@@ -135,7 +135,7 @@ async function startOpen(
     const outcome = await Promise.race([
       new Promise<"ready">((resolveReady) => {
         const inspect = (): void => {
-          if (stdout.includes(`uberblick is at http://127.0.0.1:${port}/`)) resolveReady("ready");
+          if (stdout.includes(`web        http://127.0.0.1:${port}/`)) resolveReady("ready");
         };
         child.stdout.on("data", inspect);
         inspect();

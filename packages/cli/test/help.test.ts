@@ -93,11 +93,35 @@ async function dispatch(argv: string[]): Promise<Run> {
   return { status, stdout, stderr, output: `${stdout}${stderr}` };
 }
 
-it("advertises the default web port in ub open help", async () => {
+it("prints ub open's Basic Usage in the house help layout", async () => {
   const help = await dispatch(["open", "--help"]);
   expect(help.status).toBe(0);
-  expect(help.stdout).toMatch(/--port <n>.*\(default 13379\)/);
+  expect(help.stdout).toBe(`usage: ub open [options]
+
+Serve the web app for this project's workspace, with a hub behind it, and open the browser. Runs until Ctrl-C.
+
+options:
+  --no-browser      Print the address instead of opening a browser
+  --port <n>        Port for the web app (default 13379)
+  -h, --help        show this help
+
+BROWSER in the environment names the command used to open the URL; BROWSER=none
+suppresses it, like --no-browser.
+`);
   expect(help.stderr).toBe("");
+});
+
+it.each([
+  ["--browser"],
+  ["--no-browser", "--browser"],
+  ["--browser", "--no-browser"],
+  ["--port", "13380", "--browser"],
+])("rejects the hidden browser option: %j", async (...args) => {
+  const refused = await dispatch(["open", ...args]);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout).toBe("");
+  expect(refused.stderr).toContain("ub open: Unknown option '--browser'");
+  expect(refused.stderr).toContain(`\n\n${OPEN_HELP}`);
 });
 
 it.each(["0", "65536", "1.5", "invalid"])("refuses invalid explicit web port %s", async (port) => {
