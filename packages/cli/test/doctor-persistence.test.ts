@@ -4,6 +4,7 @@
  * diagnostic's stored state exactly as it was found.
  */
 
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -16,11 +17,15 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
+import type { StoredHubLogin } from "@uberblick/hub/auth-store";
+import { authenticationOrigin } from "@uberblick/hub/remote-url";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   directoryRoom,
   initDoc,
   roomForDoc,
+  setWorkspaceName,
+  settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -30,7 +35,7 @@ import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import type { StatusReport } from "../src/status.js";
 import type { Sandbox } from "./helpers.js";
-import { pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "c4ee1905-90e4-42df-8a4c-ed6ce9cbe531";
 const DOCUMENT = "13b04df6-1c7b-45f1-9ec9-5f22034f71d3";
@@ -62,6 +67,40 @@ function emptyStore(databasePath: string, workspace = WORKSPACE): void {
   // The fixture creates the file explicitly; doctor must not create one itself.
   const store = new MirrorStore(databasePath, workspace);
   store.close();
+}
+
+function namedStore(databasePath: string): void {
+  const store = new MirrorStore(databasePath, WORKSPACE);
+  const settings = new Y.Doc();
+  try {
+    setWorkspaceName(settings, "Snapshot name");
+    const state = Y.encodeStateAsUpdate(settings);
+    const seq = store.appendUpdate(settingsRoom(WORKSPACE), state, "local");
+    store.compact(settingsRoom(WORKSPACE), state, seq);
+    setWorkspaceName(settings, "Local name");
+    store.appendUpdate(settingsRoom(WORKSPACE), Y.encodeStateAsUpdate(settings), "local");
+  } finally {
+    settings.destroy();
+    store.close();
+  }
+}
+
+function deviceSandbox(): Sandbox {
+  const principalId = randomUUID();
+  const login: StoredHubLogin = {
+    identity: { id: principalId, githubAccountId: "12345", githubUsername: "doctor-person" },
+    credential: {
+      record: { id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [WORKSPACE],
+        issuedAt: Date.now(), revokedAt: null },
+      key: Buffer.alloc(32, 1).toString("base64url"),
+      workspaceNames: { [WORKSPACE]: "Credential name" },
+    },
+  };
+  return sandbox({
+    projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
+    userConfig: { hubAdmissions: { [DEAD_HUB_URL]: "device" } },
+    credentials: { hubLogins: { [authenticationOrigin(DEAD_HUB_URL)]: login } },
+  });
 }
 
 /** Include schema and every table, so no changed cache or watermark escapes. */
@@ -199,13 +238,17 @@ describe("ub doctor observational database reading", () => {
     async (mode) => {
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
       const databasePath = join(box.cwd, "unreadable.sqlite");
-      emptyStore(databasePath);
+      namedStore(databasePath);
+      expect(existsSync(`${databasePath}-wal`)).toBe(false);
+      expect(existsSync(`${databasePath}-shm`)).toBe(false);
       chmodSync(databasePath, mode);
       try {
         const { check } = await database(box, { UBERBLICK_DB: databasePath });
         expect(check.status).toBe("fail");
         expect(check.reason).toContain(databasePath);
         expect(check.fix).toMatch(/access|permission/i);
+        expect(existsSync(`${databasePath}-wal`)).toBe(false);
+        expect(existsSync(`${databasePath}-shm`)).toBe(false);
         expect(existsSync(box.dataHome)).toBe(false);
       } finally {
         chmodSync(databasePath, 0o600);
@@ -224,6 +267,61 @@ describe("ub doctor observational database reading", () => {
     expect(check.fix).toBeNull();
     expect(report.checks.find((one) => one.name === "hub")?.status).toBe("skipped");
     expect(storedState(databasePath)).toEqual(before);
+  });
+
+  it.each(["healthy", "unreadable document"])("reads the local workspace name before the credential name without changing stored state (%s)", async (kind) => {
+    const box = deviceSandbox();
+    const databasePath = join(box.cwd, "named.sqlite");
+    namedStore(databasePath);
+    if (kind === "unreadable document") {
+      const store = new MirrorStore(databasePath, WORKSPACE);
+      try {
+        store.appendUpdate(roomForDoc(WORKSPACE, DOCUMENT), new Uint8Array([255]), "local");
+      } finally {
+        store.close();
+      }
+    }
+    const before = storedState(databasePath);
+    const files = readdirSync(box.cwd);
+    const configPath = join(box.cwd, ".uberblick.json");
+    const credentialPath = join(box.configHome, "uberblick", "credentials.json");
+    const config = readFileSync(configPath);
+    const credentials = readFileSync(credentialPath);
+    const { check, report } = await database(box, { UBERBLICK_DB: databasePath });
+
+    expect(check.status).toBe(kind === "healthy" ? "pass" : "fail");
+    expect(report.checks.find((one) => one.name === "workspace")?.reason)
+      .toBe(`Local name (${WORKSPACE}), from ${configPath}`);
+    expect(storedState(databasePath)).toEqual(before);
+    expect(readdirSync(box.cwd)).toEqual(files);
+    expect(readFileSync(configPath)).toEqual(config);
+    expect(readFileSync(credentialPath)).toEqual(credentials);
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
+  it.each(["absent", "unnamed"])("uses the credential's workspace name with an %s database without creating a store", async (kind) => {
+    const box = deviceSandbox();
+    const databasePath = kind === "absent"
+      ? join(box.cwd, "absent", "nested", "mirror.sqlite")
+      : join(box.cwd, "unnamed.sqlite");
+    if (kind === "unnamed") emptyStore(databasePath);
+    const before = kind === "unnamed" ? storedState(databasePath) : null;
+    const files = readdirSync(box.cwd);
+    const configPath = join(box.cwd, ".uberblick.json");
+    const credentialPath = join(box.configHome, "uberblick", "credentials.json");
+    const config = readFileSync(configPath);
+    const credentials = readFileSync(credentialPath);
+    const { check, report } = await database(box, { UBERBLICK_DB: databasePath });
+
+    expect(check.status).toBe(kind === "absent" ? "skipped" : "pass");
+    expect(report.checks.find((one) => one.name === "workspace")?.reason)
+      .toBe(`Credential name (${WORKSPACE}), from ${configPath}`);
+    if (before !== null) expect(storedState(databasePath)).toEqual(before);
+    expect(readdirSync(box.cwd)).toEqual(files);
+    expect(existsSync(join(box.cwd, "absent"))).toBe(false);
+    expect(existsSync(box.dataHome)).toBe(false);
+    expect(readFileSync(configPath)).toEqual(config);
+    expect(readFileSync(credentialPath)).toEqual(credentials);
   });
 
   it.skipIf(process.getuid?.() === 0)("fails an absent database whose nearest parent is not writable", async () => {
@@ -247,12 +345,14 @@ describe("ub doctor observational database reading", () => {
     const parent = join(box.cwd, "readonly");
     mkdirSync(parent);
     const databasePath = join(parent, "mirror.sqlite");
-    emptyStore(databasePath);
+    namedStore(databasePath);
+    expect(readdirSync(parent)).toEqual(["mirror.sqlite"]);
     chmodSync(parent, 0o500);
     try {
       const { check } = await database(box, { UBERBLICK_DB: databasePath });
       expect(check.status).toBe("fail");
       expect(check.reason).toContain(parent);
+      expect(readdirSync(parent)).toEqual(["mirror.sqlite"]);
     } finally {
       chmodSync(parent, 0o700);
     }

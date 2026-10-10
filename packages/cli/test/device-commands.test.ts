@@ -57,8 +57,12 @@ describe("remote device commands", () => {
     expect(text.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
     const doctor = await runUbAsync(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
-    expect(checks.find((check: { name: string }) => check.name === "login").status).toBe("pass");
-    expect(checks.find((check: { name: string }) => check.name === "hub").status).toBe("pass");
+    expect(checks.find((check: { name: string }) => check.name === "login")).toEqual({
+      name: "login", status: "pass", reason: `${login.identity.githubUsername} on ${authenticationOrigin(endpoint)}`, fix: null,
+    });
+    expect(checks.find((check: { name: string }) => check.name === "hub")).toEqual({
+      name: "hub", status: "pass", reason: `connected to ${authenticationOrigin(endpoint)}; ${login.identity.githubUsername} has access`, fix: null,
+    });
     expect(hub.authentications.length).toBeGreaterThan(0);
     for (const auth of hub.authentications) expect(auth.claims?.kid).toBe(login.credential.record.id);
     for (const output of [joined.output, status.output, text.output, doctor.output]) assertPrivate(output, login.credential.key);
@@ -91,7 +95,9 @@ describe("remote device commands", () => {
     bind(box, endpoint);
     for (const command of ["status", "doctor"]) {
       const refused = await runUbAsync([command], box);
-      expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");
+      expect(refused.output).toContain(kind === "no-access"
+        ? command === "doctor" ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}` : "administrator for access"
+        : `ub auth login ${authenticationOrigin(endpoint)}`);
       if (command === "status") {
         expect(refused.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
         const json = await runUbAsync(["status", "--json"], box);
@@ -99,6 +105,21 @@ describe("remote device commands", () => {
           account: { login: login.identity.githubUsername, provider: "github" },
           hub: { status: "auth-failed" },
         });
+        assertPrivate(json.output, login.credential.key);
+      } else {
+        expect(refused.status, refused.output).toBe(1);
+        expect(refused.stdout).not.toContain("refused remote sync");
+        const json = await runUbAsync(["doctor", "--json"], box);
+        const hubCheck = JSON.parse(json.stdout).checks.find((check: { name: string }) => check.name === "hub");
+        expect(hubCheck.status).toBe("fail");
+        expect(refused.stdout).toContain(`→ ${hubCheck.fix}\n`);
+        expect(hubCheck.fix).toBe(kind === "no-access"
+          ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}`
+          : `ub auth login ${authenticationOrigin(endpoint)}`);
+        if (kind === "no-access") {
+          expect(hubCheck.reason).toBe(`${login.identity.githubUsername} has no access to ${WORKSPACE}, or it doesn't exist on this hub`);
+          expect(refused.stdout).not.toContain("ub auth login");
+        }
         assertPrivate(json.output, login.credential.key);
       }
       assertPrivate(refused.output, login.credential.key);

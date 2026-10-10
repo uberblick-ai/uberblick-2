@@ -297,6 +297,21 @@ describe("every human-facing command path", () => {
     expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
   });
 
+  it("prints doctor's corpus Basic Usage in the house layout and gives the same purpose at the root", async () => {
+    const expected = `usage: ub doctor [--json]
+
+Check this project's Uberblick setup and name the fix for each problem.
+
+options:
+  --json            The same checks as JSON on stdout, for scripts
+  -h, --help        show this help
+`;
+    const run = await dispatch(["doctor", "--help"]);
+    expect(run.stdout).toBe(expected);
+    expect(HELP).toMatch(/doctor \[--json\] {2,}check this project's Uberblick setup and name the fix\n {2,}for each problem/);
+    for (const help of [run.stdout, HELP]) expect(help).not.toMatch(/the local stack|known failure modes/);
+  });
+
   it("explains link use's verification scope and its limits in help", () => {
     const help = WORKSPACE_USE_HELP.replace(/\s+/g, " ");
     expect(help).toContain("hub acknowledged the writes, then a fresh client read the full directory back");

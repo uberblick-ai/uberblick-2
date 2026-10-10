@@ -2,7 +2,7 @@
 import type { StoredHubLogin } from "./auth-store.js";
 import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "./protocol.js";
-import { importCredentialKey, mintRequestProof, type RequestAction } from "./token.js";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "./token.js";
 
 export type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 export interface ManagementReply { status: number; body: Record<string, unknown> }
@@ -24,7 +24,7 @@ export async function manageRequest(
   // A credential-free request can distinguish missing sign-in from an older or
   // shared-secret hub. It has no authority to read or mutate management state.
   const token = login === null ? "" : await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
-    ...action, kid: login.credential.record.id, lifetimeSeconds: 60,
+    ...action, kid: login.credential.record.id, lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,
   });
   const signal = AbortSignal.any([...(options.signal === undefined ? [] : [options.signal]), AbortSignal.timeout(10_000)]);
   const response = await fetch(`${origin}/auth/manage`, {
