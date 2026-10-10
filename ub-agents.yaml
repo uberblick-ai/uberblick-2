@@ -143,6 +143,8 @@ limits:
   retry-backoff-seconds: 60
   max-backoff-seconds: 3600
 
-# Every poll reads each triggered item; keep idle polling slow to stay inside GitHub's
-# 5,000 requests per hour shared by all launchers (ub-agents #79, #80).
-poll-seconds: 300
+# Warm polls are conditional reads that GitHub mostly answers with free 304s, and the
+# launcher's discovery budget averages at most 250 requests/hour (ub-agents #402).
+# Busy warm passes here cost 1-7 quota-counted requests (median 2, ub-agents #403),
+# so 60 seconds stays under that budget while picking up new work within a minute.
+poll-seconds: 60

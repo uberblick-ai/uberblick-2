@@ -6,7 +6,12 @@ name: CI
 # latest run instead of rerunning the base. On a pull request it is an early
 # signal the integrator reads before local CI; it runs the PR's own recipe, so
 # it never stands in for the signoff. Standard runners cost no Actions minutes
-# in a public repository.
+# in a public repository, macOS ones included.
+#
+# Linux runs everything. macOS runs the tests again, because contributors and
+# the loop work on Macs and some failures show up on only one of the two; lint
+# and typecheck do not depend on the platform. Browser e2e stays Linux-only
+# until its specs hold on GitHub's macOS runners.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
@@ -28,9 +33,18 @@ permissions:
 
 jobs:
   checks:
-    name: lint, typecheck and tests
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      # One platform failing must not cancel the other's run.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: lint, typecheck and tests
+          - os: macos-latest
+            name: macOS tests
     steps:
       # On a pull request, test the head itself rather than GitHub's merge with
       # a main that may since have moved; the integrator's merged-tree gate
@@ -42,11 +56,12 @@ jobs:
       # Installs the toolchain pinned in mise.toml and puts `mise` on PATH.
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
 
+      # Keyed per platform: the store holds platform-specific optional packages.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.pnpm-store
-          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
 
       - id: install
         run: mise run install
@@ -55,9 +70,9 @@ jobs:
 
       # Each check runs even when an earlier one fails, so one run shows
       # everything that is red on main.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run lint
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run typecheck
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run test

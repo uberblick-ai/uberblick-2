@@ -2,8 +2,8 @@
  * What each MCP client's configuration file looks like, and how to tell whether
  * one already registers uberblick.
  *
- * Three clients, two formats. Claude Code and Cursor both keep a JSON object
- * under `mcpServers`; Codex keeps a TOML table called `[mcp_servers.<name>]`.
+ * Two clients, two formats. Claude Code keeps a JSON object under `mcpServers`;
+ * Codex keeps a TOML table called `[mcp_servers.<name>]`.
  * The paths and shapes here were checked against each vendor's own
  * documentation and against what each vendor's CLI actually writes.
  *
@@ -31,7 +31,7 @@ import { parse as parseToml } from "smol-toml";
 export const SERVER_NAME = "uberblick";
 
 /** The clients `ub mcp install` knows how to wire up. */
-export const TARGETS = ["claude", "codex", "cursor"] as const;
+export const TARGETS = ["claude", "codex"] as const;
 export type TargetName = (typeof TARGETS)[number];
 
 export type Scope = "project" | "user";
@@ -79,11 +79,6 @@ export function targetFile(
       : // User scope is the top level of `~/.claude.json`, alongside the
         // per-project `projects` map that holds *local*-scope servers.
         { path: join(home, ".claude.json"), format: "json" };
-  }
-  if (target === "cursor") {
-    return scope === "project"
-      ? { path: join(cwd, ".cursor", "mcp.json"), format: "json" }
-      : { path: join(home, ".cursor", "mcp.json"), format: "json" };
   }
   const configured = env.CODEX_HOME?.trim();
   return scope === "project"
@@ -322,10 +317,7 @@ function tomlBlock(entry: Entry): string {
 }
 
 function serverObject(entry: Entry): Record<string, unknown> {
-  // `type` is explicit because Cursor's documentation requires it for local
-  // servers, and Claude Code accepts it — one object serves both.
   return {
-    type: "stdio",
     command: entry.command,
     args: entry.args,
   };

@@ -34,7 +34,7 @@ For a source checkout, follow [contributor updating](CONTRIBUTING.md#updating).
 
 `ub mcp install <client>` wires Uberblick into an MCP client, so nobody has to
 hand-edit JSON. The client is required; omitting it prints an error and install
-help on stderr and exits 2. It knows `claude`, `codex` and `cursor`; project scope
+help on stderr and exits 2. It knows `claude` and `codex`; project scope
 is the default, `--project` selects it explicitly, and `--user` selects per-user config.
 `--print` emits the snippet and runs nothing, which is also the answer for a
 client it does not know:
@@ -45,13 +45,12 @@ ub mcp install codex --user
 ub mcp install cursor --print
 ```
 
-**It edits no config file.** Where the vendor ships its own installer —
+**It edits no config file.** Each known client ships its own installer —
 `claude mcp add`, `codex mcp add` — that is what runs, because the vendor knows
 its own file best, and the scope rides on the vendor's own flags. Codex has no
 scope flag: which file it writes is the configuration directory it is handed,
-so project scope points it at the project's `.codex`. Cursor, which ships no
-`mcp add`, gets the snippet and the path to paste it into, on exit 0, with
-nothing written. A missing vendor CLI or a failed `mcp add` prints the snippet
+so project scope points it at the project's `.codex`.
+A missing vendor CLI or a failed `mcp add` prints the snippet
 on stdout, names the failure and destination file on stderr, and exits 1.
 A client `ub` has never heard of
 gets the same snippet and that client's own MCP configuration as the
