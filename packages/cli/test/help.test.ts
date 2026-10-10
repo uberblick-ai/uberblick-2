@@ -321,9 +321,10 @@ options:
   });
 
   it("uses the same semantic operand name at every help level and in usage errors", async () => {
-    expect(MCP_HELP).toContain("install [client]");
-    expect(INSTALL_HELP).toMatch(/usage: ub mcp install \[client\]/);
+    expect(MCP_HELP).toContain("install <client>");
+    expect(INSTALL_HELP).toMatch(/usage: ub mcp install <client>/);
     expect(INSTALL_HELP).toMatch(/\noperands:\n {2}client\s/);
+    expect(INSTALL_HELP).not.toMatch(/default (?:client|claude|codex|cursor)/);
 
     const unknownClient = await dispatch(["mcp", "install", "not-a-client"]);
     expect(unknownClient.status).toBe(2);

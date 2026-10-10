@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
+import { INSTALL_HELP } from "../src/install.js";
 import { doctorEntry } from "../src/mcp-config.js";
 import {
   type Sandbox,
@@ -808,6 +809,34 @@ describe("ub mcp install cursor", () => {
       uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
     } });
     expect(read(path)).toBe(before);
+  });
+});
+
+describe("ub mcp install requires a client", () => {
+  it.each([
+    { args: [] },
+    { args: ["--print"] },
+    { args: ["--user"] },
+    { args: ["--project"] },
+    { args: ["--user", "--print"] },
+    { args: ["--project", "--print"] },
+  ])("refuses options without a client: $args", ({ args }) => {
+    const box = sandbox();
+    const stub = stubVendor(box, "claude");
+    const bindingPath = join(box.cwd, ".uberblick.json");
+    const bindingBefore = read(bindingPath);
+    const root = join(box.cwd, "..");
+    const filesBefore = readdirSync(root, { recursive: true }).sort();
+
+    const run = runUb(["mcp", "install", ...args], box, stub.env);
+
+    expect(run.status, run.output).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toBe(`ub mcp install: missing client\n\n${INSTALL_HELP}`);
+    expect(run.stderr).toContain("one of: claude, codex, cursor");
+    expect(existsSync(stub.record)).toBe(false);
+    expect(readdirSync(root, { recursive: true }).sort()).toEqual(filesBefore);
+    expect(read(bindingPath)).toBe(bindingBefore);
   });
 });
 

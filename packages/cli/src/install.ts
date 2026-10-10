@@ -1,5 +1,5 @@
 /**
- * `ub mcp install [client]` — register uberblick with an MCP client.
+ * `ub mcp install <client>` — register uberblick with an MCP client.
  *
  * Every entry is a plain `ub mcp serve`, following the project's binding when
  * the client starts it. Install needs no workspace selection. Credentials stay
@@ -42,11 +42,8 @@ import {
   targetFile,
 } from "./mcp-config.js";
 
-/** The default when `ub mcp install` is run with no target named. */
-const DEFAULT_TARGET: TargetName = "claude";
-
 interface Flags {
-  target: TargetName;
+  target: TargetName | null;
   /**
    * A client this command does not know, named anyway. Only reachable with
    * `--print`, which is the answer for one: it gets the generic stdio snippet.
@@ -63,7 +60,7 @@ export const INSTALL_OPTIONS = {
   print: { type: "boolean", default: false },
 } as const;
 
-export const INSTALL_HELP = `usage: ub mcp install [client] [options]
+export const INSTALL_HELP = `usage: ub mcp install <client> [options]
 
 Register uberblick with an MCP client using a plain \`ub mcp serve\` entry.
 Agents follow the nearest .uberblick.json in the project where they start.
@@ -77,7 +74,7 @@ that client's own MCP configuration. This command edits no config file, and
 never replaces an entry it did not register.
 
 operands:
-  client            one of: ${TARGETS.join(", ")} (default ${DEFAULT_TARGET}).
+  client            one of: ${TARGETS.join(", ")}.
                     Any other name needs --print, which gives the generic stdio
                     snippet to paste into that client's own config.
 
@@ -92,7 +89,7 @@ name \`uberblick\` is never replaced: it is reported, the snippet is printed, an
 the file is left exactly as it was.
 `;
 
-function parseFlags(argv: string[]): Flags {
+function parseFlags(argv: string[]): Flags | null {
   if (argv.includes("--")) {
     throw new Error("unexpected argument \"--\"");
   }
@@ -106,8 +103,9 @@ function parseFlags(argv: string[]): Flags {
     throw new Error(`unexpected argument ${JSON.stringify(positionals[1])}`);
   }
   const named = positionals[0];
-  const known = named !== undefined && TARGETS.includes(named as TargetName);
-  if (named !== undefined && !known && values.print !== true) {
+  if (named === undefined) return null;
+  const known = TARGETS.includes(named as TargetName);
+  if (!known && values.print !== true) {
     throw new Error(
       `unknown client ${JSON.stringify(named)} — expected one of ${TARGETS.join(", ")}. ` +
         "Add --print for the snippet to paste into any other client",
@@ -118,8 +116,8 @@ function parseFlags(argv: string[]): Flags {
   }
 
   return {
-    target: known ? (named as TargetName) : DEFAULT_TARGET,
-    unlisted: known || named === undefined ? null : (named as string),
+    target: known ? (named as TargetName) : null,
+    unlisted: known ? null : named,
     // Project scope is the default because it is the one that travels with the
     // work; the report always names the absolute file, so it is never a guess.
     scope: values.user === true ? "user" : "project",
@@ -302,7 +300,7 @@ export async function installCommand(
 ): Promise<number> {
   if (takeHelp(argv, io, INSTALL_HELP)) return 0;
 
-  let flags: Flags;
+  let flags: Flags | null;
   try {
     flags = parseFlags(argv);
   } catch (error) {
@@ -311,13 +309,17 @@ export async function installCommand(
     );
     return 2;
   }
+  if (flags === null) {
+    io.err(`ub mcp install: missing client\n\n${INSTALL_HELP}`);
+    return 2;
+  }
 
   const entry = DEFAULT_ENTRY;
 
   // A client this command does not know is exactly what `--print` is for, and
   // it is answered before anything looks at the filesystem: there is no file of
   // ours to look at.
-  if (flags.unlisted !== null) {
+  if (flags.target === null) {
     io.err(
       `ub mcp install: ${JSON.stringify(flags.unlisted)} is not a client \`ub\` ` +
         "knows, so there is no file of ours to name — paste this generic stdio " +
