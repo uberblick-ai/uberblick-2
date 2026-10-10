@@ -20,6 +20,7 @@ type TerminalStatus = "denied" | "expired" | "abandoned" | "failed" | "collected
 interface SignInRequest {
   secret: string;
   deviceCode?: string;
+  deviceName?: string;
   expiresAt: number;
   intervalMs: number;
   nextPollAt: number;
@@ -65,7 +66,7 @@ export class GithubDeviceFlow<Result extends object> {
 
   constructor(
     private readonly config: GithubSignInConfig,
-    private readonly complete: (identity: { accountId: string; username: string }) => Result,
+    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string) => Result,
     private readonly log: HubLogger = stderrLogger,
     private readonly event = "hub.github.sign-in.failed",
   ) {
@@ -78,7 +79,7 @@ export class GithubDeviceFlow<Result extends object> {
     this.requests.clear();
   }
 
-  async start() {
+  async start(deviceName?: string) {
     if (this.closed.signal.aborted) return { status: "failed" } as const;
     // Active requests and retained outcomes have separate bounds. Outcomes
     // last at most another lifetime; oldest ones may be evicted at capacity.
@@ -117,6 +118,7 @@ export class GithubDeviceFlow<Result extends object> {
       const collectionSecret = randomBytes(32).toString("base64url");
       this.requests.set(requestId, {
         secret: collectionSecret, deviceCode: result.device_code, expiresAt,
+        ...(deviceName === undefined ? {} : { deviceName }),
         intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
       });
       return {
@@ -184,7 +186,7 @@ export class GithubDeviceFlow<Result extends object> {
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
       step = "issuance";
-      const completed = this.complete({ accountId: String(identity.id), username: identity.login });
+      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName);
       // Completion is synchronous: cancellation/expiry cannot interleave with
       // the commit, and another collector cannot complete a second time.
       this.finish(request, "collected");
@@ -224,6 +226,7 @@ export class GithubDeviceFlow<Result extends object> {
   private finish(request: SignInRequest, status: TerminalStatus): void {
     request.status = status;
     delete request.deviceCode;
+    delete request.deviceName;
   }
 
   private pending(request: SignInRequest): DeviceFlowCollection<Result> {
@@ -257,4 +260,3 @@ export class GithubDeviceFlow<Result extends object> {
     return object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
   }
 }
-

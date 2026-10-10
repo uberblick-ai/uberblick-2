@@ -232,7 +232,7 @@ async function ubStatusJson(options = {}) {
 }
 
 /**
- * One `list_docs` call through `ub mcp serve`, spoken the way a real client
+ * One tool call through `ub mcp serve`, spoken the way a real client
  * speaks it: newline-delimited JSON-RPC over the process's stdio.
  *
  * Hand-rolled rather than driven with the MCP SDK on purpose. The SDK is a
@@ -240,7 +240,7 @@ async function ubStatusJson(options = {}) {
  * mismatch hide behind another — and a stray byte on stdout, which the server
  * must never write, shows up here as the corrupted session it is.
  */
-async function listDocsOverStdio({ cwd, env } = {}) {
+async function callToolOverStdio(tool, { cwd, env } = {}) {
   const child = spawn("ub", ["mcp", "serve"], {
     stdio: ["pipe", "pipe", "pipe"],
     cwd,
@@ -325,12 +325,12 @@ async function listDocsOverStdio({ cwd, env } = {}) {
       `${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`,
     );
     const result = await request("tools/call", {
-      name: "list_docs",
+      name: tool,
       arguments: {},
     });
     const text = result?.content?.[0]?.text;
     if (typeof text !== "string") {
-      throw new Error("`list_docs` returned no text content");
+      throw new Error(`\`${tool}\` returned no text content`);
     }
     return JSON.parse(text);
   } finally {
@@ -414,26 +414,27 @@ async function main() {
       );
     }
     const json = await ubStatusJson({ cwd: PROJECT_ROOT });
-    if (typeof json.workspace !== "string" || json.workspace === "") {
+    if (json.workspace?.name !== "First-user workspace") {
       throw new Error("`ub status` reported no workspace after `ub workspace create`");
     }
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        json.workspaceUuid ?? "",
+        json.workspace?.id ?? "",
       )
     ) {
       throw new Error(
-        `\`ub status\` reported a workspace that is not a uuid: ${json.workspaceUuid}`,
+        `\`ub status\` reported a workspace that is not a uuid: ${json.workspace?.id}`,
       );
     }
-    if (!human.stdout.includes(json.workspace)) {
+    if (!human.stdout.includes(`${json.workspace.name} (${json.workspace.id})`)) {
       throw new Error("`ub status` did not print the workspace it reports as JSON");
     }
-    if (json.credentialPresent !== true) {
-      throw new Error("`ub workspace create` left this machine with no usable hub signing secret");
+    if (json.hub !== null || json.account !== null || json.connection !== null ||
+        json.pending?.count !== 0 || json.lastSync !== null || json.problems?.length !== 0) {
+      throw new Error("`ub status --json` did not report the fresh workspace as local with no pending changes or problems");
     }
     process.stdout.write(
-      `fue:   workspace ${json.workspace}, credential from ${json.credentialSource}\n`,
+      `fue:   workspace ${json.workspace.name} (${json.workspace.id})\n`,
     );
     return json;
   });
@@ -441,13 +442,13 @@ async function main() {
   // 2. What an agent gets. `ub mcp serve` is the line every MCP client is
   //    pointed at, and `list_docs` is the first thing one calls.
   await assert("`list_docs` answers through `ub mcp serve`", async () => {
-    const listed = await listDocsOverStdio({ cwd: PROJECT_ROOT });
+    const listed = await callToolOverStdio("list_docs", { cwd: PROJECT_ROOT });
     if (!Array.isArray(listed.docs)) {
       throw new Error("`list_docs` did not return a `docs` array");
     }
-    if (listed.workspace !== report.workspaceUuid) {
+    if (listed.workspace !== report.workspace.id) {
       throw new Error(
-        `\`list_docs\` answered for workspace ${listed.workspace}, not the configured ${report.workspaceUuid}`,
+        `\`list_docs\` answered for workspace ${listed.workspace}, not the configured ${report.workspace.id}`,
       );
     }
     const titles = new Set(listed.docs.map(doc => doc.title));
@@ -474,7 +475,7 @@ async function main() {
     await waitFor("the local web app to listen", () => tcpOpen(OPEN_PORT), { timeoutMs: 90_000, service: open });
     await waitFor("`ub open` to report its local hub", () => open.output().includes("started here"), { timeoutMs: 90_000, service: open });
     await waitFor("the local hub to accept the stored secret", async () => {
-      const status = await ubStatusJson({ cwd: PROJECT_ROOT });
+      const status = await callToolOverStdio("sync_status", { cwd: PROJECT_ROOT });
       return status.hub?.status === "connected";
     }, { timeoutMs: 90_000, service: open });
     if (JSON.parse(readFileSync(credentialsPath, "utf8")).signingSecret !== secret) {
@@ -499,7 +500,7 @@ async function main() {
   //    because `depends` serializes two long-running tasks under MISE_JOBS=1,
   //    and a regression back to `depends` is a dev loop where the web server
   //    never starts — invisible to a proof that starts it by hand.
-  const localEnv = { ...process.env, UB_WORKSPACE_ID: report.workspaceUuid, UB_HUB_URL: "local" };
+  const localEnv = { ...process.env, UB_WORKSPACE_ID: report.workspace.id, UB_HUB_URL: "local" };
   const dev = background("`mise run dev`", "mise", ["run", "dev"], { env: localEnv });
   await assert("`mise run dev` starts the hub", () =>
     waitFor(
@@ -514,11 +515,11 @@ async function main() {
   // task exists to catch, and it is invisible from outside the connection.
   await assert("the hub accepts this machine's credential", () =>
     waitFor(
-      "`ub status` to report the hub connected",
+      "`sync_status` to report the hub connected",
       async () => {
-        const json = await ubStatusJson({ env: localEnv });
+        const json = await callToolOverStdio("sync_status", { env: localEnv });
         if (json.hub?.status === "auth-failed") {
-          throw new Error(`the hub rejected this machine's token: ${json.hub.reason}`);
+          throw new Error("the hub rejected this machine's credential");
         }
         return json.hub?.status === "connected";
       },
@@ -577,7 +578,7 @@ async function main() {
     }
     if (
       !workspaces.some(
-        (entry) => typeof entry === "string" && entry.includes(report.workspaceUuid),
+        (entry) => typeof entry === "string" && entry.includes(report.workspace.id),
       )
     ) {
       throw new Error(
@@ -587,10 +588,10 @@ async function main() {
 
     // The address that redirect lands on. A dev server without SPA fallback
     // answers it with a 404, and every link anyone shares is broken.
-    const deep = await get(`/${report.workspace}`, "text/html");
+    const deep = await get(`/${report.workspace.id}`, "text/html");
     if (deep.status !== 200 || !deep.body.includes('id="root"')) {
       throw new Error(
-        `the workspace address /${report.workspace} answered HTTP ${deep.status} instead of the app`,
+        `the workspace address /${report.workspace.id} answered HTTP ${deep.status} instead of the app`,
       );
     }
   });

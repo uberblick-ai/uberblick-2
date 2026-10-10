@@ -54,6 +54,30 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
 }
 
 describe("ub open: live Access bridge", () => {
+  it("relays own device names beside legacy rows with no new upstream fields", async () => {
+    const { app, post, hub, login, other, origin } = await rig("member");
+    const named = hub.credentials!.issue({ principalId: login.identity.id, deviceId: crypto.randomUUID(),
+      deviceName: "agent-server", workspaces: [] });
+    hub.credentials!.issue({ principalId: other.identity.id, deviceId: crypto.randomUUID(),
+      deviceName: "foreign-server", workspaces: [WORKSPACE] });
+    try {
+      expect(await post({ operation: "list-devices" })).toEqual({ code: 200, body: { status: "ok", hub: origin,
+        devices: expect.arrayContaining([
+          { deviceId: login.credential.record.deviceId, signedInAt: login.credential.record.issuedAt, current: true },
+          { deviceId: named.record.deviceId, signedInAt: named.record.issuedAt, current: false, deviceName: "agent-server" },
+        ]),
+      } });
+      const listed = (await post({ operation: "list-devices" })).body;
+      expect(listed.devices).toHaveLength(2);
+      expect(JSON.stringify(listed)).not.toContain("foreign-server");
+      expect(JSON.stringify(listed)).not.toContain(login.credential.key);
+      expect((await post({ operation: "revoke-device", deviceId: named.record.deviceId })).body.status).toBe("ok");
+      expect((await post({ operation: "list-devices" })).body.devices).toEqual([
+        { deviceId: login.credential.record.deviceId, signedInAt: login.credential.record.issuedAt, current: true },
+      ]);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("authenticates account reads and exposes only the served hub's verified handle after a rebind", async () => {
     const { app, box, login, headers } = await rig();
     try {

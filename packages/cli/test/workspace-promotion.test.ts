@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
@@ -138,8 +139,8 @@ describe("workspace creation and promotion", () => {
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
     const status = await runUbAsync(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
-    expect(JSON.parse(status.stdout).hub.status).toBe("auth-failed");
-    expect(JSON.parse(status.stdout).credentialPresent).toBe(false);
+    expect(JSON.parse(status.stdout).connection.state).toBe("refused");
+    expect(JSON.parse(status.stdout).account).toBeNull();
     expect(status.stdout).toContain("ub auth login");
   });
 
@@ -355,6 +356,9 @@ it.each(["missing", "revoked"])("runs GitHub approval with a %s login without lo
   expect(result.stdout).toContain(`Use on another machine: ub workspace use ${endpoint}/${selected(box).workspaceId}\n`);
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
+  expect(hub.credentials!.listDevices(identity.id)).toEqual([
+    expect.objectContaining({ deviceName: hostname() }),
+  ]);
   const rows = accessRows(hub);
   expect(rows.claims[0]!.unclaimed).toBe(0);
   expect(rows.memberships).toHaveLength(2);

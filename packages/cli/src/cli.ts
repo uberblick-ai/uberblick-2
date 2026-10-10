@@ -31,7 +31,8 @@ commands:
                          git pull, then mise run setup
   open [options]         serve the web app and a hub in the foreground, and
                          open the browser
-  status [--json]        workspace, hub, connection, pending work and failures
+  status [--json]        see whether your work is syncing: hub, sign-in,
+                         pending changes and problems
   doctor [--json]        check this project's Uberblick setup and name the fix
                          for each problem
   workspace [command]    create, promote, join, list or select a workspace

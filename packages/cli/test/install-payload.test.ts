@@ -280,12 +280,13 @@ describe("the versioned install payload", () => {
     const status = runPayload(box, ["status", "--json"]);
     expect(status.status, status.stderr).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
-      version: VERSION,
-      storage: {
-        layout: "xdg",
-        config: join(box.configHome, "uberblick", "config.json"),
-        data: join(box.dataHome, "uberblick"),
-      },
+      workspace: { id: expect.any(String), name: "Payload proof" },
+      hub: null,
+      account: null,
+      connection: null,
+      pending: { count: 0 },
+      lastSync: null,
+      problems: [],
     });
 
     const transport = new StdioClientTransport({

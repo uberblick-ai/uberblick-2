@@ -6,6 +6,7 @@ import {
   statSync, writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
@@ -457,8 +458,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const status = await runUbAsync(["status", "--json"], box);
     expect(status.status, status.stderr).toBe(0);
     const report = JSON.parse(status.stdout);
-    expect(report.credentialPresent).toBe(true);
-    expect(report.hub.status).toBe("hub-down");
+    expect(report.account).toEqual({ login: login.identity.githubUsername, provider: "github" });
+    expect(report.connection.state).toBe("failed");
     const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
     expect(snippet.status, snippet.stderr).toBe(0);
     for (const output of [status.output, snippet.output, readFileSync(configPath(box), "utf8")]) {
@@ -491,7 +492,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     for (const request of remote.requests) {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
       expect(request.authorization).toBeUndefined();
-      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") || request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
+      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? ["deviceName"]
+        : request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
+      if (request.path.endsWith("start")) expect(request.body.deviceName).toBe(hostname());
     }
     const bridge = resolveConfig({ env: box.env, cwd: box.cwd }).env;
     const values = Object.values(bridge);

@@ -7,7 +7,7 @@
  * in the `ub mcp serve` path is a corrupted protocol session.
  */
 
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
@@ -47,17 +47,24 @@ describe("ub status", () => {
     const run = runUb(["status"], sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(WORKSPACE);
-    expect(run.stdout).toContain("local (this computer)");
+    expect(run.stdout).toBe(
+      `workspace   ${WORKSPACE}\n` +
+      "hub         local, this computer only\n" +
+      "account     none needed for a local workspace\n" +
+      "problems    none\n",
+    );
   });
 
-  it("reports that no workspace is selected, and names `ub workspace create`", () => {
+  it.each([false, true])("gives the no-binding hint on stderr with JSON=%s", (json) => {
     // The one value with no default. A guessed workspace would open a corpus
     // nobody chose, so the answer is the command that creates one.
-    const run = runUb(["status"], unboundSandbox());
-    expect(run.status).toBe(0);
-    expect(run.stdout).toMatch(/No workspace selected/);
-    expect(run.stdout).toMatch(/ub workspace create/);
-    expect(run.stderr).toBe("");
+    const run = runUb(json ? ["status", "--json"] : ["status"], unboundSandbox());
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toBe(
+      "no .uberblick.json here or in any parent directory\n" +
+      "  → ub workspace create <name>, or ub workspace use <link|id>\n",
+    );
   });
 
   it("exits 1 with its error instead of an overview when the status read fails", () => {
@@ -71,7 +78,7 @@ describe("ub status", () => {
     expect(run.stderr).toMatch(/database/);
   });
 
-  it("shows a decorated workspace as typed, and the uuid it resolves to", () => {
+  it("reports the canonical workspace id and uses the same replica for decorated ids", () => {
     // The slug is display; the uuid is what rooms, the token claim and the
     // database are keyed by — and what you quote to somebody else.
     const decorated = `uberblick-${WORKSPACE}`;
@@ -79,17 +86,13 @@ describe("ub status", () => {
 
     const human = runUb(["status"], box);
     expect(human.status).toBe(0);
-    expect(human.stdout).toMatch(new RegExp(`workspace\\s+${decorated}`));
-    expect(human.stdout).toMatch(new RegExp(`uuid\\s+${WORKSPACE}`));
+    expect(human.stdout).toContain(`workspace   ${WORKSPACE}\n`);
+    expect(human.stdout).not.toMatch(/^uuid\s/m);
 
     const report = JSON.parse(runUb(["status", "--json"], box).stdout);
-    expect(report.workspace).toBe(decorated);
-    expect(report.workspaceUuid).toBe(WORKSPACE);
+    expect(report.workspace).toEqual({ id: WORKSPACE, name: null });
     // Both spellings key one database, or the corpus would have two replicas.
-    expect(report.databasePath).toBe(
-      join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
-    );
-    expect(report.rooms[0].room).toBe(`${WORKSPACE}/_directory`);
+    expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(true);
   });
 
   it("emits one parseable object with --json, and nothing else on stdout", () => {
@@ -100,43 +103,19 @@ describe("ub status", () => {
     expect(run.status).toBe(0);
 
     const report = JSON.parse(run.stdout);
-    expect(report.workspace).toBe(WORKSPACE);
-    expect(report.workspaceUuid).toBe(WORKSPACE);
-    expect(report.hubUrl).toBe(DEAD_HUB_URL);
-    expect(report.sources).toEqual({
-      workspace: "project config",
-      hubUrl: "project config",
-    });
-    expect(report.databasePath).toBe(
-      join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
-    );
-    expect(report.credentialPresent).toBe(false);
-    expect(report.credentialSource).toBeNull();
-    expect(report.hub.status).toBe("disabled");
-    expect(report.hub.url).toBeNull();
-    expect(report.version).toMatch(/^\d+\.\d+\.\d+/);
-    // Sync state per attached room. The directory doc exists from boot.
-    expect(Array.isArray(report.rooms)).toBe(true);
-    expect(report.rooms[0].room).toBe(`${WORKSPACE}/_directory`);
-    expect(report.rooms[0]).toHaveProperty("synced");
-    expect(report.rooms[0].appliedSeq).toEqual(expect.any(Number));
-    // The rooms behind `unsyncedChanges`, not just the count: durable local work
-    // the hub has not acknowledged is the one thing this report must not hide.
-    expect(Array.isArray(report.pendingRooms)).toBe(true);
-    expect(report.pendingRooms.length).toBe(report.unsyncedChanges);
-    expect(report.inFlightUpdates).toBe(0);
-    expect(report.logEntries).toEqual(expect.any(Number));
-    expect(report.persistence).toBeNull();
-    expect(report.storage).toEqual({
-      layout: "xdg",
-      config: join(box.configHome, "uberblick", "config.json"),
-      data: join(box.dataHome, "uberblick"),
-      hub: join(box.dataHome, "uberblick", "hub.sqlite"),
-      workspace: report.databasePath,
-    });
+    expect(Object.keys(report)).toEqual([
+      "workspace", "hub", "account", "connection", "pending", "lastSync", "problems",
+    ]);
+    expect(report.workspace).toEqual({ id: WORKSPACE, name: null });
+    expect(report.hub).toBe("http://127.0.0.1:1");
+    expect(report.account).toBeNull();
+    expect(report.connection).toEqual({ state: "failed", cause: null, detail: null });
+    expect(report.pending).toEqual({ count: expect.any(Number) });
+    expect(report.lastSync).toBeNull();
+    expect(report.problems).toEqual([{ name: "sync-disabled", fix: "ub doctor for details" }]);
   });
 
-  it("keeps credential detail in JSON without printing the secret", () => {
+  it("reports a failed hub without printing the signing secret", () => {
     const secret = "cli-test-signing-secret-3f9a1c";
     const box = sandbox({
       credentials: { signingSecret: secret },
@@ -150,10 +129,10 @@ describe("ub status", () => {
 
     const json = runUb(["status", "--json"], box);
     const report = JSON.parse(json.stdout);
-    expect(report.credentialPresent).toBe(true);
-    expect(report.credentialSource).toBe("credentials file");
+    expect(report.account).toBeNull();
+    expect(report.connection.state).toBe("failed");
     // The hub URL is reported even when the connection fails; that is the point.
-    expect(report.hubUrl).toBe(DEAD_HUB_URL);
+    expect(report.hub).toBe("http://127.0.0.1:1");
 
     // A failing invocation, with the same credential configured.
     const failing = runUb(["bogus"], box);
@@ -177,10 +156,10 @@ describe("ub status", () => {
     const run = runUb(["status", "--json"], box);
     expect(run.status).toBe(0);
     const report = JSON.parse(run.stdout);
-    // Local-only, exactly as if no credential had been configured at all.
-    expect(report.credentialPresent).toBe(false);
-    expect(report.credentialSource).toBeNull();
-    expect(report.hub.status).toBe("disabled");
+    // The hub remains visible while the exposed credential goes unused.
+    expect(report.account).toBeNull();
+    expect(report.connection).toEqual({ state: "failed", cause: null, detail: null });
+    expect(report.problems).toEqual([{ name: "sync-disabled", fix: "ub doctor for details" }]);
     // The refusal and its fix are on stderr, and the secret is on neither stream.
     expect(run.stderr).toMatch(/refusing/);
     expect(run.stderr).toMatch(/secret may have leaked/);
@@ -198,7 +177,7 @@ describe("ub status", () => {
 
     const run = runUb(["status", "--json"], box);
     expect(run.status).toBe(0);
-    expect(JSON.parse(run.stdout).credentialPresent).toBe(false);
+    expect(JSON.parse(run.stdout).problems).toEqual([{ name: "sync-disabled", fix: "ub doctor for details" }]);
     expect(run.stderr).toMatch(/credentials\.json: invalid JSON/);
     expect(run.output).not.toContain(secret);
 

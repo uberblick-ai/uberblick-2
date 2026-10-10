@@ -8,6 +8,7 @@ import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 import type { HubClaimState } from "./hub-claim.js";
 import type { HubDatabase } from "./persistence.js";
 import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
+import { sanitizeDeviceName } from "./device-name.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
@@ -21,7 +22,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
   constructor(config: GithubSignInConfig, database: HubDatabase, principals: PrincipalRegistry,
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
     claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database)) {
-    super(config, ({ accountId, username }) => {
+    super(config, ({ accountId, username }, deviceName) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
       const db = database.connection;
@@ -30,6 +31,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
         const identity = principals.identify(accountId, username);
         const claimedWorkspaceId = claims?.claim(identity.id, memberships);
         const issued = credentials.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
+          ...(deviceName === undefined ? {} : { deviceName }),
           workspaces: memberships.workspacesFor(identity.id) });
         const result = { identity,
           credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") },
@@ -90,8 +92,8 @@ export async function handleGithubSignIn(
     }
     const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     if (path === "/auth/github/start") {
-      if (Object.keys(body).length !== 0) throw new Error();
-      const result = await signIn.start();
+      if (Object.keys(body).some((key) => key !== "deviceName")) throw new Error();
+      const result = await signIn.start(sanitizeDeviceName(body.deviceName));
       reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : 200, result);
     } else {
       if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" ||

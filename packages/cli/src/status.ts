@@ -1,5 +1,5 @@
 /**
- * `ub status` — what this machine is configured to do, and what it actually did.
+ * `ub status` — whether this project's work is reaching the hub.
  *
  * The command boots the same replica set the MCP server boots and reads the same
  * snapshot the `sync_status` tool returns (`collectSyncStatus`), so a human and
@@ -11,15 +11,16 @@
  * diagnostics and the MCP server's own logging all go to stderr, so the JSON
  * stays parseable by a pipe.
  *
- * No secret or key is ever printed. `credentialPresent` states whether a
- * local secret or selected remote login is available. The `storage` object is
- * directories and database paths, never anything out of `credentials.json`.
+ * The short public report is projected from the diagnostic reading. Workspace
+ * status keeps its selection and storage details; doctor keeps the full reading.
  */
 
 import { parseArgs } from "node:util";
+import { isGithubUsername } from "@uberblick/hub";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { readDeviceLogin } from "@uberblick/hub/device-login";
-import { collectSyncStatus, createMcpServer, readWorkspaceName } from "@uberblick/mcp-server";
+import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { collectSyncStatus, createMcpServer, formatHubFailure, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, UberblickMcpServer } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
@@ -34,9 +35,8 @@ import { cliVersion } from "./version.js";
 /**
  * Where this machine keeps its files.
  *
- * A stable object: a script reads the paths to find the files without
- * re-deriving anyone's rules. Directories and database files only — no
- * credential, and no value out of one.
+ * Internal diagnostic paths used by workspace status. Directories and database
+ * files only — no credential, and no value out of one.
  */
 export interface StorageReport {
   /**
@@ -55,6 +55,7 @@ export interface StorageReport {
   workspace: string;
 }
 
+/** Diagnostic input retained for `ub workspace status`, separate from public JSON. */
 export interface StatusReport {
   binding: ProjectBinding;
   projectConfig: string | null;
@@ -160,8 +161,8 @@ export interface UnboundStatusReport {
 
 /**
  * Collect the report without printing it. Exported for tests.
- * Optional workspace name and acknowledgement metadata stay outside the JSON
- * report. The workspace leaf also reads stored accounts for shared-secret hubs.
+ * Name and acknowledgement metadata stay beside the diagnostic report. The
+ * workspace leaf also reads stored accounts for shared-secret hubs.
  */
 export async function statusReport(
   options: { env?: NodeJS.ProcessEnv; cwd?: string; workspaceStatus?: boolean } = {},
@@ -191,9 +192,8 @@ export async function statusReport(
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
-    ...(options.workspaceStatus === true ? {
-      workspaceName: readWorkspaceName(config.databasePath, config.workspaceId), caughtUp,
-    } : {}),
+    workspaceName: readWorkspaceName(config.databasePath, config.workspaceId),
+    ...(options.workspaceStatus === true ? { caughtUp } : {}),
     ...(accountOrigin === undefined ? {} : { accountOrigin }),
     report: {
       binding: resolved.binding,
@@ -257,49 +257,146 @@ function lastSyncAge(lastSync: string | null): string {
   return `${plural(seconds, "second")} ago`;
 }
 
-export function renderStatus(report: StatusReport | UnboundStatusReport, accountOrigin?: string): string {
-  if (report.workspace === null) return `${report.message}\n`;
-  const hub = report.hub;
-  const hubFailure =
-    hub.status === "auth-failed" ||
-    hub.status === "update-required" ||
-    hub.status === "hub-down" ||
-    (hub.status === "quarantined" && report.persistence === null);
-  const failureCount = Number(report.persistence !== null) + Number(hubFailure);
+/** The public `ub status --json` contract, independent of diagnostics. */
+export interface ShortStatusReport {
+  workspace: { id: string; name: string | null };
+  hub: string | null;
+  account: StatusReport["account"];
+  connection: {
+    state: "connected" | "refused" | "failed";
+    cause: NonNullable<SyncStatus["hub"]["cause"]> | null;
+    detail: string | null;
+  } | null;
+  pending: { count: number };
+  lastSync: string | null;
+  problems: { name: string; fix: string }[];
+}
 
-  let text = `uberblick ${report.version}\n`;
-  text += field("workspace", report.workspace);
-  // Only when the spelling hides it. The slug is display; the uuid is what
-  // rooms, tokens and the database are keyed by, and what to quote to somebody
-  // else.
-  if (report.workspaceUuid !== report.workspace) {
-    text += field("uuid", report.workspaceUuid);
+function olderHub(hub: SyncStatus["hub"]): boolean {
+  return hub.hubProtocolVersion !== undefined && hub.hubProtocolVersion < hub.protocolVersion;
+}
+
+export function shortStatusReport(report: StatusReport, workspaceName: string | null = null): ShortStatusReport {
+  const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
+  const hub = report.hub;
+  const state = hub.status === "connected" ? "connected"
+    : hub.status === "auth-failed" || hub.status === "update-required" ? "refused" : "failed";
+  // The shared formatter validates the locally recorded evidence. Neither the
+  // raw reason nor malformed detail can reach text or JSON.
+  const recorded = state !== "connected" && formatHubFailure(hub) !== undefined;
+  const problems: ShortStatusReport["problems"] = [];
+  if (origin !== null) {
+    switch (hub.status) {
+      case "hub-down":
+        problems.push({ name: "hub-unreachable", fix: "check DNS, network or VPN; ub doctor for details" });
+        break;
+      case "auth-failed":
+        switch (hub.authRecovery) {
+          case "sign-in-required":
+            problems.push({ name: "not-signed-in", fix: `ub auth login ${origin}` });
+            break;
+          case "no-workspace-access": {
+            const login = report.account?.login;
+            problems.push({ name: "no-workspace-access", fix: login !== undefined && isGithubUsername(login)
+              ? `ask a workspace admin to run: ub workspace member add ${login}`
+              : "ask a workspace admin for access" });
+            break;
+          }
+          default:
+            problems.push({ name: hub.authRecovery ?? "sign-in-refused", fix: "ub doctor for details" });
+        }
+        break;
+      case "update-required":
+        problems.push({ name: "update-required", fix: olderHub(hub)
+          ? `ask whoever runs ${origin} to update the hub` : "ub update" });
+        break;
+      case "disabled":
+        problems.push({ name: "sync-disabled", fix: "ub doctor for details" });
+        break;
+    }
   }
-  text += field("hub", report.binding.hubUrl ?? "local (this computer)");
-  if (report.account !== null) {
-    text += field("account", `@${displayUsername(report.account.login)} (GitHub)`);
+  if (report.persistence !== null || hub.status === "quarantined") {
+    problems.push({ name: "persistence-failed", fix: "ub doctor for details" });
+  }
+  return {
+    workspace: { id: report.workspaceUuid, name: workspaceName },
+    hub: origin,
+    account: origin === null ? null : report.account,
+    connection: origin === null ? null : {
+      state,
+      cause: recorded ? hub.cause ?? null : null,
+      detail: recorded ? hub.detail ?? null : null,
+    },
+    pending: { count: origin === null ? 0 : report.unsyncedChanges },
+    lastSync: origin === null ? null : report.lastSync,
+    problems,
+  };
+}
+
+function connectionText(report: StatusReport): string {
+  const hub = report.hub;
+  switch (hub.status) {
+    case "connected": return "connected";
+    case "connecting": return "no answer yet";
+    case "update-required": return olderHub(hub)
+      ? "refused: the hub runs an older Uberblick" : "refused: the hub needs a newer Uberblick";
+    case "auth-failed": return hub.cause === "closed" ? formatHubFailure(hub) ?? "refused" : "refused";
+    default: return formatHubFailure(hub) ?? "hub does not answer";
+  }
+}
+
+const PROBLEM_PHRASES: Record<string, string> = {
+  "hub-unreachable": "hub unreachable",
+  "not-signed-in": "not signed in",
+  "no-workspace-access": "no workspace access",
+  "update-required": "update required",
+  "persistence-failed": "local persistence failed",
+  "credential-store": "stored login could not be read",
+  "renewal-unavailable": "login could not be renewed",
+  "sign-in-refused": "sign-in or signing secret refused",
+  "sync-disabled": "sync disabled",
+};
+
+const UNREACHABLE_CAUSES: Record<NonNullable<SyncStatus["hub"]["cause"]>, string> = {
+  dns: "DNS lookup failed",
+  refused: "TCP connection refused",
+  timeout: "TCP connect timed out",
+  tls: "TLS failed",
+  http: "HTTP upgrade failed",
+  closed: "connection closed",
+};
+
+export function renderStatus(
+  report: StatusReport | UnboundStatusReport,
+  accountOrigin?: string,
+  workspaceName: string | null = null,
+): string {
+  if (report.binding === null) return "";
+  const short = shortStatusReport(report, workspaceName);
+  let text = field("workspace", short.workspace.name === null
+    ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);
+  text += field("hub", short.hub ?? "local, this computer only");
+  if (short.hub === null) {
+    text += field("account", "none needed for a local workspace");
+  } else if (short.account !== null) {
+    text += field("account", `@${displayUsername(short.account.login)} (GitHub)`);
   } else if (accountOrigin !== undefined) {
-    text += field("account", `not signed in, run ub auth login ${accountOrigin}`);
+    text += field("account", `not signed in to ${short.hub}`);
   }
-  text += field("selection", report.projectConfig ?? ORIGIN_LABELS[report.sources.workspace]);
-  text += field("connection", hub.status);
-  if (hub.reason !== undefined) text += field("recovery", hub.reason);
-  // Two counts in two units, as `sync_status` reports them: rooms, and provider
-  // sync messages. They are not expected to agree.
-  text += field(
-    "pending",
-    `${plural(report.unsyncedChanges, "room")} with unacknowledged local changes, ` +
-      `${plural(report.inFlightUpdates, "sync message")} unacknowledged`,
-  );
-  if (report.binding.hubUrl !== null) text += field("last sync", lastSyncAge(report.lastSync));
-  text += field("rooms", `${plural(report.rooms.length, "room")} attached`);
-  text += field("local log", `${plural(report.logEntries, "update record")} stored`);
-  const failures =
-    hub.status === "connecting" && failureCount === 0
-      ? "hub state not yet known"
-      : `${plural(failureCount, "detected failure")}${failureCount === 0 ? "" : " — run `ub doctor`"}` +
-        (hub.status === "connecting" ? "; hub state not yet known" : "");
-  text += field("failures", failures);
+  if (short.hub !== null) {
+    text += field("connection", connectionText(report));
+    text += field("pending", short.pending.count === 0
+      ? "none" : `${plural(short.pending.count, "change")} not yet on the hub`);
+    text += field("last sync", lastSyncAge(short.lastSync));
+  }
+  if (short.problems.length === 0) return text + field("problems", "none");
+  for (const [index, problem] of short.problems.entries()) {
+    const phrase = problem.name === "hub-unreachable" && short.connection?.cause != null
+      ? `hub unreachable: ${UNREACHABLE_CAUSES[short.connection.cause]}`
+      : PROBLEM_PHRASES[problem.name] ?? "sync refused";
+    text += field(index === 0 ? "problems" : "", phrase);
+    text += `              → ${problem.fix}\n`;
+  }
   return text;
 }
 
@@ -310,19 +407,15 @@ export const STATUS_OPTIONS = {
 
 export const STATUS_HELP = `usage: ub status [--json]
 
-Overview of the selected project workspace, hub, stored account, selection source,
-connection state, pending rooms and sync messages, last hub acknowledgement,
-attached rooms, records stored in the local log and detected failures.
-Connection does not mean the hub acknowledged every change.
-Recovery names the next action; \`ub doctor\` gives further diagnostics.
-Workspace and hub bindings stay unchanged; renewal may update the stored login.
+Show whether this project's work is syncing: workspace, hub, sign-in, pending changes and problems.
 
 options:
-  --json            full report as JSON, including rooms, configuration and paths
+  --json            the same report as JSON on stdout, for scripts
   -h, --help        show this help
 
-The JSON report includes the stored account, configuration sources and credential
-presence; the signing secret is never printed. Warnings remain on stderr.
+It connects briefly to the hub for a live answer. Last sync is the last full
+replica acknowledgement, not durable hub storage. Each problem names its fix;
+\`ub doctor\` gives details. Warnings remain on stderr.
 `;
 
 export async function statusCommand(
@@ -344,10 +437,16 @@ export async function statusCommand(
     return 2;
   }
 
-  const { report, warnings, accountOrigin } = await statusReport();
+  const { report, warnings, accountOrigin, workspaceName } = await statusReport();
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
-  io.out(json ? `${JSON.stringify(report, null, 2)}\n` : renderStatus(report, accountOrigin));
+  if (report.binding === null) {
+    io.err("no .uberblick.json here or in any parent directory\n" +
+      "  → ub workspace create <name>, or ub workspace use <link|id>\n");
+    return 1;
+  }
+  io.out(json ? `${JSON.stringify(shortStatusReport(report, workspaceName), null, 2)}\n`
+    : renderStatus(report, accountOrigin, workspaceName));
   return 0;
 }

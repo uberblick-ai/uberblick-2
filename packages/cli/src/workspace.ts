@@ -77,7 +77,7 @@ interface InForce {
 
 /**
  * The workspace configuration resolves to — the same value and the same origin
- * `ub status` reports, without opening the database to get it.
+ * `ub workspace status` reports, without opening the database to get it.
  */
 function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
   const resolved = resolveConfig(options);

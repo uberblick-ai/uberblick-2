@@ -1,6 +1,7 @@
 /** Signed access requests share transport, never command-specific authority. */
 import type { StoredHubLogin } from "./auth-store.js";
 import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
+import { sanitizeDeviceName } from "./device-name.js";
 import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "./protocol.js";
 import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "./token.js";
 
@@ -130,7 +131,11 @@ export function sanitizeManagementReply(
               (login !== undefined && value.current !== (value.deviceId === login.credential.record.deviceId))) {
             throw new ManagementResponseError();
           }
-          return { deviceId: value.deviceId, signedInAt: value.signedInAt, current: value.current };
+          const name = sanitizeDeviceName(value.deviceName);
+          const deviceName = name !== undefined && login !== undefined && name.includes(login.credential.key)
+            ? undefined : name;
+          return { deviceId: value.deviceId, signedInAt: value.signedInAt, current: value.current,
+            ...(deviceName === undefined ? {} : { deviceName }) };
         });
         if (new Set(devices.map(row => row.deviceId)).size !== devices.length ||
             devices.filter(row => row.current).length !== 1) throw new ManagementResponseError();

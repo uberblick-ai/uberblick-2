@@ -3,7 +3,7 @@
  *
  * The layout itself is proved in `@uberblick/hub`'s suite; this one is about
  * the commands: that whoever creates the tree first leaves it owner-only, that
- * `ub status` reports the resolved paths in a stable shape, and that there is
+ * `ub workspace status` reports the resolved replica path, and that there is
  * no layout question left for `ub doctor` to have an opinion about.
  */
 
@@ -15,8 +15,8 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
-import type { StatusReport } from "../src/status.js";
-import { renderStatus, statusReport } from "../src/status.js";
+import { statusReport } from "../src/status.js";
+import { renderWorkspaceStatus } from "../src/workspace-status.js";
 import {
   DEAD_HUB_URL,
   REPO_ROOT,
@@ -133,8 +133,8 @@ describe("the resolved roots", () => {
   });
 });
 
-describe("`ub status`", () => {
-  it("reports a storage object with the resolved paths, and no secret", async () => {
+describe("workspace storage and selection", () => {
+  it("keeps resolved paths in the diagnostic reading and shows the replica in workspace status", async () => {
     const box = sandbox({
       credentials: { signingSecret: "storage-test-secret-91af3c" },
       projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
@@ -142,23 +142,25 @@ describe("`ub status`", () => {
 
     // Async, not `runUb`: this suite owns an in-process hub in the ordering
     // test above, and spawnSync would block the event loop it runs on.
-    const run = await runUbAsync(["status", "--json"], box);
+    const run = await runUbAsync(["workspace", "status"], box);
     expect(run.status).toBe(0);
-    const report = JSON.parse(run.stdout);
+    const { report } = await statusReport({ env: box.env, cwd: box.cwd });
+    if (report.workspace === null) throw new Error("expected the project binding");
 
     expect(report.storage).toEqual({
-      // Constant, on every platform — a reader of the JSON still finds the key.
+      // The diagnostic reading has the same layout on every platform.
       layout: "xdg",
       config: join(box.configHome, "uberblick", "config.json"),
       data: join(box.dataHome, "uberblick"),
       hub: join(box.dataHome, "uberblick", "hub.sqlite"),
       workspace: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
     });
+    expect(run.stdout).toContain(`stored in  ${report.storage.workspace}\n`);
     expect(run.output).not.toContain("storage-test-secret-91af3c");
   });
 
   it("says two signing secrets differ without leaking either, in text and JSON", async () => {
-    // The conflict remains in warnings and JSON: the two secrets are distinct and of
+    // The conflict remains in warnings and the diagnostic reading: the two secrets are distinct and of
     // different lengths, and neither may survive in either stream — not whole,
     // not in four-character fragments, not as a size. See `tracesOf`.
     const box = sandbox({
@@ -176,7 +178,8 @@ describe("`ub status`", () => {
 
     const json = await runUbAsync(["status", "--json"], box, pinned);
     expect(json.status).toBe(0);
-    const report = JSON.parse(json.stdout) as StatusReport;
+    const { report } = await statusReport({ env: { ...box.env, ...pinned }, cwd: box.cwd });
+    if (report.workspace === null) throw new Error("expected the project binding");
     // Which layer lost, and that one is in force. Never a value out of either.
     expect(report.shadowed).toEqual([
       { setting: "credential", layer: "credentials file" },
@@ -199,8 +202,9 @@ describe("`ub status`", () => {
     expect(selected.report.binding).toEqual({ workspaceId: PINNED, hubUrl: null });
     expect(selected.report.projectConfig).toBeNull();
     expect(selected.report.shadowed).toBeUndefined();
-    expect(renderStatus(selected.report)).toMatch(/selection\s+environment/);
-    expect(renderStatus(selected.report)).toMatch(/hub\s+local \(this computer\)/);
+    const text = renderWorkspaceStatus(selected.report, selected.workspaceName ?? null, selected.caughtUp === true);
+    expect(text).toMatch(/chosen by\s+environment/);
+    expect(text).toMatch(/hub\s+local \(this computer\)/);
     expect(selected.warnings).toEqual([]);
   });
 
