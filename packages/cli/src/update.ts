@@ -7,8 +7,9 @@
  * whatever tree they happen to be standing in — is the surprise this command
  * exists to avoid.
  *
- * Homebrew runs the two commands USER_GUIDE.md documents, and nothing else. This
- * command does not re-prove that Homebrew replaces the installed version;
+ * Homebrew runs the two update commands USER_GUIDE.md documents; its prefix and
+ * linked installed version identify the result. This command does not re-prove
+ * that Homebrew replaces the installed version;
  * `.github/workflows/homebrew-formula.yml` owns that. A source checkout is
  * refused without running any commands or changing any files: contributors
  * update it with `git pull`, then `mise run setup`.
@@ -44,7 +45,7 @@ options:
 
 /** What the running CLI is installed as. */
 export type Installation =
-  | { kind: "homebrew" }
+  | { kind: "homebrew"; prefix: string }
   | { kind: "checkout"; root: string }
   | { kind: "unknown" };
 
@@ -60,7 +61,7 @@ export interface UpdateHost {
   cliDir: string;
   /** Whether those files came from a versioned install payload. */
   installPayload: boolean;
-  /** Read Homebrew's installation prefix. */
+  /** Read Homebrew's installation prefix or installed formula information. */
   capture(command: string, args: readonly string[]): CaptureResult;
   /** Run a command to completion; `null` when it exited 0, else why not. */
   run(command: string, args: readonly string[], cwd?: string): Promise<string | null>;
@@ -159,18 +160,19 @@ export function classify(host: UpdateHost): Installation {
   // Homebrew-owned one can be updated, and an ancestor checkout is not the copy
   // this process is running from.
   if (host.installPayload) {
-    return withinHomebrew(host) ? { kind: "homebrew" } : { kind: "unknown" };
+    const prefix = homebrewPrefix(host);
+    return prefix === null ? { kind: "unknown" } : { kind: "homebrew", prefix };
   }
   const root = findCheckoutRoot(host.cliDir);
   if (root !== null) return { kind: "checkout", root };
   return { kind: "unknown" };
 }
 
-function withinHomebrew(host: UpdateHost): boolean {
+function homebrewPrefix(host: UpdateHost): string | null {
   const prefix = host.capture("brew", ["--prefix"]);
-  if (prefix.status !== 0) return false;
+  if (prefix.status !== 0) return null;
   const dir = prefix.stdout.trim();
-  return dir !== "" && within(dir, host.cliDir);
+  return dir !== "" && within(dir, host.cliDir) ? dir : null;
 }
 
 const UNSUPPORTED =
@@ -191,7 +193,7 @@ export async function updateCommand(
   }
 
   const installation = classify(host);
-  if (installation.kind === "homebrew") return await updateHomebrew(io, host);
+  if (installation.kind === "homebrew") return await updateHomebrew(io, host, installation.prefix);
   if (installation.kind === "checkout") {
     io.err(
       "ub update: this `ub` runs from a source checkout. Run `git pull`, then " +
@@ -203,7 +205,31 @@ export async function updateCommand(
   return 1;
 }
 
-async function updateHomebrew(io: Io, host: UpdateHost): Promise<number> {
+function homebrewVersion(io: Io, host: UpdateHost): string | null {
+  const args = ["info", "--json=v2", FORMULA];
+  const result = host.capture("brew", args);
+  io.err(result.stderr);
+  const label = named("brew", args);
+  if (result.status !== 0) {
+    const failure = result.status === null ? "could not be run" : `exited ${result.status}`;
+    io.err(`ub update: ${label} ${failure}.\n`);
+    return null;
+  }
+  try {
+    // `installed` includes old kegs; `linked_keg` is the active version and
+    // already includes Homebrew's formula revision (for example `0.42.0_1`).
+    const version: unknown = JSON.parse(result.stdout)?.formulae?.[0]?.linked_keg;
+    if (typeof version === "string" && version.trim() !== "") return version;
+  } catch {
+    // Unreadable formula information is a failed Homebrew step too.
+  }
+  io.err(`ub update: ${label} did not report a linked installed version.\n`);
+  return null;
+}
+
+async function updateHomebrew(io: Io, host: UpdateHost, prefix: string): Promise<number> {
+  const before = homebrewVersion(io, host);
+  if (before === null) return 1;
   for (const args of [["update"], ["upgrade", FORMULA]]) {
     const failure = await host.run("brew", args);
     if (failure !== null) {
@@ -211,6 +237,11 @@ async function updateHomebrew(io: Io, host: UpdateHost): Promise<number> {
       return 1;
     }
   }
-  io.out("Homebrew has finished. `ub --version` prints the version now installed.\n");
+  const after = homebrewVersion(io, host);
+  if (after === null) return 1;
+  const result = before === after
+    ? `${"current".padEnd(11)}${after}, nothing to update\n`
+    : `${"updated".padEnd(11)}${before} → ${after}\nrestart ub open and running agents to use it\n`;
+  io.out(`${"copy".padEnd(11)}Homebrew (${prefix})\n${result}`);
   return 0;
 }
