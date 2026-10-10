@@ -693,6 +693,12 @@ describe("ub workspace use <link>", () => {
   it("prints only JSON with the written binding, previous binding and fetched documents", async () => {
     const hub = await startHub();
     const uuid = await webDoc(hub, "JSON note");
+    const archived = await webDoc(hub, "Archived JSON note");
+    const tags = [randomUUID()];
+    const directory = await openRoom(hub, directoryRoom(WORKSPACE));
+    upsertDirectoryEntry(directory.doc, { uuid: archived, title: "Archived JSON note", tags });
+    tombstoneDirectoryEntry(directory.doc, archived);
+    await directory.done();
     const previous = { workspaceId: "ce1f08b6-3462-439c-b23d-6f9bdb8bbf74", hubUrl: null };
     const box = sandbox({ projectBinding: previous, credentials: { signingSecret: SECRET } });
     const run = await runUbAsync(["workspace", "use", localJoinUrl(hub, box, SECRET), "--json"], box);
@@ -701,7 +707,11 @@ describe("ub workspace use <link>", () => {
     expect(Object.keys(result).sort()).toEqual(["binding", "documents", "previous"]);
     expect(result.binding).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
     expect(result.previous).toEqual(previous);
-    expect(result.documents).toEqual([expect.objectContaining({ uuid, title: "JSON note" })]);
+    expect(result.documents).toHaveLength(2);
+    expect(result.documents).toEqual(expect.arrayContaining([
+      { uuid, title: "JSON note", tags: [], deleted: false },
+      { uuid: archived, title: "Archived JSON note", tags, deleted: true },
+    ]));
     expect(run.stdout).not.toContain("fetched    ");
     expect(run.stdout).not.toContain("using      ");
     expect(run.stderr.trim().split("\n")).toHaveLength(1);
