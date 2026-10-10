@@ -22,6 +22,7 @@ import {
   PERSISTENCE_ERROR_MESSAGE,
   MUTATING_TOOLS,
   READ_ONLY_TOOLS,
+  TOOL_ANNOTATIONS,
   hydrationRecovery,
   toFailure,
 } from "../src/failures.js";
@@ -198,7 +199,7 @@ afterAll(() => {
 });
 
 describe("the failure contract", () => {
-  it("classifies every registered tool as writing or read-only", async () => {
+  it("classifies and annotates every registered tool as writing or read-only", async () => {
     // The one fact a failure payload cannot work out for itself: the same
     // `doc_not_found` is a read's dead end and a write that never happened. A
     // tool added later is classified here or this fails.
@@ -206,18 +207,28 @@ describe("the failure contract", () => {
     const registered = (await rig.client.listTools()).tools;
 
     expect(registered.length).toBeGreaterThan(0);
-    for (const { name, description } of registered) {
+    for (const { name, description, annotations } of registered) {
       expect(
         MUTATING_TOOLS.has(name) || READ_ONLY_TOOLS.has(name),
         `${name} is neither in MUTATING_TOOLS nor READ_ONLY_TOOLS`,
       ).toBe(true);
       expect(MUTATING_TOOLS.has(name) && READ_ONLY_TOOLS.has(name)).toBe(false);
+      expect(annotations, name).toEqual(TOOL_ANNOTATIONS[name]);
+      expect(annotations, name).toEqual({
+        readOnlyHint: READ_ONLY_TOOLS.has(name),
+        destructiveHint: READ_ONLY_TOOLS.has(name) ? false : expect.any(Boolean),
+        idempotentHint: READ_ONLY_TOOLS.has(name) ? true : expect.any(Boolean),
+        openWorldHint: false,
+      });
       // Every tool points to the shared owner of the failure shape rather
       // than repeating its prose in the model-facing catalog.
       expect(description, `${name} has no description`).toBeDefined();
       expect(description?.split("\n").at(-1), name).toContain("tool-contracts");
     }
     expect([...MUTATING_TOOLS, ...READ_ONLY_TOOLS].sort()).toEqual(
+      registered.map((tool) => tool.name).sort(),
+    );
+    expect(Object.keys(TOOL_ANNOTATIONS).sort()).toEqual(
       registered.map((tool) => tool.name).sort(),
     );
     expect(READ_ONLY_TOOLS.has("get_help")).toBe(true);

@@ -156,6 +156,62 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "get_sidebar",
 ]);
 
+/** Keep the shared operation/failure path free of SDK types as well as values. */
+interface ToolHints {
+  readonly readOnlyHint: boolean;
+  readonly destructiveHint: boolean;
+  readonly idempotentHint: boolean;
+  readonly openWorldHint: boolean;
+}
+
+/**
+ * Advisory MCP hints, not security guarantees. Keep a row for every tool:
+ * registration refuses omissions and the contract test checks coverage.
+ * All tools stay within the workspace replica and hub, including the local
+ * GitHub-reference lookup in find_decisions, so none is open-world.
+ */
+export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolHints>> = {
+  get_help: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  list_tags: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  get_doc: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  get_data: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  list_docs: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  search: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  backlinks: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  find_decisions: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  export_markdown: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  sync_status: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  get_sidebar: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  // Adds a fresh document and optional pin; repeating adds another document.
+  create_doc: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  // Adds a block; repeating adds another block.
+  insert_block: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  // Replies can overwrite thread resolution; repeating adds another comment.
+  annotate: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  // Retargets a document link; unchanged rev lets repeats write the same mark.
+  link_range: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Replaces text; table_mapping can replace rows again under identical text and rev.
+  edit_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  // Removes a block; repeating finds no block to remove.
+  delete_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Replaces named fields and whole tag/link sets; repeating leaves the same values.
+  set_metadata: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Overwrites lifecycle and answer; repeating leaves the same state or is refused.
+  set_status: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
+  archive_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  // Clears the tombstone and overwrites stub metadata; repeating leaves the same state.
+  restore_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Replaces, upserts and deletes data; an identical repeat reports changed: false.
+  update_data: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Moves an existing pin; repeating leaves it in the requested place.
+  pin_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Removes a pin; repeating reports unpinned: false.
+  unpin_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Renames, moves or deletes groups/pins; repeated rename/delete by name can reach a namesake.
+  sidebar_group: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+};
+
 interface Recovery {
   readonly recoveryClass: RecoveryClass;
   readonly guidance: string;
