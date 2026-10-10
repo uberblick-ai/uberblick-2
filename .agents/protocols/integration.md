@@ -7,6 +7,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
+- **GitHub CI first.** When the PR's `CI` check at that head has finished with
+  a failure (`gh pr checks <n>`, then `gh run view <id> --log-failed`), a lint,
+  typecheck, test or spec failure that main's `CI` run does not show the same
+  way (the base comparison below) is a branch failure, unless it is a timeout
+  in a test the diff leaves untouched: finish `changes` naming it, without
+  running local CI. Otherwise, and while the check is pending or green, go on.
+  The check runs the PR's own recipe, so it never replaces local CI.
 - **CI, every tier.** Run `mise run ci <headRefOid>` from a checkout at
   freshly fetched `origin/main`. It posts the `signoff` commit status only when
   the isolated review passes, and a failing status otherwise. A failing run

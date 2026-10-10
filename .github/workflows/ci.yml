@@ -1,24 +1,27 @@
 name: CI
 
-# Main only, for now: a record of whether main itself is clean, so a failure seen
-# while validating a branch can be checked against main's latest run instead of
-# rerunning the base. It gates nothing; merges still require the local `signoff`
-# from `mise run ci` (CONTRIBUTING.md, "Local CI"). Standard runners cost no
-# Actions minutes in a public repository. `workflow_dispatch` runs it on any
-# branch from the Actions tab.
+# It gates nothing; merges still require the local `signoff` from `mise run ci`
+# (CONTRIBUTING.md, "Local CI"). On main it records whether main itself is clean,
+# so a failure seen while validating a branch can be checked against main's
+# latest run instead of rerunning the base. On a pull request it is an early
+# signal the integrator reads before local CI; it runs the PR's own recipe, so
+# it never stands in for the signoff. Standard runners cost no Actions minutes
+# in a public repository.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
-# Let a started run finish and keep only the newest push waiting behind it, so a
-# busy merge day still produces results rather than cancelling every run.
+# On main, let a started run finish and keep only the newest push waiting behind
+# it, so a busy merge day still produces results. On a pull request only the
+# newest head matters, so a new push cancels the run in progress.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,7 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # On a pull request, test the head itself rather than GitHub's merge with
+      # a main that may since have moved; the integrator's merged-tree gate
+      # covers the combination.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # Installs the toolchain pinned in mise.toml and puts `mise` on PATH.
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
@@ -61,6 +69,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
 
