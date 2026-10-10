@@ -22,7 +22,8 @@ it("reports this run's acknowledgement time after catching up", async () => {
     const json = await runUbAsync(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const report = JSON.parse(json.stdout);
-    expect(report.hub.status).toBe("connected");
+    expect(report.connection).toEqual({ state: "connected", cause: null, detail: null });
+    expect(report.pending).toEqual({ count: 0 });
     expect(report.lastSync).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
     expect(Date.parse(report.lastSync)).toBeGreaterThanOrEqual(Math.floor(before / 1_000) * 1_000);
     expect(Date.parse(report.lastSync)).toBeLessThanOrEqual(Date.now());

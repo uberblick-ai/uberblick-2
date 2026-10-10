@@ -74,7 +74,7 @@ const RESOLVED_VARIABLES = [
   "HUB_AUTH_TOKEN",
   "HUB_ADMISSION",
   "UBERBLICK_DB",
-  // `ub status` reports the database a hub started here would open, and
+  // The diagnostic reading reports the database a hub started here would open, and
   // `ub open` starts one with it — and inside this checkout mise exports it
   // from `[env]` for every contributor and every CI run, so leaving it in
   // would make those assertions a test of the runner's mise config. A suite

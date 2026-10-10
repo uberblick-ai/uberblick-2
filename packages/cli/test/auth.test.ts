@@ -457,8 +457,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const status = await runUbAsync(["status", "--json"], box);
     expect(status.status, status.stderr).toBe(0);
     const report = JSON.parse(status.stdout);
-    expect(report.credentialPresent).toBe(true);
-    expect(report.hub.status).toBe("hub-down");
+    expect(report.account).toEqual({ login: login.identity.githubUsername, provider: "github" });
+    expect(report.connection.state).toBe("failed");
     const snippet = await runUbAsync(["mcp", "install", "zed", "--print"], box);
     expect(snippet.status, snippet.stderr).toBe(0);
     for (const output of [status.output, snippet.output, readFileSync(configPath(box), "utf8")]) {

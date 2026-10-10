@@ -33,7 +33,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
-import type { StatusReport } from "../src/status.js";
+import { statusReport } from "../src/status.js";
 import type { Sandbox } from "./helpers.js";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 
@@ -521,15 +521,19 @@ describe("ub doctor observational database reading", () => {
     const env = { UBERBLICK_DB: databasePath, UB_TEST_MAX_WAIT_MS: "2000" };
 
     const status = await runUbAsync(["status", "--json"], box, env);
-    const snapshot = JSON.parse(status.stdout) as StatusReport;
+    const snapshot = JSON.parse(status.stdout);
     expect(status.status).toBe(0);
-    expect(snapshot.persistence?.room).toBe(directoryRoom(WORKSPACE));
-    expect(snapshot.persistence?.message).toContain(REFUSED);
-    expect(snapshot.hub.status).toBe("quarantined");
+    expect(snapshot.connection.state).toBe("failed");
+    expect(snapshot.problems).toEqual([{ name: "persistence-failed", fix: "ub doctor for details" }]);
+    const { report } = await statusReport({ env: { ...box.env, ...env }, cwd: box.cwd });
+    if (report.workspace === null) throw new Error("expected the hub binding");
+    expect(report.persistence?.room).toBe(directoryRoom(WORKSPACE));
+    expect(report.persistence?.message).toContain(REFUSED);
+    expect(report.hub.status).toBe("quarantined");
 
     const human = await runUbAsync(["status"], box, env);
     expect(human.status).toBe(0);
-    expect(human.stdout).toMatch(/1 detected failure.*ub doctor/);
+    expect(human.stdout).toContain("problems    local persistence failed\n              → ub doctor for details\n");
     expect(human.stdout).not.toContain(directoryRoom(WORKSPACE));
     expect(human.stdout).not.toContain(REFUSED);
 

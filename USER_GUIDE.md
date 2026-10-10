@@ -27,7 +27,7 @@ brew upgrade uberblick-ai/tap/uberblick
 PATH where they were. The upgrade replaces only what Homebrew installed:
 everything under [Where your files live](#where-your-files-live) —
 configuration, credentials, workspaces and their databases — is untouched, and
-`ub status` still reports the same workspace with the documents it already held.
+`ub status` still names the same workspace.
 For a source checkout, follow [contributor updating](CONTRIBUTING.md#updating).
 
 ## The MCP server, as a client sees it
@@ -154,8 +154,8 @@ Homebrew installs both `ub` and `uberblick` on PATH. The user commands include:
 ub auth login      # sign in to the project's hub
 ub update          # update the Homebrew installation
 ub open            # serve the web app and a hub, and open the browser
-ub status          # workspace, hub, account, connection, pending work, last sync, local log, failures
-ub status --json   # full report, including rooms, configuration and storage paths
+ub status          # whether work is syncing: hub, sign-in, pending changes and problems
+ub status --json   # the same short report as one JSON object, for scripts
 ub workspace       # print workspace help
 ub workspace status  # selected workspace, its source, storage and sync state
 ub workspace list  # workspaces this machine has a database for
@@ -192,8 +192,10 @@ commands, `ub open`, `ub mcp serve` and checkout development tasks use one resol
    descendants, including a file placed in your home directory. To give a
    repository its own selection beneath an ancestor binding, create a closer
    `.uberblick.json` there explicitly; selection commands update the nearest file.
-3. Without either, `ub status` reports **No workspace selected** without opening
-   a database. Workspace-dependent commands refuse until a binding is chosen.
+3. Without either, `ub status` prints a hint on stderr and exits 1 without opening
+   a database: `no .uberblick.json here or in any parent directory`, followed by
+   `→ ub workspace create <name>, or ub workspace use <link|id>`.
+   Workspace-dependent commands refuse until a binding is chosen.
 
 ```json
 {
@@ -204,14 +206,16 @@ commands, `ub open`, `ub mcp serve` and checkout development tasks use one resol
 
 Use JSON `null` for local operation on this computer. This may connect to the
 embedded loopback development hub when its local signing secret is available;
-it does not configure an external upstream. Without that secret, sync is disabled
-and status reports `hub.status: "disabled"`.
-The JSON status keeps the internal transport endpoint separate from the selected
-binding. The string `"local"` in a project file is rejected; use JSON null.
+it does not configure an external upstream. `ub status` describes a local workspace
+as `local, this computer only` and omits connection, pending and last-sync lines.
+Its JSON reports `hub`, `connection` and `lastSync` as null and `pending.count` as 0.
+Use the `sync_status` MCP tool for the loopback hub's diagnostics.
+The string `"local"` in a project file is rejected; use JSON null.
 A hub address is normalized to its sync endpoint; a workspace ID can have a
 display slug, but only its UUID identifies data. The file contains no credentials
 and may be committed when its selection is appropriate for everyone using the
-project. `ub status` shows the workspace, hub and selection source.
+project. `ub status` shows whether work is reaching the hub. `ub workspace status`
+shows the selected workspace, selection source and replica storage path.
 `ub workspace use` updates the nearest project file, or creates one in the
 current directory. `ub workspace create` always writes in the current directory,
 leaving an ancestor binding alone.
@@ -274,9 +278,9 @@ so setting `XDG_CONFIG_HOME` alone leaves the databases under
 requires. Resolution cannot throw and no command has an opinion about which
 layout is in force.
 
-`ub status --json` carries a `storage` object with every resolved path — the
-directories and database files, never the credential. `HUB_DB_PATH` and
-`UBERBLICK_DB` name a database file outright and outrank those defaults.
+`ub workspace status` shows the selected replica's resolved storage path.
+`HUB_DB_PATH` and `UBERBLICK_DB` name a database file outright and outrank those
+defaults.
 A replica database records the workspace it holds: pointing `UBERBLICK_DB`
 at another workspace's file makes the server exit non-zero naming both IDs and
 the path, rather than merging two corpora into one index.

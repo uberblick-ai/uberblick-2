@@ -48,13 +48,14 @@ describe("remote device commands", () => {
     expect(status.status, status.stderr).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
       account: { login: login.identity.githubUsername, provider: "github" },
-      credentialPresent: true, hub: { status: "connected" },
+      hub: authenticationOrigin(endpoint),
+      connection: { state: "connected", cause: null, detail: null },
     });
     expect(hub.renewalCount).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const text = await runUbAsync(["status"], box);
     expect(text.status, text.stderr).toBe(0);
-    expect(text.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
+    expect(text.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
     const doctor = await runUbAsync(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
     expect(checks.find((check: { name: string }) => check.name === "login")).toEqual({
@@ -96,14 +97,22 @@ describe("remote device commands", () => {
     for (const command of ["status", "doctor"]) {
       const refused = await runUbAsync([command], box);
       expect(refused.output).toContain(kind === "no-access"
-        ? command === "doctor" ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}` : "administrator for access"
+        ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}`
         : `ub auth login ${authenticationOrigin(endpoint)}`);
       if (command === "status") {
-        expect(refused.stdout).toContain(`hub         ${endpoint}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
+        expect(refused.status).toBe(0);
+        expect(refused.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
         const json = await runUbAsync(["status", "--json"], box);
         expect(JSON.parse(json.stdout)).toMatchObject({
           account: { login: login.identity.githubUsername, provider: "github" },
-          hub: { status: "auth-failed" },
+          hub: authenticationOrigin(endpoint),
+          connection: { state: "refused", cause: null, detail: null },
+          problems: [{
+            name: kind === "no-access" ? "no-workspace-access" : "not-signed-in",
+            fix: kind === "no-access"
+              ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}`
+              : `ub auth login ${authenticationOrigin(endpoint)}`,
+          }],
         });
         assertPrivate(json.output, login.credential.key);
       } else {

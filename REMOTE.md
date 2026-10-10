@@ -346,11 +346,13 @@ candidate_ub auth status ws://candidate-hub:1234
 candidate_ub status --json
 ```
 
-`auth status` is an offline record check. Require the live `status` reading to
-name this endpoint and UUID, report a connected hub with matching protocol,
-and have no pending changes. In a disposable MCP configuration, set the command
-to the absolute path of `$candidate_root/writer-mcp`, with no arguments. This
-launcher supplies the same Docker isolation to `ub mcp serve`. Create one
+`auth status` is an offline record check. Require the live `status --json` reading
+to report `hub: "http://candidate-hub:1234"`, the login's UUID in `workspace.id`,
+`connection.state: "connected"` and `pending.count: 0`. In a disposable MCP
+configuration, set the command to the absolute path of `$candidate_root/writer-mcp`,
+with no arguments. This
+launcher supplies the same Docker isolation to `ub mcp serve`. Require
+`sync_status` to report the hub connected with a matching protocol. Create one
 clearly synthetic document and retain its returned UUID. Wait for `sync_status`
 to report its changes acknowledged. Close that MCP process before switching the
 volume:

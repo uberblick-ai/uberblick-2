@@ -129,6 +129,10 @@ try {
 	// What the person has before the upgrade: a workspace and a document in it.
 	ub(["workspace", "create", "Upgrade proof"]);
 	const before = JSON.parse(ub(["status", "--json"]));
+	expect(
+		before.workspace?.name === "Upgrade proof" && typeof before.workspace.id === "string",
+		"the installed status did not name the created workspace",
+	);
 	const uuid = await withMcpSession(
 		{ cwd, env: userEnv, clientName: "homebrew-upgrade-proof", clientVersion: installedVersion },
 		async (callTool) => {
@@ -167,8 +171,8 @@ try {
 	);
 
 	const after = JSON.parse(ub(["status", "--json"]));
-	expect(after.workspaceUuid === before.workspaceUuid, "the upgraded install reports another workspace");
-	expect(after.version === upgradedVersion, "the upgraded install reports the wrong version");
+	expect(after.workspace?.id === before.workspace.id, "the upgraded install reports another workspace");
+	expect(after.workspace?.name === before.workspace.name, "the upgraded install reports another workspace name");
 	expect((await documentText(uuid)).includes(SENTINEL), "the document written before the upgrade is gone");
 
 	// The upgraded copy is a working install, not merely a present one: the

@@ -179,7 +179,10 @@ try {
   expect(created.includes("ub open"), "installed workspace create gave no ub open next step");
   expect(!/mise run|pnpm/.test(created), "installed workspace create mentioned contributor tooling");
   const status = JSON.parse(run("ub", ["status", "--json"]));
-  expect(status.version === expectedVersion, "installed status reported the wrong version");
+  expect(
+    status.workspace?.name === "Formula proof" && typeof status.workspace.id === "string",
+    "installed status did not name the created workspace",
+  );
   await listDocsOverStdio();
   await proveOpen();
   expect(treeDigest(formulaPrefix) === initialDigest, "payload changed while its journeys ran");

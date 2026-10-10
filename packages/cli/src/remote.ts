@@ -70,8 +70,7 @@ function plural(count: number, noun: string): string {
 function hubProblem(url: string, hub: HubState): string {
   if (hub.status === "update-required") {
     // `HubState.reason` is composed locally from two integers and already names
-    // both versions and the side to update — the same sentence `ub status`
-    // prints, so a person reads one wording wherever they meet this.
+    // both versions and the side to update; never quote a hub-supplied reason.
     return `${url} speaks a different sync protocol: ${hub.reason}`;
   }
   if (hub.status === "auth-failed") {

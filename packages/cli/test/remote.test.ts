@@ -573,9 +573,9 @@ describe("ub workspace use <link>", () => {
       for (const hub of [first, second]) {
         const shown = await runUbAsync(["status", "--json"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: `${hub.url}/ws` });
         expect(shown.status, shown.output).toBe(0);
-        expect(shown.stdout).toContain(`${hub.url}/ws`);
-        expect(JSON.parse(shown.stdout).hub.status).toBe("auth-failed");
-        expect(JSON.parse(shown.stdout).credentialPresent).toBe(false);
+        expect(JSON.parse(shown.stdout).hub).toBe(hub.origin);
+        expect(JSON.parse(shown.stdout).connection.state).toBe("refused");
+        expect(JSON.parse(shown.stdout).account).toBeNull();
         expect(shown.stdout).toContain("ub auth login");
         expect(shown.stdout).not.toContain("configured (credentials file)");
       }
@@ -641,8 +641,8 @@ describe("ub workspace use <link>", () => {
       expect(readConfigFile(box, "credentials.json").signingSecret).toBe(SECRET);
       await removeHubLogin(remote.origin, box.env);
       const loggedOut = await runUbAsync(["status", "--json"], box);
-      expect(JSON.parse(loggedOut.stdout).hub.status).toBe("auth-failed");
-      expect(JSON.parse(loggedOut.stdout).credentialPresent).toBe(false);
+      expect(JSON.parse(loggedOut.stdout).connection.state).toBe("refused");
+      expect(JSON.parse(loggedOut.stdout).account).toBeNull();
       expect(loggedOut.stdout).toContain("ub auth login");
       expect(loggedOut.stdout).not.toContain("configured (credentials file)");
     } finally { await remote.close(); }
