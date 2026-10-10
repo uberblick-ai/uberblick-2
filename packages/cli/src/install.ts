@@ -54,7 +54,6 @@ interface Flags {
 
 /** Exported so the help below can be checked against the parser it describes. */
 export const INSTALL_OPTIONS = {
-  project: { type: "boolean", default: false },
   user: { type: "boolean", default: false },
   print: { type: "boolean", default: false },
 } as const;
@@ -77,7 +76,6 @@ operands:
                     snippet to paste into that client's own config.
 
 options:
-  --project         this directory's config (the default)
   --user            the per-user config
   --print           print the snippet to paste, and run nothing
   -h, --help        show this help
@@ -109,10 +107,6 @@ function parseFlags(argv: string[]): Flags | null {
         "Add --print for the snippet to paste into any other client",
     );
   }
-  if (values.project === true && values.user === true) {
-    throw new Error("--project and --user contradict each other");
-  }
-
   return {
     target: known ? (named as TargetName) : null,
     unlisted: known ? null : named,
@@ -368,7 +362,7 @@ export async function installCommand(
   }
 
   // `codex mcp add` refuses outright when the directory `CODEX_HOME` names is
-  // not there, and for `--project` that directory is the checkout's own — so it
+  // not there, and for project scope that directory is the checkout's own — so it
   // is created. `mkdirSync` answers with the path it made and with `undefined`
   // when there was nothing to make, which is the only honest way to know whose
   // directory this is: a `.codex` the checkout already had is somebody's state,
