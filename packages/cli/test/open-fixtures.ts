@@ -190,7 +190,7 @@ export interface Running {
   interrupt: () => Promise<{ status: number | null; signal: string | null }>;
 }
 
-export const BANNER = /uberblick is at (http:\/\/\S+)/;
+export const BANNER = /^web        (http:\/\/\S+)$/m;
 
 /**
  * Start `ub open` and resolve once it is actually serving.

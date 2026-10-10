@@ -332,7 +332,7 @@ describe("the versioned install payload", () => {
     let outcome: Awaited<typeof closed>;
     try {
       await waitUntil("the installed web app to start", () =>
-        stdout.includes("uberblick is at"),
+        stdout.includes(`web        http://127.0.0.1:${webPort}/`),
       );
       expect(await (await fetch(`http://127.0.0.1:${webPort}/`)).text()).toContain(
         "payload web",

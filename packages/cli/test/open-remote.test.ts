@@ -89,18 +89,43 @@ describe("ub open: sharing through the upstream hub", () => {
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
     const app = await open(box, ["--port", String(await freePort())], env);
+    const document = new Y.Doc();
+    const room = roomForDoc(WORKSPACE, "332dd5b1-9a0c-4ea4-b2b5-4761976b834d");
+    const browser = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: room, document, token: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-write"),
+      ...{ WebSocketPolyfill: class extends WebSocket {
+        constructor(url: string | URL) { super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]); }
+      } },
+    });
     try {
-      expect(app.stdout()).toContain(`ub auth login ${origin}`);
+      expect(app.stdout()).toBe(
+        `web        ${app.url}\n` +
+        `hub        ws://127.0.0.1:${hub.port}/custom-proxy-path (not signed in, changes stay here)\n` +
+        "             → ub auth login\n" +
+        `workspace  ${WORKSPACE} (${origin}/custom-proxy-path)\n\n` +
+        "Ctrl-C to stop.\n",
+      );
       expect(app.stdout()).not.toContain("HUB_AUTH_TOKEN");
       const authorization = bearer(await authMessage(localBrowserKey(WORKSPACE, box.env)));
       const status = async () => await (await fetch(`${app.url}api/status`, { headers: authorization })).json() as { caughtUp: boolean; notSharedReason: string | null };
       await waitUntil("loopback origin sign-in reading", async () => (await status()).notSharedReason === "sign-in-required");
+      await waitUntil("unsigned loopback browser admission", () => browser.isSynced);
+      initDoc(document, { uuid: "332dd5b1-9a0c-4ea4-b2b5-4761976b834d", title: "Loopback pending edit" });
+      appendBlock(document, { type: "paragraph", text: "kept here before login" });
+      await waitUntil("unsigned loopback browser edit durable", () => !browser.hasUnsyncedChanges);
+      const remoteBefore = hub.hocuspocus.documents.get(room);
+      expect(remoteBefore === undefined ? undefined : getBlocks(remoteBefore)[0]?.text).not.toBe("kept here before login");
       const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
       const { replacedAt: _replaced, ...record } = issued.record;
       await writeHubLogin(origin, { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
       await waitUntil("loopback origin login resumes sharing", async () => (await status()).caughtUp);
+      await waitUntil("pending loopback browser edit reaches the hub", () => getBlocks(hub.hocuspocus.documents.get(room)!)[0]?.text === "kept here before login");
       expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
-    } finally { expect((await app.interrupt()).status).toBe(0); }
+    } finally {
+      browser.destroy(); document.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
   });
 
   it.each(["revocation", "membership"] as const)("recovers remote sharing with the same local copy and keeps serving after %s", async refusal => {
@@ -122,6 +147,14 @@ describe("ub open: sharing through the upstream hub", () => {
     };
     const webPort = await freePort();
     let app = await open(box, ["--port", String(webPort)], env);
+
+    expect(app.stdout()).toBe(
+      `web        ${app.url}\n` +
+      `hub        ${origin} (not signed in, changes stay here)\n` +
+      "             → ub auth login\n" +
+      `workspace  ${WORKSPACE} (${origin})\n\n` +
+      "Ctrl-C to stop.\n",
+    );
     const localKey = localBrowserKey(WORKSPACE, box.env);
     const authorization = bearer(await authMessage(localKey));
     const status = async () => await (await fetch(`${app.url}api/status`, { headers: authorization })).json() as {
@@ -196,6 +229,14 @@ describe("ub open: sharing through the upstream hub", () => {
     }
     const webPort = await freePort();
     let app = await open(box, ["--port", String(webPort)], env);
+
+    expect(app.stdout()).toBe(
+      `web        ${app.url}\n` +
+      "hub        https://first.example.ts.net (not signed in, changes stay here)\n" +
+      "             → ub auth login\n" +
+      `workspace  ${WORKSPACE} (https://first.example.ts.net)\n\n` +
+      "Ctrl-C to stop.\n",
+    );
 
     const instance = createMcpServer(
       resolveMcpConfig({
