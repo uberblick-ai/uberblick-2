@@ -138,8 +138,8 @@ describe("workspace creation and promotion", () => {
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
     const status = await runUbAsync(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
-    expect(JSON.parse(status.stdout).hub.status).toBe("auth-failed");
-    expect(JSON.parse(status.stdout).credentialPresent).toBe(false);
+    expect(JSON.parse(status.stdout).connection.state).toBe("refused");
+    expect(JSON.parse(status.stdout).account).toBeNull();
     expect(status.stdout).toContain("ub auth login");
   });
 

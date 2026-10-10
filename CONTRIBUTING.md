@@ -213,11 +213,13 @@ container started with `--network none`, `scripts/fue-assert.mjs` then checks:
 
 - Setup leaves the committed binding alone and creates no private workspace or
   signing secret. `ub workspace create` in a fresh directory creates a new
-  local workspace and an owner-only secret, and `ub status` names it.
+  local workspace and an owner-only secret, and `ub status` names it in its short
+  local report, with `pending.count` 0 in JSON.
 - `list_docs` answers over a real `ub mcp serve` client using newline-delimited
   JSON-RPC on stdio and returns both starter documents.
 - `ub open --no-browser` starts the local hub, which accepts the generated
-  secret. Ctrl-C releases its hub and web ports.
+  secret as checked through the `sync_status` MCP tool. Ctrl-C releases its hub
+  and web ports.
 - `mise run dev` brings up a hub accepting this machine's credential and a web
   server answering `/`, the redirect's workspace and the workspace address
   itself, using an explicit local workspace environment pair so the committed
