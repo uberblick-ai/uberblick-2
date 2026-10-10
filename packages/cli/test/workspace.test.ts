@@ -167,8 +167,8 @@ describe("ub workspace list", () => {
     const run = runUb(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual([
-      { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
-      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`) },
+      { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "unknown" },
     ]);
     expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
@@ -181,10 +181,16 @@ describe("ub workspace list", () => {
       storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: uuid }), name);
     }
     withDatabase(box, UNRELATED);
+    record(box, WORKSPACE, HUB);
+    record(box, OTHER, null);
+    // A record alone does not add a workspace to this command's inventory.
+    record(box, "00000000-1111-4222-8333-444455556666", HUB);
     const configPath = join(box.configHome, "uberblick", "config.json");
     const bindingBefore = readFileSync(join(box.cwd, ".uberblick.json"));
     const configBefore = readFileSync(configPath);
-    const databaseBefore = named.map(([uuid]) =>
+    const recordsBefore = readFileSync(workspaceRegistryPath(box.env));
+    const databaseIds = [...named.map(([uuid]) => uuid), UNRELATED];
+    const databaseBefore = databaseIds.map((uuid) =>
       readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`)));
 
     // Any network attempt fails in the real CLI process, including a websocket.
@@ -198,28 +204,53 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     const text = runUb(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
-      `  ${OTHER} | Research notes\n* ${WORKSPACE} | Project notes\n  ${UNRELATED}\n`,
+      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | hub unknown\n`,
     );
     const json = runUb(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)).toEqual([
-      { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`) },
-      { uuid: WORKSPACE, name: "Project notes", active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
-      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`) },
+      { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },
+      { uuid: WORKSPACE, name: "Project notes", active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "unknown" },
     ]);
     expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
     expect(readFileSync(configPath)).toEqual(configBefore);
-    expect(named.map(([uuid]) => readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`))))
+    expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(recordsBefore);
+    expect(databaseIds.map((uuid) => readFileSync(join(box.dataHome, "uberblick", `${uuid}.sqlite`))))
       .toEqual(databaseBefore);
+  });
+
+  it.each([
+    ["wss://Hub.Example.test:443/ws", "https://hub.example.test"],
+    ["ws://localhost:8080/proxy//ws", "http://localhost:8080/proxy//ws"],
+    [null, "local"],
+  ] as const)("shows the active workspace's recorded %s hub independently of selection", (hub, display) => {
+    const box = sandbox();
+    bind(box, `notes-${WORKSPACE}`);
+    record(box, WORKSPACE, hub);
+    const before = readFileSync(workspaceRegistryPath(box.env));
+    for (const env of [{}, { UB_WORKSPACE_ID: `notes-${WORKSPACE}`, UB_HUB_URL: "wss://override.example.test/ws" }]) {
+      const text = runUb(["workspace", "list"], box, env);
+      expect(text.status, text.output).toBe(0);
+      expect(text.stdout).toBe(`* ${WORKSPACE} | ${display}\n`);
+      const json = runUb(["workspace", "list", "--json"], box, env);
+      expect(json.status, json.output).toBe(0);
+      expect(JSON.parse(json.stdout)).toEqual([
+        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: hub ?? "local" },
+      ]);
+    }
+    expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
+    expect(existsSync(box.dataHome)).toBe(false);
   });
 
   it("lists the configured workspace without creating a data directory", () => {
     const box = sandbox();
     bind(box);
-    const run = runUb(["workspace", "list"], box);
+    const run = runUb(["workspace", "list"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toBe(`* ${WORKSPACE}\n`);
+    expect(run.stdout).toBe(`* ${WORKSPACE} | hub unknown\n`);
     expect(existsSync(box.dataHome)).toBe(false);
+    expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
   });
 
   it.each(["unnamed", "empty", "old schema", "unreadable"])(
@@ -245,8 +276,8 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       const list = runUb(["workspace", "list", "--json"], box);
       expect(list.status, list.output).toBe(0);
       expect(JSON.parse(list.stdout)).toEqual([
-        { uuid: OTHER, name: null, active: false, databasePath: path },
-        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`) },
+        { uuid: OTHER, name: null, active: false, databasePath: path, hub: "unknown" },
+        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
       ]);
       expect(readFileSync(path)).toEqual(before);
       const installed = runUb([
@@ -260,6 +291,66 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       expect(binding(box).workspaceId).toBe(OTHER);
     },
   );
+
+  it.each(["malformed JSON", "invalid hub", "unreadable"])("refuses %s records before stdout, even with no workspaces", (kind) => {
+    for (const configured of [false, true]) {
+      const box = unboundSandbox({ userConfig: { displayName: "Synthetic operator" } });
+      const protectedPaths = [join(box.configHome, "uberblick", "config.json")];
+      if (configured) {
+        bind(box);
+        withDatabase(box, OTHER);
+        protectedPaths.push(join(box.cwd, ".uberblick.json"), join(box.dataHome, "uberblick", `${OTHER}.sqlite`));
+      }
+      const registry = workspaceRegistryPath(box.env);
+      if (kind === "unreadable") {
+        mkdirSync(registry);
+        protectedPaths.push(join(registry, "untouched"));
+        writeFileSync(join(registry, "untouched"), "synthetic-sensitive-value");
+      } else {
+        writeFileSync(registry, kind === "malformed JSON" ? "{synthetic-sensitive-value"
+          : JSON.stringify({ [WORKSPACE]: HUB, [UNRELATED]: "wss://hub.example.test/ws?token=synthetic-sensitive-value" }));
+        protectedPaths.push(registry);
+      }
+      const before = protectedPaths.map(path => readFileSync(path));
+      for (const args of [[], ["--json"]]) {
+        const run = runUb(["workspace", "list", ...args], box);
+        expect(run.status, run.output).toBe(1);
+        expect(run.stdout).toBe("");
+        expect(run.stderr).toBe(kind === "unreadable"
+          ? `ub workspace list: Cannot read workspace records at ${registry}: expected a regular JSON file\n`
+          : `ub workspace list: Invalid workspace records at ${registry}: expected a UUID-to-hub map (null for local)\n`);
+      }
+      expect(protectedPaths.map(path => readFileSync(path))).toEqual(before);
+    }
+  });
+
+  it("keeps install prefix resolution independent of invalid workspace records", () => {
+    const box = sandbox();
+    withDatabase(box, OTHER);
+    const registry = workspaceRegistryPath(box.env);
+    mkdirSync(dirname(registry), { recursive: true });
+    writeFileSync(registry, "{invalid");
+    const installed = runUb([
+      "mcp", "install", "claude", "--print", "--workspace", OTHER.slice(0, 8), "--hub", "local",
+    ], box);
+    expect(installed.status, installed.output).toBe(0);
+    expect(installed.stdout).toContain(OTHER);
+    expect(readFileSync(registry, "utf8")).toBe("{invalid");
+  });
+
+  it("explains recorded, local and unknown hubs without reading records for help", () => {
+    const box = sandbox();
+    const registry = workspaceRegistryPath(box.env);
+    mkdirSync(dirname(registry), { recursive: true });
+    writeFileSync(registry, "{invalid");
+    const run = runUb(["workspace", "list", "--help"], box);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("hub this machine recorded");
+    expect(run.stdout).toContain("local for an explicit local");
+    expect(run.stdout).toContain("hub unknown when no record exists");
+    expect(run.stdout).toContain('"unknown"');
+    expect(run.stderr).toBe("");
+  });
 
   it("refuses an unreadable database directory instead of resolving against a short list", () => {
     const box = sandbox();
