@@ -298,6 +298,13 @@ describe("the versioned install payload", () => {
     const client = new Client({ name: "install-payload-test", version: VERSION });
     try {
       await client.connect(transport);
+      expect(client.getServerVersion()).toEqual({
+        name: "uberblick",
+        title: "Uberblick",
+        websiteUrl: "https://github.com/uberblick-ai/uberblick-2",
+        version: version.stdout.trim(),
+      });
+      expect(client.getInstructions()?.trim()).toBeTruthy();
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("list_docs");
     } finally {
       await client.close();

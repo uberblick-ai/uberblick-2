@@ -24,6 +24,7 @@ import { MirrorStore } from "./store.js";
 import { ServerWork } from "./server-work.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { registerTools } from "./tools.js";
+import { mcpVersion } from "./version.js";
 
 /**
  * The name to publish beside this session's caret, from what the client said
@@ -69,7 +70,12 @@ export function createMcpServer(
   const work = new ServerWork();
 
   const server = new McpServer(
-    { name: "uberblick", version: "0.0.0" },
+    {
+      name: "uberblick",
+      title: "Uberblick",
+      websiteUrl: "https://github.com/uberblick-ai/uberblick-2",
+      version: mcpVersion(),
+    },
     {
       instructions: STARTUP_ORIENTATION,
     },

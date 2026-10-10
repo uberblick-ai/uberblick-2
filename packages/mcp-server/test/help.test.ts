@@ -176,6 +176,25 @@ it("keeps shared guarantees in the owning topics after shortening descriptions",
   expect(contracts).toContain("re-sends it on reconnect");
 });
 
+it("advertises the server identity and instructions in initialize", async () => {
+  const rig = await local();
+  expect({
+    serverInfo: rig.client.getServerVersion(),
+    instructions: rig.client.getInstructions(),
+  }).toMatchInlineSnapshot({ instructions: expect.any(String) }, `
+    {
+      "instructions": Any<String>,
+      "serverInfo": {
+        "name": "uberblick",
+        "title": "Uberblick",
+        "version": "0.0.0",
+        "websiteUrl": "https://github.com/uberblick-ai/uberblick-2",
+      },
+    }
+  `);
+  expect(rig.client.getInstructions()?.trim()).toBeTruthy();
+});
+
 it("serves the short startup orientation verbatim and directs clients to the complete help catalog", async () => {
   const rig = await local();
   const instructions = rig.client.getInstructions()!;
