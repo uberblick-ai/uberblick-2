@@ -1352,9 +1352,10 @@ unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
 UUID for an existing workspace member or administrator; it cannot adopt an
 unrelated populated one.
 
-Existing MCP registrations keep their workspace/hub pins after creation or
-promotion. Add a named entry for the new selection when needed. Browser and MCP
-use of a local-only workspace requires neither login nor promotion.
+Plain MCP registrations follow the project's `.uberblick.json` after creation
+or promotion. Restart running agents to use the changed binding. A manually
+configured environment override in an entry keeps selecting its own workspace.
+Browser and MCP use of a local-only workspace requires neither login nor promotion.
 
 ## Binding a computer to this hub's workspace
 
@@ -1447,9 +1448,11 @@ and `mise run dev`'s loopback development hub keep working without a login.
 
 Persisting a selection writes the complete workspace and hub binding to the
 nearest `.uberblick.json`, or creates that file in the current folder. All CLI
-commands and MCP use it. A complete `UB_WORKSPACE_ID` and `UB_HUB_URL` environment
-pair overrides it atomically; incomplete overrides fail. New MCP installations
-pin both values, including a selected `--workspace <id> --hub <url>` override.
+commands and MCP use it. `UB_WORKSPACE_ID` overrides it using this machine's
+recorded hub for that workspace; add `UB_HUB_URL` until this machine has a record,
+or to select an explicit hub or `local`. A hub override alone is an error. New
+MCP installations register a plain `ub mcp serve` entry that follows the project
+binding; a separate workspace can be selected manually in an entry's `env`.
 Credentials remain private and separate. The deployed web client reads its
 endpoint at runtime from `/uberblick-config.json` rather than these client files.
 For a GitHub-enabled hub behind a loopback proxy, private user configuration

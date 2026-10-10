@@ -18,7 +18,7 @@ import type { Io } from "./io.js";
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { corpusProblem, verify } from "./remote.js";
 import { publishOwnerOnly } from "./safe-write.js";
-import { reportWorkspacePins } from "./workspace-create.js";
+import { reportEnvironmentBinding } from "./workspace-create.js";
 
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
@@ -195,7 +195,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       } finally { bindingLock.release(); }
       io.out(`Promoted workspace ${selected.workspaceId} to ${endpoint}.\nProject connected; ${uploaded.entries.length} documents verified, including archived documents.\n` +
         `Use on another machine: ub workspace use ${endpoint.replace(/\/$/, "")}/${selected.workspaceId}\n`);
-      reportWorkspacePins(binding, io);
+      reportEnvironmentBinding(io);
       return 0;
     } finally { lock.release(); }
   } catch (error) {

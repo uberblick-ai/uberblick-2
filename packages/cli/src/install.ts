@@ -1,19 +1,13 @@
 /**
  * `ub mcp install [client]` — register uberblick with an MCP client.
  *
- * Every entry pins the selected workspace and hub together. The selection comes
- * from the shared project/environment resolver unless `--workspace` and `--hub`
- * explicitly replace the complete binding. Credentials stay in the private
- * user store; they never enter the committable MCP configuration.
- *
- * `--label` gives a binding its own `uberblick-<label>` entry, so independent
- * processes in one agent session can work with different workspaces or hubs.
- * Later changes to the project binding do not redirect installed entries.
+ * Every entry is a plain `ub mcp serve`, following the project's binding when
+ * the client starts it. Install needs no workspace selection. Credentials stay
+ * in the private user store; they never enter the MCP configuration.
  *
  * **This command does not edit config files.** Claude Code ships `claude mcp
- * add` and Codex ships `codex mcp add` — including the environment flags a
- * binding needs — so those are run, and the vendor writes its own
- * file. Cursor ships no such subcommand, so it gets the snippet to paste and
+ * add` and Codex ships `codex mcp add`, so those are run, and the vendor writes
+ * its own file. Cursor ships no such subcommand, so it gets the snippet to paste and
  * the path to paste it into; a client `ub` has never heard of gets the same
  * snippet and its own MCP configuration as the destination, because there is no
  * path to invent for a client nobody has described. Editing somebody else's
@@ -32,23 +26,21 @@
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { requireBinding, resolveConfig } from "./config.js";
+import { findProjectConfig, PROJECT_CONFIG_FILE, resolveProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { Entry, Scope, TargetFile, TargetName } from "./mcp-config.js";
 import {
   DEFAULT_ENTRY,
-  SERVER_NAME,
   TARGETS,
   codexHome,
   presence,
   snippet,
   targetFile,
 } from "./mcp-config.js";
-import type { WorkspaceEntry } from "./workspace.js";
-import { listWorkspaces, resolveWorkspaceId } from "./workspace.js";
 
 /** The default when `ub mcp install` is run with no target named. */
 const DEFAULT_TARGET: TargetName = "claude";
@@ -62,41 +54,6 @@ interface Flags {
   unlisted: string | null;
   scope: Scope;
   print: boolean;
-  /** The workspace to pin the entry to, as it was typed. */
-  workspace: string | null;
-  /** The hub paired with an explicit workspace, or "local". */
-  hub: string | null;
-  /** A separately named entry to pin instead of the primary one. */
-  label: string | null;
-  /** The command to install, when `-- …` overrode it. */
-  entry: Entry;
-}
-
-/**
- * A label that is a plain key in both formats a client config can be.
- *
- * The entry name is `uberblick-<label>`, and that name is a JSON member and a
- * TOML table header. Keeping it to the bare-key alphabet is what lets both be
- * written without quoting rules, and it keeps the name typeable — it is what
- * the agent session will call the toolset.
- */
-const LABEL = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
-
-/**
- * Everything after a bare `--` is the command to install, verbatim.
- *
- * It is taken before `parseArgs` sees it because the override is frequently a
- * command with `--` in it of its own — a wrapper such as
- * `fnox exec -- ub mcp serve` — and only the first separator is ours.
- */
-function splitOverride(argv: string[]): {
-  flags: string[];
-  override: string[] | null;
-} {
-  const cut = argv.indexOf("--");
-  return cut === -1
-    ? { flags: argv, override: null }
-    : { flags: argv.slice(0, cut), override: argv.slice(cut + 1) };
 }
 
 /** Exported so the help below can be checked against the parser it describes. */
@@ -104,17 +61,14 @@ export const INSTALL_OPTIONS = {
   project: { type: "boolean", default: false },
   user: { type: "boolean", default: false },
   print: { type: "boolean", default: false },
-  workspace: { type: "string" },
-  hub: { type: "string" },
-  label: { type: "string" },
 } as const;
 
-export const INSTALL_HELP = `usage: ub mcp install [client] [options] [-- <command>]
+export const INSTALL_HELP = `usage: ub mcp install [client] [options]
 
-Register uberblick with an MCP client using \`ub mcp serve\`. The entry pins
-UB_WORKSPACE_ID and UB_HUB_URL from the selected project/environment binding.
-Use --workspace and --hub together to select a different pair. Credentials stay
-in the private user store and are never copied into an MCP entry.
+Register uberblick with an MCP client using a plain \`ub mcp serve\` entry.
+Agents follow the nearest .uberblick.json in the project where they start.
+Install needs no workspace selection. Credentials stay in the private user
+store and are never copied into an MCP entry.
 
 Claude Code and Codex are wired up by running their own \`mcp add\` command, so
 the vendor writes its own file. Cursor gets the snippet to paste and the path to
@@ -131,15 +85,7 @@ options:
   --project         this directory's config (the default)
   --user            the per-user config
   --print           print the snippet to paste, and run nothing
-  --workspace <id>  select a workspace UUID or a unique local UUID prefix;
-                    requires --hub
-  --hub <url|local> select the matching hub, or local-only; requires --workspace
-  --label <label>   name this entry "uberblick-<label>" instead of "uberblick",
-                    allowing several independent bindings in one project
   -h, --help        show this help
-  -- <command>      register this command instead of uberblick's own. Only the
-                    first \`--\` is ours; everything after it is passed through
-                    verbatim, including further \`--\` and \`--help\`.
 
 A second run reports \`already installed\`. An entry somebody else wrote under the
 name \`uberblick\` is never replaced: it is reported, the snippet is printed, and
@@ -147,9 +93,11 @@ the file is left exactly as it was.
 `;
 
 function parseFlags(argv: string[]): Flags {
-  const { flags, override } = splitOverride(argv);
+  if (argv.includes("--")) {
+    throw new Error("unexpected argument \"--\"");
+  }
   const { values, positionals } = parseArgs({
-    args: flags,
+    args: argv,
     options: INSTALL_OPTIONS,
     allowPositionals: true,
   });
@@ -168,19 +116,6 @@ function parseFlags(argv: string[]): Flags {
   if (values.project === true && values.user === true) {
     throw new Error("--project and --user contradict each other");
   }
-  if (override !== null && override.length === 0) {
-    throw new Error("`--` must be followed by the command to install");
-  }
-  const label = values.label ?? null;
-  if ((values.workspace === undefined) !== (values.hub === undefined)) {
-    throw new Error("--workspace and --hub must be supplied together");
-  }
-  if (label !== null && !LABEL.test(label)) {
-    throw new Error(
-      `--label ${JSON.stringify(label)} cannot be part of an entry name — ` +
-        'letters, digits, "-" and "_", starting with a letter or a digit',
-    );
-  }
 
   return {
     target: known ? (named as TargetName) : DEFAULT_TARGET,
@@ -189,17 +124,6 @@ function parseFlags(argv: string[]): Flags {
     // work; the report always names the absolute file, so it is never a guess.
     scope: values.user === true ? "user" : "project",
     print: values.print === true,
-    workspace: values.workspace ?? null,
-    hub: values.hub ?? null,
-    label,
-    entry:
-      override === null
-        ? DEFAULT_ENTRY
-        : {
-            name: SERVER_NAME,
-            command: override[0] as string,
-            args: override.slice(1),
-          },
   };
 }
 
@@ -208,24 +132,25 @@ function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
 }
 
-/** A complete binding, fixed for this MCP entry until explicitly replaced. */
-function pinnedTo(entry: Entry, id: string, hub: string, label: string | null): Entry {
-  return {
-    ...entry,
-    name: label === null ? entry.name : `${entry.name}-${label}`,
-    // Sorted like the TOML emitted by Codex's vendor command.
-    env: { UB_HUB_URL: hub, UB_WORKSPACE_ID: id },
-  };
-}
-
-function pinReport(entry: Entry): { fields: string; note: string } {
-  const id = entry.env?.UB_WORKSPACE_ID;
-  const hub = entry.env?.UB_HUB_URL;
-  if (id === undefined || hub === undefined) return { fields: "", note: "" };
-  return {
-    fields: field("entry", entry.name) + field("workspace", id) + field("hub", hub),
-    note: "\nThis entry is pinned; later project selection changes do not redirect it.\n",
-  };
+/** Describe the entry's future selection, independently of this shell's overrides. */
+function workspaceReport(scope: Scope, cwd: string, io: Io): string {
+  if (scope === "user") {
+    return field("workspace", "follows the nearest .uberblick.json of each project");
+  }
+  let path = join(cwd, PROJECT_CONFIG_FILE);
+  let selected = false;
+  try {
+    path = findProjectConfig(cwd) ?? path;
+    selected = resolveProjectBinding({ cwd, env: {} }).binding !== null;
+  } catch {
+    // A missing or invalid binding does not prevent registration. Do not repeat
+    // its contents or a parser diagnostic: only workspace selection is needed.
+  }
+  if (!selected) {
+    io.err("ub mcp install: agents cannot start until a workspace is selected. " +
+      "Run `ub workspace create <name>` or `ub workspace use <link|id>`.\n");
+  }
+  return field("workspace", `follows ${path}`);
 }
 
 function field(name: string, value: string): string {
@@ -244,10 +169,7 @@ interface Vendor {
 /**
  * The vendor's own installer for this target and scope, when there is one.
  *
- * A pinned entry goes through the same command: both vendors take the variable
- * as a flag (`claude … -e KEY=value`, `codex … --env KEY=VALUE`), measured
- * against the installed CLIs rather than assumed. Cursor 1.1.3 has no `mcp`
- * subcommand at all, so it has no entry here and gets the snippet.
+ * Cursor 1.1.3 has no `mcp` subcommand, so it gets the snippet.
  */
 function vendorCli(
   target: TargetName,
@@ -256,7 +178,6 @@ function vendorCli(
   cwd: string,
 ): Vendor | null {
   const command = [entry.command, ...entry.args];
-  const pinned = Object.entries(entry.env ?? {});
   if (target === "claude") {
     return {
       program: "claude",
@@ -266,7 +187,6 @@ function vendorCli(
         entry.name,
         "--scope",
         scope,
-        ...pinned.flatMap(([key, value]) => ["-e", `${key}=${value}`]),
         "--",
         ...command,
       ],
@@ -280,7 +200,6 @@ function vendorCli(
         "mcp",
         "add",
         entry.name,
-        ...pinned.flatMap(([key, value]) => ["--env", `${key}=${value}`]),
         "--",
         ...command,
       ],
@@ -312,8 +231,7 @@ function isOurs(name: string): boolean {
  * is what `fnox exec` does — and a child inherits whatever it is given. No
  * vendor CLI has any use for either, and a client that logs its environment, or
  * records it into a session file, would be carrying this machine's credential
- * into somebody else's format. What the pin needs travels in argv (`-e`,
- * `--env`), never here; the only thing added is the vendor's own
+ * into somebody else's format. The only thing added is the vendor's own
  * {@link Vendor.env}, which is `CODEX_HOME` saying which file codex writes.
  */
 function vendorEnv(vendor: Vendor): NodeJS.ProcessEnv {
@@ -382,9 +300,6 @@ export async function installCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
-  // Before the override is split off, and `takeHelp` stops at the same bare
-  // `--`: `ub mcp install -- … --help` registers a command, it does not ask a
-  // question.
   if (takeHelp(argv, io, INSTALL_HELP)) return 0;
 
   let flags: Flags;
@@ -397,32 +312,7 @@ export async function installCommand(
     return 2;
   }
 
-  // Resolve the complete pair before touching a vendor's files. Explicit flags
-  // replace the environment pair as a unit, never fill in a missing half.
-  let entry: Entry;
-  try {
-    let env = process.env;
-    if (flags.workspace !== null && flags.hub !== null) {
-      let known: WorkspaceEntry[] = [];
-      // Full UUIDs need no current binding or local replica. Prefixes still use
-      // the same local inventory and ambiguity rules as `workspace use`.
-      if ("error" in resolveWorkspaceId(flags.workspace, known)) {
-        known = listWorkspaces({ env: {
-          ...process.env, UB_WORKSPACE_ID: undefined, UB_HUB_URL: undefined,
-        } }).entries;
-      }
-      const selected = resolveWorkspaceId(flags.workspace, known);
-      if ("error" in selected) throw new Error(selected.error);
-      env = { ...process.env, UB_WORKSPACE_ID: selected.id, UB_HUB_URL: flags.hub };
-    }
-    const selected = requireBinding(resolveConfig({ env }));
-    entry = pinnedTo(
-      flags.entry, selected.workspaceId, selected.hubUrl ?? "local", flags.label,
-    );
-  } catch (error) {
-    io.err(`ub mcp install: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 2;
-  }
+  const entry = DEFAULT_ENTRY;
 
   // A client this command does not know is exactly what `--print` is for, and
   // it is answered before anything looks at the filesystem: there is no file of
@@ -446,24 +336,15 @@ export async function installCommand(
   }
 
   const vendor = vendorCli(flags.target, flags.scope, entry, cwd);
-  if (vendor === null) {
-    return printSnippet(
-      io,
-      file,
-      entry,
-      `${flags.target} has no command that registers an MCP server`,
-    );
-  }
-
-  const pin = pinReport(entry);
   const installed = presence(file, entry);
   if (installed === "ours") {
     let report = "already installed\n\n";
     report += field("client", where);
     report += field("file", file.path);
     report += field("command", commandLine(entry));
-    report += pin.fields;
-    io.out(report + pin.note);
+    report += workspaceReport(flags.scope, cwd, io);
+    report += "\nNothing was run or written.\n";
+    io.out(report);
     return 0;
   }
   if (installed === "unusable") {
@@ -481,9 +362,8 @@ export async function installCommand(
     return 1;
   }
   if (installed === "foreign") {
-    // "something other than this" rather than "somebody else's": an entry
-    // pinned to a different workspace is ours and is still not the one being
-    // installed, and the answer is the same either way.
+    // Every differing entry, including a manually configured environment,
+    // belongs to the caller and must be preserved.
     io.err(
       `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
         "something other than this, so it was left alone. Nothing was " +
@@ -492,6 +372,15 @@ export async function installCommand(
     );
     io.out(snippet(file.format, entry));
     return 1;
+  }
+
+  if (vendor === null) {
+    return printSnippet(
+      io,
+      file,
+      entry,
+      `${flags.target} has no command that registers an MCP server`,
+    );
   }
 
   // `codex mcp add` refuses outright when the directory `CODEX_HOME` names is
@@ -523,10 +412,9 @@ export async function installCommand(
     report += field("client", where);
     report += field("file", file.path);
     report += field("command", commandLine(entry));
-    report += pin.fields;
-    report += field("via", `${vendor.program} mcp add`);
-    report += pin.note;
-    report += "\nRestart the client, or reload its MCP servers, to pick this up.\n";
+    report += field("ran", `${vendor.program} ${vendor.args.join(" ")}`);
+    report += workspaceReport(flags.scope, cwd, io);
+    report += "\nRestart running agents to pick this up.\n";
     io.out(report);
     return 0;
   } finally {

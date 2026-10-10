@@ -503,16 +503,25 @@ syncBuiltinESMExports();
 });
 
 describe("what is not a request for help", () => {
-  it("leaves `--help` after `ub mcp install`'s bare `--` in the command being registered", () => {
-    // Only the first `--` is ours. Everything after it is the command that gets
-    // written into a client config, verbatim — `--help` included.
+  it("refuses install's bare `--` even when followed by `--help`", () => {
+    // `--help` after a separator is an operand. Install rejects the removed
+    // command passthrough before it can register anything.
     const run = runUb(
-      ["mcp", "install", "claude", "--print", "--workspace", "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64", "--hub", "local", "--", "ub", "mcp", "serve", "--help"],
+      ["mcp", "install", "claude", "--print", "--", "ub", "mcp", "serve", "--help"],
       sandbox(),
     );
-    expect(run.status).toBe(0);
-    expect(run.stdout).not.toBe(INSTALL_HELP);
-    expect(run.stdout).toContain('"--help"');
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("--");
+  });
+
+  it("omits removed install options from the parser and help", () => {
+    for (const option of ["workspace", "hub", "label"]) {
+      expect(INSTALL_OPTIONS).not.toHaveProperty(option);
+      expect(INSTALL_HELP).not.toContain(`--${option}`);
+    }
+    expect(INSTALL_HELP).not.toContain("-- <command>");
+    expect(INSTALL_HELP).not.toContain("uberblick-<label>");
   });
 
   it("still refuses an unknown subcommand, `--help` after it or not", async () => {

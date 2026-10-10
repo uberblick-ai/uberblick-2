@@ -230,15 +230,10 @@ function listCommand(argv: string[], io: Io): number {
  * What `<id>` names.
  *
  * A full id — bare or decorated — is parsed independently of machine knowledge.
- * `use` checks its record afterward; `mcp install --workspace` can still pin a
- * complete binding before this machine has served it. Anything else has to
- * resolve against what `list` knows, and the two ways that fails are told apart
+ * `use` checks its record afterward. Anything else has to resolve against what
+ * `list` knows, and the two ways that fails are told apart
  * on purpose: "that is not a uuid" sends you to check what you pasted, "nothing
  * here starts with that" sends you to `ub workspace list`.
- *
- * Exported because `ub mcp install --workspace` writes a workspace id into a
- * client config, and a prefix that meant one thing there and another here would
- * be a config pinned to a workspace nobody chose.
  */
 export function resolveWorkspaceId(
   raw: string,

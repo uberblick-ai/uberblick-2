@@ -168,6 +168,26 @@ describe("ub mcp serve", () => {
     } finally { await session.close(); }
   });
 
+  it.each([null, DEAD_HUB_URL])("serves a manual workspace override alone using its recorded hub %s", async (hubUrl) => {
+    const selected = "8f21c604-3b7d-4a15-9c62-0d5e8b3f7a29";
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
+      credentials: hubUrl === null ? undefined : { signingSecret: "cli-manual-override-secret" },
+    });
+    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
+    const session = await connect(box, { UB_WORKSPACE_ID: selected });
+    try {
+      const result = await session.client.callTool({ name: "sync_status", arguments: {} });
+      const content = result.content as { text: string }[];
+      const status = JSON.parse(content[0]!.text);
+      expect(status.workspace).toBe(selected);
+      expect(status.hub.url).toBe(hubUrl);
+      expect(status.database).toMatch(new RegExp(`${selected}\\.sqlite$`));
+      expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
+      expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl);
+    } finally { await session.close(); }
+  });
+
   it.each([null, DEAD_HUB_URL])("starts with an existing %s record even when a stale init lock remains", async (recordedHub) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
@@ -315,6 +335,19 @@ describe("ub mcp serve", () => {
     } finally {
       await session.close();
     }
+  });
+
+  it("refuses completely unbound startup with recovery on stderr and no MCP output", () => {
+    const box = unboundSandbox();
+    const run = runUb(["mcp", "serve"], box);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("No workspace selected");
+    expect(run.stderr).toContain("ub workspace create <name>");
+    expect(run.stderr).toContain("ub workspace use <link>");
+    expect(existsSync(box.dataHome)).toBe(false);
+    expect(existsSync(box.configHome)).toBe(false);
+    expect(readdirSync(box.cwd)).toEqual([]);
   });
 
   it.each([

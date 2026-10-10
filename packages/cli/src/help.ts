@@ -9,13 +9,12 @@
  * prompted for. Somebody reaching for help is by definition not ready to run the
  * command, so running any part of it would be the wrong answer.
  *
- * A bare `--` ends our options: everything after it belongs to whatever the
- * command hands it to — `ub mcp install -- ub mcp serve --help` registers a
- * command with `--help` in it, and must not print help instead.
+ * A bare `--` ends our options, so a later `--help` is an operand rather than
+ * a request for help. Commands may reject that separator during validation.
  *
  * The scan runs before `parseArgs`, so it cannot tell an option's *value* from
- * an option: `ub mcp install --hub -h` prints help before validating `-h` as a
- * hub address. That is the accepted price of help winning over validation,
+ * an option: `ub workspace use --hub -h` prints help before validating `-h`
+ * as a hub address. That is the accepted price of help winning over validation,
  * and it costs nothing real — no option here takes a value that plausibly
  * spells `-h` or `--help`; a literal option value can use `--hub=-h`.
  */
