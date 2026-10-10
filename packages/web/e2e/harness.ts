@@ -358,6 +358,8 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 
 export async function startHarness(options: {
   accessRole?: "admin" | "member";
+  /** A real git default isolated from the developer's own configuration. */
+  gitUserName?: string;
   /** Only the deep-link proof of a compiled loopback fallback needs this. */
   compiledFallback?: boolean;
   /** Offer a real on-machine replica backed by a separate authenticated hub. */
@@ -408,6 +410,13 @@ export async function startHarness(options: {
   // listening socket, no stray database — and must surface its own error rather
   // than a cleanup error on top of it.
   try {
+    if (options.gitUserName !== undefined) {
+      const configured = spawnSync("git", ["config", "--file", join(runDir, ".gitconfig"), "user.name", options.gitUserName], {
+        env: openEnvironment(runDir, bundleDir),
+        encoding: "utf8",
+      });
+      if (configured.status !== 0) throw new Error("e2e: could not configure the fixture's git display name");
+    }
     hub = await createHub(config, accessRole === undefined ? {} : { deviceCredentials: true });
     // Every later start reuses the port the first one was given, so the served
     // HUB_URL keeps pointing at the hub across a restart.

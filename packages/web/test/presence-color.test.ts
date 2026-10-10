@@ -1,10 +1,9 @@
 // @vitest-environment node
 /**
- * The presence colour is a preference that *leaves the machine* (#74).
+ * The presence name and colour are preferences that *leave the machine*.
  *
- * Every other local setting is between this browser and itself; this one is
- * published in awareness, because a colour peers cannot see is not a presence
- * colour. So the contract worth pinning is what a peer ends up holding:
+ * They are published in awareness, because a preference peers cannot see is
+ * not a presence preference. The contract is what a peer ends up holding:
  *
  * - the moment it is chosen, in every room this tab already has open — not on
  *   the next reconnect, and not only in the room that happens to be on screen;
@@ -20,6 +19,8 @@
  */
 
 import { beforeEach, expect, it, vi } from "vitest";
+import { readAuthEnvelope } from "@uberblick/hub/protocol";
+import { importRootSecret, verifyToken } from "@uberblick/hub/token";
 import * as Y from "yjs";
 import {
   Awareness,
@@ -40,8 +41,10 @@ vi.mock("@hocuspocus/provider", async () => {
     isSynced = false;
     unsyncedChanges = 0;
     awareness: InstanceType<typeof RealAwareness>;
-    constructor(options: { document: Y.Doc }) {
+    token: () => Promise<string>;
+    constructor(options: { document: Y.Doc; token: () => Promise<string> }) {
       this.awareness = new RealAwareness(options.document);
+      this.token = options.token;
     }
     attach(): void {}
     on(): void {}
@@ -92,16 +95,22 @@ function installStorage(): void {
 /** What a remote client holds about this session, decoded from the wire. */
 function seenByPeer(connection: RoomConnection): { name: string; color: string } {
   const awareness = connection.provider.awareness as Awareness;
-  const peer = new Awareness(new Y.Doc());
-  applyAwarenessUpdate(
-    peer,
-    encodeAwarenessUpdate(awareness, [awareness.clientID]),
-    "test",
-  );
-  const state = peer.getStates().get(awareness.clientID) as {
-    user: { name: string; color: string };
-  };
-  return state.user;
+  const peerDoc = new Y.Doc();
+  const peer = new Awareness(peerDoc);
+  try {
+    applyAwarenessUpdate(
+      peer,
+      encodeAwarenessUpdate(awareness, [awareness.clientID]),
+      "test",
+    );
+    const state = peer.getStates().get(awareness.clientID) as {
+      user: { name: string; color: string };
+    };
+    return state.user;
+  } finally {
+    peer.destroy();
+    peerDoc.destroy();
+  }
 }
 
 beforeEach(() => {
@@ -139,6 +148,72 @@ it("publishes a chosen presence colour to peers, in every room and after a reloa
   });
   expect(seenByPeer(reloaded.connection).color).toBe(CHOSEN);
   reloaded.release();
+});
+
+it("publishes a chosen name live in every room, keeps it after reload, and restores the serving default when cleared", () => {
+  const identity = { name: "Git Editor", color: DEALT };
+  const directory = acquireRoom(`${WORKSPACE}/_directory`, identity);
+  const doc = acquireRoom(`${WORKSPACE}/one`, identity);
+  const handles = [directory, doc];
+  try {
+    expect(seenByPeer(doc.connection)).toEqual(identity);
+    setSetting("presenceColor", CHOSEN);
+    setSetting("presenceName", "  Chosen Editor  ");
+    for (const handle of handles) {
+      expect(seenByPeer(handle.connection)).toEqual({ name: "Chosen Editor", color: CHOSEN });
+    }
+    const later = acquireRoom(`${WORKSPACE}/two`, identity);
+    handles.push(later);
+    expect(seenByPeer(later.connection)).toEqual({ name: "Chosen Editor", color: CHOSEN });
+    setSetting("presenceName", " \t ");
+    for (const handle of handles) {
+      expect(seenByPeer(handle.connection)).toEqual({ name: identity.name, color: CHOSEN });
+    }
+    setSetting("presenceName", "Chosen Editor");
+  } finally {
+    for (const handle of handles) handle.release();
+  }
+
+  // A restarted serving process can supply a new default; the browser's
+  // preference still wins until the reader clears it.
+  const nextDefault = { name: "New Git Editor", color: "#cb26b4" };
+  const reloaded = acquireRoom(`${WORKSPACE}/_directory`, nextDefault);
+  try {
+    expect(seenByPeer(reloaded.connection)).toEqual({ name: "Chosen Editor", color: CHOSEN });
+    setSetting("presenceName", " \t\n ");
+    expect(seenByPeer(reloaded.connection)).toEqual({ name: nextDefault.name, color: CHOSEN });
+  } finally {
+    reloaded.release();
+  }
+});
+
+it("mints each room reconnect token with the current nonblank name", async () => {
+  const identity = { name: "Git Editor", color: DEALT };
+  const room = acquireRoom(`${WORKSPACE}/_directory`, identity);
+  const handles = [room];
+  const key = await importRootSecret("test-secret");
+  const expectSubject = async (connection: RoomConnection, subject: string): Promise<void> => {
+    // This is the same async callback Hocuspocus invokes on every reconnect.
+    const { token } = connection.provider as unknown as { token: () => Promise<string> };
+    const envelope = readAuthEnvelope(await token());
+    expect(envelope).not.toBeNull();
+    const claims = await verifyToken(key, envelope?.token ?? "");
+    expect(claims).not.toBeNull();
+    expect(claims?.sub).toBe(subject);
+    expect(claims?.workspace).toBe(WORKSPACE);
+  };
+  try {
+    await expectSubject(room.connection, identity.name);
+    setSetting("presenceName", "  Chosen Editor  ");
+    await expectSubject(room.connection, "Chosen Editor");
+    const later = acquireRoom(`${WORKSPACE}/later`, identity);
+    handles.push(later);
+    await expectSubject(later.connection, "Chosen Editor");
+    setSetting("presenceName", " \t\n ");
+    for (const handle of handles) await expectSubject(handle.connection, identity.name);
+  } finally {
+    for (const handle of handles) handle.release();
+  }
 });
 
 it("reads a workspace name silently and withdraws presence when only that reader remains", () => {

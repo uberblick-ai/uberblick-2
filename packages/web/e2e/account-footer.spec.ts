@@ -1,5 +1,5 @@
 /** The footer identifies the login of this running local service, separately from presence. */
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
 
@@ -16,9 +16,10 @@ async function showSidebar(page: Page, settings = false): Promise<void> {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`the standard account footer keeps inert account settings and usable preferences — ${scheme}`, async ({ browser }) => {
+  test(`the standard account footer keeps inert account settings and usable preferences — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
+    test.skip(info.project.name === "webkit-iphone", "The paired explicit iPad context owns touch coverage.");
     const page = await openApp(browser, "/", {
-      contextOptions: { colorScheme: scheme, reducedMotion: "reduce" },
+      contextOptions: { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 832 }, colorScheme: scheme, reducedMotion: "reduce" },
       readySelector: ".ub-list-head",
     });
     for (const width of [1280, 320]) {
@@ -60,12 +61,22 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
         await expect(panel.getByRole("group", { name: "Appearance" })).toBeVisible();
         await expect(panel.getByText("MCP connections", { exact: true })).toBeVisible();
-        await expect(panel.locator(".ub-user-heading")).toHaveText(/^Presence name: /);
-        await expect(account(page)).not.toContainText(await panel.locator(".ub-user-heading").innerText());
+        const name = panel.getByRole("textbox", { name: "Presence name", exact: true });
+        await expect(name).toHaveValue(/\S/);
+        await expect(account(page)).not.toContainText(await name.inputValue());
         await page.keyboard.press("Escape");
         await expect(account(page)).toBeFocused();
         await page.keyboard.press("Enter");
         await expect(panel).toBeVisible();
+        // The name uses the native form's Enter submission and remains
+        // separate from the verified account in both sidebar modes.
+        await name.fill(`Presence ${scheme} ${width} ${mode}`);
+        await name.press("Enter");
+        await page.keyboard.press("Escape");
+        await expect(account(page)).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(name).toHaveValue(`Presence ${scheme} ${width} ${mode}`);
+        await expect(account(page)).toContainText(`@${handle}`);
         const swatch = panel.getByRole("group", { name: "Presence colour" }).getByRole("button").first();
         await swatch.focus();
         await page.keyboard.press("Space");
@@ -84,6 +95,31 @@ for (const scheme of ["light", "dark"] as const) {
         }
       }
     }
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`the presence name form saves through iPad touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }) => {
+    const page = await openApp(browser, "/", {
+      contextOptions: { ...devices["iPad Pro 11"], colorScheme: scheme, reducedMotion: "reduce" },
+      readySelector: ".ub-body",
+    });
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+    await account(page).tap();
+    const name = page.getByRole("textbox", { name: "Presence name", exact: true });
+    const save = page.getByRole("button", { name: "Save name", exact: true });
+    await expect(name).toBeInViewport({ ratio: 1 });
+    await expect(save).toBeInViewport({ ratio: 1 });
+    await name.tap();
+    await expect(name).toBeFocused();
+    await name.fill(`iPad ${scheme}`);
+    await save.tap();
+    await account(page).tap();
+    await expect(name).toHaveCount(0);
+    await account(page).tap();
+    await expect(name).toHaveValue(`iPad ${scheme}`);
+    await expect(account(page)).toContainText(`@${handle}`);
   });
 }
 
@@ -133,8 +169,8 @@ test("a page outside ub open has no account reading or generated account name", 
   });
   await expect(account(page)).toContainText("Account unavailable");
   await account(page).click();
-  const presence = await page.locator(".ub-user-heading").innerText();
-  await expect(account(page)).not.toContainText(presence.replace(/^Presence name: /, ""));
+  const presence = await page.getByRole("textbox", { name: "Presence name", exact: true }).inputValue();
+  await expect(account(page)).not.toContainText(presence);
   await page.keyboard.press("Escape");
   expect(accountRequests).toBe(0);
 });

@@ -57,12 +57,14 @@
  * refusals happen before a hub starts or a database file is created.
  */
 
+import { execFile } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
+import { userInfo } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import type { Hub, LocalBrowserServer } from "@uberblick/hub";
 import {
   createHub,
@@ -158,6 +160,28 @@ function message(error: unknown): string {
 function trimmed(value: string | undefined): string | null {
   const text = value?.trim();
   return text === undefined || text === "" ? null : text;
+}
+
+const runFile = promisify(execFile);
+
+/** Optional git configuration must never keep the web app from serving. */
+async function defaultPresenceName(env: NodeJS.ProcessEnv): Promise<string> {
+  try {
+    const { stdout } = await runFile("git", ["config", "user.name"], {
+      cwd: process.cwd(),
+      env,
+      encoding: "utf8",
+      maxBuffer: Number.POSITIVE_INFINITY,
+      timeout: 1_000,
+      killSignal: "SIGKILL",
+    });
+    const name = trimmed(stdout);
+    if (name !== null) return name;
+  } catch {
+    // Missing git, an unset name, failed configuration and a stalled lookup
+    // all use the same OS identity without a prompt or startup refusal.
+  }
+  return userInfo().username;
 }
 
 // --- the bundle --------------------------------------------------------------
@@ -348,6 +372,7 @@ export function configDocument(
     workspaces?: readonly string[];
     servedWorkspaces?: Record<string, { browserKey: string; remoteHubUrl: string | null; name: string | null }>;
   },
+  defaultPresenceName?: string,
 ): string {
   return JSON.stringify({
     hubUrl,
@@ -360,6 +385,7 @@ export function configDocument(
           ...(serving.rebound ? { rebound: true } : {}),
           ...(serving.servedWorkspaces === undefined ? {} : { servedWorkspaces: serving.servedWorkspaces }),
         }),
+    ...(defaultPresenceName === undefined ? {} : { defaultPresenceName }),
   });
 }
 
@@ -407,14 +433,14 @@ function sameBinding(left: Binding, right: Binding): boolean {
  * answer forever. Passing the original environment keeps the precedence honest:
  * a genuine pin still wins every time, and a file value stays a file value.
  */
-function currentConfigDocument(env: NodeJS.ProcessEnv): string {
+function currentConfigDocument(env: NodeJS.ProcessEnv, defaultPresenceName: string): string {
   const resolved = resolveConfig({ env });
-  return resolvedConfigDocument(resolved);
+  return resolvedConfigDocument(resolved, defaultPresenceName);
 }
 
-function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): string {
+function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>, defaultPresenceName?: string): string {
   const binding = bindingOf(resolved);
-  return configDocument(binding.hubUrl, null, "");
+  return configDocument(binding.hubUrl, null, "", undefined, defaultPresenceName);
 }
 
 /**
@@ -436,7 +462,7 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>): str
  * normally — {@link resolveConfig}'s own semantics, not a persistent cache of
  * the old configuration.
  */
-function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
+function configSource(env: NodeJS.ProcessEnv, initial: string, defaultPresenceName: string): () => string {
   let accepted = initial;
   return () => {
     const lock = tryAcquireInitLock(env);
@@ -444,7 +470,7 @@ function configSource(env: NodeJS.ProcessEnv, initial: string): () => string {
       return accepted;
     }
     try {
-      accepted = currentConfigDocument(env);
+      accepted = currentConfigDocument(env, defaultPresenceName);
       return accepted;
     } finally {
       lock.release();
@@ -461,6 +487,7 @@ function servingConfigSource(
   startup: ReturnType<typeof resolveConfig>,
   localHubUrl: string,
   workspaces: ReadonlyMap<string, ServedWorkspace>,
+  defaultPresenceName: string,
 ): () => string {
   const binding = bindingOf(startup);
   const startupId = workspaces.keys().next().value;
@@ -480,6 +507,7 @@ function servingConfigSource(
     binding.workspace,
     browserKey,
     { remoteHubUrl: binding.hubUrl, rebound: false, ...destinations },
+    defaultPresenceName,
   );
   return () => {
     const lock = tryAcquireInitLock(env);
@@ -491,6 +519,7 @@ function servingConfigSource(
         binding.workspace,
         browserKey,
         { remoteHubUrl: binding.hubUrl, rebound: !sameBinding(binding, current), ...destinations },
+        defaultPresenceName,
       );
       return accepted;
     } finally {
@@ -500,7 +529,7 @@ function servingConfigSource(
 }
 
 /** Resolve the startup binding and its first served document as one snapshot. */
-async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Promise<{
+async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false, defaultPresenceName?: string): Promise<{
   resolved: ReturnType<typeof resolveConfig>;
   document: string;
   secretCreated: string | null;
@@ -530,7 +559,7 @@ async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false): Prom
         }
       }
     }
-    return { resolved, document: resolvedConfigDocument(resolved), secretCreated };
+    return { resolved, document: resolvedConfigDocument(resolved, defaultPresenceName), secretCreated };
   } finally {
     lock.release();
   }
@@ -1315,12 +1344,14 @@ export async function openCommand(
   if (bundle === "refused") {
     return await foreground.shutdown(1);
   }
+  // Freeze the cwd's default for this run, just as the served binding is frozen.
+  const presenceName = await defaultPresenceName(startupEnv);
   if (foreground.interrupted()) {
     return await foreground.shutdown(0);
   }
 
   try {
-    initial = await initialConfig(startupEnv, true);
+    initial = await initialConfig(startupEnv, true, presenceName);
     projectBinding = requireBinding(initial.resolved);
     hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
     env = { ...initial.resolved.env, HUB_URL: hubUrl };
@@ -1354,6 +1385,7 @@ export async function openCommand(
         initial.resolved,
         localHubUrl,
         workspaces,
+        presenceName,
       );
       const observedServedRooms = new Set<string>();
       let collectingServedRooms: Set<string> | null = null;
@@ -1419,7 +1451,7 @@ export async function openCommand(
       const server = serveBundle(
         expectedHost,
         plan.dir,
-        configSource(startupEnv, initial.document),
+        configSource(startupEnv, initial.document, presenceName),
       );
       await listen(server, WEB_HOST, options.port);
       owned.server = server;

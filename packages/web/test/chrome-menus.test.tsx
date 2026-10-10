@@ -24,7 +24,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -37,7 +37,7 @@ import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
 import { UserMenu } from "../src/ui/UserMenu.js";
 import type { AccountIdentity } from "../src/shell/account.js";
-import { useAgentSessions } from "../src/ui/hooks.js";
+import { useAgentSessions, useSetting } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";
 import { getSetting } from "../src/settings.js";
 import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
@@ -261,7 +261,7 @@ describe("the account footer keeps this client's presence preferences separate",
     click(placeholder);
     expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
     open(view);
-    expect(within(screen.getByRole("dialog")).getByText(`Presence name: ${IDENTITY.name}`).textContent).toBe(`Presence name: ${IDENTITY.name}`);
+    expect((within(screen.getByRole("dialog")).getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe(IDENTITY.name);
     // The tab's dealt colour is the blue one, and nothing was chosen yet.
     expect(chosenSwatch()).toBe("blue");
     view.unmount();
@@ -305,7 +305,35 @@ describe("the account footer keeps this client's presence preferences separate",
     );
     open(reloaded);
     expect(chosenSwatch()).toBe("green");
-    expect(within(screen.getByRole("dialog")).getByText("Presence name: adjacent heron").textContent).toBe("Presence name: adjacent heron");
+    expect((within(screen.getByRole("dialog")).getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("adjacent heron");
+    reloaded.unmount();
+  });
+
+  it("saves a name only on submission, keeps it after reload, and clears back to the default", () => {
+    function Preferences(): ReactElement {
+      const chosenName = useSetting("presenceName");
+      return <UserMenu identity={{ ...IDENTITY, name: chosenName ?? IDENTITY.name }} agentSessions={0} />;
+    }
+    const editName = (name: string): void => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Presence name" }), { target: { value: name } });
+    };
+    const view = mount(<Preferences />);
+    open(view);
+    editName("  Pat Editor  ");
+    expect(getSetting("presenceName")).toBeNull();
+    click(screen.getByRole("button", { name: "Save name" }));
+    expect(getSetting("presenceName")).toBe("Pat Editor");
+    expect((screen.getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("Pat Editor");
+    expect(chosenSwatch()).toBe("blue");
+    view.unmount();
+
+    const reloaded = mount(<Preferences />);
+    open(reloaded);
+    expect((screen.getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("Pat Editor");
+    editName(" \t ");
+    click(screen.getByRole("button", { name: "Save name" }));
+    expect(getSetting("presenceName")).toBeNull();
+    expect((screen.getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe(IDENTITY.name);
     reloaded.unmount();
   });
 

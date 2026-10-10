@@ -5,18 +5,18 @@
  *
  * A popover rather than a menu, deliberately. A menu is a list of commands you
  * pick one of and leave; this is a small panel of controls and readouts you
- * come back out of unchanged, and two of its rows are facts rather than
- * actions. The workspace switcher above it *is* a list of commands, and is a
+ * come back out of unchanged, with controls and a connection count. The
+ * workspace switcher above it *is* a list of commands, and is a
  * menu (see `WorkspaceSwitcher`). Both surfaces compose the existing local
  * shadcn components and keep Radix's keyboard, focus and dismissal behavior.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { ReactElement } from "react";
 import { AWARENESS_COLORS } from "../collab/identity.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import type { AccountIdentity } from "../shell/account.js";
-import { setSetting } from "../settings.js";
+import { getSetting, setSetting } from "../settings.js";
 import type { Appearance } from "../settings.js";
 import { useSetting } from "./hooks.js";
 import {
@@ -26,6 +26,8 @@ import {
 } from "./shadcn/popover.js";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "./shadcn/sidebar.js";
 import { APPEARANCES, useAppearance } from "./theme.js";
+import { Input } from "./shadcn/input.js";
+import { Button } from "./shadcn/button.js";
 
 /** What each appearance is called. */
 const APPEARANCE_LABELS: Record<Appearance, string> = {
@@ -41,8 +43,7 @@ export function UserMenu({
   active = true,
 }: {
   /**
-   * This tab's awareness identity: the name it publishes, and the colour it was
-   * given before anybody chose one.
+   * This tab's current presence name and its default colour.
    */
   identity: AwarenessUser;
   /**
@@ -56,6 +57,8 @@ export function UserMenu({
   active?: boolean;
 }): ReactElement {
   const [open, setOpen] = useState(false);
+  const [name, setName] = useState(identity.name);
+  const nameId = useId();
   const color = useSetting("presenceColor") ?? identity.color;
   const [appearance, chooseAppearance] = useAppearance();
   const label = account.state === "signed-in"
@@ -65,11 +68,17 @@ export function UserMenu({
   useEffect(() => {
     if (!active) setOpen(false);
   }, [active]);
+  useEffect(() => {
+    setName(identity.name);
+  }, [identity.name]);
 
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <Popover open={active && open} onOpenChange={setOpen}>
+        <Popover open={active && open} onOpenChange={(next) => {
+          if (next) setName(identity.name);
+          setOpen(next);
+        }}>
           <PopoverTrigger asChild>
             <SidebarMenuButton data-testid="account-menu" aria-label={`${label}; preferences`}>
               <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
@@ -79,7 +88,17 @@ export function UserMenu({
             </SidebarMenuButton>
           </PopoverTrigger>
           <PopoverContent align="start" side="top" className="ub-user-panel">
-            <p className="ub-user-heading">Presence name: {identity.name}</p>
+            <form className="ub-panel-group" onSubmit={(event) => {
+              event.preventDefault();
+              setSetting("presenceName", name);
+              setName(getSetting("presenceName") ?? identity.name);
+            }}>
+              <label className="ub-panel-label block" htmlFor={nameId}>Presence name</label>
+              <div className="flex items-center gap-2">
+                <Input className="[--input:var(--sidebar-input)]" id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
+                <Button type="submit" size="sm">Save name</Button>
+              </div>
+            </form>
 
             {/* A caption over a set of related controls is what a fieldset is. */}
             <fieldset className="ub-panel-group">

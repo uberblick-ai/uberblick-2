@@ -9,6 +9,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
@@ -341,6 +342,12 @@ export function configured(): {
       // Never the repository's own packages/hub/data/hub.sqlite.
       HUB_DB_PATH: join(box.cwd, "started-hub.sqlite"),
       BROWSER: "none",
+      // Existing config-document proofs should not read the runner's git name.
+      GIT_CONFIG_GLOBAL: join(box.cwd, "no-global.gitconfig"),
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_COUNT: "0",
+      GIT_DIR: undefined,
+      GIT_WORK_TREE: undefined,
     },
   };
 }
@@ -441,6 +448,7 @@ export function servingDocumentOf(
         browserKey: entry.browserKey, name: null, remoteHubUrl: entry.remoteHubUrl,
       }])),
     },
+    defaultPresenceName: userInfo().username,
   });
 }
 

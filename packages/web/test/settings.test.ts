@@ -61,6 +61,35 @@ describe("the settings store", () => {
     expect(getSetting("presenceColor")).toBe("#0675c9");
   });
 
+  it("stores a trimmed presence name without changing the other preferences, and clears it back to the default", () => {
+    setSetting("presenceColor", "#0675c9");
+    setSetting("appearance", "dark");
+    setSetting("presenceName", "  Jos\u00e9 Editor  ");
+    expect(getSetting("presenceName")).toBe("Jos\u00e9 Editor");
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) as string)).toEqual({
+      presenceColor: "#0675c9", appearance: "dark", presenceName: "Jos\u00e9 Editor",
+    });
+
+    setSetting("presenceName", " \t\n ");
+    expect(getSetting("presenceName")).toBeNull();
+    expect(JSON.parse(localStorage.getItem(SETTINGS_KEY) as string)).toEqual({
+      presenceColor: "#0675c9", appearance: "dark",
+    });
+    setSetting("presenceColor", null);
+    setSetting("appearance", null);
+    expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+  });
+
+  it("refuses unusable stored names independently of a valid colour", () => {
+    for (const presenceName of [undefined, null, 42, {}, [], "", " \t\n "]) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ presenceColor: "#0675c9", presenceName }));
+      expect(getSetting("presenceName")).toBeNull();
+      expect(getSetting("presenceColor")).toBe("#0675c9");
+    }
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ presenceName: "  Pat Editor  " }));
+    expect(getSetting("presenceName")).toBe("Pat Editor");
+  });
+
   it("imports nothing from the collab layer", () => {
     // The reason a local setting cannot reach a document: the module that holds
     // it has no way to name a Y.Doc, a room, or the hub. Static, because the

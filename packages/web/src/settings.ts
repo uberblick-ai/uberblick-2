@@ -9,8 +9,8 @@
  * than an accident waiting in this file.
  *
  * One namespaced, versioned key holds one JSON object. The version is in the
- * key itself, so a future shape is a new key and the old blob is simply never
- * read again — no migration branch, no half-understood object.
+ * key itself, so a future incompatible shape uses a new key and the old blob
+ * is simply never read again — no migration branch, no half-understood object.
  *
  * Reads are read-through rather than cached: localStorage is the state, and a
  * cache would be a second copy to keep honest across tabs. Every read is
@@ -42,11 +42,11 @@ export interface Settings {
    * The presence colour this browser picked, `#rrggbb`, or null for the random
    * one the tab was given (#74).
    *
-   * The one field here that leaves the machine, and deliberately: it is
-   * published in awareness, because a colour peers cannot see is not a presence
-   * colour. Nothing else here may grow that property without saying so.
+   * Published in awareness alongside the presence name.
    */
   presenceColor: string | null;
+  /** Published in awareness and on new comments; null uses the serving default. */
+  presenceName: string | null;
   /** The appearance override, or null to follow the system's preference (#74). */
   appearance: Appearance | null;
 }
@@ -54,6 +54,7 @@ export interface Settings {
 /** What every field reads as when storage holds nothing usable for it. */
 const DEFAULTS: Readonly<Settings> = {
   presenceColor: null,
+  presenceName: null,
   appearance: null,
 };
 
@@ -70,6 +71,11 @@ const listeners = new Set<Listener>();
  */
 function storedColor(value: unknown): string | null {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
+}
+
+/** Blank names restore the default; a token subject must never be blank. */
+function storedName(value: unknown): string | null {
+  return typeof value === "string" ? value.trim() || null : null;
 }
 
 /** A stored appearance, or null — which reads as "follow the system". */
@@ -104,6 +110,7 @@ function readAll(): Settings {
   const stored = parsed as Record<string, unknown>;
   return {
     presenceColor: storedColor(stored.presenceColor),
+    presenceName: storedName(stored.presenceName),
     appearance: storedAppearance(stored.appearance),
   };
 }
@@ -130,6 +137,7 @@ export function setSetting<K extends keyof Settings>(
   value: Settings[K],
 ): void {
   const next: Settings = { ...readAll(), [key]: value };
+  next.presenceName = storedName(next.presenceName);
   const kept = Object.entries(next).filter(([, held]) => held !== null);
   try {
     if (kept.length === 0) localStorage.removeItem(SETTINGS_KEY);

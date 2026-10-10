@@ -1,9 +1,8 @@
 /**
- * Awareness identity: a fun name and a colour, one per tab.
+ * Awareness defaults: a random name and colour, one per tab.
  *
- * The colour is a *default*, not the last word: a reader who picks one in the
- * user menu (#74) stores it, and `rooms.ts` publishes the stored one over this
- * for every room. The name has no such override — nothing has asked for one.
+ * ub open supplies the name before rooms connect. Browser settings can
+ * override either default, and rooms publish those choices live.
  *
  * Self-asserted for now. Identity can later be derived from authenticated token
  * claims — which is why `AwarenessUser` is a value passed into the
