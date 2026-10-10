@@ -95,7 +95,7 @@ export function UserMenu({
             }}>
               <label className="ub-panel-label block" htmlFor={nameId}>Presence name</label>
               <div className="flex items-center gap-2">
-                <Input id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
+                <Input className="[--input:var(--sidebar-input)]" id={nameId} value={name} onChange={(event) => setName(event.target.value)} />
                 <Button type="submit" size="sm">Save name</Button>
               </div>
             </form>
