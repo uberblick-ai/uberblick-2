@@ -72,7 +72,11 @@ agents:
       - "Bash(sort *)"
       - "Bash(find *)"
       - "Bash(jq *)"
+      # Interpreters and env already run any code, so denying them guards nothing;
+      # env also lets a run clear credentials before tests.
       - "Bash(node *)"
+      - "Bash(python3 *)"
+      - "Bash(env *)"
 
   issue-reviewer:
     retrospectives: 1016
