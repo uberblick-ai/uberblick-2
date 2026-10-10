@@ -395,6 +395,8 @@ describe("hub login store", () => {
     expect(state.state).toBe("refused");
     expect(state.logins).toEqual({});
     expect(state.diagnostic).toContain(`chmod 600 ${path}`);
+    expect(state.reason).toBe(`credential store ${path} mode ${mode.toString(8).padStart(4, "0")} lets other users access it`);
+    expect(state.fix).toBe(`chmod 600 ${path}`);
     expect(JSON.stringify(state)).not.toContain(login().credential.key);
     expect(() => preflightHubLoginStore(box.env)).toThrow(`chmod 600 ${path}`);
     await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(`chmod 600 ${path}`);
@@ -415,6 +417,11 @@ describe("hub login store", () => {
     const result = readHubLogins(box.env);
     expect(result.state).toBe("unreadable");
     expect(result.logins).toEqual({});
+    expect(result.reason).toContain(path);
+    expect(result.fix).toBe(`repair ${path}, then run ub auth login`);
+    expect(result.reason).not.toBe(result.fix);
+    expect(result.reason).not.toContain("`");
+    expect(result.fix).not.toContain("`");
     expect(JSON.stringify(result)).not.toContain("secret-that-must-not-leak");
     expect(() => preflightHubLoginStore(box.env)).toThrow(/credential store/);
     await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(/credential store/);
@@ -429,7 +436,10 @@ describe("hub login store", () => {
     writeFileSync(target, JSON.stringify({ hubLogins: { [HUB]: login() } }), { mode: 0o600 });
     mkdirSync(dirname(path), { recursive: true });
     symlinkSync(target, path);
-    expect(readHubLogins(box.env).state).toBe("refused");
+    expect(readHubLogins(box.env)).toMatchObject({
+      state: "refused", reason: `credential store ${path} must be a regular file you own`,
+      fix: `move ${path} aside, then run ub auth login`,
+    });
     expect(() => preflightHubLoginStore(box.env)).toThrow(/regular file you own/);
     await expect(writeHubLogin(HUB, login(), box.env)).rejects.toThrow(/regular file you own/);
     await expect(removeHubLogin(HUB, box.env)).rejects.toThrow(/regular file you own/);

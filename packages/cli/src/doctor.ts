@@ -1,31 +1,11 @@
 /**
- * `ub doctor` — the local stack's documented failure modes, run as checks.
- *
- * Each check answers one question somebody would otherwise answer by finding,
- * reading and translating prose: is a workspace configured, is a signing secret
- * usable, can the existing database be read and written,
- * does a hub answer, is this machine's clock close enough to the hub's,
- * do the endpoint and the hub's port agree,
- * who holds the port, is any MCP client wired up. Three of the
- * hub-side failures present identically as "offline" in the web UI, which is
- * the reason this command exists — it names the cause and the fix.
+ * `ub doctor` checks this project's Uberblick setup and names each fix.
+ * Product wording follows CLI: ub doctor intents and examples.
  *
  * **It diagnoses; it never repairs.** The database check reads an existing
  * store without a replica, hub connection, migration or write. Nothing creates
  * an absent database, configuration file or directory. A failed check names
  * the recovery.
- *
- * **The wording is the Install and run document's**, whose "If it fails"
- * section is the specification for the hub, port and credential checks. It is
- * quoted rather than paraphrased, so the command and the document cannot drift
- * into saying subtly different things.
- *
- * **Nothing here requires configuration.** With no files present at all every
- * check still reports, against the built-in defaults: an unconfigured workspace
- * is a failed check rather than a thrown error, and an absent signing secret is
- * a skip that says hub sync is disabled and every MCP tool still works — the
- * MCP server is offline-first by construction, so that is a supported state and
- * not a defect.
  *
  * `--json` prints exactly one object to stdout and nothing else; warnings and
  * the MCP server's own logging go to stderr. No check ever prints the signing
@@ -34,29 +14,33 @@
  */
 
 
-import { readDeviceLogin } from "@uberblick/hub/device-login";
+import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/hub/device-login";
+import { isGithubUsername } from "@uberblick/hub";
+import { authenticationOrigin } from "@uberblick/hub/remote-url";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
-  MAX_TOKEN_LIFETIME_SECONDS,
+  REQUEST_PROOF_LIFETIME_SECONDS,
 } from "@uberblick/hub/token";
-import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
+import { protocolSkew } from "@uberblick/hub/protocol";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { inspectExistingStore } from "@uberblick/mcp-server";
+import { inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";
+import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
-import { exposedSigningSecretRemedy, readCredentials, resolveConfig, requireBinding } from "./config.js";
+import { readCredentials, resolveConfig } from "./config.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import type { DoctorEntry, TargetFile, TargetName } from "./mcp-config.js";
 import { TARGETS, claudeDoctorEntries, doctorEntry, targetFile } from "./mcp-config.js";
 import { DEFAULT_WEB_PORT, WEB_HOST, whoHoldsPort, whyNotStartable } from "./open.js";
-import { resolveProjectBinding } from "./project-binding.js";
+import { findProjectConfig, resolveProjectBinding } from "./project-binding.js";
 import type { Endpoint, HubProbe } from "./probes.js";
 import {
   endpointOf,
@@ -65,7 +49,6 @@ import {
   probeHubClock,
   probePort,
 } from "./probes.js";
-import { ORIGIN_LABELS } from "./status.js";
 import { cliVersion } from "./version.js";
 
 /** Stable strings: `--json` prints them and a script will branch on them. */
@@ -110,18 +93,27 @@ function skipped(name: string, reason: string): Check {
   return { name, status: "skipped", reason, fix: null };
 }
 
-const WORKSPACE_REMEDY =
-  "`ub workspace create <name>` creates a workspace; `ub workspace use <hub>/<workspace-id>` binds " +
-  "this project to one that already exists; `ub workspace use <id>` adopts one " +
-  "this machine already has";
+const WORKSPACE_REMEDY = "ub workspace create <name>, or ub workspace use <link|id>";
 
-/**
- * The hub's bind address and the endpoint the clients dial are two settings, and
- * only one of them is an environment variable: the endpoint lives in this
- * machine's config, written by `ub workspace create` or `ub workspace use`.
- */
-const PORT_REMEDY =
-  "the hub binds HUB_HOST:PORT — set PORT to the port the configured endpoint dials, or point this machine at the hub you meant with `ub workspace use <endpoint>/<workspace-id>`";
+/** Resolver errors remain shared; doctor separates a short refusal from its fix. */
+function bindingRefusal(error: unknown, env: NodeJS.ProcessEnv, cwd: string): string {
+  const reason = message(error).replaceAll("`", "");
+  if (env.UB_WORKSPACE_ID !== undefined || env.UB_HUB_URL !== undefined) {
+    if (!env.UB_WORKSPACE_ID?.trim()) return "UB_WORKSPACE_ID must not be empty; UB_HUB_URL requires UB_WORKSPACE_ID";
+    try { parseWorkspaceId(env.UB_WORKSPACE_ID); }
+    catch { return "UB_WORKSPACE_ID is not a valid workspace id"; }
+    if (env.UB_HUB_URL !== undefined && !env.UB_HUB_URL.trim()) return "UB_HUB_URL must not be empty";
+    if (reason.startsWith("This machine has no hub record")) return "this computer has no hub record for UB_WORKSPACE_ID and no UB_HUB_URL";
+    return /UB_WORKSPACE_ID|UB_HUB_URL/.test(reason) ? reason : `UB_HUB_URL: ${reason}`;
+  }
+  if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) return "legacy WORKSPACE_ID / HUB_URL variables are no longer supported";
+  try {
+    const path = findProjectConfig(cwd);
+    return path === null || reason.includes(path) ? reason : `${path}: ${reason}`;
+  } catch {
+    return reason;
+  }
+}
 
 // --- workspace ---------------------------------------------------------------
 
@@ -129,21 +121,31 @@ function workspaceCheck(
   resolved: ResolvedConfig | null,
   config: McpConfig | null,
   error: string | null,
+  workspaceName: string | null,
+  deviceLogin: DeviceLoginResult | null,
+  env: NodeJS.ProcessEnv,
 ): Check {
   if (config === null || resolved === null) {
     // Nothing configured at all is the common case and gets a line of its own;
     // a value that *is* configured and was refused keeps the refusal's own
     // message, which names the layer the value came from.
-    const reason = error ?? "No workspace selected; choose a complete project or environment binding";
+    const reason = error ?? "no .uberblick.json here or in any parent directory";
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
-  const spelling = resolved.env.WORKSPACE_ID ?? config.workspaceId;
-  const origin = ORIGIN_LABELS[resolved.origins.workspace];
-  const uuid = spelling === config.workspaceId ? "" : ` — uuid ${config.workspaceId}`;
-  return pass("workspace", `${spelling} (${origin})${uuid}`);
+  const name = workspaceName
+    ?? (deviceLogin?.status === "ready" ? deviceLogin.login.credential.workspaceNames?.[config.workspaceId] : undefined);
+  const source = resolved.origins.workspace === "environment"
+    ? `UB_WORKSPACE_ID${env.UB_HUB_URL === undefined ? "" : " and UB_HUB_URL"}`
+    : resolved.paths.projectConfig;
+  return pass("workspace", `${name === undefined || name === null ? config.workspaceId : `${name} (${config.workspaceId})`}, from ${source}`);
 }
 
 // --- login -------------------------------------------------------------------
+
+/** Keep auth's quoting, escaping backticks so diagnostic lines have no markup. */
+function doctorUsername(username: string): string {
+  return displayUsername(username).replaceAll("`", "\\u0060");
+}
 
 /** The permission bits, as install.md quotes them: `mode 0644`. */
 function modeOf(path: string): string {
@@ -156,14 +158,13 @@ function modeOf(path: string): string {
 
 /** Device admission, including a loopback deployment, requires a stored login. */
 function loginCheck(
-  env: NodeJS.ProcessEnv,
   config: McpConfig | null,
+  login: DeviceLoginResult | null,
 ): Check {
-  if (config?.deviceLogin !== undefined) {
-    const login = readDeviceLogin(config.hubUrl, config.workspaceId, env);
-    return login.status === "ready"
-      ? pass("login", "stored device login; hub acceptance is checked below")
-      : fail("login", login.message, login.message);
+  if (login !== null) {
+    if (login.status === "ready") return pass("login", `${doctorUsername(login.login.identity.githubUsername)} on ${login.origin}`);
+    if (login.status === "sign-in-required") return fail("login", `not signed in to ${login.origin}`, `ub auth login ${login.origin}`);
+    return fail("login", login.reason ?? `could not read the stored login for ${login.origin}`, login.fix ?? `ub auth login ${login.origin}`);
   }
   return skipped(
     "login",
@@ -199,59 +200,69 @@ function directoryProblem(path: string): string | null {
   }
 }
 
-function databaseCheck(config: McpConfig | null): Check {
+interface DatabaseCheckResult {
+  check: Check;
+  workspaceName: string | null;
+}
+
+function databaseCheck(config: McpConfig | null): DatabaseCheckResult {
+  const unread = (check: Check): DatabaseCheckResult => ({ check, workspaceName: null });
   if (config === null) {
-    return skipped("database", "no workspace configured, so no database path resolves");
+    return unread(skipped("database", "no workspace configured, so no database path resolves"));
   }
   const path = config.databasePath;
   try {
     if (!statSync(path).isFile()) {
-      return fail(
+      return unread(fail(
         "database",
         `${path} is not a database file`,
         "point UBERBLICK_DB at this workspace's existing database",
-      );
+      ));
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      return fail(
+      return unread(fail(
         "database",
         `${path}: cannot inspect the store (${message(error)})`,
-        "restore access to this workspace's database, then run `ub doctor` again",
-      );
+        "restore access to this workspace's database",
+      ));
     }
   }
 
   const problem = directoryProblem(dirname(path));
   if (problem !== null) {
-    return fail(
+    return unread(fail(
       "database",
       `${path}: ${problem}`,
       "make that directory writable, or point UBERBLICK_DB at a path you can write",
-    );
+    ));
   }
   if (!existsSync(path)) {
-    return skipped("database", `${path} does not exist yet; its nearest existing directory is writable`);
+    return unread(skipped("database", `${path} does not exist yet; its nearest existing directory is writable`));
   }
   try {
     accessSync(path, constants.R_OK | constants.W_OK);
   } catch {
-    return fail(
+    return unread(fail(
       "database",
       `${path}: this user cannot read and write the store`,
-      "restore access to this workspace's database, then run `ub doctor` again",
-    );
+      "restore access to this workspace's database",
+    ));
   }
+  let check: Check;
   try {
     inspectExistingStore(path, config.workspaceId);
-    return pass("database", path);
+    check = pass("database", path);
   } catch (error) {
-    return fail(
+    check = fail(
       "database",
       `${path}: could not read the store (${message(error)})`,
-      "restore access to a valid database for this workspace, then run `ub doctor` again",
+      "restore access to a valid database for this workspace",
     );
   }
+  // Read only after the same preconditions that permit the database inspection.
+  // Both readers may leave SQLite WAL sidecars, but neither constructs a store.
+  return { check, workspaceName: readWorkspaceName(path, config.workspaceId) };
 }
 
 // --- hub and local listeners -------------------------------------------------
@@ -267,6 +278,7 @@ interface HubCheckResult {
 async function hubCheck(
   config: McpConfig | null,
   login: Check,
+  deviceLogin: DeviceLoginResult | null,
   dial: Dial,
 ): Promise<HubCheckResult> {
   if (config === null || config.deviceLogin === undefined) {
@@ -281,18 +293,38 @@ async function hubCheck(
     return { check: skipped("hub", "needs login"), status: "skipped" };
   }
   const hub = await dial(config.hubUrl);
-  return { check: hubVerdict(config, hub), status: hub.status };
+  return { check: hubVerdict(config, hub, "hub", deviceLogin), status: hub.status };
 }
 
-function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub"): Check {
+function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin: DeviceLoginResult | null = null): Check {
   const local = config.deviceLogin === undefined;
+  const origin = local ? config.hubUrl : authenticationOrigin(config.hubUrl);
+  const username = deviceLogin?.status === "ready" ? deviceLogin.login.identity.githubUsername : null;
+  const user = username === null ? "this account" : doctorUsername(username);
   const status = hub.status;
   if (status === "connected") {
-    return pass(name, `${config.hubUrl} answered and served the directory room`);
+    return pass(name, local ? `${origin} answered and served the directory room` : `connected to ${origin}; ${user} has access`);
   }
   if (status === "auth-failed") {
     if (config.deviceLogin !== undefined || hub.authRecovery !== undefined) {
-      return fail(name, `${config.hubUrl} refused remote sync`, hub.reason ?? "Run `ub auth login <hub>` and obtain workspace access.");
+      switch (hub.authRecovery) {
+        case "no-workspace-access":
+          return fail(name, `${user} has no access to ${config.workspaceId}, or it doesn't exist on this hub`,
+            username !== null && isGithubUsername(username)
+              ? `ask a workspace admin to run: ub workspace member add ${username}`
+              : "ask a workspace admin for access");
+        case "credential-store": {
+          const stored = readDeviceLogin(config.hubUrl, config.workspaceId, config.deviceLogin?.env);
+          return fail(name, stored.status !== "ready" && stored.reason !== undefined ? stored.reason : `the stored login for ${origin} could not be read`,
+            stored.status !== "ready" && stored.fix !== undefined ? stored.fix : `repair the credential store, then run ub auth login ${origin}`);
+        }
+        case "renewal-unavailable":
+          return fail(name, `${origin} could not renew ${user}'s login`, `ask whoever runs ${origin} to repair credential renewal`);
+        case "sign-in-required":
+          return fail(name, `${origin} no longer accepts ${user}'s login`, `ub auth login ${origin}`);
+        default:
+          return fail(name, `${origin} refused ${user}'s login`, `ub auth login ${origin}`);
+      }
     }
     // Narrower here than for a long-running client: this probe minted its
     // token seconds ago, in this process, in the current format, so the token's
@@ -300,12 +332,10 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub"): Check {
     // does not share, a clock far enough out that the hub's clamp refuses an
     // otherwise correct token, and a hub older than this client, which reads
     // our envelope as unparseable and answers exactly as a wrong secret does.
-    // The third is why the fix carries AUTH_REJECTED, since no probe can tell
-    // it from the first.
     return fail(
       name,
       `${config.hubUrl} refused the signing secret`,
-      `${AUTH_REJECTED}. Give the hub and this machine the same secret — a clock far enough out of step is refused the same way`,
+      "give the hub and this computer the same signing secret",
     );
   }
   if (status === "update-required") {
@@ -317,8 +347,12 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub"): Check {
         : protocolSkew(hub.hubProtocolVersion, hub.protocolVersion);
     return fail(
       name,
-      `${config.hubUrl}: ${versions}`,
-      "update the older side, then restart this client — a hub and a client on different sync protocols exchange nothing at all, so no credential and no retry changes this",
+      `${origin}: ${versions}`,
+      hub.hubProtocolVersion === undefined
+        ? `check the version on ${origin} with its operator and update the older side`
+        : hub.hubProtocolVersion > hub.protocolVersion
+          ? "ub update, then restart ub open and running agents"
+          : `ask whoever runs ${origin} to update the hub`,
     );
   }
   if (status === "unsettled") {
@@ -327,40 +361,20 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub"): Check {
     // gets called healthy.
     return (local ? fail : warn)(
       name,
-      `${config.hubUrl} answered but the directory room did not finish syncing`,
+      `${origin} answered but the directory room did not finish syncing`,
       local
-        ? "check the hub's log — it accepted the connection without serving the room; restarting it (`ub open --no-browser` starts one on loopback) is the usual fix"
-        : "check the deployment's log — it accepted the connection without serving the room; restarting the hub there is the usual fix",
+        ? "restart the local hub with ub open --no-browser"
+        : `ask whoever runs ${origin} to restart the hub`,
     );
   }
   return warn(
     name,
-    `${config.hubUrl} does not answer`,
-    "check your network or ask whoever runs the hub; your work stays here and syncs once the hub is back",
+    `${origin} does not answer`,
+    "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back",
   );
 }
 
-/**
- * Whether this machine's clock is close enough to the hub's to be trusted.
- *
- * Tokens carry `exp`, and the hub refuses one issued more than
- * `CLOCK_SKEW_SECONDS` ahead of its own clock or already expired — so a machine
- * whose clock has drifted cannot connect at all, and the failure it sees is an
- * indistinguishable "invalid token". Naming the real cause is the only reason
- * this check exists.
- *
- * **Two thresholds, because the two directions break differently.** A machine
- * running fast trips `iat > now + CLOCK_SKEW_SECONDS`, which is 60 s. A machine
- * running slow mints a token that is *already expired* when the hub reads it —
- * `now > exp` — and since a room token is minted for
- * {@link MAX_TOKEN_LIFETIME_SECONDS}, that is 900 s of room before it breaks.
- * Neither bound is this command's invention; both are the clamp's, read from
- * the same constants the hub applies.
- *
- * The reading comes from the `Date` header of an unauthenticated GET, but only
- * after the hub check reached the hub. A skipped or unreachable hub skips this
- * check without another dial; the hub check already reports what it needs.
- */
+/** Device proofs fail when issued too far ahead or expired on arrival. */
 async function clockCheck(config: McpConfig | null, hub: HubCheckResult): Promise<Check> {
   if (config !== null && config.deviceLogin === undefined) {
     return skipped("clock", "local workspace, so no hub clock comparison applies");
@@ -378,32 +392,22 @@ async function clockCheck(config: McpConfig | null, hub: HubCheckResult): Promis
   if (skew === null) {
     return skipped(
       "clock",
-      `${config.hubUrl} answered no HTTP date, so the clocks were not compared`,
+      `${authenticationOrigin(config.hubUrl)} did not provide a clock reading`,
     );
   }
   // The probe reports how far the hub reads ahead of us; both bounds below are
   // stated from this machine's side, so flip it once, here.
   const ahead = -skew;
-  const measured =
-    ahead === 0
-      ? `in step with ${config.hubUrl}`
-      : `${Math.abs(ahead)}s ${ahead > 0 ? "ahead of" : "behind"} ${config.hubUrl}`;
-
-  // Asymmetric because the two failures are different ones: running fast trips
-  // the 60s issued-in-the-future bound, running slow mints a token that has
-  // already expired, which takes a whole token lifetime to reach.
-  const limit = ahead > 0 ? CLOCK_SKEW_SECONDS : MAX_TOKEN_LIFETIME_SECONDS;
+  const offset = Math.abs(ahead);
+  const limit = ahead > 0 ? CLOCK_SKEW_SECONDS : REQUEST_PROOF_LIFETIME_SECONDS;
   if (Math.abs(ahead) <= limit) {
-    return pass("clock", `this machine's clock is ${measured}`);
+    return pass("clock", `within ${offset}s of the hub`);
   }
-  const rule =
-    ahead > 0
-      ? `more than the ${CLOCK_SKEW_SECONDS}s the hub tolerates ahead of its own`
-      : `more than the ${MAX_TOKEN_LIFETIME_SECONDS}s a token lives, so this machine mints tokens that have already expired`;
+  const measured = offset >= 120 && offset % 60 === 0 ? `${offset / 60} min` : `${offset}s`;
   return fail(
     "clock",
-    `this machine's clock is ${measured}, ${rule}`,
-    "synchronise this machine's clock — every token carries an expiry, and the hub refuses one issued ahead of its own time or already past it (`sudo timedatectl set-ntp true` on Linux, System Settings > General > Date & Time on macOS). The reading is an HTTP `Date` header, so a reverse proxy in front of the hub is whose clock this compares against",
+    `${measured} ${ahead > 0 ? "ahead of" : "behind"} ${authenticationOrigin(config.hubUrl)}`,
+    "turn on automatic time in your system settings",
   );
 }
 
@@ -413,7 +417,7 @@ async function webServerCheck(): Promise<Check> {
   const address = `${WEB_HOST}:${DEFAULT_WEB_PORT}`;
   const port = await probePort(WEB_HOST, DEFAULT_WEB_PORT);
   if (port.state === "free") {
-    return skipped(name, `${address} is not running; \`ub open\` starts it`);
+    return skipped(name, `${address} is not running; ub open starts it`);
   }
   if (port.state === "unknown") {
     return skipped(name, `${address} could not be tested (${port.code ?? "unknown error"})`);
@@ -425,7 +429,7 @@ async function webServerCheck(): Promise<Check> {
   if (holder === "unidentified") {
     return skipped(name, `${address} is in use, but its holder could not be identified`);
   }
-  return fail(name, `${address} is in use by a process that is not \`ub open\``, "stop that process, then run `ub open`");
+  return fail(name, `${address} is in use by a process that is not ub open`, "stop that process, then run ub open");
 }
 
 /** The local hub's configuration and holder are one listener verdict. */
@@ -441,14 +445,14 @@ async function localHubListenerCheck(
     return fail(
       name,
       `refusing ${credentials.path}: mode ${modeOf(credentials.path)} lets other users read the hub signing secret, so it was not used`,
-      exposedSigningSecretRemedy(credentials.path),
+      `delete ${credentials.path}, then run ub open and restart running agents; run ub auth login again if the file held hub logins`,
     );
   }
   if (endpoint === null || !["ws:", "wss:"].includes(new URL(config.hubUrl).protocol)) {
     return fail(
       name,
       `the configured endpoint ${JSON.stringify(config.hubUrl)} is not a websocket URL`,
-      "give this machine a ws:// or wss:// endpoint with `ub workspace use <endpoint>/<workspace-id>`",
+      "ub workspace use <link|id>",
     );
   }
   const bind = hubBind(env);
@@ -456,7 +460,7 @@ async function localHubListenerCheck(
     return fail(
       name,
       `PORT is ${JSON.stringify(bind.raw)}, which is not a port number`,
-      "set PORT to an integer in 0..65535 — the same port the configured endpoint dials",
+      "unset PORT, then run ub open",
     );
   }
   if (bind.port !== endpoint.port) {
@@ -464,7 +468,7 @@ async function localHubListenerCheck(
     return fail(
       name,
       `the hub binds ${bind.host}:${bind.port} (${source}) but the configured endpoint dials port ${endpoint.port}`,
-      PORT_REMEDY,
+      bind.raw === null ? "ub workspace use <link|id>" : "unset PORT, then run ub open",
     );
   }
 
@@ -483,11 +487,11 @@ async function localHubListenerCheck(
   const probe = await probePort(endpoint.host, endpoint.port);
   if (probe.state === "free") {
     if (config.authSecret === null) {
-      return skipped(name, `${address} is not running; no signing secret in force — hub sync is disabled, and every MCP tool still works; \`ub open\` creates a local signing secret`);
+      return skipped(name, `${address} is not running; no signing secret in force — hub sync is disabled, and every MCP tool still works; ub open creates a local signing secret`);
     }
     // Reuse the starter's refusal so a skip never promises a hub it cannot start.
     const refusal = whyNotStartable(config.hubUrl, new URL(config.hubUrl));
-    return skipped(name, refusal ?? `${address} is not running; \`ub open\` starts it at ${config.hubUrl}`);
+    return skipped(name, refusal?.replaceAll("`", "") ?? `${address} is not running; ub open starts it at ${config.hubUrl}`);
   }
   if (probe.state === "unknown") {
     return skipped(name, `${address} could not be tested (${probe.code ?? "unknown error"})`);
@@ -498,7 +502,7 @@ async function localHubListenerCheck(
       `${address} is in use; without a signing secret this cannot tell an uberblick hub from another process`,
     );
   }
-  return fail(name, `${address} is in use by a process that is not an uberblick hub`, PORT_REMEDY);
+  return fail(name, `${address} is in use by a process that is not an uberblick hub`, "stop that process, then run ub open");
 }
 
 async function localHubCheck(
@@ -657,16 +661,17 @@ export async function doctorReport(
     resolved = resolveConfig({ env, cwd });
     warnings.push(...resolved.warnings);
   } catch (thrown) {
-    error = message(thrown);
+    error = bindingRefusal(thrown, env, cwd);
   }
 
   let config: McpConfig | null = null;
   if (resolved !== null) {
     try {
-      requireBinding(resolved);
-      config = resolveMcpConfig(resolved.env);
+      if (resolved.binding !== null) {
+        config = resolveMcpConfig(resolved.env);
+      }
     } catch (thrown) {
-      error = message(thrown);
+      error = bindingRefusal(thrown, env, cwd);
     }
   }
 
@@ -680,13 +685,15 @@ export async function doctorReport(
         }
       : url => probeHubState(config, url);
 
-  const login = loginCheck(resolvedEnv, config);
+  const deviceLogin = config?.deviceLogin === undefined ? null : readDeviceLogin(config.hubUrl, config.workspaceId, resolvedEnv);
+  const login = loginCheck(config, deviceLogin);
+  const database = databaseCheck(config);
   const checks: Check[] = [
-    workspaceCheck(resolved, config, error),
+    workspaceCheck(resolved, config, error, database.workspaceName, deviceLogin, env),
     login,
-    databaseCheck(config),
+    database.check,
   ];
-  const hub = await hubCheck(config, login, dial);
+  const hub = await hubCheck(config, login, deviceLogin, dial);
   checks.push(
     hub.check,
     await clockCheck(config, hub),
@@ -711,14 +718,17 @@ const MARKERS: Record<CheckStatus, string> = {
   skipped: "skip",
 };
 
-export function renderDoctor(report: DoctorReport): string {
+export function renderDoctor(report: DoctorReport, env: NodeJS.ProcessEnv = process.env): string {
+  const home = resolve(env.HOME?.trim() || homedir());
+  const humanPath = (value: string) => value.replaceAll(`${home}${sep}`, (prefix, offset: number) =>
+    offset === 0 || /[\s("'=:]/.test(value[offset - 1] ?? "") ? `~${sep}` : prefix);
   let text = `uberblick ${report.version}\n\n`;
   for (const check of report.checks) {
     for (const line of check.listeners ?? [check]) {
       const reason = check.listeners === undefined ? line.reason : `${line.name}: ${line.reason}`;
-      text += `${MARKERS[line.status].padEnd(6)}${check.name.padEnd(12)}${reason}\n`;
+      text += `${MARKERS[line.status].padEnd(6)}${check.name.padEnd(12)}${humanPath(reason)}\n`;
       if (line.status === "warn" || line.status === "fail") {
-        text += `${" ".repeat(6)}→ ${line.fix}\n`;
+        text += `${" ".repeat(6)}→ ${humanPath(line.fix ?? "")}\n`;
       }
     }
   }
@@ -737,19 +747,11 @@ export const DOCTOR_OPTIONS = {
 
 export const DOCTOR_HELP = `usage: ub doctor [--json]
 
-Check the local stack against its known failure modes — configuration, the
-stored remote login or local signing secret and its file mode, the database,
-whether the hub is reachable and agrees with this machine's clock, both local
-listeners, and the MCP client configs \`ub mcp install\` targets. Diagnoses, never
-repairs. The database reading is offline and leaves the existing store unchanged;
-it never creates an absent database, configuration file or directory.
-Failures name their recovery.
+Check this project's Uberblick setup and name the fix for each problem.
 
 options:
-  --json            the same checks as JSON on stdout, for a script to read
+  --json            The same checks as JSON on stdout, for scripts
   -h, --help        show this help
-
-Exits non-zero when any check fails, so it works as a gate in a script.
 `;
 
 export async function doctorCommand(
