@@ -1,0 +1,27 @@
+{
+  "violations": [
+    {
+      "violation": "report script-src-elem inline 40766441-fbcf-4cd1-af71-2d25787e2d65:7",
+      "count": 2
+    },
+    {
+      "violation": "report style-src-elem inline index-BYVelBZg.js:103",
+      "count": 4
+    },
+    {
+      "violation": "report style-src-attr inline index-BYVelBZg.js:103",
+      "count": 18
+    }
+  ],
+  "console": [
+    "Executing inline script violates the following Content Security Policy directive 'script-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-YjJtHnJO51MquaKg9QRoM0GV291vCKejgzvWQIQbiYo='), or a nonce ('nonce-...') is required to enable inline execution. The policy is report-only, so the",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. The policy is report-only, so the vi",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-StEaX+se6YS7pqjzrzMIA0KaX9zF/8zAhvQXZAe5epY='), or a nonce ('nonce-...') is required to enable inline execution. The policy is report-only, so the vi",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-uPBSyAGG1wEdhpU3s9eU/bI9x7HtVvP7pFlfDDzD9yQ='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-VoOE+2Yni8j1WkfR1e2TgCGm2x9TRfab5cjiuaRytjU='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LJwEbzMVB/8dp7MZaIcfIHZbC+NYOvBqwcefwxI0BJ8='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-01sRpec2+wVODAHuhK3u2YUxsYkO1qgBpp0ZddVPWug='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-s+kK/5hXHpnvMwAI6OHUD1kU4iHnN92iZvzL1GPvJWY='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve",
+    "Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-yXvSE15G09bAo8qtf2/7ie/vL6lL928kZhEZcnouGFQ='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to eve"
+  ]
+}

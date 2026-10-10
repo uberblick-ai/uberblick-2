@@ -1,0 +1,1843 @@
+{
+  "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src https://embed.figma.com https://www.figma.com https://www.youtube-nocookie.com https://www.loom.com",
+  "browsers": {
+    "chromium": {
+      "responses": [
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c7"
+        },
+        {
+          "url": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "status": 302,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 403,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c8"
+        },
+        {
+          "url": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "status": 200,
+          "frame": "child",
+          "case": "c9"
+        },
+        {
+          "url": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "status": 302,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "status": 403,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 404,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "status": 403,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 403,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "status": 403,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 403,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c14"
+        }
+      ],
+      "failed": [
+        {
+          "url": "https://www.youtube-nocookie.com/api/stats/qoe?cpn=g6WdHUzOuUY-IW_t&el=embedded&ns=yt&fexp=v1%2C100673025%2C627%2C-76669008%2C27058999%2C34656%2C124674%2C117689%2C9252%2C16509%2C23206%2C100702%2C15105%2C25059%2C4174%2C30447%2C18705%2C26008%2C13016%2C14665%2C761%2C661%2C6621%2C2783%2C23826%2C9500%2C1840%2C94838%2C20588%2C34313%2C9181%2C32874%2C20109%2C6032%2C1168%2C372%2C7759%2C34320%2C11462%2C26845%2C15076%2C4367%2C9717%2C3613%2C26539%2C3843%2C17160%2C1340%2C10904%2C3243%2C17341%2C9037%2C1538%2C5824%2C20491%2C17956%2C12550%2C2839%2C9177%2C2794%2C6901%2C13874%2C1727%2C1910%2C11%2C5315%2C4013%2C3037%2C8892%2C5018%2C2972%2C2746%2C1504%2C9935%2C2230%2C4%2C307%2C1405%2C10555%2C1863%2C2534%2C1881%2C19%2C18019&cl=994693141&seq=1&event=streamingstats&docid=y9lZ5GMXNyU&cbrand=apple&cbr=HeadlessChrome&cbrver=151.0.7922.34&c=WEB_EMBEDDED_PLAYER&cver=2.20261007.01.00&cplayer=UNIPLAYER&cos=Macintosh&cosver=10_15_7&cplatform=DESKTOP&vps=0.000:N,0.000:ER&cmt=0.000:0.000,0.000:0.000&error=0.000:embedder.identity.missing.referrer::0.000:0;a6s.0&vis=0.000:0&bh=0.000:0.000&qclc=ChBnNldkSFV6T3VVWS1JV190EAE",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/page",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/page",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "console": [
+        "Framing 'https://example.com/' violates the following Content Security Policy directive: \"frame-src https://embed.figma.com https://www.figma.com https://www.youtube-nocookie.com https://www.loom.com\". The request has been blocked.\n",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 404 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: the server responded with a status of 403 ()",
+        "Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME",
+        "Permissions policy violation: compute-pressure is not allowed in this document.",
+        "Failed to load resource: net::ERR_UNKNOWN_URL_SCHEME",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+      ],
+      "cases": [
+        {
+          "id": "c1",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 1",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c1.png"
+        },
+        {
+          "id": "c2",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 2",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c2.png"
+        },
+        {
+          "id": "c3",
+          "name": "Figma public design frame",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c3.png"
+        },
+        {
+          "id": "c4",
+          "name": "Figma public prototype",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "proto",
+          "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4/Embed-Kit-2.0-examples?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "frameText": "Embed Kit 2.0 examples - Bakery Bliss Prototype | Screenreader support is currently disabled. To enable it, use the Accessibility settings f",
+          "screenshot": "chromium/c4.png"
+        },
+        {
+          "id": "c5",
+          "name": "FigJam public board",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "board",
+          "src": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c5.png"
+        },
+        {
+          "id": "c6",
+          "name": "Figma broken link",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "frameText": "Figma | Whoops! We can't seem to find that. If you expected to see a file here, that file may not be publicly accessible. Figma only allows ",
+          "screenshot": "chromium/c6.png"
+        },
+        {
+          "id": "c7",
+          "name": "YouTube video",
+          "variant": "proposed",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "Figma for Edu: Prototyping with animations in Figma - YouTube | Figma for Edu: Prototyping with animations in Figma Figma Figma 791.000 Abon",
+          "screenshot": "chromium/c7.png"
+        },
+        {
+          "id": "c8",
+          "name": "YouTube video",
+          "variant": "no-referrer",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "YouTube | Fehler bei der Konfiguration des Videoplayers Fehler bei der Konfiguration des Videoplayers Fehler 153 Video auf YouTube ansehen W",
+          "screenshot": "chromium/c8.png"
+        },
+        {
+          "id": "c9",
+          "name": "Loom video",
+          "variant": "proposed",
+          "provider": "loom",
+          "kind": "video",
+          "src": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "refused": false,
+          "frameUrl": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "frameText": "How to share your video | How to share your video 9.52K views Copy link 0.8× 1× 1.2× 1.5× 1.7× 2× 2.5× 57 sec ⚡️ 1 min 11 sec 57 sec 47 sec ",
+          "screenshot": "chromium/c9.png"
+        },
+        {
+          "id": "c10",
+          "name": "Not a provider",
+          "variant": "proposed",
+          "refused": true,
+          "screenshot": "chromium/c10.png"
+        },
+        {
+          "id": "c11",
+          "name": "Figma public design frame",
+          "variant": "no sandbox",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c11.png"
+        },
+        {
+          "id": "c12",
+          "name": "Figma public design frame",
+          "variant": "dark theme",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "frameText": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+          "screenshot": "chromium/c12.png"
+        },
+        {
+          "id": "c13",
+          "name": "Off-allowlist frame",
+          "variant": "must be blocked by CSP",
+          "provider": "none",
+          "kind": "",
+          "src": "https://example.com/",
+          "refused": false,
+          "frameUrl": "chrome-error://chromewebdata/",
+          "frameText": "|",
+          "screenshot": "chromium/c13.png"
+        }
+      ],
+      "interaction": {
+        "case": "c3",
+        "inertWheelScrolledPage": true,
+        "activatedByClick": true,
+        "parentFocusAfterClick": "IFRAME",
+        "targetShows": "ERROR: The request could not be satisfied | 403 ERROR The request could not be satisfied. Request blocked. We can't connect to the server fo",
+        "activeWheelScrolledPage": true,
+        "escapeReachedParent": false,
+        "releasedByOutsideClick": true
+      },
+      "lazy": {
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+        "beforeScroll": {
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "loadEvents": 1
+        },
+        "afterScroll": {
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "loadEvents": 1
+        }
+      },
+      "events": [
+        {
+          "t": 19,
+          "case": "c10",
+          "type": "refused",
+          "detail": "https://example.com/some/page"
+        },
+        {
+          "t": 21,
+          "case": null,
+          "type": "ready",
+          "detail": "14"
+        },
+        {
+          "t": 29,
+          "case": "c13",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 34,
+          "case": null,
+          "type": "csp-violation",
+          "detail": "frame-src https://example.com"
+        },
+        {
+          "t": 292,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 554,
+          "case": "c8",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 682,
+          "case": "c1",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 734,
+          "case": "c7",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1423,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1491,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1558,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1627,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1783,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1860,
+          "case": "c6",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1875,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 1876,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 1895,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 2083,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 3376,
+          "case": "c9",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 4886,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 5299,
+          "case": null,
+          "type": "window-blur",
+          "detail": "c4"
+        },
+        {
+          "t": 20348,
+          "case": "c14",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 40969,
+          "case": "c3",
+          "type": "activated",
+          "detail": ""
+        },
+        {
+          "t": 40970,
+          "case": null,
+          "type": "window-blur",
+          "detail": "c3"
+        },
+        {
+          "t": 43024,
+          "case": "c3",
+          "type": "released",
+          "detail": ""
+        }
+      ]
+    },
+    "webkit": {
+      "responses": [
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c8"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c7"
+        },
+        {
+          "url": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "status": 302,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "status": 200,
+          "frame": "child",
+          "case": "c9"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "status": 302,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "status": 202,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 404,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "status": 202,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c14"
+        }
+      ],
+      "failed": [
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/api/figment-proxy/monitor",
+          "error": "cancelled"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "error": "cancelled"
+        }
+      ],
+      "console": [
+        "Error while parsing the 'sandbox' attribute: 'allow-presentation' is an invalid sandbox flag.",
+        "Error while parsing the 'sandbox' attribute: 'allow-presentation' is an invalid sandbox flag.",
+        "Refused to load https://example.com/ because it does not appear in the frame-src directive of the Content Security Policy.",
+        "Error while parsing the 'sandbox' attribute: 'allow-presentation' is an invalid sandbox flag.",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "There are too many active WebGL contexts on this page, the oldest context will be lost.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy.",
+        "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive of the Content Security Policy."
+      ],
+      "cases": [
+        {
+          "id": "c1",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 1",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "frameText": "| Max challenge attempts exceeded. Please refresh the page to try again!",
+          "screenshot": "webkit/c1.png"
+        },
+        {
+          "id": "c2",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 2",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "frameText": "| Max challenge attempts exceeded. Please refresh the page to try again!",
+          "screenshot": "webkit/c2.png"
+        },
+        {
+          "id": "c3",
+          "name": "Figma public design frame",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "webkit/c3.png"
+        },
+        {
+          "id": "c4",
+          "name": "Figma public prototype",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "proto",
+          "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4/Embed-Kit-2.0-examples?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "frameText": "▶ Embed Kit 2.0 examples - Bakery Bliss Prototype | Screenreader support is currently disabled. To enable it, use the Accessibility settings",
+          "screenshot": "webkit/c4.png"
+        },
+        {
+          "id": "c5",
+          "name": "FigJam public board",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "board",
+          "src": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "webkit/c5.png"
+        },
+        {
+          "id": "c6",
+          "name": "Figma broken link",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "frameText": "Figma | Whoops! We can't seem to find that. If you expected to see a file here, that file may not be publicly accessible. Figma only allows ",
+          "screenshot": "webkit/c6.png"
+        },
+        {
+          "id": "c7",
+          "name": "YouTube video",
+          "variant": "proposed",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "Figma for Edu: Prototyping with animations in Figma - YouTube | Figma for Edu: Prototyping with animations in Figma Figma Watch on",
+          "screenshot": "webkit/c7.png"
+        },
+        {
+          "id": "c8",
+          "name": "YouTube video",
+          "variant": "no-referrer",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "YouTube | Video player configuration error Video player configuration error Error 153 Watch video on YouTube Learn more Error 153",
+          "screenshot": "webkit/c8.png"
+        },
+        {
+          "id": "c9",
+          "name": "Loom video",
+          "variant": "proposed",
+          "provider": "loom",
+          "kind": "video",
+          "src": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "refused": false,
+          "frameUrl": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "frameText": "How to share your video | How to share your video 9.52K views Copy link 1.2× 57 sec ⚡️ 1 min 11 sec57 sec47 sec38 sec33 sec28 sec22 sec ❤️ \ud83d",
+          "screenshot": "webkit/c9.png"
+        },
+        {
+          "id": "c10",
+          "name": "Not a provider",
+          "variant": "proposed",
+          "refused": true,
+          "screenshot": "webkit/c10.png"
+        },
+        {
+          "id": "c11",
+          "name": "Figma public design frame",
+          "variant": "no sandbox",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "webkit/c11.png"
+        },
+        {
+          "id": "c12",
+          "name": "Figma public design frame",
+          "variant": "dark theme",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "webkit/c12.png"
+        },
+        {
+          "id": "c13",
+          "name": "Off-allowlist frame",
+          "variant": "must be blocked by CSP",
+          "provider": "none",
+          "kind": "",
+          "src": "https://example.com/",
+          "refused": false,
+          "frameUrl": "",
+          "frameText": "(no answer within 3s)",
+          "screenshot": "webkit/c13.png"
+        }
+      ],
+      "interaction": {
+        "case": "c3",
+        "inertWheelScrolledPage": true,
+        "activatedByClick": true,
+        "parentFocusAfterClick": "IFRAME",
+        "targetShows": "Figma |",
+        "activeWheelScrolledPage": false,
+        "escapeReachedParent": false,
+        "releasedByOutsideClick": true
+      },
+      "lazy": {
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+        "beforeScroll": {
+          "frameUrl": "",
+          "loadEvents": 0
+        },
+        "afterScroll": {
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "loadEvents": 1
+        }
+      },
+      "events": [
+        {
+          "t": 24,
+          "case": "c10",
+          "type": "refused",
+          "detail": "https://example.com/some/page"
+        },
+        {
+          "t": 25,
+          "case": "c13",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 25,
+          "case": null,
+          "type": "ready",
+          "detail": "14"
+        },
+        {
+          "t": 32,
+          "case": null,
+          "type": "csp-violation",
+          "detail": "frame-src https://example.com"
+        },
+        {
+          "t": 440,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 652,
+          "case": "c8",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 935,
+          "case": "c1",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 936,
+          "case": "c7",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1485,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1498,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1510,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1559,
+          "case": "c6",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 1581,
+          "case": "c1",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 1582,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 1583,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2068,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2433,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "3"
+        },
+        {
+          "t": 2927,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "4"
+        },
+        {
+          "t": 3595,
+          "case": "c9",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 3639,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "5"
+        },
+        {
+          "t": 4369,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "6"
+        },
+        {
+          "t": 7372,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 7386,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 7739,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 10034,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 10034,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 26284,
+          "case": "c14",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 45459,
+          "case": "c3",
+          "type": "activated",
+          "detail": ""
+        },
+        {
+          "t": 45459,
+          "case": null,
+          "type": "window-blur",
+          "detail": "c3"
+        },
+        {
+          "t": 47632,
+          "case": "c3",
+          "type": "released",
+          "detail": ""
+        }
+      ]
+    },
+    "firefox": {
+      "responses": [
+        {
+          "url": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "status": 302,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 202,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "status": 200,
+          "frame": "child",
+          "case": "c9"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c7"
+        },
+        {
+          "url": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "status": 302,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "status": 202,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c8"
+        },
+        {
+          "url": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 404,
+          "frame": "child",
+          "case": "c6"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c2"
+        },
+        {
+          "url": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c1"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Duberblick%26footer%3D0%26kind%3Dproto%26node-id%3D5-3%26scaling%3Dscale-down%26starting-point-node-id%3D5%253A3%26theme%3Dlight%26version%3D2&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Ddark%26version%3D2%26viewer%3D1&theme=dark&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D0-1%26page-selector%3D1%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "status": 200,
+          "frame": "child",
+          "case": "c4"
+        },
+        {
+          "url": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c5"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c3"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c12"
+        },
+        {
+          "url": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D5-3%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2&ready=1",
+          "status": 302,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "status": 200,
+          "frame": "child",
+          "case": "c11"
+        },
+        {
+          "url": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "status": 200,
+          "frame": "child",
+          "case": "c14"
+        }
+      ],
+      "failed": [
+        {
+          "url": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/webpack-artifacts/assets/188-aa8812ca3e48620c.min.js.br",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/webpack-artifacts/assets/3228-227a2bed609341d5.min.js.br",
+          "error": "NS_BINDING_ABORTED"
+        },
+        {
+          "url": "https://www.figma.com/webpack-artifacts/assets/4616-19b2fcc029cf7406.min.js.br",
+          "error": "NS_BINDING_ABORTED"
+        }
+      ],
+      "console": [
+        "[JavaScript Error: \"Content-Security-Policy: The page’s settings blocked the loading of a resource (frame-src) at https://example.com/ because it violates the following directive: “frame-src https://embed.figma.com https://www.figma.com https://www.youtube-nocookie.com https://www.loom.com”\" {file: ",
+        "[JavaScript Error: \"Cookie “__Host-psifi.analyticsTrace” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71\" line: 0}]",
+        "[JavaScript Error: \"Cookie “__Host-psifi.analyticsTraceV2” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71\" line: 0}]",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26ki",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kin",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Dub",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fproto%2FnrPSsILSYjesyc5UHjYYa4%3Fcontent-scaling%3Dfixed%26embed-host%3Dube",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kin",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fboard%2FgPtsX2q0ZF6WElF7YSAYjz%3Fembed-host%3Duberblick%26footer%3D0%26kind",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26ki",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kin",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26ki",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kin",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26ki",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FnrPSsILSYjesyc5UHjYYa4%3Fembed-host%3Duberblick%26footer%3D0%26kin",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1\" line: 0}]",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1\" line: 0}]",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&start",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starti",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1\" ",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2\" line:",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2\" line: ",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1\" ",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&start",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starti",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1\" ",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1\"",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1\" ",
+        "[JavaScript Error: \"Cookie “product_locale” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+        "[JavaScript Error: \"Cookie “figma.session” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1\"",
+        "[JavaScript Error: \"Firefox can’t establish a connection to the server at wss://www.figma.com/api/multiplayer/nrPSsILSYjesyc5UHjYYa4?role=viewerWithCpp&tracking_session_id=0V0R0AKmelzJsH1m&version=242&recentReload=0&file-load-streaming-compression&client_release=9e48cd910c46a3a417dddafbc5cf91bf5f6fe",
+        "[JavaScript Error: \"The connection to wss://www.figma.com/api/multiplayer/nrPSsILSYjesyc5UHjYYa4?role=viewerWithCpp&tracking_session_id=0V0R0AKmelzJsH1m&version=242&recentReload=0&file-load-streaming-compression&client_release=9e48cd910c46a3a417dddafbc5cf91bf5f6febbb was interrupted while the page w",
+        "[JavaScript Error: \"Cookie “__cf_bm” has been rejected for invalid domain.\" {file: \"https://878a2765-820b-49b9-adea-c98c1ff83688-v3-r-figmaiframepreview.figma.site/\" line: 0}]",
+        "[JavaScript Error: \"Cookie “__cf_bm” has been rejected for invalid domain.\" {file: \"https://878a2765-820b-49b9-adea-c98c1ff83688-v3-r-figmaiframepreview.figma.site/__iframe-proxy/webpack-artifacts/assets/untrusted_code_iframe_with_workers-68a0e1cb8b5dc79b.min.js.br\" line: 0}]",
+        "[JavaScript Error: \"Cookie “dd_cookie_test_f5beaf56-c869-456f-a647-c8dfeaf4554d” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71\" line: 0}]",
+        "[JavaScript Error: \"Cookie “dd_cookie_test_f5beaf56-c869-456f-a647-c8dfeaf4554d” has been rejected because it is in a cross-site context and its “SameSite” is “Lax” or “Strict”.\" {file: \"https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71\" line: 0}]",
+        "[JavaScript Error: \"Cookie “__awc_tld_test__” has been rejected for invalid domain.\" {file: \"https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71\" line: 0}]",
+        "compileStreaming compiled_wasm.wasm failed: InternalError: out of memory",
+        "MobileFileViewer: failed to initialize JSHandle@object"
+      ],
+      "cases": [
+        {
+          "id": "c1",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 1",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://embed.figma.com/community/file/1380235722331273046?embed-host=uberblick&theme=light",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=1&embed-host=uberblick&kind=file&page-selector=1&theme=light&version=2",
+          "frameText": "Figma | Page: Cover 39%",
+          "screenshot": "firefox/c1.png"
+        },
+        {
+          "id": "c2",
+          "name": "Figma community file",
+          "variant": "proposed, candidate 2",
+          "provider": "figma",
+          "kind": "community file",
+          "src": "https://www.figma.com/embed?embed_host=uberblick&url=https%3A%2F%2Fwww.figma.com%2Fcommunity%2Ffile%2F1380235722331273046%2Fsimple-design-system",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/file/1380235722331273046/hf_embed?community_viewer=true&embed_host=uberblick&kind=file&page-selector=0&viewer=1",
+          "frameText": "Figma | Page: Cover 39%",
+          "screenshot": "firefox/c2.png"
+        },
+        {
+          "id": "c3",
+          "name": "Figma public design frame",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "firefox/c3.png"
+        },
+        {
+          "id": "c4",
+          "name": "Figma public prototype",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "proto",
+          "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/proto/nrPSsILSYjesyc5UHjYYa4/Embed-Kit-2.0-examples?content-scaling=fixed&embed-host=uberblick&footer=0&kind=proto&node-id=5-3&scaling=scale-down&starting-point-node-id=5%3A3&theme=light&version=2",
+          "frameText": "Embed Kit 2.0 examples - Bakery Bliss Prototype | Screenreader support is currently disabled. To enable it, use the Accessibility settings f",
+          "screenshot": "firefox/c4.png"
+        },
+        {
+          "id": "c5",
+          "name": "FigJam public board",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "board",
+          "src": "https://embed.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?node-id=0-1&embed-host=uberblick&theme=light&footer=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/board/gPtsX2q0ZF6WElF7YSAYjz?embed-host=uberblick&footer=0&kind=file&node-id=0-1&page-selector=1&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "firefox/c5.png"
+        },
+        {
+          "id": "c6",
+          "name": "Figma broken link",
+          "variant": "proposed",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/AAAAAAAAAAAAAAAAAAAAAA?node-id=1-2&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/embed/interstitial?embed_host=uberblick&embed_path=%2Fdesign%2FAAAAAAAAAAAAAAAAAAAAAA%3Fembed-host%3Duberblick%26footer%3D0%26kind%3Dfile%26node-id%3D1-2%26page-selector%3D0%26theme%3Dlight%26version%3D2%26viewer%3D1&theme=light&version=2",
+          "frameText": "Figma | Whoops! We can't seem to find that. If you expected to see a file here, that file may not be publicly accessible. Figma only allows ",
+          "screenshot": "firefox/c6.png"
+        },
+        {
+          "id": "c7",
+          "name": "YouTube video",
+          "variant": "proposed",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "Figma for Edu: Prototyping with animations in Figma - YouTube | Figma for Edu: Prototyping with animations in Figma Figma Figma 791K subscri",
+          "screenshot": "firefox/c7.png"
+        },
+        {
+          "id": "c8",
+          "name": "YouTube video",
+          "variant": "no-referrer",
+          "provider": "youtube",
+          "kind": "video",
+          "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "refused": false,
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "frameText": "YouTube | Video player configuration error Video player configuration error Error 153 Watch video on YouTube Learn more Error 153",
+          "screenshot": "firefox/c8.png"
+        },
+        {
+          "id": "c9",
+          "name": "Loom video",
+          "variant": "proposed",
+          "provider": "loom",
+          "kind": "video",
+          "src": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "refused": false,
+          "frameUrl": "https://www.loom.com/embed/31f430c1a1e744b8a7b6c18a26982c71",
+          "frameText": "How to share your video | How to share your video 9.52K views Copy link 0.8× 1× 1.2× 1.5× 1.7× 2× 2.5× 57 sec ⚡️ 1 min 11 sec 57 sec 47 sec ",
+          "screenshot": "firefox/c9.png"
+        },
+        {
+          "id": "c10",
+          "name": "Not a provider",
+          "variant": "proposed",
+          "refused": true,
+          "screenshot": "firefox/c10.png"
+        },
+        {
+          "id": "c11",
+          "name": "Figma public design frame",
+          "variant": "no sandbox",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=light&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=light&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "firefox/c11.png"
+        },
+        {
+          "id": "c12",
+          "name": "Figma public design frame",
+          "variant": "dark theme",
+          "provider": "figma",
+          "kind": "frame",
+          "src": "https://embed.figma.com/design/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&embed-host=uberblick&theme=dark&footer=false&page-selector=false",
+          "refused": false,
+          "frameUrl": "https://www.figma.com/design/nrPSsILSYjesyc5UHjYYa4?embed-host=uberblick&footer=0&kind=file&node-id=5-3&page-selector=0&theme=dark&version=2&viewer=1",
+          "frameText": "Figma |",
+          "screenshot": "firefox/c12.png"
+        },
+        {
+          "id": "c13",
+          "name": "Off-allowlist frame",
+          "variant": "must be blocked by CSP",
+          "provider": "none",
+          "kind": "",
+          "src": "https://example.com/",
+          "refused": false,
+          "frameUrl": "",
+          "frameText": "|",
+          "screenshot": "firefox/c13.png"
+        }
+      ],
+      "interaction": {
+        "case": "c3",
+        "inertWheelScrolledPage": true,
+        "activatedByClick": true,
+        "parentFocusAfterClick": "IFRAME",
+        "targetShows": "Figma |",
+        "activeWheelScrolledPage": true,
+        "escapeReachedParent": false,
+        "releasedByOutsideClick": true
+      },
+      "lazy": {
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+        "beforeScroll": {
+          "frameUrl": "",
+          "loadEvents": 0
+        },
+        "afterScroll": {
+          "frameUrl": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+          "loadEvents": 1
+        }
+      },
+      "events": [
+        {
+          "t": 130,
+          "case": "c10",
+          "type": "refused",
+          "detail": "https://example.com/some/page"
+        },
+        {
+          "t": 133,
+          "case": null,
+          "type": "ready",
+          "detail": "14"
+        },
+        {
+          "t": 164,
+          "case": null,
+          "type": "csp-violation",
+          "detail": "frame-src https://example.com"
+        },
+        {
+          "t": 2028,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2126,
+          "case": "c1",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2141,
+          "case": "c8",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2267,
+          "case": "c7",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2851,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2853,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2854,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2855,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2860,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 2861,
+          "case": "c6",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 5194,
+          "case": "c2",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 5240,
+          "case": "c1",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 8999,
+          "case": "c4",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 11104,
+          "case": "c5",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 11108,
+          "case": "c12",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 11108,
+          "case": "c3",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 11111,
+          "case": "c11",
+          "type": "iframe-load",
+          "detail": "2"
+        },
+        {
+          "t": 18186,
+          "case": "c9",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 26317,
+          "case": "c14",
+          "type": "iframe-load",
+          "detail": "1"
+        },
+        {
+          "t": 41273,
+          "case": "c3",
+          "type": "activated",
+          "detail": ""
+        },
+        {
+          "t": 43315,
+          "case": "c3",
+          "type": "released",
+          "detail": ""
+        }
+      ]
+    }
+  }
+}

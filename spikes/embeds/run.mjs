@@ -11,7 +11,10 @@ import { PROVIDERS } from "./providers.js";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const require = createRequire(join(here, "../../packages/web/package.json"));
 const pw = require("@playwright/test");
-const out = join(here, "results");
+// OUT and INTERACT_KIND allow a side run (e.g. the interaction check on a
+// prototype, which headless Chromium can load) without replacing results/.
+const out = join(here, process.env.OUT ?? "results");
+const INTERACT_KIND = process.env.INTERACT_KIND ?? "frame";
 const PORT = 4599;
 const SETTLE_MS = Number(process.env.SETTLE_MS ?? 20000);
 const hosts = new Set(PROVIDERS.flatMap((p) => p.frameSrc.map((s) => new URL(s).hostname)));
@@ -22,7 +25,7 @@ const server = await serve(PORT);
 const results = { csp: CSP, browsers: {} };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-for (const name of ["chromium", "webkit", "firefox"]) {
+for (const name of (process.env.BROWSERS ?? "chromium,webkit,firefox").split(",")) {
   const r = (results.browsers[name] = { responses: [], failed: [], console: [], cases: [], interaction: {}, lazy: {} });
   let browser;
   try {
@@ -36,10 +39,15 @@ for (const name of ["chromium", "webkit", "firefox"]) {
   await mkdir(join(out, name), { recursive: true });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: "light" });
   const page = await context.newPage();
-  page.on("response", (res) => {
+  page.on("response", async (res) => {
     const u = new URL(res.url());
-    if (hosts.has(u.hostname) && res.request().resourceType() === "document")
-      r.responses.push({ url: res.url(), status: res.status(), frame: res.frame()?.parentFrame() ? "child" : "top" });
+    if (!hosts.has(u.hostname) || res.request().resourceType() !== "document") return;
+    const entry = { url: res.url(), status: res.status(), frame: res.frame()?.parentFrame() ? "child" : "top" };
+    r.responses.push(entry);
+    // Tag documents loaded straight into a case iframe with that case, so the
+    // summary can show the status of the page the frame finally showed.
+    if (res.frame()?.parentFrame() === page.mainFrame())
+      entry.case = await res.frame().frameElement().then((h) => h.evaluate((el) => el.closest(".case")?.id ?? null)).catch(() => null);
   });
   page.on("requestfailed", (req) => {
     const u = new URL(req.url());
@@ -52,14 +60,21 @@ for (const name of ["chromium", "webkit", "firefox"]) {
   await sleep(SETTLE_MS);
 
   // Lazy embed: was its document requested before the scroller moved?
+  // Checked on the lazy iframe's own frame, because an eager copy of the same
+  // src elsewhere on the page makes request counting meaningless.
   const lazySrc = await page.$eval("#lazy-slot .case", (el) => el.dataset.src).catch(() => null);
   if (lazySrc) {
-    const before = r.responses.filter((x) => x.url.startsWith(lazySrc.split("?")[0])).length;
-    const casesWithSameSrc = await page.$$eval("#cases .case", (els, s) => els.filter((e) => e.dataset.src === s).length, lazySrc);
+    const lazyFrameUrl = async () => (await (await page.$("#lazy-slot iframe"))?.contentFrame())?.url() ?? null;
+    const lazyLoads = () => page.evaluate(() => window.__events.filter((e) => e.type === "iframe-load" && document.getElementById(e.case)?.closest("#lazy-slot")).length);
+    // Bring the scroll container itself into the window first: lazy loading is
+    // measured against the viewport, so an off-screen container proves nothing.
+    await page.locator("#scroller").scrollIntoViewIfNeeded();
+    await sleep(5000);
+    const before = { frameUrl: await lazyFrameUrl(), loadEvents: await lazyLoads() };
     await page.$eval("#scroller", (el) => { el.scrollTop = el.scrollHeight; });
     await sleep(8000);
-    const after = r.responses.filter((x) => x.url.startsWith(lazySrc.split("?")[0])).length;
-    r.lazy = { src: lazySrc, eagerCopiesOnPage: casesWithSameSrc, requestsBeforeScroll: before, requestsAfterScroll: after };
+    const after = { frameUrl: await lazyFrameUrl(), loadEvents: await lazyLoads() };
+    r.lazy = { src: lazySrc, beforeScroll: before, afterScroll: after };
     await page.locator("#lazy-slot .case").screenshot({ path: join(out, name, "lazy.png") }).catch(() => {});
   }
 
@@ -69,16 +84,27 @@ for (const name of ["chromium", "webkit", "firefox"]) {
     const loc = page.locator(`#${id}`);
     await loc.scrollIntoViewIfNeeded();
     await sleep(300);
-    const info = await loc.evaluate((el) => ({ id: el.id, name: el.dataset.name, variant: el.dataset.variant, provider: el.dataset.provider, src: el.dataset.src, refused: el.dataset.refused === "true" }));
+    const info = await loc.evaluate((el) => ({ id: el.id, name: el.dataset.name, variant: el.dataset.variant, provider: el.dataset.provider, kind: el.dataset.kind, src: el.dataset.src, refused: el.dataset.refused === "true" }));
+    // What the frame actually shows: Playwright can read cross-origin frames.
+    const child = await (await loc.locator("iframe").elementHandle({ timeout: 1000 }).catch(() => null))?.contentFrame();
+    if (child) {
+      info.frameUrl = child.url();
+      // A frame blocked by CSP never answers in WebKit, hence the timeout.
+      info.frameText = await Promise.race([
+        child.evaluate(() => `${document.title} | ${document.body?.innerText ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 140)),
+        sleep(3000).then(() => "(no answer within 3s)"),
+      ]).catch((e) => `(unreadable: ${String(e.message).split("\n")[0].slice(0, 80)})`);
+    }
     await loc.screenshot({ path: join(out, name, `${id}.png`) });
     r.cases.push({ ...info, screenshot: `${name}/${id}.png` });
   }
 
-  // Interaction on the first non-refused Figma case (else the first embed).
-  const target = await page.$$eval("#cases .case", (els) => {
+  // Interaction on the proposed Figma design frame (else the first embed).
+  const target = await page.$$eval("#cases .case", (els, kind) => {
     const ok = els.filter((e) => e.dataset.src && e.dataset.provider !== "none");
-    return (ok.find((e) => e.dataset.provider === "figma") ?? ok[0])?.id ?? null;
-  });
+    const frame = ok.find((e) => e.dataset.provider === "figma" && e.dataset.kind === kind && e.dataset.variant === "proposed" && !e.dataset.name.includes("broken"));
+    return (frame ?? ok.find((e) => e.dataset.provider === "figma") ?? ok[0])?.id ?? null;
+  }, INTERACT_KIND);
   if (target) {
     const frame = page.locator(`#${target} .frame`);
     await frame.scrollIntoViewIfNeeded();
@@ -96,6 +122,7 @@ for (const name of ["chromium", "webkit", "firefox"]) {
     await page.mouse.click(box2.x + box2.width / 2, box2.y + box2.height / 2);
     await sleep(800);
     const activeAfterClick = await frame.evaluate((el) => el.classList.contains("active"));
+    const focusAfterClick = await page.evaluate(() => document.activeElement?.tagName ?? null);
     const ya = await page.evaluate(() => window.scrollY);
     await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
     await page.mouse.wheel(0, 400);
@@ -113,6 +140,8 @@ for (const name of ["chromium", "webkit", "firefox"]) {
       case: target,
       inertWheelScrolledPage: y1 !== y0,
       activatedByClick: activeAfterClick,
+      parentFocusAfterClick: focusAfterClick,
+      targetShows: r.cases.find((c) => c.id === target)?.frameText ?? null,
       activeWheelScrolledPage: yb !== ya,
       escapeReachedParent: keysAfter > keysBefore,
       releasedByOutsideClick: !activeAfterOutside,
@@ -138,11 +167,12 @@ const lines = ["# Embeds spike results", "", `CSP: \`${CSP}\``, ""];
 for (const [name, r] of Object.entries(results.browsers)) {
   lines.push(`## ${name}`, "");
   if (r.skipped) { lines.push(`Skipped: ${r.skipped}`, ""); continue; }
-  lines.push("| Case | Variant | Provider | Loads | Document status | Screenshot |", "| --- | --- | --- | --- | --- | --- |");
+  lines.push("| Case | Variant | Provider | Loads | Frame documents (status) | Frame shows | Screenshot |", "| --- | --- | --- | --- | --- | --- | --- |");
   for (const c of r.cases) {
     const loads = r.events.filter((e) => e.case === c.id && e.type === "iframe-load").length;
-    const status = c.src ? r.responses.filter((x) => x.url === c.src).map((x) => x.status).join(",") || "none seen" : "refused";
-    lines.push(`| ${c.name} | ${c.variant} | ${c.provider} | ${loads} | ${status} | ${c.screenshot} |`);
+    const docs = c.src ? r.responses.filter((x) => x.case === c.id).map((x) => `${new URL(x.url).hostname}${new URL(x.url).pathname.split("/").slice(0, 2).join("/")} ${x.status}`).join(" → ") || "none seen" : "refused";
+    const shows = (c.frameText ?? "").replace(/\|/g, "/");
+    lines.push(`| ${c.name} | ${c.variant} | ${c.provider} | ${loads} | ${docs} | ${shows} | ${c.screenshot} |`);
   }
   lines.push("", `Interaction: \`${JSON.stringify(r.interaction)}\``, `Lazy: \`${JSON.stringify(r.lazy)}\``);
   lines.push(`CSP violations: ${r.events.filter((e) => e.type === "csp-violation").map((e) => e.detail).join("; ") || "none"}`);

@@ -546,6 +546,21 @@ function respond(
   response.end(request.method === "HEAD" ? undefined : body);
 }
 
+// SPIKE ONLY (spikes/embeds): the strictest policy worth starting from, plus
+// the embed providers' frame-src. Violations show what the app really needs.
+const SPIKE_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "frame-src https://embed.figma.com https://www.figma.com https://www.youtube-nocookie.com https://www.loom.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+
 const API_PREFIX = "/api/";
 const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
@@ -821,6 +836,9 @@ function serveBundleRequest(
       // The bundle's filenames are content-hashed by Vite, but index.html is
       // not, and a stale one points at assets that are gone.
       "cache-control": "no-cache",
+      // SPIKE ONLY (spikes/embeds, never merged): a strict report-only policy
+      // to list what the current app would need from a real CSP.
+      "content-security-policy-report-only": SPIKE_CSP,
     };
     if (request.method === "HEAD") {
       respond(request, response, 200, headers, "");

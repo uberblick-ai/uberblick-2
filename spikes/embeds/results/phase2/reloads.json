@@ -1,0 +1,275 @@
+{
+  "steps": [
+    {
+      "step": "type in the paragraph above (A)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "type in the paragraph between the embeds (A)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "second client types below the embeds (B)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "MCP agent edits a paragraph",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "move the Figma block below the next paragraph (A)",
+      "a": {
+        "created": 1,
+        "destroyed": 1,
+        "loads": 2,
+        "srcChanges": 1,
+        "domAttaches": 1,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "3,2",
+        "orderAfter": "p p Figma YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p p Figma YouTube p"
+      }
+    },
+    {
+      "step": "undo the move (A, Mod+z)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "3,2",
+        "liveInstancesAfter": "3,2",
+        "orderAfter": "p Figma p YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "switch theme to dark (A, data-theme)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "3,2",
+        "liveInstancesAfter": "3,2",
+        "orderAfter": "p Figma p YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 0,
+        "srcChanges": 0,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    },
+    {
+      "step": "edit the YouTube URL (A, expected reload)",
+      "a": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 1,
+        "srcChanges": 1,
+        "domAttaches": 0,
+        "liveInstancesBefore": "3,2",
+        "liveInstancesAfter": "3,2",
+        "orderAfter": "p Figma p YouTube p"
+      },
+      "b": {
+        "created": 0,
+        "destroyed": 0,
+        "loads": 1,
+        "srcChanges": 1,
+        "domAttaches": 0,
+        "liveInstancesBefore": "1,2",
+        "liveInstancesAfter": "1,2",
+        "orderAfter": "p Figma p YouTube p"
+      }
+    }
+  ],
+  "probeA": {
+    "created": [
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "t": 141
+      },
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "t": 141
+      },
+      {
+        "instance": 3,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "t": 50235
+      }
+    ],
+    "destroyed": [
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "t": 50235
+      }
+    ],
+    "loads": [
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+        "t": 679
+      },
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 1320
+      },
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 4052
+      },
+      {
+        "instance": 3,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 51436
+      },
+      {
+        "instance": 3,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 54017
+      },
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU?start=30",
+        "t": 68870
+      }
+    ],
+    "srcChanges": [
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 141
+      },
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU",
+        "t": 141
+      },
+      {
+        "instance": 3,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "src": "https://embed.figma.com/proto/nrPSsILSYjesyc5UHjYYa4?node-id=5-3&starting-point-node-id=5%3A3&embed-host=uberblick&theme=light&footer=false",
+        "t": 50235
+      },
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "src": "https://www.youtube-nocookie.com/embed/y9lZ5GMXNyU?start=30",
+        "t": 68471
+      }
+    ],
+    "domMoves": [
+      {
+        "instance": 1,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "t": 145
+      },
+      {
+        "instance": 2,
+        "block": "b2412311-e8e9-4e4d-99b4-6bf80f6b18a4",
+        "t": 145
+      },
+      {
+        "instance": 3,
+        "block": "9729503d-2223-4214-8701-c1f37c766efd",
+        "t": 50294
+      }
+    ]
+  }
+}

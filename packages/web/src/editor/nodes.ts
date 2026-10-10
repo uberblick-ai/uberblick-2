@@ -68,6 +68,7 @@ import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
+import { embedBlockView } from "./embed-spike.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -283,7 +284,8 @@ export const CodeBlock = Node.create({
   // `renderHTML` still governs serialization — getHTML, copy, paste — so the
   // button exists only while the block is on screen.
   addNodeView() {
-    return sourceBlockView(codeBlockChrome);
+    // SPIKE ONLY (spikes/embeds): `embed` code blocks render as an embed frame.
+    return embedBlockView(sourceBlockView(codeBlockChrome));
   },
   // No Enter override. Tiptap's core `keymap` extension already chains
   // newlineInCode → createParagraphNear → liftEmptyBlock → splitBlock, and

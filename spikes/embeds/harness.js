@@ -46,6 +46,7 @@ function addCase(parent, { name, raw, theme = "light", variant = "proposed", ove
   const src = rawSrc ?? hit.candidates[srcIndex];
   section.dataset.src = src;
   section.dataset.provider = provider?.id ?? "none";
+  section.dataset.kind = hit?.kind ?? "";
 
   const block = document.createElement("div");
   block.className = "block";
@@ -117,7 +118,8 @@ for (const s of usable) {
   if (hit.provider.id === "youtube") {
     addCase(root, { name: s.name, raw: s.url, variant: "no-referrer", override: { referrerpolicy: "no-referrer" } });
   }
-  if (!firstLazy && !s.name.includes("broken")) firstLazy = s;
+  // YouTube renders in every engine, so it makes the clearest lazy probe.
+  if (hit.provider.id === "youtube") firstLazy = s;
 }
 const figmaVariantSource = firstFigma ?? usable.find((s) => resolveEmbed(s.url)?.provider.id === "figma" && !s.name.includes("broken"));
 if (figmaVariantSource) {
