@@ -61,8 +61,9 @@ On the PR: gate evidence against the SHA each gate ran at, the tier call, the
 P3s accepted as debt (one line each), the merge report the policy requires, and
 the documentation pass result. Link gate and reviewer evidence instead of
 restating it. A tier-1 record is the merge SHA, the gate links and one line per
-acceptance criterion; its documentation pass is one sentence, and no fresh
-corpus search is owed unless the issue says existing docs are stale. A
+acceptance criterion; its documentation pass is one sentence. On every tier
+it checks the pages the implementer's search names for the surfaces the merge
+changed. A
 `changes` record says only what failed and where. Do not add a wrapper comment
 for a Copilot review that already exists or for a no-comment result.
 
