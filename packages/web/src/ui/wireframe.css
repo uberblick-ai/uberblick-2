@@ -43,8 +43,9 @@
   opacity: 1;
 }
 
+/* Touch has no hover: the tools sit in their own row above the preview. */
 @media (pointer: coarse) {
-  .ub-wireframe-tools { opacity: 1; }
+  .ub-wireframe-tools { position: static; justify-content: flex-end; margin: -0.25rem 0 0.5rem; opacity: 1; }
 }
 
 .ub-wireframe-tools button,

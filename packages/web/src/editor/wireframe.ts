@@ -44,15 +44,29 @@ export function isWireframe(node: PMNode): boolean {
 export function fitWireframe(viewport: HTMLElement, root: HTMLElement): number {
   const available = viewport.clientWidth;
   if (available <= 0) return 1;
-  root.style.zoom = "1";
-  root.style.width = `${available}px`;
-  const board = root.firstElementChild as HTMLElement | null;
-  const natural = Math.max(available, board?.scrollWidth ?? available);
-  const scale = Math.max(MIN_SCALE, Math.min(1, available / natural));
-  root.style.width = scale > MIN_SCALE ? `${available / scale}px` : `${natural}px`;
-  root.style.zoom = String(scale);
+  // Frames clip their content, so a cramped fluid frame does not widen the
+  // board by itself: count the widest frame's hidden overflow too. Scaling
+  // re-flows fluid content, so refine a few times until nothing overflows.
+  const needed = (): number => {
+    const board = root.firstElementChild as HTMLElement | null;
+    let clipped = 0;
+    for (const body of root.querySelectorAll<HTMLElement>(".wf-frame-body")) {
+      clipped = Math.max(clipped, body.scrollWidth - body.clientWidth);
+    }
+    return (board?.scrollWidth ?? 0) + clipped;
+  };
+  let scale = 1;
+  let width = available;
+  for (let pass = 0; pass < 4; pass += 1) {
+    root.style.width = `${width}px`;
+    root.style.zoom = String(scale);
+    const need = needed();
+    if (need <= width + 1 || scale === MIN_SCALE) break;
+    scale = Math.max(MIN_SCALE, Math.min(scale, available / need));
+    width = scale > MIN_SCALE ? available / scale : Math.max(need, available / MIN_SCALE);
+  }
   viewport.dataset.scale = scale.toFixed(2);
-  viewport.dataset.scrolls = String(natural * scale > available + 1);
+  viewport.dataset.scrolls = String(width * scale > available + 1);
   return scale;
 }
 
