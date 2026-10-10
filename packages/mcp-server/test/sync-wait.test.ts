@@ -145,8 +145,10 @@ it("records only the DNS code and dialled host", async () => {
   const instance = new HubSync(testConfig({ hubUrl: "ws://missing.invalid/ws" }), () => {}, { silent: true });
   cleanup.push(() => instance.destroy());
   await waitUntil("DNS failure", () => instance.state().cause === "dns");
-  expect(instance.state().detail).toBe("ENOTFOUND missing.invalid");
-  expect(formatHubFailure(instance.state())).toBe("DNS lookup failed for missing.invalid (ENOTFOUND)");
+  const reading = instance.state();
+  // An isolated runner has no resolver and reports EAI_AGAIN instead of ENOTFOUND.
+  expect(reading.detail).toMatch(/^(?:ENOTFOUND|EAI_AGAIN) missing\.invalid$/);
+  expect(formatHubFailure(reading)).toBe(`DNS lookup failed for missing.invalid (${reading.detail?.split(" ")[0]})`);
 });
 
 it("records a TLS failure without claiming a certificate problem", async () => {
