@@ -6,15 +6,14 @@ import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login"
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
 import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
 import { resolveStorage } from "@uberblick/hub/storage";
-import { syncWorkspace } from "@uberblick/mcp-server";
+import { defaultDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "./access-management.js";
-import { authCommand } from "./auth.js";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import { requireBinding, resolveConfig, writeHubAdmission } from "./config.js";
 import { takeHelp } from "./help.js";
 import { acquireInitLock } from "./init-lock.js";
-import type { Io } from "./io.js";
+import { type Io, shellArgument } from "./io.js";
 import { resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { corpusProblem, verify } from "./remote.js";
 import { publishOwnerOnly } from "./safe-write.js";
@@ -22,10 +21,10 @@ import { reportEnvironmentBinding } from "./workspace-create.js";
 
 export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
-Share the selected local-only workspace on a GitHub-enabled hub. Reuse this
-machine's working login, or ask for GitHub approval. Your account must currently
-be a member or administrator of at least one workspace on that hub. On a fresh
-hub, its first login claims the default workspace and qualifies.
+Share the selected local-only workspace on a GitHub-enabled hub. Sign in first
+with ub auth login <hub>; promote reuses this machine's stored login. Your account
+must currently be a member or administrator of at least one workspace on that
+hub. On a fresh hub, its first login claims the default workspace and qualifies.
 
 The hub can be a bare host, an HTTP(S) URL or a WS(S) endpoint. Bare hosts and
 HTTP(S) URLs without a path use /ws; WS(S) endpoints keep their supplied path.
@@ -95,10 +94,12 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
 export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_PROMOTE_HELP)) return 0;
   let endpoint: string;
+  let hub: string;
   try {
     const { positionals } = parseArgs({ args: argv, options: {}, allowPositionals: true });
     if (positionals.length !== 1) throw new Error("expected exactly one hub");
-    endpoint = normalizeRemoteUrl(positionals[0] ?? "");
+    hub = positionals[0] ?? "";
+    endpoint = normalizeRemoteUrl(hub);
   } catch (error) {
     io.err(`ub workspace promote: ${error instanceof Error ? error.message : "invalid hub"}\n`);
     return 2;
@@ -125,6 +126,19 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     const path = selection.path;
     const before = bindingBytes(path);
     const origin = authenticationOrigin(endpoint);
+    const refuseSignIn = (): number => {
+      const name = readWorkspaceName(defaultDatabasePath(workspaceId), workspaceId) ?? workspaceId;
+      io.err(
+        `error: you are not signed in to ${origin}\n` +
+        `nothing was uploaded; ${name} is still local\n` +
+        "sign in first, then run promote again:\n" +
+        `  ub auth login ${shellArgument(origin)}\n  ub workspace promote ${shellArgument(hub)}\n`,
+      );
+      return 1;
+    };
+    const current = readDeviceLogin(endpoint, workspaceId);
+    if (current.status === "sign-in-required") return refuseSignIn();
+    if (current.status !== "ready") throw new Error(current.message);
     const key = createHash("sha256").update(`${origin}\n${workspaceId}`).digest("hex");
     const receipt = join(resolveStorage().configDir, `.workspace-promotion-${key}.json`);
     const lock = await acquireInitLock(process.env, { path: `${receipt}.lock`, waitMs: 0, command: "ub workspace promote" });
@@ -134,18 +148,12 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       if (!existsSync(localConfig.databasePath)) throw new Error("this machine has no local replica of the selected workspace");
       const local = await syncWorkspace({ ...localConfig, authSecret: null });
       if (local.missing.length > 0) throw new Error("local workspace has missing document content; restore it before promotion");
-      let current = readDeviceLogin(endpoint, workspaceId);
-      if (current.status === "sign-in-required") {
-        if (await authCommand(["login", endpoint], io, { loginNextAction: false }) !== 0) return 1;
-        current = readDeviceLogin(endpoint, workspaceId);
-      }
-      if (current.status !== "ready") throw new Error(current.message);
       interrupted.signal.throwIfAborted();
       canResume = true;
       let result = await reserve(origin, workspaceId, attemptId, current.login, interrupted.signal);
       if (result === "sign-in-required") {
         // A concurrently renewed key may already be in the store. Try normal
-        // renewal before replacing the login through GitHub approval.
+        // renewal before requiring an explicit sign-in.
         const renewed = await ensureDeviceLogin(endpoint, current.login.credential.record.workspaces[0] ?? workspaceId,
           { rejected: current.login, signal: interrupted.signal });
         if (renewed.status === "ready") {
@@ -153,19 +161,14 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
         } else if (renewed.status !== "sign-in-required" && renewed.status !== "no-access") {
           throw new Error(renewed.message);
         }
-        if (result === "sign-in-required") {
-          if (await authCommand(["login", endpoint], io, { loginNextAction: false }) !== 0) return 1;
-          current = readDeviceLogin(endpoint, workspaceId);
-          if (current.status !== "ready") throw new Error(current.message);
-          result = await reserve(origin, workspaceId, attemptId, current.login, interrupted.signal);
-          if (result === "sign-in-required") throw new Error("the hub refused the new login");
-        }
+        if (result === "sign-in-required") return refuseSignIn();
       }
       interrupted.signal.throwIfAborted();
       // Only after the committed grant: preflight dialing the new UUID would
       // cache a no-access renewal and delay the just-authorized connection.
       const admitted = await ensureDeviceLogin(endpoint, workspaceId,
         { membershipGranted: true, signal: interrupted.signal });
+      if (admitted.status === "sign-in-required") return refuseSignIn();
       if (admitted.status !== "ready") throw new Error(admitted.message);
       const env = { ...resolved.env, WORKSPACE_ID: workspaceId, HUB_URL: endpoint, UB_HUB_URL: endpoint,
         HUB_ADMISSION: "device", HUB_AUTH_TOKEN: undefined };
