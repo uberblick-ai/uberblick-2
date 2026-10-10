@@ -40,6 +40,7 @@ import { devConfigDocument } from "../dev-config-document.js";
 import {
   HUB_CONFIG_PATH,
   configuredWorkspaces,
+  defaultPresenceName,
   endpointLabel,
   hubUrl,
   readClientConfig,
@@ -131,6 +132,28 @@ afterEach(() => {
 });
 
 describe("the served configuration", () => {
+  it("accepts an optional default presence name without changing the other configuration", async () => {
+    for (const value of [undefined, null, 42, {}, [], "", " \t\n "]) {
+      const config = await readClientConfig(serving({ body: JSON.stringify({
+        hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], defaultPresenceName: value,
+      }) }).fetch);
+      expect(config.defaultPresenceName).toBeUndefined();
+      expect(config.hubUrl).toBe("ws://127.0.0.1:4321/");
+      expect(config.workspaces).toEqual([FIRST]);
+      expect(config.rejected).toBeUndefined();
+    }
+
+    // JSON escaping leaves a personal name intact, even when its characters
+    // resemble another config key. It cannot retarget the endpoint.
+    const name = 'Pat "Editor", "hubUrl": "ws://elsewhere.example/ws"';
+    const config = await readClientConfig(serving({ body: JSON.stringify({
+      hubUrl: "ws://127.0.0.1:4321", workspaces: [FIRST], defaultPresenceName: `  ${name}  `,
+    }) }).fetch);
+    expect(config.defaultPresenceName).toBe(name);
+    expect(config.hubUrl).toBe("ws://127.0.0.1:4321/");
+    expect(config.rejected).toBeUndefined();
+  });
+
   it("answers the SPA fallback's HTML with a diagnostic and a working fallback, and tries again for a secret it never got", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "info").mockImplementation(() => {});
@@ -138,7 +161,7 @@ describe("the served configuration", () => {
     // Then the same read, after the deployment came up.
     const { fetch, calls } = serving(
       { body: '<!doctype html>\n<html lang="en">' },
-      { body: `{"hubUrl":"ws://127.0.0.1:4321","hubAuthToken":"${LATE_SECRET}"}` },
+      { body: `{"hubUrl":"ws://127.0.0.1:4321","hubAuthToken":"${LATE_SECRET}","defaultPresenceName":"Git Editor"}` },
     );
 
     // The only `resolveClientConfig` calls in this file — it memoises per
@@ -154,6 +177,7 @@ describe("the served configuration", () => {
     // The accessors the app reads: the one `rooms.ts` builds the socket from,
     // and the one that answers `/` and fills the switcher.
     expect(hubUrl()).toBe(INJECTED);
+    expect(defaultPresenceName()).toBeNull();
     expect(configuredWorkspaces()).toEqual(await builtInWorkspaces());
 
     // One diagnostic, naming the sources in force and why the document was not
@@ -183,6 +207,7 @@ describe("the served configuration", () => {
     expect(calls).toHaveLength(2);
     expect(again.hubAuthToken).toBe(LATE_SECRET);
     expect(hubUrl()).toBe("ws://127.0.0.1:4321/");
+    expect(defaultPresenceName()).toBe("Git Editor");
   });
 
   it("refuses a hubUrl that is not a bare ws(s) address, without echoing it", async () => {

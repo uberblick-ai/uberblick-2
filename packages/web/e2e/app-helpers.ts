@@ -15,7 +15,12 @@ interface OpenAppOptions {
 }
 
 /** Share one harness per file, with fresh contexts for each independent test. */
-export function setupHarness(options: { scope?: "file" | "test"; app?: OpenAppOptions; accessRole?: "admin" | "member" } = {}) {
+export function setupHarness(options: {
+  scope?: "file" | "test";
+  app?: OpenAppOptions;
+  accessRole?: "admin" | "member";
+  gitUserName?: string;
+} = {}) {
   let started: Harness | null = null;
   const contexts: BrowserContext[] = [];
 
@@ -27,7 +32,10 @@ export function setupHarness(options: { scope?: "file" | "test"; app?: OpenAppOp
   }
 
   const start = async (): Promise<void> => {
-    started = await startHarness(options.accessRole === undefined ? {} : { accessRole: options.accessRole });
+    started = await startHarness({
+      ...(options.accessRole === undefined ? {} : { accessRole: options.accessRole }),
+      ...(options.gitUserName === undefined ? {} : { gitUserName: options.gitUserName }),
+    });
   };
   const stop = async (): Promise<void> => {
     const running = started;

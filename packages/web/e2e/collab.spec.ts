@@ -251,7 +251,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // Awareness only carries a cursor while that editor has focus, so A's caret
   // has to be in the block for there to be anything to render.
   await a.getByTestId("account-menu").click();
-  const name = (await a.locator(".ub-user-heading").innerText()).replace(/^Presence name: /, "").trim();
+  const name = await a.getByRole("textbox", { name: "Presence name", exact: true }).inputValue();
   const color = await a.locator('.ub-swatch[aria-pressed="true"]').evaluate(
     (element) => getComputedStyle(element).backgroundColor,
   );
