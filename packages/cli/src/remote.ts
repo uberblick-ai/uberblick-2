@@ -348,7 +348,8 @@ export async function useRemoteWorkspace(
       io.err(`ub: warning: The verified snapshot was taken at ${fetched.takenAt}; later writes to the previous hub are not included. Close other clients before relying on it.\n`);
     }
     if (options.json) {
-      io.out(`${JSON.stringify({ binding, previous, documents: fetched.corpus.entries }, null, 2)}\n`);
+      const documents = fetched.corpus.entries.map(({ uuid, title, tags, deleted }) => ({ uuid, title, tags, deleted }));
+      io.out(`${JSON.stringify({ binding, previous, documents }, null, 2)}\n`);
     } else {
       if (options.verbose) {
         text += "\nDocuments fetched (including archived):\n" +
