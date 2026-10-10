@@ -21,4 +21,5 @@ blocks nothing.
 Follow [run-operations.md](run-operations.md#posting-records-and-scratch)
 when writing and posting the body.
 
-A maintainer reads them in the `delivery-review` skill's daily report.
+A maintainer reads them in the [`ub-agents-deliver-report`](https://github.com/uberblick-ai/skills/tree/main/skills/ub-agents/ub-agents-deliver-report) skill's daily report.
+Install it with `npx skills@latest add uberblick-ai/skills -g`.
