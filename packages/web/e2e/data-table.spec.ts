@@ -784,7 +784,19 @@ test("one table and twenty shared views record bounded Chromium live-update timi
       },
       contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
     });
-    await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
+    try {
+      await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
+    } catch (error) {
+      console.log("data table failure state", await page.evaluate(() => ({
+        route: location.pathname,
+        title: document.querySelector<HTMLInputElement>(".ub-title")?.value,
+        editor: document.querySelector(".ProseMirror")?.textContent?.length,
+        chartBlocks: document.querySelectorAll(".ub-chart").length,
+        body: document.body.innerText.slice(0, 1800),
+        probe: (window as unknown as { tableProbe: unknown }).tableProbe,
+      })));
+      throw error;
+    }
     await page.context().close();
   }
 });

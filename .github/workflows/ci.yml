@@ -98,4 +98,5 @@ jobs:
 
       # The task downloads pinned Chromium and WebKit (a no-op on a cache hit)
       # and starts its own hub and dev server, so there is nothing else to wire.
+      - run: mise run e2e -- data-table.spec.ts table-row-drag.spec.ts -g 'one table and twenty|own gaps, outside release'
       - run: mise run e2e
