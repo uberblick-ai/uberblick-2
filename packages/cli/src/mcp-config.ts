@@ -61,8 +61,8 @@ export interface TargetFile {
 /**
  * Where a target keeps the configuration for one scope.
  *
- * `--project` is relative to the working directory and `--user` to the home
- * directory, except for Codex, which lets `CODEX_HOME` move its whole
+ * `--project` is relative to the caller's project directory and `--user` to the
+ * home directory, except for Codex, which lets `CODEX_HOME` move its whole
  * configuration directory — and honouring that is what lets `ub` and `codex mcp
  * add` agree about which file they are both talking about, in either scope.
  */
