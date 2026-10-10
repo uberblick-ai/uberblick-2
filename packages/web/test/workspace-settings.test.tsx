@@ -17,7 +17,7 @@ import type { HubEndpoint } from "../src/config.js";
 import { notifyTransient } from "../src/notifications.js";
 import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
-import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
+import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
 
 vi.mock("../src/collab/rooms.js", async (original) => ({
   ...await original<typeof import("../src/collab/rooms.js")>(),
@@ -576,10 +576,10 @@ const ADMIN: AccessMember = { principalId: "admin-principal", githubAccountId: "
 const SECOND_ADMIN: AccessMember = { principalId: "second-principal", githubAccountId: "1002", githubUsername: "second-admin", role: "admin" };
 const NEW_MEMBER: AccessMember = { principalId: "new-principal", githubAccountId: "9001", githubUsername: "current-agent-login", role: "member" };
 
-function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?: string } = {}) {
+function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?: string; devices?: AccessDevice[] } = {}) {
   let role: AccessRole = options.role ?? "admin";
   let members = [{ ...ADMIN }, { ...SECOND_ADMIN }];
-  let devices = [
+  let devices = options.devices ?? [
     { deviceId: "current-device", signedInAt: Date.UTC(2026, 9, 5, 10), current: true },
     { deviceId: "other-own-device", signedInAt: Date.UTC(2026, 9, 4, 12), current: false },
   ];
@@ -729,6 +729,61 @@ it("offers members only their role and own devices with sign-in times and this-c
   expect(within(table).getAllByRole("time", { hidden: true })[0]?.getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
   expect(table?.textContent).not.toContain("another-person");
 });
+
+it("shows duplicate hostnames and UUID fallback while revoking each row by UUID", async () => {
+  const hub = accessHub({ role: "member", devices: [
+    { deviceId: "current-device", deviceName: "shared-host", signedInAt: Date.UTC(2026, 9, 5, 10), current: true },
+    { deviceId: "other-own-device", deviceName: "shared-host", signedInAt: Date.UTC(2026, 9, 4, 12), current: false },
+    { deviceId: "legacy-device", signedInAt: Date.UTC(2026, 9, 3, 12), current: false },
+  ] });
+  const host = await mountAccess();
+  const table = within(host).getByRole("table", { name: "Your devices" });
+  expect(within(table).getAllByText("shared-host", { exact: true })).toHaveLength(2);
+  expect(table.textContent).toContain("legacy-device");
+  expect(table.textContent).not.toContain("current-device");
+  expect(table.textContent).not.toContain("other-own-device");
+  const current = accessButton(host, "Revoke device current-device");
+  const other = accessButton(host, "Revoke device other-own-device");
+  expect(current.textContent).toBe("Revoke device");
+  expect(other.textContent).toBe("Revoke device");
+  expect(within(current.closest("tr") as HTMLElement).getByText("This computer")).toBeTruthy();
+  expect(within(other.closest("tr") as HTMLElement).queryByText("This computer")).toBeNull();
+  expect(within(other.closest("tr") as HTMLElement).getByRole("time", { hidden: true }).getAttribute("datetime"))
+    .toBe("2026-10-04T12:00:00.000Z");
+  await clickAccess(host, "Revoke device other-own-device");
+  await clickAccess(screen.getByRole("alertdialog", { name: "Revoke device?" }), "Revoke device");
+  expect(hub.calls.find(({ action }) => action.operation === "revoke-device")?.action)
+    .toEqual({ operation: "revoke-device", deviceId: "other-own-device" });
+  expect(within(table).getAllByText("shared-host", { exact: true })).toHaveLength(1);
+  expect(accessButton(host, "Revoke device current-device")).toBeTruthy();
+  expect(accessButton(host, "Revoke device legacy-device")).toBeTruthy();
+});
+
+it.each(["h".repeat(253), "\u{1f4bb}".repeat(253), "<script>plain host</script>"])(
+  "renders an acceptable hostname as plain device text", async (deviceName) => {
+    accessHub({ role: "member", devices: [{ deviceId: "current-device", deviceName, signedInAt: 1, current: true }] });
+    const host = await mountAccess();
+    const table = within(host).getByRole("table", { name: "Your devices" });
+    expect(within(table).getByRole("rowheader").textContent).toBe(`${deviceName}This computer`);
+    expect(table.querySelector("script")).toBeNull();
+  },
+);
+
+it.each([null, 12, "", "h".repeat(254), "host\nname", "host\n", "host\tname", "host\u202ename", "host\u2028name", "host\u2029name", "host\ud800name"])(
+  "falls back to UUID without refusing a device with an unacceptable hostname", async (deviceName) => {
+    const hub = accessHub({ role: "member" });
+    hub.setOverride((action) => action.operation === "list-devices" ? new Response(JSON.stringify({
+      status: "ok", hub: ACCESS_HUB, devices: [{ deviceId: "current-device", deviceName, signedInAt: 1, current: true,
+        key: "must-not-be-shown", token: "must-not-be-shown" }],
+    }), { status: 200 }) : null);
+    const host = await mountAccess();
+    const table = within(host).getByRole("table", { name: "Your devices" });
+    expect(within(table).getByRole("rowheader").textContent).toBe("current-deviceThis computer");
+    expect(accessButton(host, "Revoke device current-device").textContent).toBe("Revoke device");
+    expect(table.textContent).not.toContain("must-not-be-shown");
+    expect(within(host).queryByRole("alert")).toBeNull();
+  },
+);
 
 it("keeps account-scoped own-device revocation available after a forbidden role read", async () => {
   const hub = accessHub({ ownRoleStatus: "forbidden" }); const host = await mountAccess();

@@ -68,16 +68,17 @@ async function post(hub: Hub, path: string, body: unknown, headers: Record<strin
   return { code: response.status, result: await response.json() as Record<string, unknown> };
 }
 
-async function start(hub: Hub) {
-  const { code, result } = await post(hub, "start", {});
+async function start(hub: Hub, body: unknown = {}) {
+  const { code, result } = await post(hub, "start", body);
   expect(code).toBe(200);
   expect(result).toMatchObject({ status: "pending", verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH", interval: 5 });
+  expect(result).not.toHaveProperty("deviceName");
   return { requestId: result.requestId as string, collectionSecret: result.collectionSecret as string };
 }
 
 type Complete = Extract<SignInCollection, { status: "complete" }>;
-async function complete(testRig: Awaited<ReturnType<typeof rig>>) {
-  const request = await start(testRig.hub);
+async function complete(testRig: Awaited<ReturnType<typeof rig>>, body: unknown = {}) {
+  const request = await start(testRig.hub, body);
   testRig.github.time += 5000;
   const { code, result } = await post(testRig.hub, "collect", request);
   expect(code).toBe(200);
@@ -98,6 +99,38 @@ function privateRows(path: string) {
 }
 
 describe("hub-driven GitHub identity", () => {
+  it("keeps each CLI hostname on its device without copying it to GitHub or credential replies", async () => {
+    const testRig = await rig();
+    const laptop = await start(testRig.hub, { deviceName: "laptop" });
+    const server = await start(testRig.hub, { deviceName: "agent-server" });
+    testRig.github.time += 5000;
+    const laptopResult = (await post(testRig.hub, "collect", laptop)).result as unknown as Complete;
+    const serverResult = (await post(testRig.hub, "collect", server)).result as unknown as Complete;
+    expect(laptopResult.status).toBe("complete");
+    expect(serverResult.status).toBe("complete");
+    expect(laptopResult.credential.record).not.toHaveProperty("deviceName");
+    expect(serverResult.credential.record).not.toHaveProperty("deviceName");
+    expect(laptopResult.credential.record.deviceId).not.toBe(serverResult.credential.record.deviceId);
+    expect(testRig.hub.credentials!.listDevices(laptopResult.identity.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ deviceId: laptopResult.credential.record.deviceId, deviceName: "laptop" }),
+      expect.objectContaining({ deviceId: serverResult.credential.record.deviceId, deviceName: "agent-server" }),
+    ]));
+    expect(JSON.stringify({ laptopResult, serverResult, logs: testRig.logs })).not.toContain("agent-server");
+    expect(testRig.github.calls.every((call) => !call.body.has("deviceName"))).toBe(true);
+  });
+
+  it.each([undefined, null, 42, {}, [], "", "line\nbreak", "format\u200dcharacter", "a".repeat(254)])(
+    "completes legacy or invalid-name sign-in with an unnamed device", async (deviceName) => {
+      const testRig = await rig();
+      const signedIn = await complete(testRig, deviceName === undefined ? {} : { deviceName });
+      expect(signedIn.result.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(testRig.hub.credentials!.listDevices(signedIn.result.identity.id)).toEqual([
+        { deviceId: signedIn.result.credential.record.deviceId,
+          signedInAt: signedIn.result.credential.record.issuedAt, workspaces: [] },
+      ]);
+    },
+  );
+
   it("discovers a direct grant on first sign-in and retains it across login renames and reassignment", async () => {
     const first = await rig();
     const admin = first.hub.principals!.identify("9999", "workspace-admin");

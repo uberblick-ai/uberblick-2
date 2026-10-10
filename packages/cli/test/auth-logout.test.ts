@@ -1,5 +1,7 @@
 /** Device retirement uses real hub credentials; an unconfirmed reply is never success. */
 import { readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { importCredentialKey, inspectRequestProof } from "@uberblick/hub/token";
@@ -138,6 +140,16 @@ describe("ub auth logout retires devices", () => {
     const remote = await rig([WORKSPACE]);
     const older = await signedIn(remote);
     const current = await signedIn(remote);
+    // A client predating hostname metadata still issues an unnamed UUID device.
+    const unnamed = remote.hub.credentials!.issue({
+      principalId: current.login.identity.id, deviceId: randomUUID(), workspaces: [WORKSPACE],
+    });
+    const ownDevices = await manageRequest(remote.origin, { operation: "list-devices" }, current.login);
+    expect(ownDevices.body).toMatchObject({ devices: expect.arrayContaining([
+      expect.objectContaining({ deviceId: older.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: false }),
+      expect.objectContaining({ deviceId: current.login.credential.record.deviceId, signedInAt: expect.any(Number), deviceName: hostname(), current: true }),
+      expect.objectContaining({ deviceId: unnamed.record.deviceId, signedInAt: expect.any(Number), current: false }),
+    ]) });
     remote.github.identity = { id: 5678, login: "another-account" };
     const another = await signedIn(remote);
     const access = memberships(remote.databasePath);
@@ -145,13 +157,13 @@ describe("ub auth logout retires devices", () => {
     const store = readStore(current.box);
     const run = await runUbAsync(["auth", "logout", "--all-devices"], current.box);
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toBe(`revoked    2 devices of ${USERNAME} on ${remote.origin}, including this computer\nremoved    login for ${remote.origin} on this computer\nsign in again on the computers you still use: ub auth login ${remote.origin}\n`);
+    expect(run.stdout).toBe(`revoked    3 devices of ${USERNAME} on ${remote.origin}, including this computer\nremoved    login for ${remote.origin} on this computer\nsign in again on the computers you still use: ub auth login ${remote.origin}\n`);
     expect(run.stderr).toBe("");
     const actions = remote.requests.filter(request => request.path === "/auth/manage").map(request => request.body);
-    expect(actions.map(action => action.operation)).toEqual(["list-devices", "revoke-device", "revoke-device"]);
-    expect(actions.slice(1).map(action => action.deviceId)).toEqual([
-      older.login.credential.record.deviceId, current.login.credential.record.deviceId,
-    ]);
+    expect(actions.map(action => action.operation)).toEqual(["list-devices", "list-devices", "revoke-device", "revoke-device", "revoke-device"]);
+    const revocations = actions.filter(action => action.operation === "revoke-device").map(action => action.deviceId);
+    expect(revocations.slice(0, -1)).toEqual(expect.arrayContaining([older.login.credential.record.deviceId, unnamed.record.deviceId]));
+    expect(revocations.at(-1)).toBe(current.login.credential.record.deviceId);
     expect(Object.keys(readStore(current.box).hubLogins ?? {})).toEqual([OTHER_HUB]);
     expect(readStore(current.box).hubLogins?.[OTHER_HUB]).toEqual(store.hubLogins?.[OTHER_HUB]);
     expect(readStore(current.box).signingSecret).toBe(SIGNING_SECRET);

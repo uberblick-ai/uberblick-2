@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
@@ -355,6 +356,9 @@ it.each(["missing", "revoked"])("runs GitHub approval with a %s login without lo
   expect(result.stdout).toContain(`Use on another machine: ub workspace use ${endpoint}/${selected(box).workspaceId}\n`);
   expect(result.output).not.toContain("fixture-private");
   expect(approvals).toBe(1);
+  expect(hub.credentials!.listDevices(identity.id)).toEqual([
+    expect.objectContaining({ deviceName: hostname() }),
+  ]);
   const rows = accessRows(hub);
   expect(rows.claims[0]!.unclaimed).toBe(0);
   expect(rows.memberships).toHaveLength(2);

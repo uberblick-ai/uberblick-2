@@ -79,6 +79,23 @@ describe("shared management transport", () => {
 });
 
 describe("management replies exposed to a browser", () => {
+  it("adds only acceptable device names to the public projection", () => {
+    const named = { ...device, deviceName: "agent-server" };
+    const upstream = { status: "ok", devices: [{ ...named, key: "private-device-key",
+      workspaces: [WORKSPACE], credential: login.credential }], key: login.credential.key };
+    expect(sanitizeManagementReply({ operation: "list-devices" }, { status: 200, body: upstream }, login))
+      .toEqual({ status: 200, body: { status: "ok", devices: [named] } });
+  });
+
+  it.each([undefined, null, 42, {}, "", " ", "x".repeat(254), "host\nname", "host\u202ename",
+    "host\u2028name", login.credential.key, `host-${login.credential.key}`])(
+    "omits unsafe name metadata without dropping the device", deviceName => {
+      expect(sanitizeManagementReply({ operation: "list-devices" }, { status: 200, body: {
+        status: "ok", devices: [{ ...device, deviceName }],
+      } }, login)).toEqual({ status: 200, body: { status: "ok", devices: [device] } });
+    },
+  );
+
   it.each([
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "admin" }],
     [{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, { status: "ok", githubAccountId: "1234", githubUsername: "octocat" }],

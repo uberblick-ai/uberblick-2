@@ -47,6 +47,43 @@ afterEach(() => {
 });
 
 describe("hub-owned credential registry", () => {
+  it("persists optional nonunique device names without changing identity or exposing them in credentials", async () => {
+    const path = tempDatabasePath();
+    const first = registry(path);
+    const name = "a".repeat(253);
+    const laptop = first.issue({ principalId: "person", deviceId: "laptop", deviceName: name, workspaces: [WORKSPACE] });
+    const otherLaptop = first.issue({ principalId: "person", deviceId: "other-laptop", deviceName: name, workspaces: [] });
+    const unnamed = issue(first, "legacy");
+    first.issue({ principalId: "another-person", deviceId: "foreign", deviceName: "private-host", workspaces: [] });
+    expect(laptop.record).not.toHaveProperty("deviceName");
+    expect(first.get(laptop.record.id)).not.toHaveProperty("deviceName");
+    const expected = [
+      { deviceId: unnamed.record.deviceId, signedInAt: unnamed.record.issuedAt, workspaces: [WORKSPACE] },
+      { deviceId: laptop.record.deviceId, deviceName: name, signedInAt: laptop.record.issuedAt, workspaces: [WORKSPACE] },
+      { deviceId: otherLaptop.record.deviceId, deviceName: name, signedInAt: otherLaptop.record.issuedAt, workspaces: [] },
+    ].sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    expect(first.listDevices("person")).toEqual(expected);
+    databases[0]?.close();
+    const restarted = registry(path);
+    expect(restarted.listDevices("person")).toEqual(expected);
+    expect(await restarted.verify(await token(laptop))).toHaveProperty("record", laptop.record);
+    expect(restarted.revokeDevice("person", "foreign")).toBe(false);
+    expect(restarted.revokeDevice("person", laptop.record.deviceId)).toBe(true);
+    expect(restarted.listDevices("person")).toEqual(expected.filter((row) => row.deviceId !== laptop.record.deviceId));
+  });
+
+  it.each(["", "  ", "line\nbreak", "format\u200dcharacter", "control\u0000character", "a".repeat(254)])(
+    "ignores an invalid device name without interfering with key issuance", (deviceName) => {
+      const store = registry();
+      const issued = store.issue({ principalId: "person", deviceId: "laptop", deviceName, workspaces: [] });
+      expect(issued.keyBytes).toHaveLength(32);
+      expect(store.listDevices("person")).toEqual([
+        { deviceId: "laptop", signedInAt: issued.record.issuedAt, workspaces: [] },
+      ]);
+      expect(databases[0]?.connection.prepare("SELECT device_name FROM hub_credentials").get()?.device_name).toBeNull();
+    },
+  );
+
   it("issues distinct keys per device and reveals only public records thereafter", async () => {
     const store = registry();
     const laptop = issue(store);

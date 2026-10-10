@@ -6,6 +6,7 @@ import {
   statSync, writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
@@ -491,7 +492,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     for (const request of remote.requests) {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
       expect(request.authorization).toBeUndefined();
-      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") || request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
+      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? ["deviceName"]
+        : request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
+      if (request.path.endsWith("start")) expect(request.body.deviceName).toBe(hostname());
     }
     const bridge = resolveConfig({ env: box.env, cwd: box.cwd }).env;
     const values = Object.values(bridge);
