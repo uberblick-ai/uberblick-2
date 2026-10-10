@@ -381,7 +381,7 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
   // The ceiling is inside signedAuthMessage. Hocuspocus calls this before every
   // connect, so each reconnect mints a fresh token rather than replaying an
   // expired one.
-  return await signedAuthMessage(secret, workspace, identity.name);
+  return await signedAuthMessage(secret, workspace, getSetting("presenceName") ?? identity.name);
 }
 
 export interface RoomStatus {
@@ -499,7 +499,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
 
   /**
    * Publish who is here: the tab's identity, with the browser's chosen presence
-   * colour over it (#74).
+   * name and colour over it.
    *
    * Re-run whenever a setting changes, because the picker is the *menu*, not
    * this module — and a colour peers only see after a reconnect is not a live
@@ -507,15 +507,19 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
    * something else must not put an awareness message on the wire per room.
    */
   let publishedColor = "";
+  let publishedName = "";
   const publishUser = (): void => {
     const color = getSetting("presenceColor") ?? identity.color;
-    if (color === publishedColor) return;
+    const name = getSetting("presenceName") ?? identity.name;
+    if (color === publishedColor && name === publishedName) return;
     publishedColor = color;
-    provider.setAwarenessField("user", { ...identity, color });
+    publishedName = name;
+    provider.setAwarenessField("user", { name, color });
   };
   let stopPreference = (): void => {};
   const startPresence = (): void => {
     publishedColor = "";
+    publishedName = "";
     publishUser();
     stopPreference = subscribeSettings(publishUser);
     provider.setAwarenessField("client", WEB_CLIENT);

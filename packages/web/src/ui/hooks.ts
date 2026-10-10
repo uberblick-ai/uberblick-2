@@ -7,6 +7,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -654,13 +655,14 @@ function observeConnectionThreads(
 }
 
 /**
- * A stable per-tab identity. `useState`'s lazy initializer, not `useMemo` with
+ * Stable per-tab defaults, with the served name once configuration resolves.
+ * `useState`'s lazy initializer, not `useMemo` with
  * an empty dependency list: React guarantees the initializer runs exactly once,
  * where a memo is free to recompute and would hand out a second identity.
  */
-export function useIdentity(factory: () => AwarenessUser): AwarenessUser {
+export function useIdentity(factory: () => AwarenessUser, defaultName: string | null = null): AwarenessUser {
   const [identity] = useState(factory);
-  return identity;
+  return useMemo(() => defaultName === null ? identity : { ...identity, name: defaultName }, [identity, defaultName]);
 }
 
 /**

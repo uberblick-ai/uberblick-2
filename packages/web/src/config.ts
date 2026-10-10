@@ -16,10 +16,11 @@
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
  *      "hubAuthToken": "<token-signing key>",
  *      "remoteHubUrl": "wss://team-host/ws", "rebound": true,
+ *      "defaultPresenceName": "Ana Lopez",
  *      "servedWorkspaces": {"<uuid>": {"browserKey": "<workspace key>",
  *        "remoteHubUrl": "wss://team-host/ws"}}}
  *
- * The final two keys are present only when `ub open` is the serving process:
+ * The local-serving keys are present only when `ub open` is the serving process:
  * `hubUrl` then names its loopback websocket, `remoteHubUrl` names the hub its
  * replica half points at, and `rebound: true` says the machine's configured
  * binding has changed since this `ub open` started and it must be restarted.
@@ -45,6 +46,8 @@
  * Its servedWorkspaces map uses bare UUIDs; a null remoteHubUrl means an
  * explicitly local workspace. The legacy fields describe the startup binding.
  * Unbound ub open supplies no workspace or key.
+ * Only ub open supplies defaultPresenceName, from git user.name or the OS
+ * username. Other serving routes omit it and retain random tab names.
  *
  * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
  * fallback default. There are still exactly two, both fallbacks behind the
@@ -84,6 +87,8 @@ export const HUB_CONFIG_PATH = "/uberblick-config.json";
 export type ConfigSource = "document" | "define" | "fallback";
 
 export interface ClientConfig {
+  /** Optional ub open default; other serving routes leave names random. */
+  defaultPresenceName?: string;
   /** The hub this session dials. */
   hubUrl: string;
   hubUrlSource: ConfigSource;
@@ -340,6 +345,7 @@ function usableWorkspaces(
 
 /** Each key of the document, read on its own — see {@link readDocument}. */
 interface DocumentConfig {
+  defaultPresenceName?: string;
   hubUrl: { url: string } | { rejected: string };
   workspaces: { list: string[]; dropped: number } | { rejected: string };
   /** Empty when the document named no usable token-signing key. */
@@ -470,6 +476,7 @@ function readDocument(
     "remoteHubUrl",
     "rebound",
     "servedWorkspaces",
+    "defaultPresenceName",
   ].find(
     (key) => (body.match(new RegExp(`(^|[^\\\\])"${key}"\\s*:`, "g")) ?? []).length >
       (key === "remoteHubUrl" ? nestedUpstreams + (Object.hasOwn(document, key) ? 1 : 0) : 1),
@@ -491,6 +498,8 @@ function readDocument(
     ? usableServedWorkspaces(document.servedWorkspaces, workspaces, document.rebound === true)
     : null;
   return {
+    ...(typeof document.defaultPresenceName === "string" && document.defaultPresenceName.trim() !== ""
+      ? { defaultPresenceName: document.defaultPresenceName.trim() } : {}),
     hubUrl:
       typeof url === "string" && url !== ""
         ? usableEndpoint(url)
@@ -587,6 +596,7 @@ export async function readClientConfig(
     : { hubUrl: outcome.hubUrl.url, hubUrlSource: "document" as const };
   return {
     ...endpoint,
+    ...(outcome.defaultPresenceName === undefined ? {} : { defaultPresenceName: outcome.defaultPresenceName }),
     ...("rejected" in outcome.workspaces
       ? { workspaces: BUILT_IN_WORKSPACES, workspacesSource: "define" as const }
       : { workspaces: outcome.workspaces.list, workspacesSource: "document" as const }),
@@ -660,6 +670,11 @@ export function resolveClientConfig(
  */
 export function hubUrl(): string {
   return settled().hubUrl;
+}
+
+/** Resolved before room acquisition; absent on dev and Caddy serving routes. */
+export function defaultPresenceName(): string | null {
+  return settled().defaultPresenceName ?? null;
 }
 
 /**

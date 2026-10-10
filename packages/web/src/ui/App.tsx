@@ -35,6 +35,7 @@ import type { DocMeta } from "@uberblick/schema";
 import {
   browserSignInRequired,
   configuredWorkspaces,
+  defaultPresenceName,
   endpointLabel,
   hubEndpoint,
   localServing,
@@ -92,6 +93,7 @@ import {
   useRoomStatus,
   useSidebar,
   useStoredFlag,
+  useSetting,
   useThreads,
 } from "./hooks.js";
 
@@ -348,7 +350,6 @@ export function RoutePane({
 }
 
 export function App(): ReactElement {
-  const identity = useIdentity(randomIdentity);
   const [path, navigate] = useRoutePath();
   // No room before the client configuration is known (#91): the shared
   // websocket is built from the first room acquired, so one acquired early
@@ -356,6 +357,11 @@ export function App(): ReactElement {
   // of that same read, and are empty until it settles — which is also what
   // re-renders this component with them.
   const hubReady = useHubEndpoint();
+  // Rooms retain the default identity so clearing an override restores it,
+  // without rebuilding their providers when the browser's name changes.
+  const defaultIdentity = useIdentity(randomIdentity, hubReady ? defaultPresenceName() : null);
+  const chosenName = useSetting("presenceName");
+  const identity = useMemo(() => ({ ...defaultIdentity, name: chosenName ?? defaultIdentity.name }), [defaultIdentity, chosenName]);
   const configured = hubReady ? configuredWorkspaces() : [];
   const startupServing = hubReady ? localServing() : null;
   /** The one that answers `/`, the address that names no workspace. */
@@ -532,24 +538,24 @@ export function App(): ReactElement {
 
   const directory = useRoom(
     roomReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
-    identity,
+    defaultIdentity,
   );
   const doc = useRoom(
     roomReady && workspace !== null && selected !== null
       ? roomForDoc(workspace.uuid, selected)
       : null,
-    identity,
+    defaultIdentity,
   );
   const sidebar = useRoom(
     roomReady && workspace !== null ? sidebarRoom(workspace.uuid) : null,
-    identity,
+    defaultIdentity,
   );
   const catalog = useRoom(
     roomReady &&
       workspace !== null
       ? settingsRoom(workspace.uuid)
       : null,
-    identity,
+    defaultIdentity,
   );
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
@@ -727,7 +733,7 @@ export function App(): ReactElement {
    */
   const workspaces = workspaceList(configured, workspace);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const workspaceNames = useWorkspaceNames(workspaces, workspaceUuid, catalog, identity, workspaceMenuOpen,
+  const workspaceNames = useWorkspaceNames(workspaces, workspaceUuid, catalog, defaultIdentity, workspaceMenuOpen,
     hubReady ? servedWorkspaceNames() : null);
   const onSwitchWorkspace = useCallback(
     // A workspace's list, not a document: two corpora share no uuid, so
@@ -869,7 +875,7 @@ export function App(): ReactElement {
     }
     const uuid = crypto.randomUUID();
     const room = roomForDoc(workspace.uuid, uuid);
-    const handle = acquireRoom(room, identity);
+    const handle = acquireRoom(room, defaultIdentity);
     pending.current?.stop();
     pending.current?.release();
     const held = {
@@ -931,7 +937,7 @@ export function App(): ReactElement {
     // waiting/read-only state, so a second create cannot keep editing the old
     // document while the new connection is still handshaking.
     onSelect(uuid);
-  }, [directory, identity, onBackToWorkspace, onSelect, workspace]);
+  }, [directory, defaultIdentity, onBackToWorkspace, onSelect, workspace]);
 
   /**
    * The directory stub is a cache; `meta.title` in the document is
