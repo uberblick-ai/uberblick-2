@@ -273,22 +273,48 @@ export function caretAtEdge(element: Element, edge: "start" | "end" = "end"): bo
   return copy.textContent === "";
 }
 
-/** Register after ProseMirror's focus handler and its 20ms selection sync. */
+/** Settle pending menu focus restoration and ProseMirror's 20ms focus sync. */
 async function settleEditorFocus(target: Locator): Promise<void> {
-  await expect.poll(() => target.evaluate((element) => {
-    const root = element.closest(".ProseMirror");
-    return root?.classList.contains("ProseMirror-focused") === true && root.contains(element.ownerDocument.activeElement);
-  })).toBe(true);
-  await target.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  await expect.poll(async () => {
+    await target.evaluate((element) => {
+      const root = element.closest(".ProseMirror");
+      if (!(root instanceof HTMLElement)) throw new Error("e2e: caret target has no editor");
+      root.focus();
+    });
+    // Radix can still return focus after its menu has disappeared. Reconcile
+    // that lifecycle before placing a caret, without repeating native input.
+    await target.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    return target.evaluate((element) => {
+      const root = element.closest(".ProseMirror");
+      return root?.classList.contains("ProseMirror-focused") === true && root.contains(element.ownerDocument.activeElement);
+    });
+  }).toBe(true);
+}
+
+/** WebKit/iOS lacks desktop Home/End semantics; use its native selection. */
+async function positionCaret(target: Locator, edge: "start" | "end"): Promise<void> {
+  const page = target.page();
+  if (page.context().browser()?.browserType().name() === "webkit") {
+    await target.evaluate((element, at) => {
+      const owner = element.ownerDocument;
+      const range = owner.createRange();
+      // A td/th child boundary can normalize into the next cell. Keep the
+      // native range inside its paragraph, as a person's caret would be.
+      const block = element.matches("th, td")
+        ? element.querySelector(at === "start" ? ":scope > p:first-child" : ":scope > p:last-child") ?? element
+        : element;
+      range.selectNodeContents(block);
+      range.collapse(at === "start");
+      const selection = owner.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }, edge);
+  } else await page.keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
 
 /** Settle editor focus before delivering the native caret-placement gesture. */
 export async function placeCaretIn(target: Locator, options: { touch?: boolean; edge?: "start" | "end" } = {}): Promise<void> {
-  await target.evaluate((element) => {
-    const root = element.closest(".ProseMirror");
-    if (!(root instanceof HTMLElement)) throw new Error("e2e: caret target has no editor");
-    root.focus();
-  });
   await settleEditorFocus(target);
   if (options.touch === true) {
     // Touch border controls can cover a cell's edge; use its interior.
@@ -298,9 +324,17 @@ export async function placeCaretIn(target: Locator, options: { touch?: boolean; 
     await target.tap(position === undefined ? {} : { position });
   } else await target.click();
   const edge = options.edge ?? "end";
-  await target.page().keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
-  await target.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  await expect.poll(() => target.evaluate(caretAtEdge, edge)).toBe(true);
+  await positionCaret(target, edge);
+  try { await expect.poll(() => target.evaluate(caretAtEdge, edge)).toBe(true); }
+  catch (error) {
+    const state = await target.evaluate((element) => {
+      const selection = element.ownerDocument.getSelection();
+      return { focus: element.ownerDocument.activeElement?.outerHTML.slice(0, 350),
+        target: element.outerHTML.slice(0, 350), anchor: selection?.anchorNode?.parentElement?.outerHTML.slice(0, 350),
+        anchorType: selection?.anchorNode?.nodeName, offset: selection?.anchorOffset, collapsed: selection?.isCollapsed };
+    });
+    throw new Error(`e2e: caret did not settle: ${JSON.stringify(state)}`, { cause: error });
+  }
 }
 
 /**
@@ -313,32 +347,12 @@ export async function placeCaretIn(target: Locator, options: { touch?: boolean; 
  */
 export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Promise<void> {
   const editor = page.locator(".ub-editor .ProseMirror");
-  const webkit = page.context().browser()?.browserType().name() === "webkit";
   await expect
     .poll(async () => {
-      await editor.focus();
       await settleEditorFocus(editor);
-      if (webkit) {
-        // iOS does not give Home/End desktop block-edge semantics. Native
-        // range setup avoids a pointer gesture while retaining real selection
-        // geometry and selectionchange; the test supplies the input it proves.
-        await editor.evaluate((element, at) => {
-          const block = element.firstElementChild;
-          if (block === null) throw new Error("e2e: prose has no block");
-          const range = element.ownerDocument.createRange();
-          range.selectNodeContents(block);
-          range.collapse(at === "start");
-          const selection = element.ownerDocument.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-        }, edge);
-      } else {
-        await page.keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
-      }
-      await page.evaluate(
-        () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-      );
-      return editor.locator(":scope > *").first().evaluate(caretAtEdge, edge);
+      const block = editor.locator(":scope > *").first();
+      await positionCaret(block, edge);
+      return block.evaluate(caretAtEdge, edge);
     })
     .toBe(true);
 }
