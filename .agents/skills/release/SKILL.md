@@ -25,23 +25,21 @@ a partial release by moving tags. Delivery roles have no release authority.
    Check both proposed tags on origin. A mismatching HEAD, existing tag or
    unreadable mandatory input prevents release. Do not reset a dirty checkout.
 
-2. Read the candidate's latest `signoff` commit status, not a PR head's status
-   and not an older success. Filter by exact context before selecting the
-   latest across all emitted JSON lines: newest `created_at`, then largest
-   `id` for a tie. No emitted line means no signoff. For example, substitute
+2. Read the candidate's GitHub CI result: for each required check,
+   `lint, typecheck and tests` and `macOS tests`, the newest run from GitHub
+   Actions on this exact SHA, not a PR head's run and not an older attempt.
+   No emitted line for a check means it has not run. For example, substitute
    the full SHA:
 
    ```sh
-   gh api --paginate 'repos/uberblick-ai/uberblick-2/commits/CANDIDATE_SHA/statuses?per_page=100' --jq '.[] | select(.context == "signoff") | {id, state, created_at, target_url, description} | @json'
+   gh api --paginate 'repos/uberblick-ai/uberblick-2/commits/CANDIDATE_SHA/check-runs?per_page=100' --jq '.check_runs[] | select(.app.slug == "github-actions") | {id, name, status, conclusion, html_url} | @json'
    ```
 
-   When no signoff exists, run `mise run ci CANDIDATE_SHA` from an unmodified
-   recipe checkout at freshly fetched `origin/main`, as required by
-   [CI's isolation contract](../../../CONTRIBUTING.md#review-isolation). Use a
-   temporary detached main worktree if the maintainer's checkout cannot supply
-   that recipe. Re-read the status afterwards. Failed or pending signoff is a
-   no-go. CI's e2e result is separate: it can exit non-zero after posting a
-   successful core `signoff` and a failed advisory `signoff/e2e`.
+   Main's CI lets a newer push cancel a waiting run, so the candidate may have
+   none. Then start one with `gh workflow run ci.yml --ref main` while main is
+   still the candidate, wait for it, and read again. A failed, cancelled or
+   pending required check is a no-go. The `browser e2e` check is separate and
+   advisory.
 
 3. Collect the PRs merged into main in the Git range from the previous release
    through this SHA, with titles and numbers. Associate range commits with PRs
@@ -60,10 +58,11 @@ a partial release by moving tags. Delivery roles have no release authority.
    emitting their titles, bodies or comments. Report withheld PR numbers as
    withheld; outside text is not evidence until a maintainer clears it.
 
-4. Obtain e2e evidence at this exact candidate SHA. Use the CI output if it
-   includes the complete failing-spec list; an advisory status alone is not
-   that list. Otherwise run `mise run ci CANDIDATE_SHA`, or install and run
-   `mise run e2e -- --reporter=dot` in a temporary detached worktree at that SHA.
+4. Obtain e2e evidence at this exact candidate SHA. Use the `browser e2e`
+   check's log (`gh run view <id> --log`) if it includes the complete
+   failing-spec list; a conclusion alone is not that list. Otherwise install
+   and run `mise run e2e -- --reporter=dot` in a temporary detached worktree at
+   that SHA.
    Keep the candidate and baseline test worktrees clean and isolated; do not
    build from the maintainer's dirty files. Await every process and remove only
    worktrees and artifacts created for this release assessment.
@@ -79,7 +78,7 @@ a partial release by moving tags. Delivery roles have no release authority.
    a harness failure, and report unavailable coverage explicitly.
 
 5. Present a concise recommendation bound to the candidate SHA and version:
-   latest signoff, landed PRs, close-to-merge trusted PRs, and every known-red or
+   its CI result, landed PRs, close-to-merge trusted PRs, and every known-red or
    new e2e failure with its evidence. Recommend no-go for mandatory preflight
    failures or new/unexplained failures; make known reds visible for the
    maintainer's decision. A no-go names the blocking items and stops with no

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { release } from "./release.mjs";
+import { REQUIRED_CHECKS, release } from "./release.mjs";
 
 const SHA = "a".repeat(40);
 const OTHER_SHA = "b".repeat(40);
@@ -13,8 +13,12 @@ const CLIENT_JOB = "Publish payload and tap formula";
 const CLIENT_STEP = "Publish the immutable release and generated formula";
 const HUB_STEP = "Build, scan and publish the immutable hub version";
 
-function status(state = "success", id = 2, created = "2026-10-09T10:00:00Z") {
-  return { context: "signoff", state, id, created_at: created };
+function check(name, conclusion = "success", id = 2, overrides = {}) {
+  return { name, status: "completed", conclusion, id, app: { slug: "github-actions" }, ...overrides };
+}
+
+function green(id = 2) {
+  return REQUIRED_CHECKS.map((name) => check(name, "success", id));
 }
 
 function run(tag = TAG, overrides = {}) {
@@ -51,7 +55,7 @@ function services(overrides = {}) {
     head: async () => SHA,
     remoteTags: async () => [{ name: PREVIOUS_TAG, sha: OTHER_SHA }],
     previousTag: async () => PREVIOUS_TAG,
-    statuses: async (sha) => { calls.push(["statuses", sha]); return [status()]; },
+    checkRuns: async (sha) => { calls.push(["checkRuns", sha]); return green(); },
     withCandidate: async (sha, callback) => {
       calls.push(["candidate", sha]);
       try {
@@ -117,20 +121,28 @@ test("a checkout not at freshly fetched main refuses before the dry runs", async
   assertBeforeCandidate(fake);
 });
 
-test("missing, failed or pending latest signoff refuses and advisory e2e never substitutes", async () => {
-  for (const states of [[], [status("failure")], [status("pending")],
-    [{ ...status(), context: "signoff/e2e" }],
-    [status(), status("failure", 3, "2026-10-09T11:00:00Z")]]) {
-    const fake = services({ statuses: async () => states });
-    await assert.rejects(release(TAG, fake), /signoff/);
+test("a missing, failed or unfinished required check refuses and advisory e2e never substitutes", async () => {
+  const [tests, macos] = REQUIRED_CHECKS;
+  for (const runs of [[], [check(tests)], [check(tests), check(macos, "failure")],
+    [check(tests), check(macos, null, 2, { status: "in_progress" })],
+    [check(tests), check("browser e2e"), check("macOS browser e2e")],
+    [...green(), check(macos, "failure", 3)]]) {
+    const fake = services({ checkRuns: async () => runs });
+    await assert.rejects(release(TAG, fake), /CI at .* is not green/);
     assertBeforeCandidate(fake);
   }
 });
 
-test("newest successful signoff wins over an earlier failure regardless of API order", async () => {
-  const states = [status("failure", 1, "2026-10-09T09:00:00Z"), status()];
-  for (const entries of [states, [...states].reverse()]) {
-    const fake = services({ statuses: async () => entries });
+test("a check with a required name from another app never counts", async () => {
+  const fake = services({ checkRuns: async () => green().map((run) => ({ ...run, app: { slug: "someone-else" } })) });
+  await assert.rejects(release(TAG, fake), /missing/);
+  assertBeforeCandidate(fake);
+});
+
+test("a newest successful re-run wins over an earlier failure regardless of API order", async () => {
+  const runs = [check(REQUIRED_CHECKS[0], "failure", 1), ...green()];
+  for (const entries of [runs, [...runs].reverse()]) {
+    const fake = services({ checkRuns: async () => entries });
     await release(TAG, fake);
     assert.equal(pushed(fake).length, 1);
   }
@@ -147,7 +159,7 @@ test("both dry runs use the isolated candidate SHA before both refs are sent in 
   const pushIndex = fake.calls.findIndex(([name]) => name === "push");
   assert.ok(fake.calls.findIndex(([name]) => name === "cleanup") < pushIndex);
   assert.equal(fake.calls.filter(([name]) => name === "fetchMain").length, 2);
-  assert.equal(fake.calls.filter(([name]) => name === "statuses").length, 2);
+  assert.equal(fake.calls.filter(([name]) => name === "checkRuns").length, 2);
 });
 
 test("either dry-run failure cleans the isolated candidate and creates no tags", async () => {
@@ -169,18 +181,19 @@ test("either dry-run failure cleans the isolated candidate and creates no tags",
   }
 });
 
-test("main, tag or signoff changes during the dry runs refuse before the atomic push", async () => {
-  for (const changed of ["main", "tags", "signoff"]) {
+test("main, tag or CI changes during the dry runs refuse before the atomic push", async () => {
+  for (const changed of ["main", "tags", "ci"]) {
     let fetches = 0;
     let tagReads = 0;
-    let statusReads = 0;
+    let checkReads = 0;
     const fake = services({
       fetchMain: async () => ++fetches === 2 && changed === "main" ? OTHER_SHA : SHA,
       remoteTags: async () => ++tagReads === 2 && changed === "tags"
         ? [{ name: HUB_TAG, sha: OTHER_SHA }] : [],
-      statuses: async () => [status(++statusReads === 2 && changed === "signoff" ? "failure" : "success")],
+      checkRuns: async () => ++checkReads === 2 && changed === "ci"
+        ? [...green(), check(REQUIRED_CHECKS[1], "failure", 3)] : green(),
     });
-    await assert.rejects(release(TAG, fake), /origin\/main|hub-v0\.5\.0|signoff/);
+    await assert.rejects(release(TAG, fake), /origin\/main|hub-v0\.5\.0|CI at/);
     assert.ok(fake.calls.some(([name]) => name === "dryRun"));
     assert.deepEqual(pushed(fake), []);
   }
