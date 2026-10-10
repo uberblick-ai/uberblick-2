@@ -48,9 +48,11 @@ ub mcp install cursor --print
 `claude mcp add`, `codex mcp add` — that is what runs, because the vendor knows
 its own file best, and the scope rides on the vendor's own flags. Codex has no
 scope flag: which file it writes is the configuration directory it is handed,
-so project scope points it at the project's `.codex`. Cursor, which ships no `mcp add`, gets
-the snippet and the path to paste it into, on exit 0, with nothing written — so
-does a target whose vendor CLI is not installed. A client `ub` has never heard of
+so project scope points it at the project's `.codex`. Cursor, which ships no
+`mcp add`, gets the snippet and the path to paste it into, on exit 0, with
+nothing written. A missing vendor CLI or a failed `mcp add` prints the snippet
+on stdout, names the failure and destination file on stderr, and exits 1.
+A client `ub` has never heard of
 gets the same snippet and that client's own MCP configuration as the
 destination: there is no path to invent for a client nobody has described.
 Before it delegates, the command reads the target file for one answer: an entry
