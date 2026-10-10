@@ -248,10 +248,16 @@ test("own gaps, outside release and Escape preserve the caret and focus without 
         await expect(indicator(page)).toHaveCount(0);
         await expect(page.getByRole("menu")).toHaveCount(0);
         await expect(editor(page)).toBeFocused();
+        // Native selections can end at a text offset or an element's child
+        // boundary. Both are a caret at the end when no target text follows.
         await expect.poll(() => caret.evaluate((element) => {
           const selection = document.getSelection();
-          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
-            && element.contains(selection.anchorNode) && selection.anchorOffset === selection.anchorNode.textContent?.length;
+          const anchor = selection?.anchorNode;
+          if (!selection?.isCollapsed || anchor === null || anchor === undefined || !element.contains(anchor)) return false;
+          const remaining = document.createRange();
+          remaining.selectNodeContents(element);
+          remaining.setStart(anchor, selection.anchorOffset);
+          return remaining.toString() === "";
         })).toBe(true);
         await expect(bodyNames(table)).toHaveText(INITIAL);
         expect(Y.encodeStateVector(fixture.doc)).toEqual(before);

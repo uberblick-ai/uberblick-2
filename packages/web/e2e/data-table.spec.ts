@@ -720,7 +720,7 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
       rows: tables.map(table => table.tBodies[0]?.rows.length ?? 0),
       headers: tables[0]?.querySelectorAll("thead th[scope='col']").length ?? 0,
     };
-  }), { timeout: mixed ? 60_000 : 20_000 }).toEqual({
+  }), { timeout: mixed ? 180_000 : 20_000 }).toEqual({
     tables: mixed ? 10 : 1,
     ready: mixed ? 20 : 1,
     rows: Array.from({ length: mixed ? 10 : 1 }, () => 4035),
@@ -770,7 +770,9 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
 }
 
 test("one table and twenty shared views record bounded Chromium live-update timings", async ({ browser }, info) => {
-  test.setTimeout(180_000);
+  // Initial layout of 400,000 cells takes over a minute on GitHub's runner.
+  // Readiness is separate from the first-render/update measurements below.
+  test.setTimeout(360_000);
   const session = writer();
   for (const mixed of [false, true]) {
     const { uuid, bytes } = await workload(session, mixed);
@@ -784,19 +786,7 @@ test("one table and twenty shared views record bounded Chromium live-update timi
       },
       contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
     });
-    try {
-      await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
-    } catch (error) {
-      console.log("data table failure state", await page.evaluate(() => ({
-        route: location.pathname,
-        title: document.querySelector<HTMLInputElement>(".ub-title")?.value,
-        editor: document.querySelector(".ProseMirror")?.textContent?.length,
-        chartBlocks: document.querySelectorAll(".ub-chart").length,
-        body: document.body.innerText.slice(0, 1800),
-        probe: (window as unknown as { tableProbe: unknown }).tableProbe,
-      })));
-      throw error;
-    }
+    await publishTimings(info, await timingEvidence(page, session, uuid, mixed, bytes), mixed ? "mixed" : "single");
     await page.context().close();
   }
 });
