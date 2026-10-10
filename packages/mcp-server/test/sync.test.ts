@@ -21,7 +21,7 @@ import {
   setTldr,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { Hub, HubLogRecord } from "@uberblick/hub";
+import type { Hub } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
@@ -610,14 +610,9 @@ describe("hub sync", () => {
     // accept us may put another token on the wire: a client told it is the
     // wrong version does not become the right one by reconnecting, and only a
     // restart of this process re-reads that.
-    const records: HubLogRecord[] = [];
     const databasePath = tempDatabasePath();
-    const log = (record: HubLogRecord) => {
-      records.push(record);
-    };
     const first = await hub({
       databasePath,
-      log,
       protocolVersion: SYNC_PROTOCOL_VERSION + 1,
     });
     const port = first.port;
@@ -640,8 +635,8 @@ describe("hub sync", () => {
     // *our* version — the most inviting thing that can happen to a client that
     // is still trying.
     await hubs.pop()?.stop();
-    records.length = 0;
-    const second = await hub({ port, databasePath, log });
+    const second = await hub({ port, databasePath });
+    const records = second.records;
     expect(second.port).toBe(port);
 
     // A fresh client authenticating proves the new hub is up and serving, so

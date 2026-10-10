@@ -12,7 +12,7 @@ import {
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
-import { caretAtEdge, keys, placeCaretIn } from "./harness.js";
+import { caretAtEdge, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -105,10 +105,13 @@ async function startMouse(page: Page, table: Locator, row = 1): Promise<void> {
 }
 
 async function overGap(page: Page, table: Locator, boundary: number): Promise<void> {
-  const destination = await gap(table, boundary);
-  await page.mouse.move(destination.x, destination.y, { steps: 12 });
-  await expect(indicator(page)).toHaveCount(1);
-  await expect(indicator(page)).toHaveAttribute("data-gap", String(boundary));
+  // Auto-scroll can move the gap after its coordinates were read. Steer the
+  // held pointer at the current gap; these moves cannot restart a canceled drag.
+  await expect.poll(async () => {
+    const destination = await gap(table, boundary);
+    await page.mouse.move(destination.x, destination.y);
+    return indicator(page).evaluateAll(elements => elements.map(element => element.getAttribute("data-gap")));
+  }).toEqual([String(boundary)]);
 }
 
 async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
@@ -467,15 +470,9 @@ test("native touch holds pick up rows and swallow release clicks, including canc
   const session = await page.context().newCDPSession(page);
   try {
     const table = await openTable(page, fixture.uuid);
-    for (const [round, ending] of (["own", "escape", "cancel", "move"] as const).entries()) {
+    for (const ending of ["own", "escape", "cancel", "move"] as const) {
       const cell = table.locator("tr").nth(1).locator("td").nth(1);
-      // ProseMirror groups mouse downs within 500 ms and 10 px into double and
-      // triple clicks. A fast round would make this tap a triple click, which
-      // selects the paragraph without focusing the editor.
-      // Keep these taps near the cell's left edge, away from border controls.
-      await cell.tap({ position: { x: 8 + round * 16, y: (await box(cell)).height / 2 } });
-      await page.keyboard.press(keys.lineEnd);
-      const offset = await cell.evaluate(() => document.getSelection()?.anchorOffset);
+      await placeCaretIn(cell, { touch: true });
       const bounds = await box(handle(page, 1));
       const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
       const before = Y.encodeStateVector(fixture.doc);
@@ -492,11 +489,7 @@ test("native touch holds pick up rows and swallow release clicks, including canc
       await expect(bodyNames(table)).toHaveText(ending === "move" ? ["beta", "gamma", "alpha"] : INITIAL);
       if (ending !== "move") {
         expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
-        await expect.poll(() => cell.evaluate((element) => {
-          const selection = document.getSelection();
-          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
-            && element.contains(selection.anchorNode) ? selection.anchorOffset : null;
-        })).toBe(offset);
+        await expect.poll(() => cell.evaluate(caretAtEdge)).toBe(true);
       }
       const current = ending === "move" ? 3 : 1;
       // A stationary hold generates a native click after release; a later

@@ -101,6 +101,7 @@ function TableControlSurface({ tableId, editor, host }: {
   const menuRef = useRef<TableRowTarget | null>(null);
   const hovered = useRef<{ id: string; row: number | null; y?: number | undefined } | null>(null);
   const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
+  const lastTouch = useRef<{ x: number; y: number } | null>(null);
   const pendingFocus = useRef(false);
   const controls = useRef<HTMLDivElement | null>(null);
   const columnStrip = useRef<HTMLDivElement | null>(null);
@@ -208,8 +209,16 @@ function TableControlSurface({ tableId, editor, host }: {
       if (drag.current !== null) setGap(rowGap(next, base, drag.current.point));
     };
     const move = (event: PointerEvent): void => {
-      if (event.pointerType === "touch") return;
+      if (event.pointerType === "touch") {
+        lastTouch.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      // WebKit can emit stationary compatibility hover at the last touch
+      // point during reflow/scroll. It is not a switch to mouse input.
+      if (touch.current && event.pointerType === "mouse" && event.movementX === 0 && event.movementY === 0
+        && lastTouch.current?.x === event.clientX && lastTouch.current.y === event.clientY) return;
       touch.current = false;
+      lastTouch.current = null;
       const id = tableIdAt(event.target);
       const element = event.target instanceof Element ? event.target : null;
       hovered.current = id === null ? null : {
@@ -229,6 +238,7 @@ function TableControlSurface({ tableId, editor, host }: {
     };
     const press = (event: PointerEvent): void => {
       touch.current = event.pointerType === "touch";
+      lastTouch.current = touch.current ? { x: event.clientX, y: event.clientY } : null;
       if (touch.current) hovered.current = null;
       else {
         const id = tableIdAt(event.target);

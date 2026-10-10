@@ -39,6 +39,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
 import { getBlocks } from "@uberblick/schema";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
+import { activateControl } from "./input-helpers.js";
 
 /**
  * The hub's HMAC signing secret for the run. Not a secret in any sense worth
@@ -291,10 +292,10 @@ async function settleEditorFocus(target: Locator): Promise<void> {
   }).toBe(true);
 }
 
-/** WebKit/iOS lacks desktop Home/End semantics; use its native selection. */
-async function positionCaret(target: Locator, edge: "start" | "end"): Promise<void> {
+/** Explicit targets avoid click-count selections; WebKit lacks Home/End semantics. */
+async function positionCaret(target: Locator, edge: "start" | "end", explicit = false): Promise<void> {
   const page = target.page();
-  if (page.context().browser()?.browserType().name() === "webkit") {
+  if (explicit || page.context().browser()?.browserType().name() === "webkit") {
     await target.evaluate((element, at) => {
       const owner = element.ownerDocument;
       const range = owner.createRange();
@@ -309,6 +310,10 @@ async function positionCaret(target: Locator, edge: "start" | "end"): Promise<vo
       selection?.removeAllRanges();
       selection?.addRange(range);
     }, edge);
+    // A non-moving native key flushes this selection into ProseMirror before
+    // the test sends its actual input. End can move a triple-click selection
+    // into the following paragraph/cell instead of placing this target's caret.
+    await page.keyboard.press("Shift");
   } else await page.keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
@@ -316,15 +321,9 @@ async function positionCaret(target: Locator, edge: "start" | "end"): Promise<vo
 /** Settle editor focus before delivering the native caret-placement gesture. */
 export async function placeCaretIn(target: Locator, options: { touch?: boolean; edge?: "start" | "end" } = {}): Promise<void> {
   await settleEditorFocus(target);
-  if (options.touch === true) {
-    // Touch border controls can cover a cell's edge; use its interior.
-    const position = await target.evaluate(element => element.matches("th, td")
-      ? { x: element.getBoundingClientRect().width / 4, y: element.getBoundingClientRect().height / 2 }
-      : undefined);
-    await target.tap(position === undefined ? {} : { position });
-  } else await target.click();
+  await activateControl(target, { touch: options.touch });
   const edge = options.edge ?? "end";
-  await positionCaret(target, edge);
+  await positionCaret(target, edge, true);
   try { await expect.poll(() => target.evaluate(caretAtEdge, edge)).toBe(true); }
   catch (error) {
     const state = await target.evaluate((element) => {

@@ -748,7 +748,8 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
         ...(mixed ? [{ collection: "summaries", upsert: [{ id: "summary-00364", value: { day: new Date(Date.UTC(2012, 0, 365)).toISOString().slice(0, 10), value0: value, value1: value + 1, value2: value + 2 } }] }] : []),
       ],
     });
-    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length)).toBe(previous + 1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length),
+      { timeout: readinessTimeout }).toBe(previous + 1);
   }
   const probe = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[]; readsPerUpdate: number[]; localUpdates: number } }).tableProbe);
   expect(probe.localUpdates).toBe(0);
@@ -771,7 +772,7 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
 }
 
-test("one table and twenty shared views record bounded Chromium live-update timings", async ({ browser }, info) => {
+test("one table and twenty shared views record bounded Chromium live-update timings", { tag: "@workload" }, async ({ browser }, info) => {
   // Initial layout of 400,000 cells takes over a minute on GitHub's runner.
   // Readiness is separate from the first-render/update measurements below.
   test.setTimeout(360_000);

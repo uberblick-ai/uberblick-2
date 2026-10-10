@@ -2,7 +2,7 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { join } from "node:path";
-import { createDoc, docTitle, editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
+import { activateControl, createDoc, docTitle, editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
 import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext } = setupHarness();
@@ -16,8 +16,7 @@ function button(page: Page, name: string): Locator {
 }
 
 async function activate(control: Locator, info: TestInfo): Promise<void> {
-  if (info.project.use.hasTouch === true) await control.tap();
-  else await control.click();
+  await activateControl(control, { touch: info.project.use.hasTouch === true });
 }
 
 async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
@@ -34,7 +33,7 @@ async function touchPage(browser: Browser, info: TestInfo): Promise<Page> {
 async function openTable(page: Page, headerOnly = false): Promise<Locator> {
   await page.goto(harness().appUrl);
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
-    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
   }
   await createDoc(page, docTitle("Table controls"));
   await placeCaret(page);
@@ -664,6 +663,28 @@ test("touch exposes 44px controls for the caret table and row without hover", { 
   await expect(table.locator("th")).toHaveCount(4);
   await expect(table.locator("tr").last().locator("td")).toHaveCount(4);
   await pageFits(page);
+});
+
+test("touch sizing survives stationary compatibility hover but real mouse movement changes mode", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info);
+  const table = await openTable(page);
+  const point = await table.locator("tr").nth(1).locator("td").first().evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return { x: Math.round(box.left + box.width / 4), y: Math.round(box.top + box.height / 2) };
+  });
+  await page.touchscreen.tap(point.x, point.y);
+  const row = button(page, "Insert row after 2");
+  await expect(row).toHaveCSS("width", "44px");
+  await page.evaluate(({ x, y }) => {
+    document.elementFromPoint(x, y)?.dispatchEvent(new PointerEvent("pointermove", {
+      bubbles: true, pointerType: "mouse", clientX: x, clientY: y, movementX: 0, movementY: 0,
+    }));
+  }, point);
+  await expect(controls(page)).toHaveAttribute("data-touch", "true");
+  await expect(row).toHaveCSS("width", "44px");
+  await page.mouse.move(point.x + 10, point.y);
+  await expect(controls(page)).toHaveAttribute("data-touch", "false");
+  await expect(row).toHaveCSS("width", "24px");
 });
 
 test("archiving hides structural controls and keyboard and right-click paths cannot write", { tag: "@webkit" }, async ({ page }, info) => {
