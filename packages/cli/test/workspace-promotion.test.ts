@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { hostname } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
@@ -64,6 +63,8 @@ describe("workspace creation and promotion", () => {
     expect(result.stdout).toContain("ub workspace promote https://hub.example.com");
     expect(result.stdout).toContain("ub workspace promote wss://hub.example.com/ws");
     expect(result.stdout).toContain("member or administrator of at least one workspace");
+    expect(result.stdout).toContain("Sign in first\nwith ub auth login <hub>");
+    expect(result.stdout).not.toContain("ask for GitHub approval");
   });
 
   it("creates a new named workspace with starters without touching parent bindings, old data, credentials or MCP pins", async () => {
@@ -323,8 +324,8 @@ describe("workspace creation and promotion", () => {
   });
 });
 
-it.each(["missing", "revoked"])("runs GitHub approval with a %s login without login next actions", async state => {
-  const box = await localWorkspace();
+it.each(["missing", "revoked"])("refuses promotion with a %s login without starting GitHub approval", async state => {
+  const box = await localWorkspace("My Workspace");
   let approvals = 0;
   const github: typeof fetch = async input => {
     const url = String(input);
@@ -341,29 +342,124 @@ it.each(["missing", "revoked"])("runs GitHub approval with a %s login without lo
     github: { clientId: "Iv1.0123456789abcdef", fetch: github }, log: silentLogger,
   }, { deviceCredentials: true, initializeDefaultWorkspace: true });
   hubs.push(hub);
-  const endpoint = `ws://127.0.0.1:${hub.port}`;
   const identity = hub.principals!.identify("1234", "test-first-owner");
   const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
   if (state === "revoked") await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
     credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
   hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);
+  const before = bindingBytes(box);
+  const rows = accessRows(hub);
+  let renewals = 0;
+  const handler = hub.hocuspocus.configuration.onRequest!;
+  const extension = hub.hocuspocus.configuration.extensions.find(item => item.onRequest === handler)!;
+  vi.spyOn(extension, "onRequest").mockImplementation(async payload => {
+    if (payload.request.url === "/auth/credential/renew") renewals++;
+    return handler(payload);
+  });
+  const origin = `http://127.0.0.1:${hub.port}`;
+  const result = await runUbAsync(["workspace", "promote", origin], box);
+  expect(result.status, result.output).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe(`error: you are not signed in to ${origin}\n` +
+    "nothing was uploaded; My Workspace is still local\n" +
+    "sign in first, then run promote again:\n" +
+    `  ub auth login ${origin}\n  ub workspace promote ${origin}\n`);
+  expect(result.output).not.toContain("fixture-private");
+  expect(approvals).toBe(0);
+  expect(renewals).toBe(state === "revoked" ? 1 : 0);
+  expect(bindingBytes(box)).toBe(before);
+  const workspaceId = selected(box).workspaceId;
+  expect(readWorkspaceHub(workspaceId, box.env)).toBeNull();
+  expect(accessRows(hub)).toEqual(rows);
+  expect(rows.receipts).toEqual([]);
+  expect([...hub.hocuspocus.documents.keys()].filter(name => name.startsWith(`${workspaceId}/`))).toEqual([]);
+  const db = new DatabaseSync(hub.databasePath, { readOnly: true });
+  try {
+    const prefix = `${workspaceId}/`;
+    expect(db.prepare("SELECT name FROM documents WHERE substr(name, 1, ?) = ?").all(prefix.length, prefix)).toEqual([]);
+  } finally { db.close(); }
+});
+
+it("prints the corpus sign-in refusal verbatim", async () => {
+  const box = await localWorkspace("My Workspace");
+  const before = bindingBytes(box);
+  const result = await runUbAsync(["workspace", "promote", "https://hub.uberblick.ai"], box);
+  expect(result.status, result.output).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("error: you are not signed in to https://hub.uberblick.ai\n" +
+    "nothing was uploaded; My Workspace is still local\n" +
+    "sign in first, then run promote again:\n" +
+    "  ub auth login https://hub.uberblick.ai\n  ub workspace promote https://hub.uberblick.ai\n");
+  expect(bindingBytes(box)).toBe(before);
+});
+
+it("uses the workspace id without a readable name and shell-quotes the original hub argument", async () => {
+  const box = await localWorkspace();
+  const local = createMcpServer(offline(box));
+  try { local.replicas.settings().doc.getMap("workspace-settings").delete("name"); }
+  finally { await local.close(); }
+  const workspaceId = selected(box).workspaceId;
+  const before = bindingBytes(box);
+  const result = await runUbAsync(["workspace", "promote", " https://[::1]:8080 "], box);
+  expect(result.status, result.output).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe("error: you are not signed in to https://[::1]:8080\n" +
+    `nothing was uploaded; ${workspaceId} is still local\n` +
+    "sign in first, then run promote again:\n" +
+    "  ub auth login 'https://[::1]:8080'\n  ub workspace promote ' https://[::1]:8080 '\n");
+  expect(bindingBytes(box)).toBe(before);
+});
+
+it("silently renews a refused stored credential and retries promotion without GitHub approval", async () => {
+  const box = await localWorkspace();
+  const { hub, endpoint } = await hubFor(box);
+  const handler = hub.hocuspocus.configuration.onRequest!;
+  const extension = hub.hocuspocus.configuration.extensions.find(item => item.onRequest === handler)!;
+  let reservations = 0;
+  let renewals = 0;
+  vi.spyOn(extension, "onRequest").mockImplementation(async payload => {
+    if (payload.request.url === "/auth/credential/renew") renewals++;
+    if (payload.request.url === "/auth/manage" && reservations++ === 0) {
+      payload.response.writeHead(401, { "Content-Type": "application/json" });
+      payload.response.end(JSON.stringify({ status: "sign-in-required" }));
+      return Promise.reject();
+    }
+    return handler(payload);
+  });
   const result = await runUbAsync(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
-  expect(result.stdout).toContain("open       https://github.com/login/device\n");
-  expect(result.stdout).toContain("claimed    default workspace (");
-  expect(result.stdout).not.toContain("Use it here:");
-  expect(result.stdout).not.toContain("Project binding unchanged");
-  expect(result.stdout).toContain(`Use on another machine: ub workspace use ${endpoint}/${selected(box).workspaceId}\n`);
-  expect(result.output).not.toContain("fixture-private");
-  expect(approvals).toBe(1);
-  expect(hub.credentials!.listDevices(identity.id)).toEqual([
-    expect.objectContaining({ deviceName: hostname() }),
-  ]);
-  const rows = accessRows(hub);
-  expect(rows.claims[0]!.unclaimed).toBe(0);
-  expect(rows.memberships).toHaveLength(2);
-  expect(rows.memberships.every(row => row.role === "admin")).toBe(true);
-  expect(rows.receipts).toHaveLength(1);
+  expect(reservations).toBe(2);
+  expect(renewals).toBe(2); // Retry the refused key, then admit the newly granted workspace.
+  expect(selected(box).hubUrl).toBe(endpoint);
+  expect(accessRows(hub).receipts).toHaveLength(1);
+});
+
+it("refuses before upload if the stored device is revoked immediately after reservation", async () => {
+  const box = await localWorkspace("My Workspace");
+  const { hub, endpoint, login } = await hubFor(box);
+  const before = bindingBytes(box);
+  const handler = hub.hocuspocus.configuration.onRequest!;
+  const extension = hub.hocuspocus.configuration.extensions.find(item => item.onRequest === handler)!;
+  vi.spyOn(extension, "onRequest").mockImplementation(async payload => {
+    try { return await handler(payload); }
+    finally {
+      if (payload.request.url === "/auth/manage" && payload.response.statusCode === 200) {
+        hub.credentials!.revokeDevice(login.identity.id, login.credential.record.deviceId);
+      }
+    }
+  });
+  const result = await runUbAsync(["workspace", "promote", endpoint], box);
+  const origin = `http://127.0.0.1:${hub.port}`;
+  expect(result.status, result.output).toBe(1);
+  expect(result.stdout).toBe("");
+  expect(result.stderr).toBe(`error: you are not signed in to ${origin}\n` +
+    "nothing was uploaded; My Workspace is still local\n" +
+    "sign in first, then run promote again:\n" +
+    `  ub auth login ${origin}\n  ub workspace promote ${endpoint}\n`);
+  expect(bindingBytes(box)).toBe(before);
+  expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
+  expect(accessRows(hub).receipts).toHaveLength(1);
+  expect([...hub.hocuspocus.documents.keys()].filter(name => name.startsWith(`${selected(box).workspaceId}/`))).toEqual([]);
 });
 
 it("resumes a lost grant reply using another URL spelling of the same authentication origin", async () => {

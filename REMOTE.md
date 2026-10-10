@@ -1319,15 +1319,16 @@ Run these commands in the project directory on the computer holding its document
 
 ```sh
 ub workspace create "Project notes"
+ub auth login http://localhost:8080
 ub workspace promote http://localhost:8080
 ```
 
 `create` makes and selects a local-only workspace with a fresh UUID, name and
-starter documents/sidebar. `promote` reuses this hub's stored login, or runs
-GitHub approval if there is no working login. Your account must currently be a
-member or administrator of at least one workspace on the hub. The login that
-claims a fresh hub's default workspace qualifies. Signing in otherwise grants
-nothing.
+starter documents/sidebar. Sign in first with `ub auth login <hub>`; `promote`
+reuses this hub's stored login and refuses if sign-in is required. Your account
+must currently be a member or administrator of at least one workspace on the hub.
+The login that claims a fresh hub's default workspace qualifies. Signing in
+otherwise grants nothing.
 
 Promotion grants this account the new workspace's sole initial admin membership,
 then renews its device credential, uploads documents (including archived
@@ -1345,7 +1346,7 @@ the hub stores its receipt atomically with the grant. The project binding stays
 unchanged on failure and local work remains available. Close other clients while
 promoting. A workspace already bound to a hub cannot be promoted. The reservation
 itself does not change the hub's default workspace, first-claim state or other
-memberships. On a fresh hub, the sign-in requested by promotion can claim the
+memberships. On a fresh hub, the separate sign-in before promotion can claim the
 default workspace through the normal first-login flow.
 
 Host-only first-administrator setup remains a separate operation for workspaces
