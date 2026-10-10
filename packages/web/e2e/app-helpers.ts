@@ -73,6 +73,15 @@ export function editor(page: Page): Locator {
   return page.locator(".ub-editor .ProseMirror");
 }
 
+/** Keyboard input needs the opened menu's focus lifecycle, not just its paint. */
+export async function openKeyboardMenu(page: Page, shortcut: string, trigger?: Locator): Promise<void> {
+  await page.keyboard.press(shortcut);
+  if (trigger !== undefined) await expect(trigger).toHaveAttribute("data-state", "open");
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect.poll(() => menu.evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
+}
+
 export function docButton(page: Page, title: string): Locator {
   return page.locator(".ub-list").getByRole("button", { name: title, exact: true });
 }

@@ -2,8 +2,8 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { join } from "node:path";
-import { createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { createDoc, docTitle, editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext } = setupHarness();
 
@@ -21,18 +21,7 @@ async function activate(control: Locator, info: TestInfo): Promise<void> {
 }
 
 async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
-  if (info.project.use.hasTouch === true && await cell.evaluate((element) => element.matches("th, td"))) {
-    // Border targets may cover the neighbouring cell's edge on touch. Use
-    // the cell interior, away from the visible right-edge row controls.
-    const box = await cell.boundingBox();
-    if (box === null) throw new Error("e2e: caret cell has no geometry");
-    await cell.tap({ position: { x: box.width / 4, y: box.height / 2 } });
-  } else await activate(cell, info);
-  await expect.poll(() => cell.evaluate((element) => {
-    const anchor = document.getSelection()?.anchorNode;
-    return anchor !== null && anchor !== undefined && element.contains(anchor);
-  })).toBe(true);
-  await cell.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await placeCaretIn(cell, { touch: info.project.use.hasTouch === true });
 }
 
 async function touchPage(browser: Browser, info: TestInfo): Promise<Page> {
@@ -460,10 +449,9 @@ test(`row menus target their row by trigger, right click and keyboard and protec
   await expect(table.locator("tr").nth(3).locator("td")).toHaveText(["", "", ""]);
   await expect(table.locator("tr").last()).toContainText("Keep last row");
 
-  await activate(table.locator("tr").nth(2).locator("td").first(), info);
+  await caretIn(table.locator("tr").nth(2).locator("td").first(), info);
   // Control+Option+R exists on a MacBook without a context-menu key.
-  await page.keyboard.press("Control+Alt+r");
-  await expect(page.getByRole("menu")).toBeVisible();
+  await openKeyboardMenu(page, "Control+Alt+r", button(page, "Row 3 actions"));
   await page.keyboard.press("End");
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
@@ -473,7 +461,7 @@ test(`row menus target their row by trigger, right click and keyboard and protec
   await expect(table.locator("tr").last()).toContainText("Keep last row");
 
   await caretIn(table.locator("th").first(), info);
-  await page.keyboard.press("Control+Alt+r");
+  await openKeyboardMenu(page, "Control+Alt+r", button(page, "Row 1 actions"));
   await expect(page.getByRole("menuitem", { name: "Insert row above", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "Insert row below", exact: true })).toBeEnabled();
@@ -535,8 +523,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await expect(table.locator("tr")).toHaveCount(4);
   await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
   await caretIn(table.locator("tr").last().locator("td").first(), info);
-  await page.keyboard.press("Shift+F10");
-  await expect(page.getByRole("menu")).toBeVisible();
+  await openKeyboardMenu(page, "Shift+F10", button(page, "Row 4 actions"));
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(button(page, "Row 4 actions")).toBeFocused();

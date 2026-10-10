@@ -241,8 +241,7 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
-  // Full-app menu/focus transitions exceed 5s on the shared CI runner.
-  it("archives and restores a whole decision topic from a successor, with first-record authority", { timeout: 20_000 }, async () => {
+  it("archives and restores a whole decision topic from a successor, with first-record authority", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
@@ -296,7 +295,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(banner(host)).toBeNull();
   });
 
-  it("curates and archives from the identity-row menu, taking the pin with it", { timeout: 20_000 }, async () => {
+  it("curates and archives from the identity-row menu, taking the pin with it", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
     const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;

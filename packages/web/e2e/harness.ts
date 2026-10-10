@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
-import type { Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test";
+import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub, HubConfig } from "@uberblick/hub";
 import { getBlocks } from "@uberblick/schema";
@@ -256,6 +256,53 @@ export const keys = {
   documentStart: mac ? "Meta+ArrowUp" : "Control+Home",
 } as const;
 
+/** A native caret may end at a text offset or an element's child boundary. */
+export function caretAtEdge(element: Element, edge: "start" | "end" = "end"): boolean {
+  const owner = element.ownerDocument;
+  const selection = owner.getSelection();
+  const anchor = selection?.anchorNode;
+  const root = element.closest(".ProseMirror");
+  if (!selection?.isCollapsed || anchor === null || anchor === undefined || !element.contains(anchor)
+    || root === null || !root.contains(owner.activeElement)) return false;
+  const outside = owner.createRange();
+  outside.selectNodeContents(element);
+  if (edge === "start") outside.setEnd(anchor, selection.anchorOffset);
+  else outside.setStart(anchor, selection.anchorOffset);
+  const copy = outside.cloneContents();
+  for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) cursor.remove();
+  return copy.textContent === "";
+}
+
+/** Register after ProseMirror's focus handler and its 20ms selection sync. */
+async function settleEditorFocus(target: Locator): Promise<void> {
+  await expect.poll(() => target.evaluate((element) => {
+    const root = element.closest(".ProseMirror");
+    return root?.classList.contains("ProseMirror-focused") === true && root.contains(element.ownerDocument.activeElement);
+  })).toBe(true);
+  await target.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+}
+
+/** Settle editor focus before delivering the native caret-placement gesture. */
+export async function placeCaretIn(target: Locator, options: { touch?: boolean; edge?: "start" | "end" } = {}): Promise<void> {
+  await target.evaluate((element) => {
+    const root = element.closest(".ProseMirror");
+    if (!(root instanceof HTMLElement)) throw new Error("e2e: caret target has no editor");
+    root.focus();
+  });
+  await settleEditorFocus(target);
+  if (options.touch === true) {
+    // Touch border controls can cover a cell's edge; use its interior.
+    const position = await target.evaluate(element => element.matches("th, td")
+      ? { x: element.getBoundingClientRect().width / 4, y: element.getBoundingClientRect().height / 2 }
+      : undefined);
+    await target.tap(position === undefined ? {} : { position });
+  } else await target.click();
+  const edge = options.edge ?? "end";
+  await target.page().keyboard.press(edge === "start" ? keys.lineStart : keys.lineEnd);
+  await target.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await expect.poll(() => target.evaluate(caretAtEdge, edge)).toBe(true);
+}
+
 /**
  * Focus the editor and put its caret at one end of the first text line.
  *
@@ -270,10 +317,7 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
   await expect
     .poll(async () => {
       await editor.focus();
-      // ProseMirror schedules a selection-to-DOM sync 20ms after focus.
-      // Register a page timer after it so neither this caret placement nor a
-      // caller's immediate keyboard selection can be reverted by that sync.
-      await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+      await settleEditorFocus(editor);
       if (webkit) {
         // iOS does not give Home/End desktop block-edge semantics. Native
         // range setup avoids a pointer gesture while retaining real selection
@@ -294,34 +338,7 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
       await page.evaluate(
         () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
       );
-      return editor.evaluate((element, expectedEdge) => {
-        const selection = element.ownerDocument.getSelection();
-        const anchor = selection?.anchorNode;
-        const block = element.firstElementChild;
-        if (
-          !selection?.isCollapsed ||
-          anchor === undefined ||
-          anchor === null ||
-          block === null ||
-          !block.contains(anchor) ||
-          !element.contains(element.ownerDocument.activeElement)
-        ) {
-          return false;
-        }
-
-        const outside = element.ownerDocument.createRange();
-        outside.selectNodeContents(block);
-        if (expectedEdge === "start") {
-          outside.setEnd(anchor, selection.anchorOffset);
-        } else {
-          outside.setStart(anchor, selection.anchorOffset);
-        }
-        const copy = outside.cloneContents();
-        for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) {
-          cursor.remove();
-        }
-        return copy.textContent === "";
-      }, edge);
+      return editor.locator(":scope > *").first().evaluate(caretAtEdge, edge);
     })
     .toBe(true);
 }

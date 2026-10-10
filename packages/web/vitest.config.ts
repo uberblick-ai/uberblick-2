@@ -16,6 +16,10 @@ export default defineConfig({
     // jsdom everywhere: the golden round-trip test drives a real ProseMirror
     // EditorView, which needs a DOM.
     environment: "jsdom",
+    // Full-app fixtures import the editor and render portal/focus lifecycles
+    // while the other packages run in parallel. Their deadline is a liveness
+    // guard, not a five-second performance contract on shared CI CPUs.
+    testTimeout: 20_000,
     setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     // CI output, as in packages/schema/vitest.config.ts.
@@ -27,8 +31,7 @@ export default defineConfig({
     // under load overruns, and it overruns it anonymously — the hook has no
     // label to fail with. Matches packages/mcp-server, for the same reason: the
     // timeout that fires first is the one that gets to explain itself, so the
-    // anonymous one is kept out of the way. Per-test budgets are set in the
-    // file that needs them.
+    // anonymous one is kept out of the way.
     hookTimeout: 120_000,
     // One worker per core rather than Vitest's cores-1 default. Workers spend
     // most of their time starting jsdom and importing the editor, not idling
