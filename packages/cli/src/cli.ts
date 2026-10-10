@@ -37,7 +37,7 @@ commands:
                          for each problem
   workspace [command]    create, promote, join, list or select a workspace
   auth [command]         sign in to a remote hub and manage this machine's login
-  mcp <command>          register uberblick with an MCP client
+  mcp [command]          register uberblick with an MCP client
 
 options:
   -h, --help        show this help; after a command, that command's help
@@ -50,13 +50,14 @@ options:
  * `serve` is left out for the same reason it is left out of the top-level help:
  * it is the stdio line a client config points at, written there by machine.
  */
-export const MCP_HELP = `usage: ub mcp <command>
+export const MCP_HELP = `usage: ub mcp [command]
 
 commands:
-  install <client>       register uberblick with an MCP client
+  install <client>   # Register Uberblick with an agent's MCP client: claude or codex
 
-options:
-  -h, --help             show this help; after a command, that command's help
+options for install:
+  --user             # Register for every project of this user, not just this directory
+  --print            # Print the entry to paste, and run nothing
 `;
 
 /** Run one `ub` invocation and return its exit code. Never throws for usage. */
@@ -108,7 +109,7 @@ export async function runCli(
       io.out(MCP_HELP);
       return 0;
     }
-    io.err(`ub mcp: expected "install" or "serve", got ${JSON.stringify(subcommand)}\n\n${MCP_HELP}`);
+    io.err(`ub mcp: unknown command ${JSON.stringify(subcommand)}\n\n${MCP_HELP}`);
     return 2;
   }
 
