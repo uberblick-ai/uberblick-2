@@ -46,7 +46,7 @@ import {
 import { AUTH_REJECTED, protocolSkew } from "@uberblick/hub/protocol";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
-import { inspectExistingStore } from "@uberblick/mcp-server";
+import { formatHubFailure, inspectExistingStore } from "@uberblick/mcp-server";
 import { resolveMcpConfig } from "./budget.js";
 import type { ResolvedConfig } from "./config.js";
 import { exposedSigningSecretRemedy, readCredentials, resolveConfig, requireBinding } from "./config.js";
@@ -335,7 +335,7 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub"): Check {
   }
   return warn(
     name,
-    `${config.hubUrl} does not answer`,
+    formatHubFailure(hub) ?? `${config.hubUrl} does not answer`,
     "check your network or ask whoever runs the hub; your work stays here and syncs once the hub is back",
   );
 }

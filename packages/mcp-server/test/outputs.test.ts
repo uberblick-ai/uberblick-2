@@ -147,6 +147,25 @@ describe("successful MCP output contracts", () => {
     }
   });
 
+  it("projects connection causes out of both MCP answers without changing the source reading", async () => {
+    const reading = {
+      status: "hub-down", url: "wss://hub.example.test", protocolVersion: 1,
+      reason: "no connection to wss://hub.example.test", recoveryClass: "retry",
+      cause: "dns", detail: "ENOTFOUND hub.example.test",
+    };
+    const result = await probe("list_docs", { workspace: "fixture", docs: [], hub: reading });
+    const expected = {
+      workspace: "fixture", docs: [], hub: {
+        status: reading.status, url: reading.url, protocolVersion: reading.protocolVersion,
+        reason: reading.reason, recoveryClass: reading.recoveryClass,
+      },
+    };
+    expect(result.isError).not.toBe(true);
+    expect(textPayload(result)).toEqual(expected);
+    expect(result.structuredContent).toEqual(expected);
+    expect(reading).toMatchObject({ cause: "dns", detail: "ENOTFOUND hub.example.test" });
+  });
+
   it.each([
     ["missing field", { workspace: "fixture", docs: [] }, "hub"],
     ["wrong field type", { workspace: "fixture", docs: "wrong", hub }, "docs"],
