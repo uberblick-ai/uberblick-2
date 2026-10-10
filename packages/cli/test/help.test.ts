@@ -446,7 +446,7 @@ commands:
       expect(run.stderr).toBe("");
     }
     const root = await dispatch(["--help"]);
-    expect(root.stdout).toMatch(/^  mcp \[command\]          register uberblick with an MCP client$/m);
+    expect(root.stdout.split("\n")).toContain("  mcp [command]          register uberblick with an MCP client");
   });
 
   it("refuses unknown mcp commands with the same help and no hidden command", async () => {
