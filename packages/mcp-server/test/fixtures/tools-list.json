@@ -112,7 +112,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "The active workspace tag catalog, in deterministic name order. Each entry carries the stable canonical `id` documents store and its current display `name`. Retired entries are absent here but remain visible, marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has not delivered the catalog room to this replica: what is listed is then a local copy that may be missing curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that connection stands.\n\nHelp: list_tags, workspaces, tool-contracts."
+    "description": "The active workspace tag catalog, in deterministic name order. Each entry carries the stable canonical `id` documents store and its current display `name`. Retired entries are absent here but remain visible, marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has not delivered the catalog room to this replica: what is listed is then a local copy that may be missing curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that connection stands.\n\nHelp: list_tags, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "create_doc",
@@ -924,7 +930,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create a document and its directory stub, with optional seed blocks and TL;DR. Requires nonblank title and description. Tags select active catalog ids or exact names; unknown or retired selections refuse before creation. A kind defaults to its first status; incompatible kind/status combinations refuse. Decisions start open or decided; governs requires a live, hydrated requirement, and supersedes a hydrated decision in a live topic. Invalid targets and a decided successor without a person's answer refuse before any room is written. Optional sidebar placement pins into an existing group id from get_sidebar; an unknown or empty id returns group_not_found and creates nothing. Omit placement to create unpinned. The answer reports each independently persisted room; writes are not transactional. A partial persistence_failed carries uuid, completed and failed rooms, rolledBack: false and stage-aware recovery: follow it to finish without creating a duplicate.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Create a document and its directory stub, with optional seed blocks and TL;DR. Requires nonblank title and description. Tags select active catalog ids or exact names; unknown or retired selections refuse before creation. A kind defaults to its first status; incompatible kind/status combinations refuse. Decisions start open or decided; governs requires a live, hydrated requirement, and supersedes a hydrated decision in a live topic. Invalid targets and a decided successor without a person's answer refuse before any room is written. Optional sidebar placement pins into an existing group id from get_sidebar; an unknown or empty id returns group_not_found and creates nothing. Omit placement to create unpinned. The answer reports each independently persisted room; writes are not transactional. A partial persistence_failed carries uuid, completed and failed rooms, rolledBack: false and stage-aware recovery: follow it to finish without creating a duplicate.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "get_doc",
@@ -2980,7 +2992,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM with formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table cell links have no block-level ranges. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data."
+    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM with formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table cell links have no block-level ranges. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "get_data",
@@ -3286,7 +3304,13 @@
         }
       ]
     },
-    "description": "Read a document's structured data without changing it, including merged invalidity and diagnostics. Omit collection for an area summary with no schemas or values, or data: null when absent. Name a collection for its raw schema and a detached page in Unicode code-point id order; an unknown collection refuses. after is an exclusive cursor; ids optionally filters it and reports missing_ids. limit: 0 reads only the schema. max_bytes bounds canonical JSON of the page's id/value array, excluding schemas, diagnostics and formatting; a positive-limit page includes its first remaining record even over budget. It does not bound the whole response or token count. Follow next_after until complete; schema-only reads do not advance, and pages are not snapshots.\n\nHelp: get_data, workspaces, lifecycle, tool-contracts, data."
+    "description": "Read a document's structured data without changing it, including merged invalidity and diagnostics. Omit collection for an area summary with no schemas or values, or data: null when absent. Name a collection for its raw schema and a detached page in Unicode code-point id order; an unknown collection refuses. after is an exclusive cursor; ids optionally filters it and reports missing_ids. limit: 0 reads only the schema. max_bytes bounds canonical JSON of the page's id/value array, excluding schemas, diagnostics and formatting; a positive-limit page includes its first remaining record even over budget. It does not bound the whole response or token count. Follow next_after until complete; schema-only reads do not advance, and pages are not snapshots.\n\nHelp: get_data, workspaces, lifecycle, tool-contracts, data.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "update_data",
@@ -3503,7 +3527,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Apply one validated batch through the shared applyDocData operation. Name each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` is exclusive of other changes. Schema and value JSON reach the shared validator unaltered; unsupported schema versions/rules and invalid retained records are refused before mutation. The whole batch commits as one local transaction. An identical refresh reports `changed: false` and emits no update. The answer summarizes touched collection names, counts and deletion without schemas or record values, plus the normal durability fields.\n\nA producer owns its collections and refreshes them by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by the producer's record ids; refreshing producer records leaves that collection unchanged. Split changes exceeding the 1 MiB operation budget (schemas plus changed record values) across calls; those calls are not atomic together. No CAS, distributed lock or new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data."
+    "description": "Apply one validated batch through the shared applyDocData operation. Name each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` is exclusive of other changes. Schema and value JSON reach the shared validator unaltered; unsupported schema versions/rules and invalid retained records are refused before mutation. The whole batch commits as one local transaction. An identical refresh reports `changed: false` and emits no update. The answer summarizes touched collection names, counts and deletion without schemas or record values, plus the normal durability fields.\n\nA producer owns its collections and refreshes them by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by the producer's record ids; refreshing producer records leaves that collection unchanged. Split changes exceeding the 1 MiB operation budget (schemas plus changed record values) across calls; those calls are not atomic together. No CAS, distributed lock or new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "list_docs",
@@ -4383,7 +4413,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List workspace documents from directory stubs without opening document rooms. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts."
+    "description": "List workspace documents from directory stubs without opening document rooms. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "search",
@@ -4520,7 +4556,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Search document titles, descriptions and block text in this replica's derived FTS5 index. Every searchable query term must occur in the same document. Punctuation or emoji alone matches nothing; underscore groups match adjacent words, case and accents fold, and words are not stemmed. A trailing * enables a prefix match. Hits include description and canonical tag assignments. Optional tag accepts a catalog id or exact current name; an unknown value refuses. No hits means no indexed document matches all terms, without proving the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts."
+    "description": "Search document titles, descriptions and block text in this replica's derived FTS5 index. Every searchable query term must occur in the same document. Punctuation or emoji alone matches nothing; underscore groups match adjacent words, case and accents fold, and words are not stemmed. A trailing * enables a prefix match. Hits include description and canonical tag assignments. Optional tag accepts a catalog id or exact current name; an unknown value refuses. No hits means no indexed document matches all terms, without proving the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "backlinks",
@@ -4588,7 +4630,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Documents that reference this one, by UUID and never by path or title. The answer is the union of two kinds of edge, which it does not distinguish: the curated doc-level `links` set_metadata owns, and every inline reference in a prose block or table cell — written by link_range, an `inline` run, or a table cell's inline markdown. A citation needs no `links` entry to appear here.\n\nEach one carries its `description` — null where it has none — so a citing document can be judged without opening it.\n\nHelp: backlinks, workspaces, lifecycle, tool-contracts."
+    "description": "Documents that reference this one, by UUID and never by path or title. The answer is the union of two kinds of edge, which it does not distinguish: the curated doc-level `links` set_metadata owns, and every inline reference in a prose block or table cell — written by link_range, an `inline` run, or a table cell's inline markdown. A citation needs no `links` entry to appear here.\n\nEach one carries its `description` — null where it has none — so a citing document can be judged without opening it.\n\nHelp: backlinks, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "find_decisions",
@@ -4662,7 +4710,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Find live decision records whose prose links one GitHub issue or PR, using this replica's derived index without opening document rooms or calling GitHub. Only external link hrefs in prose count; labels, unlinked text and source blocks do not. Pass github_ref as owner/repo#n or an http(s) github.com /issues/n or /pull/n URL. Equivalent case/path spellings and suffixes normalize to the same identity; bare #n and other hosts refuse with invalid_github_reference. Returns every indexed live matching record once, ordered by title under SQLite binary collation then UUID, without pagination or topic resolution. Archived records are omitted. Results may lag unseen or unindexed content; an empty array does not prove replica completeness.\n\nHelp: find_decisions, workspaces, lifecycle, tool-contracts."
+    "description": "Find live decision records whose prose links one GitHub issue or PR, using this replica's derived index without opening document rooms or calling GitHub. Only external link hrefs in prose count; labels, unlinked text and source blocks do not. Pass github_ref as owner/repo#n or an http(s) github.com /issues/n or /pull/n URL. Equivalent case/path spellings and suffixes normalize to the same identity; bare #n and other hosts refuse with invalid_github_reference. Returns every indexed live matching record once, ordered by title under SQLite binary collation then UUID, without pagination or topic resolution. Archived records are omitted. Results may lag unseen or unindexed content; an empty array does not prove replica completeness.\n\nHelp: find_decisions, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "edit_block",
@@ -5037,7 +5091,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "insert_block",
@@ -5435,7 +5495,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "delete_block",
@@ -5578,7 +5644,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\nHelp: delete_block, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Delete one block. Deleting is never how a block changes type — use insert_block plus edit_block only for new content, and never delete-and-reinsert to re-type, which churns the block id and orphans its annotations.\n\nHelp: delete_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "set_metadata",
@@ -5855,7 +5927,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set any non-empty subset of `title`, `description`, `tldr`, `tags` and curated `links` in one call; omitted fields keep their values. All named fields are validated before any write, so a refusal changes nothing and a field-specific failure names `field`. The answer returns all five fields as get_doc would read them, with write durability and no TL;DR review reminder.\n\nTitle and description must be nonempty and cannot be cleared; `tldr: null` clears the person-facing summary. Tags and links each replace their complete curated set, and `[]` clears one. Tag selectors are active catalog ids or exact names from list_tags; already assigned retired or unresolved ids can be preserved. Newly added link UUIDs must be known to this replica's directory; archived targets are accepted, and existing curated targets may be passed back unchanged.\n\nA decided record refuses any call naming title or tldr, while description, tags and links remain writable. Archived documents refuse every metadata field; status changes use set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts."
+    "description": "Set any non-empty subset of `title`, `description`, `tldr`, `tags` and curated `links` in one call; omitted fields keep their values. All named fields are validated before any write, so a refusal changes nothing and a field-specific failure names `field`. The answer returns all five fields as get_doc would read them, with write durability and no TL;DR review reminder.\n\nTitle and description must be nonempty and cannot be cleared; `tldr: null` clears the person-facing summary. Tags and links each replace their complete curated set, and `[]` clears one. Tag selectors are active catalog ids or exact names from list_tags; already assigned retired or unresolved ids can be preserved. Newly added link UUIDs must be known to this replica's directory; archived targets are accepted, and existing curated targets may be passed back unchanged.\n\nA decided record refuses any call naming title or tldr, while description, tags and links remain writable. Archived documents refuse every metadata field; status changes use set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "set_status",
@@ -6066,7 +6144,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the status; the result names both, so adoption is never silent. A document that already has a kind accepts only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the other kind's status cannot change it. An open record can be withdrawn without an answer; decided records cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in a conflict. It stores `rejectionReason`. Validation refusals change nothing.\n\nHelp: set_status, workspaces, lifecycle, tool-contracts."
+    "description": "Record a document's lifecycle status. On an ordinary document this also adopts the kind that owns the status; the result names both, so adoption is never silent. A document that already has a kind accepts only that kind's statuses. Its kind is fixed through MCP: if it was adopted in error, retrying with the other kind's status cannot change it. An open record can be withdrawn without an answer; decided records cannot reopen or withdraw. Rejected and withdrawn are final. Rejection requires a non-empty `reason` and a recorded person's answer, and applies only to an open proposal, an agent stance or a decided record in a conflict. It stores `rejectionReason`. Validation refusals change nothing.\n\nHelp: set_status, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "archive_doc",
@@ -6237,7 +6321,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Archive a document or every record in a decision topic: tombstone directory entries, drop local search rows and unconditionally unpin without erasing content. Reads by UUID remain available. unpinned reports the asserted unpin, not whether a pin was found. An unseen concurrent pin can survive with archived status; use get_sidebar then unpin_doc to remove it. This writes directory and sidebar rooms independently, without rollback or remote atomicity. The answer reports rooms; partial persistence_failed carries uuid, completed/failed rooms, rolledBack: false and recovery. Follow recovery to finish. indexed is false only on index-write failure; the archive remains applied and a later call retries indexing. Restoration uses restore_doc; pin_doc deliberately places the restored document back in navigation.\n\nHelp: archive_doc, workspaces, lifecycle, tool-contracts."
+    "description": "Archive a document or every record in a decision topic: tombstone directory entries, drop local search rows and unconditionally unpin without erasing content. Reads by UUID remain available. unpinned reports the asserted unpin, not whether a pin was found. An unseen concurrent pin can survive with archived status; use get_sidebar then unpin_doc to remove it. This writes directory and sidebar rooms independently, without rollback or remote atomicity. The answer reports rooms; partial persistence_failed carries uuid, completed/failed rooms, rolledBack: false and recovery. Follow recovery to finish. indexed is false only on index-write failure; the archive remains applied and a later call retries indexing. Restoration uses restore_doc; pin_doc deliberately places the restored document back in navigation.\n\nHelp: archive_doc, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "restore_doc",
@@ -6403,7 +6493,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Restore a document or decision topic's directory visibility and search indexing, using its recorded title and tags. It never restores a sidebar pin; use pin_doc for placement. On an already live document it can repair a drifted directory stub. Check indexed: false means this replica lacks the content or its index write failed. The restore still applies and replicates; search catches up when content arrives or a later call retries. Offline content arrival requires hub recovery.\n\nHelp: restore_doc, workspaces, lifecycle, tool-contracts."
+    "description": "Restore a document or decision topic's directory visibility and search indexing, using its recorded title and tags. It never restores a sidebar pin; use pin_doc for placement. On an already live document it can repair a drifted directory stub. Check indexed: false means this replica lacks the content or its index write failed. The restore still applies and replicates; search catches up when content arrives or a later call retries. Offline content arrival requires hub recovery.\n\nHelp: restore_doc, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "annotate",
@@ -6690,7 +6786,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "link_range",
@@ -6863,7 +6965,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links and code, mermaid, table, terminal or chart source blocks refuse. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown."
+    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links and code, mermaid, table, terminal or chart source blocks refuse. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "export_markdown",
@@ -6914,7 +7022,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data."
+    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "sync_status",
@@ -7121,7 +7235,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary replica tools are quarantined until restart. See this tool's help for counter units and lastSync conditions.\n\nHelp: sync_status, workspaces, tool-contracts."
+    "description": "Inspect local replica state, pending rooms and hub connection/acknowledgements. hub.status distinguishes disabled, retryable hub-down, auth-failed requiring action, and update-required protocol mismatch. hub.recoveryClass, authRecovery and reason explain recovery; protocolVersion and hubProtocolVersion identify the incompatible side. Tools still work locally. unsyncedChanges counts durable pending rooms; inFlightUpdates counts provider sync messages on the current connection, resetting on reconnect. lastSync is this machine's stored UTC time when its full replica caught up, or null; it never moves backwards across processes. persistence diagnoses a failed log append and remains readable when ordinary replica tools are quarantined until restart. See this tool's help for counter units and lastSync conditions.\n\nHelp: sync_status, workspaces, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "get_sidebar",
@@ -7272,7 +7392,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. This is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, links and backlinks. Unpinned documents are simply not entry points.\n\nHelp: get_sidebar, workspaces, lifecycle, tool-contracts."
+    "description": "The workspace's curated navigation: named groups of pinned documents, in the order they are stored. This is not the corpus — unpinned documents are fully alive and reachable through list_docs, search, links and backlinks. Unpinned documents are simply not entry points.\n\nHelp: get_sidebar, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "pin_doc",
@@ -7482,7 +7608,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Pin a document into a group, creating the group when no group carries that name. `index` places it; omit it to append.\n\nOne pin per document across the whole sidebar, so this is also how a pinned document is moved or reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts positions in the target group after the document has been taken out of it.\n\nHelp: pin_doc, workspaces, lifecycle, tool-contracts."
+    "description": "Pin a document into a group, creating the group when no group carries that name. `index` places it; omit it to append.\n\nOne pin per document across the whole sidebar, so this is also how a pinned document is moved or reordered: pinning one that is already pinned moves it to `index` in the named group — carrying the pin as it stands rather than re-pinning it, so a concurrent unpin still wins — and `index` then counts positions in the target group after the document has been taken out of it.\n\nHelp: pin_doc, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "unpin_doc",
@@ -7663,7 +7795,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a navigation act, not a delete — archive_doc is the one that tombstones a document.\n\nAn unpin beats a move made concurrently on another replica, so a document does not reappear because somebody was dragging it at the time. It takes no group: one pin per document means there is only ever one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\nHelp: unpin_doc, workspaces, lifecycle, tool-contracts."
+    "description": "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a navigation act, not a delete — archive_doc is the one that tombstones a document.\n\nAn unpin beats a move made concurrently on another replica, so a document does not reappear because somebody was dragging it at the time. It takes no group: one pin per document means there is only ever one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\nHelp: unpin_doc, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   },
   {
     "name": "sidebar_group",
@@ -7921,7 +8059,13 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses `index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field belonging to another action is refused at the input boundary before the sidebar is touched, rather than ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\nThere is no create action: pin_doc creates a group by naming one that does not exist, which is how a group comes into being with something in it rather than empty.\n\nHelp: sidebar_group, workspaces, lifecycle, tool-contracts."
+    "description": "Manage the groups themselves. `delete` removes the group and its pins — the documents are untouched, because the group only ever held their uuids, and they stay reachable through list_docs and search.\n\n`action` picks one of three shapes and each takes only its own field: `rename` needs `name` and refuses `index`, `move` takes `index` (omitted: last) and refuses `name`, `delete` takes neither. A field belonging to another action is refused at the input boundary before the sidebar is touched, rather than ignored — so a call that says two things is a failure you can see, not a silent half-success.\n\nThere is no create action: pin_doc creates a group by naming one that does not exist, which is how a group comes into being with something in it rather than empty.\n\nHelp: sidebar_group, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
   },
   {
     "name": "get_help",
@@ -8017,6 +8161,12 @@
         }
       ]
     },
-    "description": "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list every topic with its id, title, description and URI. The returned text is the same Markdown as uberblick://help/{topic}. Help is workspace-agnostic, needs no guidance briefing and never opens or settles a replica; it remains available offline and while the replica store is quarantined. Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.\n\nHelp: get_help, orientation, tools, tool-contracts."
+    "description": "Read bundled, version-matched product help by topic or exact registered tool name. Omit topic to list every topic with its id, title, description and URI. The returned text is the same Markdown as uberblick://help/{topic}. Help is workspace-agnostic, needs no guidance briefing and never opens or settles a replica; it remains available offline and while the replica store is quarantined. Unknown topics refuse with unknown_help_topic and list valid topic ids; choose one and retry.\n\nHelp: get_help, orientation, tools, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   }
 ]

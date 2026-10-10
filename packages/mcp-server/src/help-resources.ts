@@ -7,6 +7,7 @@ import { toolHelpEntries } from "./help-examples.js";
 import type { HelpCatalog } from "./help.js";
 import type { ServerWork } from "./server-work.js";
 import { ClientSafeResourceError, guardedResource } from "./resource-adapter.js";
+import { TOOL_ANNOTATIONS } from "./failures.js";
 
 /** Registrations need only this public SDK method, allowing help to capture its result. */
 export type ToolRegistrar = Pick<McpServer, "registerTool">;
@@ -32,7 +33,9 @@ export function createToolRegistrar(server: McpServer, help: HelpCatalog): ToolR
   const sdkRegisterTool = server.registerTool.bind(server);
   return {
     registerTool: (name, config, handler) => {
-      const tool = sdkRegisterTool(name, config, handler);
+      const annotations = TOOL_ANNOTATIONS[name];
+      if (annotations === undefined) throw new Error(`No annotations for registered tool: ${name}`);
+      const tool = sdkRegisterTool(name, { ...config, annotations }, handler);
       captureTool(help, name, tool);
       return tool;
     },
