@@ -364,17 +364,53 @@ describe("the versioned install payload", () => {
    * purpose: which copy `ub update` updates comes from where `ub`'s own files
    * live, so a Homebrew `ub` typed inside a checkout must still be Homebrew's.
    */
-  it("updates a Homebrew installation through Homebrew, and touches nothing else", () => {
-    const prefix = join(scratch, "homebrew");
+  it.each([
+    { outcome: "updated", afterVersion: "0.42.0_1" },
+    { outcome: "current", afterVersion: "0.42.0" },
+  ])("reports $outcome for a Homebrew installation, and touches nothing else", ({ outcome, afterVersion }) => {
+    const beforeVersion = "0.42.0";
+    const prefix = join(scratch, `homebrew-${outcome}`);
     const keg = join(prefix, "Cellar", "uberblick", VERSION, "libexec");
     mkdirSync(dirname(keg), { recursive: true });
     cpSync(payload, keg, { recursive: true });
-    const fakeBin = join(scratch, "homebrew-bin");
+    const fakeBin = join(scratch, `homebrew-bin-${outcome}`);
     mkdirSync(fakeBin, { recursive: true });
-    const log = join(scratch, "homebrew-commands.log");
+    const log = join(scratch, `homebrew-commands-${outcome}.log`);
+    const upgraded = join(scratch, `homebrew-upgraded-${outcome}`);
+    const formula = (version: string) => JSON.stringify({
+      formulae: [{
+        name: "uberblick",
+        full_name: "uberblick-ai/tap/uberblick",
+        linked_keg: version,
+        installed: [{ version: "0.41.0" }, { version: "0.42.0" }, { version: "0.42.0_1" }],
+      }],
+    });
     writeFileSync(
       join(fakeBin, "brew"),
-      `#!/bin/sh\necho "brew $*" >> "${log}"\n[ "$1" = "--prefix" ] && echo "${prefix}"\nexit 0\n`,
+      `#!/bin/sh
+echo "brew $*" >> "${log}"
+case "$*" in
+  --prefix) echo "${prefix}" ;;
+  "info --json=v2 uberblick-ai/tap/uberblick")
+    if [ -e "${upgraded}" ]; then
+      echo '${formula(afterVersion)}'
+    else
+      echo '${formula(beforeVersion)}'
+    fi
+    ;;
+  update)
+    echo "brew update stdout"
+    echo "brew update stderr" >&2
+    ;;
+  "upgrade uberblick-ai/tap/uberblick")
+    : > "${upgraded}"
+    echo "brew upgrade stdout"
+    echo "brew upgrade stderr" >&2
+    ;;
+  *) exit 1 ;;
+esac
+exit 0
+`,
       { encoding: "utf8", mode: 0o755 },
     );
     for (const other of ["git", "mise", "pnpm"]) {
@@ -399,12 +435,23 @@ describe("the versioned install payload", () => {
     });
 
     expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(
+      `copy       Homebrew (${prefix})\n` +
+        (outcome === "updated"
+          ? `updated    ${beforeVersion} → ${afterVersion}\nrestart ub open and running agents to use it\n`
+          : `current    ${afterVersion}, nothing to update\n`),
+    );
+    expect(run.stderr).toBe(
+      "brew update stdout\nbrew update stderr\nbrew upgrade stdout\nbrew upgrade stderr\n",
+    );
     expect(readFileSync(log, "utf8").split("\n").filter(Boolean)).toEqual([
       // The recognition read: only a payload under the prefix Homebrew itself
       // reports is one `brew upgrade` can replace.
       "brew --prefix",
+      "brew info --json=v2 uberblick-ai/tap/uberblick",
       "brew update",
       "brew upgrade uberblick-ai/tap/uberblick",
+      "brew info --json=v2 uberblick-ai/tap/uberblick",
     ]);
     // No repository operation, no build, and nothing under the XDG layout: this
     // path resolves no configuration and writes no state of its own.
