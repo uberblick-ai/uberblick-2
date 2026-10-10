@@ -418,7 +418,8 @@ describe("the sidebar is the _sidebar document", () => {
     ]);
   });
 
-  it("pins and unpins the open document from its actions menu, with no drag", async () => {
+  // Full-app menu/focus transitions exceed 5s on the shared CI runner.
+  it("pins and unpins the open document from its actions menu, with no drag", { timeout: 20_000 }, async () => {
     seedDirectory();
     const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
     initDoc(doc, { uuid: THREE, title: "Sync" });

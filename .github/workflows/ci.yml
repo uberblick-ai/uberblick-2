@@ -1,24 +1,27 @@
 name: CI
 
-# Main only, for now: a record of whether main itself is clean, so a failure seen
-# while validating a branch can be checked against main's latest run instead of
-# rerunning the base. It gates nothing; merges still require the local `signoff`
-# from `mise run ci` (CONTRIBUTING.md, "Local CI"). Standard runners cost no
-# Actions minutes in a public repository. `workflow_dispatch` runs it on any
-# branch from the Actions tab.
+# It gates nothing; merges still require the local `signoff` from `mise run ci`
+# (CONTRIBUTING.md, "Local CI"). On main it records whether main itself is clean,
+# so a failure seen while validating a branch can be checked against main's
+# latest run instead of rerunning the base. On a pull request it is an early
+# signal the integrator reads before local CI; it runs the PR's own recipe, so
+# it never stands in for the signoff. Standard runners cost no Actions minutes
+# in a public repository.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
-# Let a started run finish and keep only the newest push waiting behind it, so a
-# busy merge day still produces results rather than cancelling every run.
+# On main, let a started run finish and keep only the newest push waiting behind
+# it, so a busy merge day still produces results. On a pull request only the
+# newest head matters, so a new push cancels the run in progress.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
