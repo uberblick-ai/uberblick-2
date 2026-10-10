@@ -264,7 +264,7 @@ async function logout(selection: Selection, io: Io, allDevices: boolean): Promis
       return 1;
     }
     const user = login.identity.githubUsername;
-    authField(io, "revoked", `${confirmed} devices of ${isGithubUsername(user) ? user : JSON.stringify(user)} on ${origin}, including this computer`);
+    authField(io, "revoked", `${confirmed} devices of ${displayUsername(user)} on ${origin}, including this computer`);
   } else if (login !== undefined) {
     try {
       await deviceRequest(origin, { operation: "revoke-device", deviceId: login.credential.record.deviceId }, login, io);
