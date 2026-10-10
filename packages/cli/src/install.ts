@@ -284,7 +284,7 @@ function runVendor(vendor: Vendor): VendorRun {
 
 // --- the command ------------------------------------------------------------
 
-/** The snippet and where it goes: the answer whenever nothing can run. */
+/** Print the entry and its destination without claiming registration. */
 function printSnippet(
   io: Io,
   file: TargetFile,
@@ -396,7 +396,8 @@ export async function installCommand(
   try {
     const ran = runVendor(vendor);
     if (ran.kind === "absent") {
-      return printSnippet(io, file, entry, `\`${vendor.program}\` is not installed`);
+      printSnippet(io, file, entry, `\`${vendor.program}\` is not installed`);
+      return 1;
     }
     if (ran.kind === "failed") {
       io.err(
@@ -404,6 +405,7 @@ export async function installCommand(
           "Its output is not repeated here because a client's diagnostics can " +
           `quote the config; run \`${vendor.program} mcp add\` yourself to see it\n`,
       );
+      printSnippet(io, file, entry, "the client did not register the entry");
       return 1;
     }
 

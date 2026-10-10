@@ -134,6 +134,15 @@ function codexHome(box: Sandbox, at = join(box.cwd, "codex-home")): string {
   return at;
 }
 
+/** The whole stdout contract for a registration that falls back to pasting. */
+function entrySnippet(program: string): string {
+  return program === "codex"
+    ? '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n'
+    : `${JSON.stringify({ mcpServers: {
+      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+    } }, null, 2)}\n`;
+}
+
 describe("ub mcp install --print", () => {
   it("prints a snippet for the named target and touches no file", () => {
     const box = sandbox();
@@ -196,11 +205,13 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     program: string;
     argv: string[];
     expected: string[];
+    file: (box: Sandbox, home: string) => string;
   }[] = [
     {
       what: "claude, project",
       program: "claude",
       argv: ["mcp", "install", "claude", "--project"],
+      file: (box) => join(box.cwd, ".mcp.json"),
       expected: [
         "mcp",
         "add",
@@ -217,12 +228,14 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       what: "claude, user",
       program: "claude",
       argv: ["mcp", "install", "claude", "--user"],
+      file: (box) => join(box.env.HOME as string, ".claude.json"),
       expected: ["mcp", "add", "uberblick", "--scope", "user", "--", "ub", "mcp", "serve"],
     },
     {
       what: "codex, project",
       program: "codex",
       argv: ["mcp", "install", "codex", "--project"],
+      file: (box) => join(box.cwd, ".codex", "config.toml"),
       expected: [
         "mcp",
         "add",
@@ -237,6 +250,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       what: "codex, user",
       program: "codex",
       argv: ["mcp", "install", "codex", "--user"],
+      file: (_box, home) => join(home, "config.toml"),
       expected: ["mcp", "add", "uberblick", "--", "ub", "mcp", "serve"],
     },
   ];
@@ -297,22 +311,65 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.output).not.toMatch(/pin/i);
   });
 
-  it("reports that it failed without repeating what it said", () => {
+  it.each(CELLS)("prints the entry for a failed $what without repeating its output", ({ program, argv, file }) => {
     // A client's own diagnostics quote the config it just read, so relaying
     // them would walk straight past everything this command refuses to print.
     const box = sandbox();
+    const home = codexHome(box);
     const stub = stubVendor(
       box,
-      "claude",
+      program,
       `echo "conflict in config: API_TOKEN=${SECRET}" >&2\necho "${SECRET}"\nexit 1\n`,
     );
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    const run = runUb(argv, box, { ...stub.env, CODEX_HOME: home });
     expect(run.status).toBe(1);
+    expect(run.stdout).toBe(entrySnippet(program));
     expect(run.output).not.toContain(SECRET);
     // Enough to act on: which program, how it ended, and where to look.
-    expect(run.stderr).toMatch(/claude mcp add/);
+    expect(run.stderr).toContain(`${program} mcp add`);
     expect(run.stderr).toMatch(/exited 1/);
+    expect(run.stderr).toContain(file(box, home));
+    expect(existsSync(file(box, home))).toBe(false);
+    expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+  });
+
+  it.each(["claude", "codex"])("prints the entry when %s mcp add is killed by a signal", (program) => {
+    const box = sandbox();
+    const stub = stubVendor(
+      box,
+      program,
+      `echo "${SECRET}" >&2\necho "${SECRET}"\nkill -TERM $$\n`,
+    );
+    const run = runUb(["mcp", "install", program, "--project"], box, stub.env);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe(entrySnippet(program));
+    expect(run.output).not.toContain(SECRET);
+    expect(run.stderr).toContain(`${program} mcp add`);
+    expect(run.stderr).toMatch(/killed by SIGTERM/);
+    expect(run.stderr).toContain(program === "codex"
+      ? join(box.cwd, ".codex", "config.toml")
+      : join(box.cwd, ".mcp.json"));
+    expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+  });
+
+  it.each(["claude", "codex"])("prints the entry when %s mcp add cannot start", (program) => {
+    const box = sandbox();
+    const stub = stubVendor(box, program);
+    // A non-executable file on PATH is distinct from a missing program.
+    chmodSync(join(stub.env.PATH as string, program), 0o644);
+    const run = runUb(["mcp", "install", program, "--project"], box, stub.env);
+
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe(entrySnippet(program));
+    expect(run.stderr).toContain(`${program} mcp add`);
+    expect(run.stderr).toMatch(/could not be started \(EACCES\)/);
+    expect(run.stderr).toContain(program === "codex"
+      ? join(box.cwd, ".codex", "config.toml")
+      : join(box.cwd, ".mcp.json"));
+    expect(existsSync(stub.record)).toBe(false);
+    expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
   it("hands the vendor no variable of uberblick's own", () => {
@@ -351,24 +408,22 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(received).not.toContain(SECRET);
   });
 
-  it("prints the snippet when the vendor is not installed, and leaves nothing behind", () => {
+  it.each(CELLS)("prints the entry for missing $what and leaves nothing behind", ({ program, argv, file }) => {
     const box = sandbox();
-
-    const claude = runUb(["mcp", "install", "claude", "--project"], box, NO_VENDOR);
-    expect(claude.status).toBe(0);
-    expect(claude.stderr).toMatch(/`claude` is not installed/);
-    expect(JSON.parse(claude.stdout).mcpServers.uberblick.command).toBe("ub");
-    expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
+    const home = codexHome(box);
+    const run = runUb(argv, box, { ...NO_VENDOR, CODEX_HOME: home });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe(entrySnippet(program));
+    expect(run.stderr).toContain(`\`${program}\` is not installed`);
+    expect(run.stderr).toContain(file(box, home));
+    expect(existsSync(file(box, home))).toBe(false);
 
     // Codex refuses a CODEX_HOME that is not there, so project scope creates
     // one — and a run that ended in a snippet must not leave it in a checkout.
-    const codex = runUb(["mcp", "install", "codex", "--project"], box, NO_VENDOR);
-    expect(codex.status).toBe(0);
-    expect(codex.stdout).toContain("[mcp_servers.uberblick]");
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
-  it("leaves a `.codex` it did not create, empty or not", () => {
+  it.each(["missing", "failed"])("leaves a `.codex` it did not create when the vendor is %s", (ending) => {
     // "Writes nothing" has to include taking nothing away. An empty `.codex` a
     // checkout already had is still somebody's state — and whether this run is
     // the one that made the directory is the only thing that decides it.
@@ -376,9 +431,10 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const dir = join(box.cwd, ".codex");
     mkdirSync(dir, { recursive: true });
 
-    const run = runUb(["mcp", "install", "codex", "--project"], box, NO_VENDOR);
-    expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toContain("[mcp_servers.uberblick]");
+    const env = ending === "missing" ? NO_VENDOR : stubVendor(box, "codex", "exit 1\n").env;
+    const run = runUb(["mcp", "install", "codex", "--project"], box, env);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stdout).toBe(entrySnippet("codex"));
     expect(existsSync(dir)).toBe(true);
   });
 });
