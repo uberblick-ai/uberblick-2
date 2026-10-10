@@ -32,9 +32,10 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   section states the full boundary. Use the head's SHA-tagged image for the
   failure-path probes the policy requires at stateful boundaries, then remove
   it when the PR is settled; the merged-tree gate below uses the same task.
-- CI also runs browser e2e at the head as the advisory `browser e2e` check.
-  It uses the candidate's own e2e recipe, so for a browser-observable outcome
-  read its output rather than trusting the conclusion. A
+- CI also runs browser e2e at the head as the advisory `browser e2e` (Linux)
+  and `macOS browser e2e` checks. Both use the candidate's own e2e recipe, so
+  for a browser-observable outcome read their output rather than trusting
+  the conclusions. Classify a failure of either check the same way. A
   failure may be called environmental only after the same failing spec is run
   against the base, or when it failed the same way (same test, browser project
   and error) in the latest completed `CI` run on `main` at or before the base

@@ -16,15 +16,27 @@ async function documentText(page: Page): Promise<string | null> {
 }
 
 async function statusGeometry(page: Page) {
-  const [status, prose, updated] = await Promise.all([
-    page.locator(".ub-status").boundingBox(),
-    editor(page).locator(":scope > *").first().boundingBox(),
-    page.locator(".ub-last-updated").boundingBox(),
-  ]);
-  expect(status).not.toBeNull();
-  expect(prose).not.toBeNull();
-  expect(updated).not.toBeNull();
-  return { status, proseY: prose?.y, updated };
+  // Read one rendered layout, rather than three protocol calls that can span
+  // a route change. Keep immediate exact equality: an actual shift must fail.
+  return page.locator(".ub-status").evaluate((status) => {
+    const doc = status.ownerDocument;
+    const prose = doc.querySelector(".ub-editor .ProseMirror > :first-child");
+    const updated = status.querySelector(".ub-last-updated");
+    const toggle = status.querySelector(".ub-sync-toggle");
+    if (prose === null || updated === null || toggle === null) {
+      throw new Error("e2e: status geometry requires prose, last-updated and sync trigger");
+    }
+    const box = (node: Element) => {
+      const { x, y, width, height } = node.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    return {
+      status: box(status), proseY: box(prose).y, updated: box(updated),
+      // Diagnose loss of the touch row without hiding it behind a retry.
+      coarsePointer: matchMedia("(any-pointer:coarse)").matches,
+      syncMinHeight: getComputedStyle(toggle).minHeight,
+    };
+  });
 }
 
 test("local-only edits survive a restart and reach the hub after authentication returns", async ({ browser }) => {
@@ -152,6 +164,8 @@ test("local-only status answers leave the readings and prose in place", async ({
         await page.keyboard.press("Enter");
       }
       await openDoc(page, title);
+      await expect(page.locator(".ub-title")).toHaveValue(title);
+      await expect.poll(() => new URL(page.url()).pathname).toBe(paths[titles.indexOf(title)]);
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
       await expect(saved).toHaveText("saved here");
       await expect(shared).toHaveText("");

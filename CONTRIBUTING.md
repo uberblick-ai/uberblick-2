@@ -240,11 +240,12 @@ existing state cannot stand in for what initialization should create.
 ## CI
 
 Every push to `main` and every pull request runs `.github/workflows/ci.yml`
-on GitHub: lint, typecheck, tests and browser e2e on Linux, and the tests again
-on macOS. The checks `lint, typecheck and tests` and `macOS tests` are required
-to merge; the main ruleset accepts them only from GitHub Actions. Browser e2e is
-advisory. On `main` the same run records whether `main` itself is clean. A pull
-request's run uses that pull request's own recipe, so a change to what CI runs
+on GitHub: lint, typecheck, tests and browser e2e on Linux, and tests and browser
+e2e again on macOS. The checks `lint, typecheck and tests` and `macOS tests` are
+required to merge; the main ruleset accepts them only from GitHub Actions.
+`browser e2e` and `macOS browser e2e` are advisory. On `main` the same run
+records whether `main` itself is clean. A pull request's run uses that pull
+request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
 
 GitHub Actions also retains release publishing and the Linux Homebrew upgrade

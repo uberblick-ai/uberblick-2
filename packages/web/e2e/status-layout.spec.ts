@@ -368,7 +368,16 @@ for (const upstream of [true, false]) {
           expect(await waitingPeers.evaluate((node) => node.getBoundingClientRect().width), "empty presence does not reserve a gap on the waiting screen").toBe(0);
           // Keep this app alive: closing the browser cannot prove that leaving
           // the waiting header resolves the notice it owns.
-          const pageInstance = await waiting.evaluate(() => performance.timeOrigin);
+          // A new window loses the marker; pagehide also catches a departure
+          // restored from the back/forward cache. Wall-clock readings can drift.
+          const samePageMarker = "__uberblickWaitingPage";
+          await waiting.evaluate((key) => {
+            const originalWindow = window as unknown as Record<string, unknown>;
+            originalWindow[key] = true;
+            window.addEventListener("pagehide", () => {
+              originalWindow[key] = false;
+            }, { once: true });
+          }, samePageMarker);
           const showList = waiting.getByRole("button", { name: "Show document list", exact: true });
           if (await showList.isVisible()) {
             await showList.focus();
@@ -377,7 +386,8 @@ for (const upstream of [true, false]) {
           await waiting.getByRole("button", { name: "Workspace settings", exact: true }).click();
           await expect(waiting.locator(".ub-status")).toHaveCount(0);
           await expect(waiting.locator("[data-sonner-toast]")).toHaveCount(0);
-          expect(await waiting.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+          expect(await waiting.evaluate((key) =>
+            (window as unknown as Record<string, unknown>)[key], samePageMarker)).toBe(true);
         } finally {
           await waiting.context().close();
         }
