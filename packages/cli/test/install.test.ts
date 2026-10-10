@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
+import { doctorEntry } from "../src/mcp-config.js";
 import {
   type Sandbox,
   type SandboxFiles,
@@ -474,14 +475,43 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("recognises the plain table `codex mcp add` writes", () => {
+  it.each([
+    {
+      what: "the vendor header beside multiline and large-integer settings",
+      before: 'model = "gpt-5"\n' + entrySnippet("codex") +
+        '[other]\ninstructions = """\nUnrelated multiline setting.\n"""\n' +
+        'large_integer = 9007199254740993\n',
+    },
+    {
+      what: "a spaced header with quoted and escaped keys",
+      before: '[ "mcp_servers" . "\\u0075berblick" ] # plain entry\n' +
+        'args = [\'mcp\', \'serve\',]\ncommand = "ub"\n',
+    },
+    {
+      what: "an inline server with empty inline env",
+      before: '[mcp_servers]\nuberblick = { command = "ub", ' +
+        'args = ["mcp", "serve"], env = {} }\n',
+    },
+    {
+      what: "a root inline server table",
+      before: 'mcp_servers = { uberblick = { command = "ub", args = ["mcp", "serve"] } }\n',
+    },
+    {
+      what: "dotted server keys",
+      before: 'mcp_servers."uberblick".command = "ub"\n' +
+        'mcp_servers.uberblick.args = ["mcp", "serve"]\n',
+    },
+    { what: "empty inline env", before: entrySnippet("codex") + 'env = {}\n' },
+    {
+      what: "an empty env subtable separated by another table",
+      before: entrySnippet("codex") + '[other]\nenabled = true\n[mcp_servers.uberblick.env]\n',
+    },
+  ])("recognises the plain Codex entry from $what and runs nothing", ({ before }) => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
-    const before =
-      'model = "gpt-5"\n\n[mcp_servers.uberblick]\ncommand = "ub"\n' +
-      'args = ["mcp", "serve"]\n';
     writeFileSync(path, before, "utf8");
+    expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "entry", env: {} });
     const stub = stubVendor(box, "codex");
 
     const run = runUb(
@@ -498,11 +528,9 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("refuses a `[mcp_servers.uberblick]` that is spelled another way", () => {
-    // A quoted key, spaces inside the brackets and a trailing comment are one
-    // table spelled four ways, and reading any of them as "nothing there" would
-    // run `codex mcp add` — whose duplicate add exits 0 and replaces what it
-    // finds. A header this cannot compare byte for byte is somebody else's.
+  it("protects a differing Codex entry under a quoted and spaced header", () => {
+    // Alternate TOML spelling must not hide somebody else's command or env
+    // from the protection against a duplicate add replacing their entry.
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
@@ -525,8 +553,8 @@ describe("ub mcp install, and what is registered already", () => {
   });
 
   /**
-   * The same entry, written without the header the scan looks for. TOML spells
-   * one key several ways, and each of these defines `mcp_servers.uberblick` —
+   * Differing entries without a server header. TOML spells one key several
+   * ways, and each of these defines `mcp_servers.uberblick` —
    * so reading any of them as "nothing there" would point `codex mcp add` at
    * somebody's entry and let its duplicate add replace it.
    */
@@ -565,6 +593,82 @@ describe("ub mcp install, and what is registered already", () => {
     expect(run.output).not.toContain(SECRET);
     expect(read(path)).toBe(before);
     expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it.each([
+    { what: "another command", text: entrySnippet("codex").replace('command = "ub"', `command = "${SECRET}"`) },
+    { what: "other arguments", text: entrySnippet("codex").replace('["mcp", "serve"]', `["${SECRET}"]`) },
+    { what: "a binding env override", text: entrySnippet("codex") + `env = { UB_WORKSPACE_ID = "${WORKSPACE}" }\n` },
+    { what: "an inline env variable", text: entrySnippet("codex") + `env = { API_TOKEN = "${SECRET}" }\n` },
+    { what: "a dotted env variable", text: entrySnippet("codex") + `env.API_TOKEN = "${SECRET}"\n` },
+    { what: "an unknown key", text: entrySnippet("codex") + `cwd = "${SECRET}"\n` },
+    { what: "a JSON-only type key", text: entrySnippet("codex") + 'type = "stdio"\n' },
+    ...[`"${SECRET}"`, `["${SECRET}"]`, "1", "true", "1979-05-27", "07:32:00"].map((value) => ({
+      what: `non-table env ${value}`, text: entrySnippet("codex") + `env = ${value}\n`,
+    })),
+    ...[`"${SECRET}"`, "[]", "1979-05-27", "07:32:00"].map((value) => ({
+      what: `non-table server ${value}`, text: `[mcp_servers]\nuberblick = ${value}\n`,
+    })),
+  ])("protects Codex config with $what", ({ text }) => {
+    const box = sandbox();
+    const home = codexHome(box);
+    const path = join(home, "config.toml");
+    const before = `private_token = "${SECRET}"\n${text}`;
+    writeFileSync(path, before);
+    const stub = stubVendor(box, "codex");
+    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toMatch(/something other than this/);
+    expect(run.stdout).toBe(entrySnippet("codex"));
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain("private_token");
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it.each([
+    { what: "malformed config with no entry", text: `token = "unterminated ${SECRET}\n` },
+    { what: "a plain entry followed by malformed settings", text: entrySnippet("codex") + `[other]\nunparseable ${SECRET}\n` },
+    { what: "duplicate server tables", text: entrySnippet("codex") + `[mcp_servers.uberblick]\ncommand = "${SECRET}"\n` },
+    { what: "duplicate server keys", text: entrySnippet("codex") + `command = "${SECRET}"\n` },
+    ...[`"${SECRET}"`, "[]", "1979-05-27", "07:32:00"].map((value) => ({
+      what: `non-table mcp_servers ${value}`, text: `mcp_servers = ${value}\n`,
+    })),
+  ])("refuses unusable Codex config with $what without quoting it", ({ text }) => {
+    const box = sandbox();
+    const home = codexHome(box);
+    const path = join(home, "config.toml");
+    const before = `private_token = "${SECRET}"\n${text}`;
+    writeFileSync(path, before);
+    expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "unusable" });
+    const stub = stubVendor(box, "codex");
+    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain(path);
+    expect(run.stderr).toMatch(/could not be read/);
+    expect(run.stdout).toBe(entrySnippet("codex"));
+    expect(run.output).not.toContain(SECRET);
+    expect(run.output).not.toContain("private_token");
+    expect(read(path)).toBe(before);
+    expect(existsSync(stub.record)).toBe(false);
+  });
+
+  it("adds Codex's absent entry despite an apparent header inside unrelated multiline settings", () => {
+    const box = sandbox();
+    const home = codexHome(box);
+    const path = join(home, "config.toml");
+    const before = 'large_integer = 9007199254740993\n[other]\ninstructions = """\n' +
+      `[mcp_servers.uberblick]\ncommand = "${SECRET}"\n"""\n`;
+    writeFileSync(path, before);
+    expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "absent" });
+    const stub = stubVendor(box, "codex");
+    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    expect(run.status, run.output).toBe(0);
+    expect(read(stub.record).trimEnd().split("\n")).toEqual([
+      "mcp", "add", "uberblick", "--", "ub", "mcp", "serve",
+    ]);
+    expect(run.output).not.toContain(SECRET);
+    expect(read(path)).toBe(before);
   });
 
   it("refuses an entry it did not write, prints the snippet, and quotes nothing", () => {
