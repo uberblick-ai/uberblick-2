@@ -141,8 +141,10 @@ move or a head mismatch returns to the applicable gates.
 
 Confirm every issue the PR closes auto-closed, and close a parent whose last
 open sub-issue it closed. Then apply the pull request's `Corpus update` through
-MCP, checked against the merged code. If MCP fails, record the concrete failure
-and outstanding update on the PR for recovery. A fresh integrator does not own
+MCP, checked against the merged code and the intent rules in
+[the integrator role](../roles/integrator.md). If MCP fails, record the concrete
+failure on the PR and open an issue labelled `needs-preparation` holding the
+outstanding update, so a later run applies it. A fresh integrator does not own
 or restart another session's development processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —

@@ -71,12 +71,19 @@ finish `integrate` and state `none owed (<reason>)`. Require agent review when
 you can name a concrete unresolved risk that warrants it. Copilot is optional
 under that policy and is not requested automatically.
 
-When the change makes a corpus claim wrong, or adds behavior a corpus
+Before drafting the `Corpus update`, find every page that owns a user-facing surface the diff
+changes, not only the ones Pointers cite: search the corpus for each changed
+command, tool or flow (for example the `cli` or `mcp` tag and the command's
+name). When the change makes a corpus claim wrong, or adds behavior a corpus
 document should describe, draft the rewrite under the pull request's
-`Corpus update`: each document by title and UUID, the block, and its new text,
+`Corpus update`; new user-facing behavior no page covers names the page to
+extend. A page that describes intent the change does not yet deliver keeps that
+intent: confirm an open issue tracks the gap, and raise it in the handoff when
+none does. `None` fits only a diff with no user-facing effect. Each rewrite
+lists the document by title and UUID, the block, and its new text,
 following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
-so the corpus never describes unmerged code. Keep it current with every revision.
+so the corpus never claims that unmerged code ships. Keep it current with every revision.
 
 ## Decision records
 

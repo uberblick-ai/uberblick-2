@@ -57,8 +57,10 @@ permissions or policy.
   maintain or admin access when naming who decides, approves or answers.
 - **Corpus context:** discover `ub` command intent through the current tag
   catalog and purpose-based search. These pages describe the intended state, so
-  check the code for what ships. The corpus holds no agent workflow or
-  editorial contract; the local protocols govern delivery.
+  check the code for what ships. A gap between a page and the code is normally
+  tracked by an open issue that brings the code to the page; the page keeps its
+  intent until a maintainer decides otherwise. The corpus holds no agent
+  workflow or editorial contract; the local protocols govern delivery.
 - **MCP route:** use the registered `uberblick` server (`ub mcp serve` through
   mise, from `.mcp.json`).
 - **Commands:** `.agents/development.md`.
@@ -143,7 +145,9 @@ A pointer is a route to the source, not a substitute for reading it.
   GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
-  doc edit. An unsettled change to those commitments requires a maintainer decision.
+  doc edit. Never rewrite or delete intent only because the code does not do it
+  yet; when unsure whether a difference is intent or drift, escalate to a
+  maintainer. An unsettled change to those commitments requires a maintainer decision.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated

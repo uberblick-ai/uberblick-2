@@ -37,7 +37,9 @@ delivery policy's merge policy says.
 
 After the merge, follow [integration.md's After the merge](../protocols/integration.md#after-the-merge).
 Draft a rewrite yourself only for a claim the merge made wrong that the
-`Corpus update` missed, and create any new decision record it drafts through
+`Corpus update` missed, never to remove intent the code does not deliver yet:
+a page ahead of the code stays, and a gap no open issue tracks is an
+escalation to a maintainer, as is any doubt about which side is right. Create any new decision record it drafts through
 `create_doc` under [the implementer's Decision records](implementer.md#decision-records).
 Every corpus edit follows [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and governing authoring criteria discovered by purpose.
@@ -61,8 +63,9 @@ On the PR: gate evidence against the SHA each gate ran at, the tier call, the
 P3s accepted as debt (one line each), the merge report the policy requires, and
 the documentation pass result. Link gate and reviewer evidence instead of
 restating it. A tier-1 record is the merge SHA, the gate links and one line per
-acceptance criterion; its documentation pass is one sentence, and no fresh
-corpus search is owed unless the issue says existing docs are stale. A
+acceptance criterion; its documentation pass is one sentence. On every tier,
+the documentation pass checks the pages that own the surfaces the merge changed,
+found by the implementer's page search. A
 `changes` record says only what failed and where. Do not add a wrapper comment
 for a Copilot review that already exists or for a no-comment result.
 

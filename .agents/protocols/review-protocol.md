@@ -37,7 +37,9 @@ Product intent is read, not inferred from the issue text: read the corpus the
 issue's Pointers cite wherever the change touches its product meaning, under
 [AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
 rewrite for a claim the change makes wrong, or one that misstates the change,
-is a finding.
+is a finding. Run the implementer's page search for the surfaces the diff
+changes: a page it missed, a `None` for user-facing behavior, or a rewrite that
+deletes intent the change does not deliver is a finding.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's

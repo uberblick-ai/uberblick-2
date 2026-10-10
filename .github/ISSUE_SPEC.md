@@ -104,6 +104,9 @@ waives neither this ready bar nor review and merge gates.
   see #14"). Cite a product doc as `title (uuid)`, using its discovered title and
   UUID from live `list_docs` discovery; the repository holds no corpus copy or
   UUID table. Cite rather than copy content; the agent reads the live source.
+  When the change touches a user-facing surface (a `ub` command, an MCP tool, a
+  web UI flow), cite the page that owns it, found by tag and search, even when
+  the issue did not start from that page.
   `None.` only when the grounded change needs no additional pointers;
   explain why no corpus document governs it. Operational policy cannot
   substitute for product context. Supply enough pointers for a fresh session.
