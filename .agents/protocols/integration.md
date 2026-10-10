@@ -7,6 +7,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
+- **GitHub CI first.** When the PR's `CI` check at that head has finished with
+  a failure (`gh pr checks <n>`, then `gh run view <id> --log-failed`), a lint,
+  typecheck, test or spec failure that main's `CI` run does not show the same
+  way (the base comparison below) is a branch failure, unless it is a timeout
+  in a test the diff leaves untouched: finish `changes` naming it, without
+  running local CI. Otherwise, and while the check is pending or green, go on.
+  The check runs the PR's own recipe, so it never replaces local CI.
 - **CI, every tier.** Run `mise run ci <headRefOid>` from a checkout at
   freshly fetched `origin/main`. It posts the `signoff` commit status only when
   the isolated review passes, and a failing status otherwise. A failing run
@@ -31,9 +38,12 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   That run uses the candidate's own e2e recipe, so for a browser-observable
   outcome read its output rather than trusting the status. A
   failure may be called environmental only after the same failing spec is run
-  against the base: green at the base and red at the head is a branch
-  regression to fix, even when the stale code is a test fixture rather than
-  production.
+  against the base, or when it failed the same way (same test, browser project
+  and error) in the latest completed `CI` run on `main` at or before the base
+  (`gh run list --workflow ci.yml --branch main --status completed`, then
+  `gh run view <id> --log-failed`): green at the base and red at the head is a
+  branch regression to fix, even when the stale code is a test fixture rather
+  than production.
 - Record every gate outcome against the commit SHA it ran at, and the exact
   base-ref SHA the exact-head gate set began from as its base-freshness point.
   Link the check or failure evidence; do not paste full logs, test counts or

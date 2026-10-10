@@ -80,6 +80,9 @@ export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
  */
 export const CLOCK_SKEW_SECONDS = 60;
 
+/** Lifetime of the per-request device sign-in proofs minted by clients. */
+export const REQUEST_PROOF_LIFETIME_SECONDS = 60;
+
 /**
  * The longest a token may be — 4096 characters, which for a base64url token is
  * 4 KiB. A real one is a few hundred bytes.

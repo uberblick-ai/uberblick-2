@@ -8,7 +8,7 @@ import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMis
 import { authenticationOrigin } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
-import { importCredentialKey, mintRequestProof } from "./token.js";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "./token.js";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;
@@ -21,6 +21,9 @@ export interface DeviceLoginFailure {
   status: FailureStatus;
   origin: string;
   message: string;
+  /** Credential-store failure and next action without combined recovery prose. */
+  reason?: string;
+  fix?: string;
   hubVersion?: number;
 }
 export type DeviceLoginResult = { status: "ready"; origin: string; login: StoredHubLogin } | DeviceLoginFailure;
@@ -56,7 +59,9 @@ export function readDeviceLogin(endpoint: string, _workspace: string, env: NodeJ
   const store = readHubLogins(env);
   if (store.state === "refused" || store.state === "unreadable" || store.unreadableHubs.includes(origin)) {
     return { status: store.state === "refused" ? "credential-store-refused" : "credential-store-unreadable", origin,
-      message: store.diagnostic ?? `The stored login for ${origin} is unreadable; repair the credential store and run \`ub auth login ${origin}\`.` };
+      message: store.diagnostic ?? `The stored login for ${origin} is unreadable; repair the credential store and run \`ub auth login ${origin}\`.`,
+      reason: store.reason ?? `stored login for ${origin} in credential store ${store.path} is unreadable`,
+      fix: store.fix ?? `repair ${store.path}, then run ub auth login ${origin}` };
   }
   const login = store.logins[origin];
   return login === undefined ? signIn(origin) : { status: "ready", origin, login };
@@ -143,7 +148,7 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
     signal?.throwIfAborted();
     const key = await importCredentialKey(Buffer.from(login.credential.key, "base64url"));
     const proof = await mintRequestProof(key, {
-      kid: login.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+      kid: login.credential.record.id, operation: "renew-credential", lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,
     });
     requestSignal.throwIfAborted();
     const request = (body: string) => fetch(`${origin}/auth/credential/renew`, {

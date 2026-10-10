@@ -41,6 +41,9 @@ export interface HubLogins {
   unreadableHubs: string[];
   /** Safe to print: a file or shape diagnostic, never stored contents. */
   diagnostic?: string;
+  /** File failure and next action, separately consumable by diagnostics. */
+  reason?: string;
+  fix?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -113,39 +116,56 @@ interface Store extends HubLogins {
 function readStore(env: NodeJS.ProcessEnv): Store {
   const path = credentialsPath(env);
   const empty = { path, logins: {}, unreadableHubs: [], raw: null };
+  const refusedFile = {
+    ...empty, state: "refused" as const,
+    diagnostic: `refusing credential store ${path}: it must be a regular file you own; move it aside and run \`ub auth login\` again`,
+    reason: `credential store ${path} must be a regular file you own`,
+    fix: `move ${path} aside, then run ub auth login`,
+  };
+  const unreadableJson = {
+    ...empty, state: "unreadable" as const,
+    diagnostic: `could not read credential store ${path}: expected a readable JSON object; repair that file before logging in`,
+    reason: `credential store ${path} is not a readable JSON object`,
+    fix: `repair ${path}, then run ub auth login`,
+  };
   let fd: number;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { ...empty, state: "missing" };
-    if (code === "ELOOP") return { ...empty, state: "refused", diagnostic: `refusing credential store ${path}: it must be a regular file you own; move it aside and run \`ub auth login\` again` };
-    return { ...empty, state: "unreadable", diagnostic: `could not read credential store ${path}` };
+    if (code === "ELOOP") return refusedFile;
+    return { ...empty, state: "unreadable", diagnostic: `could not read credential store ${path}`,
+      reason: `could not read credential store ${path}`, fix: `make ${path} readable by your account` };
   }
   let raw: unknown;
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || (process.getuid !== undefined && stat.uid !== process.getuid())) {
-      return { ...empty, state: "refused", diagnostic: `refusing credential store ${path}: it must be a regular file you own; move it aside and run \`ub auth login\` again` };
+      return refusedFile;
     }
     const permissions = stat.mode & 0o777;
     if ((permissions & 0o077) !== 0) {
-      return { ...empty, state: "refused", diagnostic: `refusing credential store ${path}: mode ${permissions.toString(8).padStart(4, "0")} lets other users access it; fix it with: chmod 600 ${path}` };
+      return { ...empty, state: "refused", diagnostic: `refusing credential store ${path}: mode ${permissions.toString(8).padStart(4, "0")} lets other users access it; fix it with: chmod 600 ${path}`,
+        reason: `credential store ${path} mode ${permissions.toString(8).padStart(4, "0")} lets other users access it`,
+        fix: `chmod 600 ${path}` };
     }
     // Permissions and contents are read from the same descriptor. A replaced
     // path cannot turn a checked owner-only file into an exposed credential.
     raw = JSON.parse(readFileSync(fd, "utf8"));
   } catch {
-    return { ...empty, state: "unreadable", diagnostic: `could not read credential store ${path}: expected a readable JSON object; repair that file before logging in` };
+    return unreadableJson;
   } finally {
     closeSync(fd);
   }
   if (!object(raw)) {
-    return { ...empty, state: "unreadable", diagnostic: `could not read credential store ${path}: expected a readable JSON object; repair that file before logging in` };
+    return unreadableJson;
   }
   const entries = raw.hubLogins;
   if (entries !== undefined && !object(entries)) {
-    return { ...empty, state: "unreadable", diagnostic: `could not read hub logins in credential store ${path}: expected a JSON object; repair that file before logging in` };
+    return { ...empty, state: "unreadable", diagnostic: `could not read hub logins in credential store ${path}: expected a JSON object; repair that file before logging in`,
+      reason: `hub logins in credential store ${path} are not a JSON object`,
+      fix: `repair ${path}, then run ub auth login` };
   }
   const logins: Record<string, StoredHubLogin> = {};
   const unreadableHubs: string[] = [];

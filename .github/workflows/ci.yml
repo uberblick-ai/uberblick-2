@@ -1,0 +1,101 @@
+name: CI
+
+# It gates nothing; merges still require the local `signoff` from `mise run ci`
+# (CONTRIBUTING.md, "Local CI"). On main it records whether main itself is clean,
+# so a failure seen while validating a branch can be checked against main's
+# latest run instead of rerunning the base. On a pull request it is an early
+# signal the integrator reads before local CI; it runs the PR's own recipe, so
+# it never stands in for the signoff. Standard runners cost no Actions minutes
+# in a public repository.
+#
+# No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# On main, let a started run finish and keep only the newest push waiting behind
+# it, so a busy merge day still produces results. On a pull request only the
+# newest head matters, so a new push cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, typecheck and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # On a pull request, test the head itself rather than GitHub's merge with
+      # a main that may since have moved; the integrator's merged-tree gate
+      # covers the combination.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Installs the toolchain pinned in mise.toml and puts `mise` on PATH.
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - id: install
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # Each check runs even when an earlier one fails, so one run shows
+      # everything that is red on main.
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: mise run lint
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: mise run typecheck
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: mise run test
+
+  # Separate from `checks` so it runs in parallel and only it downloads browsers.
+  e2e:
+    name: browser e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      # Keyed on the lockfile because that is what pins @playwright/test, and
+      # the browser build a Playwright version wants is a function of it.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # Cached engines do not include system packages, so provision WebKit's
+      # host libraries on every run. Local e2e never installs host packages.
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+
+      # The task downloads pinned Chromium and WebKit (a no-op on a cache hit)
+      # and starts its own hub and dev server, so there is nothing else to wire.
+      - run: mise run e2e

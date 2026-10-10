@@ -1,7 +1,7 @@
 /** Doctor verdicts against real isolated configuration and local hubs. */
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { Server as HttpServer } from "node:http";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -10,9 +10,10 @@ import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { AUTH_REJECTED, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
 import type { HubFailureCause } from "@uberblick/mcp-server";
+import { CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/hub/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import * as budget from "../src/budget.js";
@@ -85,7 +86,7 @@ async function silentServer(offsetSeconds: number | null = 0): Promise<{ port: n
   server.on("connection", (socket: Socket) => sockets.push(socket));
   server.on("upgrade", (request, socket: Socket) => {
     const accept = createHash("sha1").update(`${request.headers["sec-websocket-key"] ?? ""}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
-    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   servers.push({ server, sockets });
@@ -105,6 +106,13 @@ async function doctor(box: Sandbox, extraEnv: NodeJS.ProcessEnv = {}): Promise<{
       expect(one.fix).toEqual(expect.any(String));
       expect(one.fix).not.toBe("");
     } else expect(one.fix).toBeNull();
+    for (const line of [one, ...(one.listeners ?? [])]) {
+      expect(line.reason).not.toMatch(/[`\r\n]/);
+      if (line.fix !== null) {
+        expect(line.fix).not.toMatch(/[`\r\n]/);
+        expect(line.fix).not.toBe(line.reason);
+      }
+    }
   }
   expect(report.ok).toBe(!report.checks.some((one) => one.status === "fail"));
   return { report, checks: new Map(report.checks.map((one) => [one.name, one])), ok: report.ok };
@@ -118,7 +126,14 @@ function check(checks: Map<string, Check>, name: string): Check {
 
 function listener(checks: Map<string, Check>, name: "web server" | "hub listener"): Check {
   const combined = check(checks, "local hub");
-  return combined.listeners?.find((one) => one.name === name) ?? combined;
+  const detail = combined.listeners?.find((one) => one.name === name);
+  if (detail !== undefined) return detail;
+  // Equal listener verdicts share one serialized row; select its relevant
+  // reason without letting the other listener's text affect assertions.
+  const marker = `${name}: `;
+  const start = combined.reason.indexOf(marker);
+  return start === -1 ? combined : { ...combined,
+    reason: combined.reason.slice(start + marker.length).split("; hub listener: ")[0] ?? "" };
 }
 
 async function mcpDoctor(
@@ -212,9 +227,9 @@ function repository(box: Sandbox): void {
 }
 
 /** A well-formed stored login for cases with a stubbed network probe. */
-function deviceBox(endpoint: string): Sandbox {
+function deviceBox(endpoint: string, username = "doctor-person"): Sandbox {
   const principalId = randomUUID();
-  const login: StoredHubLogin = { identity: { id: principalId, githubAccountId: "12345", githubUsername: "doctor-person" },
+  const login: StoredHubLogin = { identity: { id: principalId, githubAccountId: "12345", githubUsername: username },
     credential: { record: { id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [WORKSPACE], issuedAt: Date.now(), revokedAt: null }, key: Buffer.alloc(32, 1).toString("base64url") } };
   return sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
     userConfig: { hubAdmissions: { [endpoint]: "device" } },
@@ -226,11 +241,10 @@ describe("ub doctor", () => {
     const { checks, ok } = await doctor(unboundSandbox());
     expect([...checks.keys()]).toEqual(NAMES);
     for (const one of checks.values()) expect(one.reason).not.toBe("");
-    expect(check(checks, "workspace").status).toBe("fail");
-    expect(check(checks, "workspace").fix).toMatch(/ub workspace create/);
-    expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").fix).toMatch(/ub workspace use/);
-    expect(check(checks, "workspace").reason).toContain(".uberblick.json");
+    expect(check(checks, "workspace")).toEqual({
+      name: "workspace", status: "fail", reason: "no .uberblick.json here or in any parent directory",
+      fix: "ub workspace create <name>, or ub workspace use <link|id>",
+    });
     expect(ok).toBe(false);
   });
 
@@ -264,8 +278,77 @@ describe("ub doctor", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const { checks } = await doctor(box, { UB_WORKSPACE_ID: PINNED, UB_HUB_URL: "local" });
     expect(check(checks, "workspace").status).toBe("pass");
-    expect(check(checks, "workspace").reason).toContain("environment");
-    expect(check(checks, "workspace").reason).toContain(PINNED);
+    expect(check(checks, "workspace").reason).toBe(`${PINNED}, from UB_WORKSPACE_ID and UB_HUB_URL`);
+  });
+
+  it("names the selecting project file and keeps the full uuid", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: `named-workspace-${WORKSPACE}`, hubUrl: null } });
+    const { checks } = await doctor(box);
+    expect(check(checks, "workspace").reason).toBe(`${WORKSPACE}, from ${join(box.cwd, ".uberblick.json")}`);
+  });
+
+  it("names only UB_WORKSPACE_ID when the machine's hub record selects the workspace", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: PINNED, hubUrl: null } });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    const { checks } = await mcpDoctor(box, { UB_WORKSPACE_ID: WORKSPACE });
+    expect(check(checks, "workspace").reason).toBe(`${WORKSPACE}, from UB_WORKSPACE_ID`);
+  });
+
+  it.each([
+    { description: "invalid JSON", raw: "{" },
+    { description: "a malformed id", raw: JSON.stringify({ workspaceId: SECRET, hubUrl: null }) },
+  ])("names the binding file refused for $description in one line", async ({ raw }) => {
+    const box = sandbox({ raw: { projectBinding: raw } });
+    const { checks } = await doctor(box);
+    const workspace = check(checks, "workspace");
+    expect(workspace.status).toBe("fail");
+    expect(workspace.reason).toContain(join(box.cwd, ".uberblick.json"));
+    expect(workspace.reason).not.toContain(SECRET);
+    expect(workspace.fix).toBe("ub workspace create <name>, or ub workspace use <link|id>");
+  });
+
+  it("names a project binding path that is not a readable file", async () => {
+    const box = sandbox();
+    const path = join(box.cwd, ".uberblick.json");
+    rmSync(path);
+    mkdirSync(path);
+    const { checks } = await doctor(box);
+    expect(check(checks, "workspace").status).toBe("fail");
+    expect(check(checks, "workspace").reason).toContain(path);
+    expect(check(checks, "workspace").reason).toMatch(/(?:read|regular file)/i);
+  });
+
+  it.each([
+    { description: "lone UB_HUB_URL", env: { UB_HUB_URL: DEAD_HUB_URL }, variable: "UB_HUB_URL" },
+    { description: "empty UB_HUB_URL", env: { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "" }, variable: "UB_HUB_URL" },
+    { description: "no recorded hub", env: { UB_WORKSPACE_ID: WORKSPACE }, variable: "UB_WORKSPACE_ID" },
+    { description: "legacy WORKSPACE_ID", env: { WORKSPACE_ID: WORKSPACE }, variable: "WORKSPACE_ID" },
+    { description: "legacy HUB_URL", env: { HUB_URL: DEAD_HUB_URL }, variable: "HUB_URL" },
+    { description: "malformed UB_WORKSPACE_ID", env: { UB_WORKSPACE_ID: SECRET, UB_HUB_URL: "local" }, variable: "UB_WORKSPACE_ID" },
+  ])("names the variable at fault for $description in one line", async ({ env, variable }) => {
+    const { checks } = await doctor(sandbox(), env);
+    const workspace = check(checks, "workspace");
+    expect(workspace.status).toBe("fail");
+    expect(workspace.reason).toContain(variable);
+    expect(workspace.reason).not.toContain(SECRET);
+    expect(workspace.reason).not.toBe("no .uberblick.json here or in any parent directory");
+  });
+
+  it.each(["unreadable", "refused"] as const)("separates a device credential file's %s reason and fix", async kind => {
+    const endpoint = "wss://hub.example.invalid/custom-sync-path";
+    const box = deviceBox(endpoint);
+    const path = join(box.configHome, "uberblick", "credentials.json");
+    if (kind === "unreadable") writeFileSync(path, "{", "utf8");
+    else chmodSync(path, 0o644);
+    const dial = vi.spyOn(probes, "probeHubState");
+    const { checks } = await doctor(box);
+    const login = check(checks, "login");
+    expect(login.status).toBe("fail");
+    expect(login.reason).toContain(path);
+    expect(login.reason).toMatch(kind === "refused" ? /mode 0644/ : /(?:readable|JSON)/);
+    expect(login.fix).toMatch(kind === "refused" ? /^chmod 600 / : /^repair /);
+    expect(login.fix).not.toBe(login.reason);
+    expect(dial).not.toHaveBeenCalled();
   });
 
   it("moves a refused local credentials file to local hub without printing its secret", async () => {
@@ -275,7 +358,7 @@ describe("ub doctor", () => {
     expect(check(checks, "login").status).toBe("skipped");
     expect(local.status).toBe("fail");
     expect(local.reason).toMatch(/mode 0644/);
-    expect(local.fix).toMatch(/delete .*credentials\.json/);
+    expect(local.fix).toMatch(/^(?:chmod 600|delete) .*credentials\.json/);
     expect(JSON.stringify(report)).not.toContain(SECRET);
   });
 
@@ -287,8 +370,8 @@ describe("ub doctor", () => {
       credentials: { signingSecret: SECRET } });
     const dial = vi.spyOn(probes, "probeHubState");
     const { checks } = await doctor(box);
-    expect(check(checks, "login").status).toBe("fail");
-    expect(check(checks, "login").fix).toMatch(/ub auth login/);
+    expect(check(checks, "login")).toEqual({ name: "login", status: "fail",
+      reason: `not signed in to ${authenticationOrigin(endpoint)}`, fix: `ub auth login ${authenticationOrigin(endpoint)}` });
     expect(check(checks, "hub").status).toBe("skipped");
     expect(check(checks, "hub").reason).toMatch(/needs.*login/);
     expect(check(checks, "clock").status).toBe("skipped");
@@ -306,8 +389,10 @@ describe("ub doctor", () => {
       ...(host === "ws://127.0.0.1" ? { userConfig: { hubAdmissions: { [endpoint]: "device" } } } : {}),
       credentials: { signingSecret: SECRET, hubLogins: { [authenticationOrigin(endpoint)]: login } } });
     const { report, checks } = await doctor(box);
-    expect(check(checks, "login").status).toBe("pass");
-    expect(check(checks, "hub").status).toBe("pass");
+    expect(check(checks, "login")).toEqual({ name: "login", status: "pass",
+      reason: `${login.identity.githubUsername} on ${authenticationOrigin(endpoint)}`, fix: null });
+    expect(check(checks, "hub")).toEqual({ name: "hub", status: "pass",
+      reason: `connected to ${authenticationOrigin(endpoint)}; ${login.identity.githubUsername} has access`, fix: null });
     expect(remote.authentications.length).toBeGreaterThan(0);
     expect(JSON.stringify(report)).not.toContain(SECRET);
     expect(JSON.stringify(report)).not.toContain(login.credential.key);
@@ -320,10 +405,9 @@ describe("ub doctor", () => {
     const hub = check(checks, "hub");
     expect(check(checks, "login").status).toBe("pass");
     expect(hub.status).toBe("warn");
-    expect(hub.fix).toMatch(/network/);
-    expect(hub.fix).toMatch(/whoever runs the hub/);
-    expect(hub.fix).toMatch(/work stays here/);
-    expect(hub.fix).toMatch(/syncs once.*back/);
+    expect(hub.fix).toBe("check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back");
+    expect(hub.reason).toBe(`refused by ${new URL(endpoint).host} (ECONNREFUSED)`);
+    expect(hub.reason).not.toContain(endpoint);
     expect(hub.fix).not.toContain("ub open");
     expect(check(checks, "clock").status).toBe("skipped");
   });
@@ -344,7 +428,7 @@ describe("ub doctor", () => {
       protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
     const { report, checks } = await doctor(deviceBox(endpoint));
     expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason,
-      fix: "check your network or ask whoever runs the hub; your work stays here and syncs once the hub is back" });
+      fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
     expect(renderDoctor(report)).toContain(reason);
     expect(check(checks, "clock").status).toBe("skipped");
   });
@@ -354,8 +438,8 @@ describe("ub doctor", () => {
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
       protocolVersion: SYNC_PROTOCOL_VERSION });
     const { checks } = await doctor(deviceBox(endpoint));
-    expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason: `${endpoint} does not answer`,
-      fix: "check your network or ask whoever runs the hub; your work stays here and syncs once the hub is back" });
+    expect(check(checks, "hub")).toEqual({ name: "hub", status: "warn", reason: `${authenticationOrigin(endpoint)} does not answer`,
+      fix: "check your network or VPN, or ask whoever runs the hub; your work stays here and syncs once it is back" });
   });
 
   it.each<[HubFailureCause, string]>([
@@ -367,9 +451,84 @@ describe("ub doctor", () => {
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint,
       protocolVersion: SYNC_PROTOCOL_VERSION, cause, detail });
     const { report, checks } = await doctor(deviceBox(endpoint));
-    expect(check(checks, "hub").reason).toBe(`${endpoint} does not answer`);
+    expect(check(checks, "hub").reason).toBe(`${authenticationOrigin(endpoint)} does not answer`);
     expect(renderDoctor(report)).not.toContain(detail);
   });
+
+  it.each(["wss://hub.example.invalid/custom-sync-path", "ws://hub.example.invalid:8080/custom-sync-path"])(
+    "names the authentication origin for every device hub line at %s", async endpoint => {
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+      vi.spyOn(probes, "probeHubClock").mockResolvedValue(-240);
+      const { report, checks } = await doctor(deviceBox(endpoint));
+      const origin = authenticationOrigin(endpoint);
+      expect(check(checks, "login").reason).toBe(`doctor-person on ${origin}`);
+      expect(check(checks, "hub").reason).toBe(`connected to ${origin}; doctor-person has access`);
+      expect(check(checks, "clock").reason).toBe(`4 min ahead of ${origin}`);
+      expect(JSON.stringify(report)).not.toContain(endpoint);
+    },
+  );
+
+  it.each(["no-workspace-access", "sign-in-required", "credential-store", "renewal-unavailable"] as const)(
+    "keeps the device refusal %s distinct and actionable", async authRecovery => {
+      const endpoint = "wss://hub.example.invalid/custom-sync-path";
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "auth-failed", url: endpoint,
+        protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery, reason: `device refusal: ${authRecovery}` });
+      vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
+      const { checks } = await doctor(deviceBox(endpoint));
+      const hub = check(checks, "hub");
+      expect(hub.status).toBe("fail");
+      expect(hub.reason).not.toContain("refused remote sync");
+      if (authRecovery === "no-workspace-access") {
+        expect(hub.reason).toBe(`doctor-person has no access to ${WORKSPACE}, or it doesn't exist on this hub`);
+        expect(hub.fix).toBe("ask a workspace admin to run: ub workspace member add doctor-person");
+        expect(hub.fix).not.toContain("ub auth login");
+      } else if (authRecovery === "sign-in-required") {
+        expect(hub.fix).toBe(`ub auth login ${authenticationOrigin(endpoint)}`);
+      } else {
+        expect(hub.reason).toMatch(authRecovery === "credential-store" ? /credential|stored login/ : /renew/);
+        expect(hub.reason).not.toMatch(/no access|not signed in/);
+      }
+    },
+  );
+
+  it.each(["bad handle", "bad;handle", "doctor`person", "doctor\n\u001b[31m\u007f\u0085"])(
+    "prints an invalid stored login safely and never embeds it in the access command: %j", async username => {
+      const endpoint = "wss://hub.example.invalid";
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "auth-failed", url: endpoint,
+        protocolVersion: SYNC_PROTOCOL_VERSION, authRecovery: "no-workspace-access" });
+      vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
+      const { checks } = await doctor(deviceBox(endpoint, username));
+      const safe = JSON.stringify(username).replace(/[`\u007f-\u009f]/g,
+        char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+      expect(check(checks, "login").reason).toBe(`${safe} on ${authenticationOrigin(endpoint)}`);
+      expect(check(checks, "hub").reason).toBe(`${safe} has no access to ${WORKSPACE}, or it doesn't exist on this hub`);
+      expect(check(checks, "hub").fix).toBe("ask a workspace admin for access");
+    },
+  );
+
+  it.each([SYNC_PROTOCOL_VERSION + 1, SYNC_PROTOCOL_VERSION - 1])(
+    "names who updates a device hub speaking protocol %s, preserving failure and its JSON fix", async hubVersion => {
+      const endpoint = "wss://hub.example.invalid/custom-sync-path";
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "update-required", url: endpoint,
+        protocolVersion: SYNC_PROTOCOL_VERSION, hubProtocolVersion: hubVersion });
+      vi.spyOn(probes, "probeHubClock").mockResolvedValue(0);
+      const box = deviceBox(endpoint);
+      const { report, checks, ok } = await doctor(box);
+      const mismatch = check(checks, "hub");
+      expect(mismatch.status).toBe("fail");
+      expect(ok).toBe(false);
+      expect(mismatch.reason).toContain(authenticationOrigin(endpoint));
+      if (hubVersion > SYNC_PROTOCOL_VERSION) expect(mismatch.fix).toMatch(/^ub update.*restart.*agents/);
+      else {
+        expect(mismatch.fix).toContain(authenticationOrigin(endpoint));
+        expect(mismatch.fix).toMatch(/^ask .*update/);
+        expect(mismatch.fix).not.toContain("ub update");
+      }
+      const json = JSON.parse(JSON.stringify(report)) as DoctorReport;
+      expect(json.checks.find(one => one.name === "hub")?.fix).toBe(mismatch.fix);
+      expect(renderDoctor(report, box.env)).toContain(`→ ${mismatch.fix}\n`);
+    },
+  );
 
   it("skips a free local listener and renders one line when both listeners skip", async () => {
     const port = await freePort();
@@ -401,8 +560,7 @@ describe("ub doctor", () => {
     const local = check(checks, "local hub");
     expect(local.status).toBe("fail");
     expect(local.reason).toMatch(/refused the signing secret/);
-    expect(local.fix).toContain(AUTH_REJECTED);
-    expect(local.fix).toMatch(/same secret/);
+    expect(local.fix).toMatch(/same (?:signing )?secret/);
     expect(local.fix).not.toContain("ub status");
   });
 
@@ -418,8 +576,7 @@ describe("ub doctor", () => {
     expect(local.reason).toMatch(status === "pass" ? /held by an uberblick hub/ : /refused the signing secret/);
   });
 
-  it("explains both sync protocol versions under local hub", async () => {
-    const hubVersion = SYNC_PROTOCOL_VERSION + 1;
+  it.each([SYNC_PROTOCOL_VERSION + 1, SYNC_PROTOCOL_VERSION - 1])("explains sync protocol %s under local hub", async hubVersion => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     const hub = await startHub(box, hubVersion);
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
@@ -428,7 +585,12 @@ describe("ub doctor", () => {
     expect(mismatch.status).toBe("fail");
     expect(mismatch.reason).toContain(`this client speaks sync protocol ${SYNC_PROTOCOL_VERSION}`);
     expect(mismatch.reason).toContain(`the hub speaks ${hubVersion}`);
-    expect(`${mismatch.reason} ${mismatch.fix}`).toContain("update this client");
+    if (hubVersion > SYNC_PROTOCOL_VERSION) expect(mismatch.fix).toMatch(/^ub update.*restart.*agents/);
+    else {
+      expect(mismatch.fix).toContain(`ws://127.0.0.1:${hub.port}`);
+      expect(mismatch.fix).toMatch(/^ask .*update/);
+      expect(mismatch.fix).not.toContain("ub update");
+    }
   });
 
   it("fails a local hub that accepts a websocket but never serves the directory", async () => {
@@ -448,8 +610,8 @@ describe("ub doctor", () => {
     expect(local.status).toBe("fail");
     expect(local.reason).toContain(`127.0.0.1:${port}`);
     expect(local.reason).toMatch(/not an uberblick hub/);
-    expect(local.fix).toMatch(/PORT/);
-    expect(local.fix).toMatch(/ub workspace use/);
+    expect(local.fix).toBe("stop that process, then run ub open");
+    expect(local.fix).not.toContain("PORT");
   });
 
   it("skips an occupied local hub port when no signing secret can identify it", async () => {
@@ -479,6 +641,7 @@ describe("ub doctor", () => {
     expect(check(checks, "local hub").status).toBe("fail");
     expect(check(checks, "local hub").reason).toContain(value);
     expect(check(checks, "local hub").reason).toMatch(/PORT/);
+    expect(check(checks, "local hub").fix).toMatch(/^unset PORT\b/);
   });
 
   it("names both values when PORT disagrees with the local endpoint", async () => {
@@ -488,8 +651,7 @@ describe("ub doctor", () => {
     expect(local.status).toBe("fail");
     expect(local.reason).toContain(String(port));
     expect(local.reason).toContain("1");
-    expect(local.fix).toMatch(/PORT/);
-    expect(local.fix).toMatch(/ub workspace use/);
+    expect(local.fix).toMatch(/^unset PORT\b/);
   });
 
   it.each(["http://127.0.0.1:1234", "ftp://127.0.0.1:1234"])("fails a local endpoint that is not a websocket URL: %s", async endpoint => {
@@ -500,7 +662,7 @@ describe("ub doctor", () => {
     const { checks } = await doctor(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } }));
     expect(check(checks, "local hub").status).toBe("fail");
     expect(check(checks, "local hub").reason).toMatch(/websocket|ws:/);
-    expect(check(checks, "local hub").reason).not.toMatch(/ub open starts/);
+    expect(listener(checks, "hub listener").reason).not.toMatch(/ub open starts/);
   });
 
   it("does not promise ub open will start a refused secure local endpoint", async () => {
@@ -510,15 +672,41 @@ describe("ub doctor", () => {
     expect(listener(checks, "hub listener").reason).toMatch(/wss|TLS|secure/i);
   });
 
-  it.each([["61s fast", "fail", -61, /ahead of/], ["61s slow", "pass", 61, /behind/]] as const)("a device workspace clock %s is a %s", async (_name, status, offsetSeconds, direction) => {
+  it.each([["62s fast", -62, "ahead of"], ["62s slow", 62, "behind"]] as const)("fails a device workspace clock %s", async (_name, offsetSeconds, direction) => {
     const server = await silentServer(offsetSeconds);
     const endpoint = `ws://127.0.0.1:${server.port}`;
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "unsettled", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
     const { checks } = await doctor(deviceBox(endpoint));
-    expect(check(checks, "clock").status).toBe(status);
-    expect(check(checks, "clock").reason).toMatch(direction);
+    expect(check(checks, "clock").status).toBe("fail");
+    expect(check(checks, "clock").reason).toContain(`${direction} ${authenticationOrigin(endpoint)}`);
     expect(server.clockRequests).toBe(1);
-    if (status === "fail") expect(check(checks, "clock").fix).toMatch(/clock/);
+    expect(check(checks, "clock").fix).toBe("turn on automatic time in your system settings");
+  });
+
+  it.each([0, 2, -2, -CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS])(
+    "passes a device clock offset of %ss, including either admission boundary", async skew => {
+      const endpoint = "wss://hub.example.invalid/ws";
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+      vi.spyOn(probes, "probeHubClock").mockResolvedValue(skew);
+      const { checks } = await doctor(deviceBox(endpoint));
+      expect(check(checks, "clock")).toEqual({ name: "clock", status: "pass",
+        reason: `within ${Math.abs(skew)}s of the hub`, fix: null });
+    },
+  );
+
+  it.each([
+    { skew: -CLOCK_SKEW_SECONDS - 1, offset: `${CLOCK_SKEW_SECONDS + 1}s`, direction: "ahead of" },
+    { skew: REQUEST_PROOF_LIFETIME_SECONDS + 1, offset: `${REQUEST_PROOF_LIFETIME_SECONDS + 1}s`, direction: "behind" },
+    { skew: -240, offset: "4 min", direction: "ahead of" },
+    { skew: 900, offset: "15 min", direction: "behind" },
+  ])("fails a device clock $offset $direction the hub", async ({ skew, offset, direction }) => {
+    const endpoint = "wss://hub.example.invalid/ws";
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+    vi.spyOn(probes, "probeHubClock").mockResolvedValue(skew);
+    const { checks } = await doctor(deviceBox(endpoint));
+    expect(check(checks, "clock")).toEqual({ name: "clock", status: "fail",
+      reason: `${offset} ${direction} ${authenticationOrigin(endpoint)}`, fix: "turn on automatic time in your system settings" });
+    expect(check(checks, "clock").reason).not.toMatch(/tolerance|HTTP|Date|proxy/);
   });
 
   it.each(["hub-down", "connecting", "disabled"] as const)("does not read a device hub clock when its probe is %s", async status => {
@@ -538,7 +726,7 @@ describe("ub doctor", () => {
     const { checks } = await doctor(deviceBox(endpoint));
     expect(check(checks, "hub").status).toBe("warn");
     expect(check(checks, "clock").status).toBe("skipped");
-    expect(check(checks, "clock").reason).toMatch(/answered no HTTP date/);
+    expect(check(checks, "clock").reason).toBe(`${authenticationOrigin(endpoint)} did not provide a clock reading`);
     expect(server.clockRequests).toBe(1);
   });
 
@@ -1039,5 +1227,34 @@ describe("ub doctor MCP setup", () => {
     expect(run.stdout).toMatch(/0 failed, 1 warning, \d+ passed, \d+ skipped/);
     expect(run.stdout.match(/→ /g)).toHaveLength(1);
     expect(run.status).toBe(0);
+  });
+
+  it("shortens home paths only in human output and keeps JSON reasons and fixes absolute", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
+      credentials: { signingSecret: SECRET }, credentialsMode: 0o644 });
+    const { report } = await doctor(box);
+    const absoluteHome = homeOf(box);
+    const human = renderDoctor(report, box.env);
+    expect(human).toContain(`${WORKSPACE}, from ~/checkout/.uberblick.json`);
+    expect(human).toContain(`~/data/uberblick/${WORKSPACE}.sqlite`);
+    expect(human).toContain("~/config/uberblick/credentials.json");
+    expect(human).not.toContain(absoluteHome);
+    const json = JSON.stringify(report);
+    expect(json).toContain(join(box.cwd, ".uberblick.json"));
+    expect(json).toContain(join(box.configHome, "uberblick", "credentials.json"));
+    expect(json).toContain(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`));
+    expect(json).not.toContain("~/");
+  });
+
+  it.each(["neighbor", "embedded"] as const)("does not shorten an outside directory with a %s home substring", kind => {
+    const box = sandbox();
+    const home = homeOf(box);
+    const path = kind === "neighbor" ? `${home}-neighbor/database.sqlite` : `/archive${home}/database.sqlite`;
+    const report: DoctorReport = { version: "0.0.0", ok: false, checks: [
+      { name: "database", status: "fail", reason: `${path}: cannot read the store`, fix: `restore access to ${path}` },
+    ] };
+    const text = renderDoctor(report, box.env);
+    expect(text).toContain(path);
+    expect(text).not.toContain("~");
   });
 });

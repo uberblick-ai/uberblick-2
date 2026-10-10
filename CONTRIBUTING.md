@@ -253,7 +253,11 @@ gh extension install basecamp/gh-signoff
 GitHub Actions retains release publishing and the Linux Homebrew upgrade proof
 after packaging changes. The latter runs after merges changing the formula or
 its payload, and on demand from the Actions tab, through
-`.github/workflows/homebrew-formula.yml`.
+`.github/workflows/homebrew-formula.yml`. Every push to `main` and every pull
+request also runs lint, typecheck, tests and browser e2e through
+`.github/workflows/ci.yml`. It gates nothing: on `main` it records whether
+`main` itself is clean, and on a pull request it is an early signal that runs
+the pull request's own recipe.
 
 ## Review isolation
 
