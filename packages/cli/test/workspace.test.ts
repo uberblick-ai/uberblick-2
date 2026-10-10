@@ -254,7 +254,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
   });
 
   it.each(["unnamed", "empty", "old schema", "unreadable"])(
-    "keeps a %s replica in the list and both prefix resolvers",
+    "keeps a %s replica in the list and workspace use prefix resolution",
     (kind) => {
       const box = sandbox();
       bind(box);
@@ -280,11 +280,6 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
         { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
       ]);
       expect(readFileSync(path)).toEqual(before);
-      const installed = runUb([
-        "mcp", "install", "claude", "--print", "--workspace", OTHER.slice(0, 8), "--hub", "local",
-      ], box);
-      expect(installed.status, installed.output).toBe(0);
-      expect(installed.stdout).toContain(OTHER);
       record(box, OTHER, null);
       const selected = runUb(["workspace", "use", OTHER.slice(0, 8)], box);
       expect(selected.status, selected.output).toBe(0);
@@ -324,17 +319,19 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     }
   });
 
-  it("keeps install prefix resolution independent of invalid workspace records", () => {
+  it("prints a plain install entry independently of invalid workspace records", () => {
     const box = sandbox();
     withDatabase(box, OTHER);
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{invalid");
     const installed = runUb([
-      "mcp", "install", "claude", "--print", "--workspace", OTHER.slice(0, 8), "--hub", "local",
+      "mcp", "install", "claude", "--print",
     ], box);
     expect(installed.status, installed.output).toBe(0);
-    expect(installed.stdout).toContain(OTHER);
+    expect(JSON.parse(installed.stdout)).toEqual({ mcpServers: {
+      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+    } });
     expect(readFileSync(registry, "utf8")).toBe("{invalid");
   });
 

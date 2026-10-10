@@ -38,21 +38,13 @@ export type Scope = "project" | "user";
 
 /** A server as a client registers it: a name, and the program it spawns. */
 export interface Entry {
-  /**
-   * The key it is registered under — {@link SERVER_NAME} for the entry `ub`
-   * installs by default, `uberblick-<label>` for a workspace-pinned one.
-   */
+  /** The key it is registered under — {@link SERVER_NAME} for install. */
   name: string;
   command: string;
   args: string[];
-  /**
-   * A complete, non-secret binding: UB_WORKSPACE_ID and UB_HUB_URL.
-   * The hub may be "local". Credentials are resolved privately at spawn time.
-   */
-  env?: Record<string, string>;
 }
 
-/** The stable spawn line; `install` adds its complete selected binding. */
+/** The complete entry install registers, independent of workspace selection. */
 export const DEFAULT_ENTRY: Entry = {
   name: SERVER_NAME,
   command: "ub",
@@ -278,22 +270,17 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
   if (Object.keys(held).some((key) => !KNOWN_JSON_KEYS.has(key))) return false;
   if (held.type !== undefined && held.type !== "stdio") return false;
   const args = held.args ?? [];
-  // Absent and empty are the same unpinned entry, spelled two ways; a pin has
-  // to be the same variable set to the same workspace, because the pin is the
-  // whole reason a second entry exists. Anything that is not an object — `null`,
+  // Absent and empty are the same plain entry, spelled two ways. Any environment
+  // variable makes this somebody else's configuration. A non-object — `null`,
   // an array, a string, a number — is not an environment at all, and an entry
   // this does not understand is never declared "already installed".
   if (held.env !== undefined && !isObject(held.env)) return false;
-  const heldEnv = held.env ?? {};
-  const env = Object.entries(heldEnv);
-  const wanted = Object.entries(entry.env ?? {});
   return (
     held.command === entry.command &&
     Array.isArray(args) &&
     args.length === entry.args.length &&
     args.every((arg, index) => arg === entry.args[index]) &&
-    env.length === wanted.length &&
-    wanted.every(([key, value]) => heldEnv[key] === value)
+    Object.keys(held.env ?? {}).length === 0
   );
 }
 
@@ -389,8 +376,7 @@ function tomlTable(text: string, name: string): string | null {
  * `JSON.stringify` is the whole implementation because a JSON string *is* a TOML
  * basic string: TOML's escape set — `\b \t \n \f \r \" \\ \uXXXX` — contains
  * every escape JSON emits, including the `\u00XX` form JSON uses for the control
- * characters TOML also forbids raw. Only reachable with a `--` override, whose
- * words are whatever the caller typed, so it does have to hold up.
+ * characters TOML also forbids raw.
  */
 function tomlString(value: string): string {
   return JSON.stringify(value);
@@ -399,40 +385,25 @@ function tomlString(value: string): string {
 /**
  * The block to paste into a Codex config, byte for byte what `codex mcp add`
  * writes for the same server — which is what lets a second run recognise either
- * one as installed. The pin is a sub-table because that is where Codex puts it.
+ * one as installed.
  */
 function tomlBlock(entry: Entry): string {
   const args = entry.args.map(tomlString).join(", ");
-  const pinned = Object.entries(entry.env ?? {});
-  // The table name and any pinned variable are bare keys by construction — the
-  // names are `uberblick` and `uberblick-<label>`, and the only variable is
-  // `UB_HUB_URL` and `UB_WORKSPACE_ID` — so none needs quoting here.
   return (
     `[mcp_servers.${entry.name}]\n` +
     `command = ${tomlString(entry.command)}\n` +
-    `args = [${args}]\n` +
-    (pinned.length === 0
-      ? ""
-      : `\n[mcp_servers.${entry.name}.env]\n${pinned
-          .map(([key, value]) => `${key} = ${tomlString(value)}\n`)
-          .join("")}`)
+    `args = [${args}]\n`
   );
 }
 
 function serverObject(entry: Entry): Record<string, unknown> {
   // `type` is explicit because Cursor's documentation requires it for local
-  // servers, and Claude Code accepts it — one object serves both. `env` is
-  // written only when there is one, so an unpinned entry stays exactly the
-  // three keys it has always been.
-  const object: Record<string, unknown> = {
+  // servers, and Claude Code accepts it — one object serves both.
+  return {
     type: "stdio",
     command: entry.command,
     args: entry.args,
   };
-  if (entry.env !== undefined) {
-    object.env = entry.env;
-  }
-  return object;
 }
 
 /** What `ub mcp install` prints: a snippet valid for the named target. */

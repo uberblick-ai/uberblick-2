@@ -46,10 +46,9 @@ ub mcp install cursor --print
 
 **It edits no config file.** Where the vendor ships its own installer —
 `claude mcp add`, `codex mcp add` — that is what runs, because the vendor knows
-its own file best, and the scope and any `--workspace` pin ride on the vendor's
-own flags (`-e KEY=value`, `--env KEY=VALUE`). Codex has no scope flag: which
-file it writes is the configuration directory it is handed, so project scope
-points it at the project's `.codex`. Cursor, which ships no `mcp add`, gets
+its own file best, and the scope rides on the vendor's own flags. Codex has no
+scope flag: which file it writes is the configuration directory it is handed,
+so project scope points it at the project's `.codex`. Cursor, which ships no `mcp add`, gets
 the snippet and the path to paste it into, on exit 0, with nothing written — so
 does a target whose vendor CLI is not installed. A client `ub` has never heard of
 gets the same snippet and that client's own MCP configuration as the
@@ -68,28 +67,26 @@ Reports name files, never their contents: a conflicting entry is reported by
 path with nothing of it quoted back, and a vendor CLI's own output is not
 relayed, because a client's diagnostics quote the config they just read. Config
 files are where API tokens live. The vendor is spawned without Uberblick's own
-variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID` —
-because it has no use for them and `ub` may be run with a secret exported;
-the pin it does need rides in its argv.
+variables in its environment — no `HUB_*`, no `UBERBLICK_*`, no `WORKSPACE_ID`,
+no `UB_WORKSPACE_ID` or `UB_HUB_URL` — because it has no use for them and `ub` may be run with a secret
+exported.
 
-The installed line is always `ub mcp serve`. Each new entry pins the complete
-selected binding as `UB_WORKSPACE_ID` and `UB_HUB_URL`, including `local` for a
-local-only workspace. Credentials stay in the private user store. With no
-selection, installation fails rather than creating an entry that follows an
-unrelated machine default.
+The entry is always named `uberblick` and runs `ub mcp serve` with no `env`.
+Install needs no workspace selection and never creates or changes
+`.uberblick.json`. Project scope registers in the current directory, even when
+the project's binding is in a parent directory. With no valid project binding,
+it registers normally and warns that agents cannot start until you run
+`ub workspace create <name>` or `ub workspace use <link|id>`. `--user` works
+anywhere and follows each project's nearest `.uberblick.json`.
 
-```sh
-ub mcp install claude --workspace research-<uuid> --hub https://hub.example.test
-```
-
-Terminal commands and MCP use the same [project binding](#configuration).
-Explicit installer overrides require both `--workspace` and `--hub`.
-
-Re-pinning an entry that already exists is not this command's job: an
-entry pinned to another workspace is not the one it would register, so it is
-reported and the snippet printed, and the change is made in the client's own
-config or with the vendor's own command. A project moved to another corpus
-does not silently redirect an agent's existing registration.
+Terminal commands and MCP use the same [project binding](#configuration). The
+report names the client command that ran, its target file and the binding path
+the entry follows. Restart running agents after registration or a binding
+change; they keep the workspace selected when they started. An already plain
+entry is reported as already installed and runs no client command. An existing
+`uberblick` entry with environment overrides or a different command is left
+byte-for-byte unchanged, and install prints the plain entry with exit 1. Change
+such an entry through the client's own config or management command.
 
 ## A second workspace
 
@@ -122,16 +119,30 @@ ub workspace use <id-or-prefix>
 For promotion to a hub, membership requirements, fetching a shared link and
 verification guarantees, follow [REMOTE.md](REMOTE.md#create-and-promote-a-project-workspace).
 
-A session can use several corpora through separately named MCP entries, on the
-same or different hubs:
+A session can use several corpora through separately named MCP entries written
+in the client's own config. For example, a JSON client can follow the project
+binding with `uberblick` and select another workspace with `research`:
 
-```sh
-ub mcp install claude --workspace <first-uuid> --hub https://first.example.test --label product
-ub mcp install claude --workspace <second-uuid> --hub https://second.example.test --label research
+```json
+{
+  "mcpServers": {
+    "uberblick": { "command": "ub", "args": ["mcp", "serve"] },
+    "research": {
+      "command": "ub",
+      "args": ["mcp", "serve"],
+      "env": {
+        "UB_WORKSPACE_ID": "11111111-1111-4111-8111-111111111111",
+        "UB_HUB_URL": "https://research.example.test"
+      }
+    }
+  }
+}
 ```
 
-Each entry carries its own complete binding. Installing an existing name never
-overwrites its configuration; use the vendor's management command to replace it.
+`UB_WORKSPACE_ID` overrides the project binding for that entry only. It can stand
+alone when this machine has a hub record for that workspace; otherwise add
+`UB_HUB_URL`, or `local` for local-only use. Install leaves other named entries
+untouched and never overwrites an existing `uberblick` configuration.
 
 ## The `ub` command line
 
@@ -205,12 +216,13 @@ leaving an ancestor binding alone.
 
 **Migration:** legacy `WORKSPACE_ID` / `HUB_URL` inputs and workspace/endpoint
 fields in the user's `config.json` no longer select a workspace. Legacy environment
-selectors without a complete new pair are refused, even when a project file
+selectors without a valid new override are refused, even when a project file
 exists, so an old named MCP pin cannot silently open another corpus. Existing
 credentials, identity and document databases remain untouched. Add an explicit
-project file with the existing workspace and hub, or set both new environment
-variables. Existing MCP entries must be updated to include both variables;
-installation reports conflicting entries without overwriting them.
+project file with the existing workspace and hub, or use the environment override
+described above. Existing MCP entries can follow the project binding by removing
+their selectors, or select a separate workspace through the supported per-entry
+override. Installation reports conflicting entries without overwriting them.
 Before removing old settings, run `ub workspace use <workspace-id> --hub <hub-url|local>`
 once. It preserves the old endpoint's device-admission mode in private,
 endpoint-keyed metadata, including when the new project uses a different hub.

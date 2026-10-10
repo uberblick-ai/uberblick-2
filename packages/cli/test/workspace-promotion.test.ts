@@ -84,9 +84,12 @@ describe("workspace creation and promotion", () => {
     const pins = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" } } } });
     writeFileSync(join(child, ".mcp.json"), pins);
     const childBox = { ...box, cwd: child };
-    const result = await runUbAsync(["workspace", "create", " New project "], childBox);
+    const result = await runUbAsync(["workspace", "create", " New project "], childBox,
+      { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
-    expect(result.stderr).toContain("previous workspace and hub pins");
+    expect(result.stderr).toContain("environment binding still takes precedence");
+    expect(result.stderr).not.toContain("MCP registrations");
+    expect(result.stderr).not.toContain("ub mcp install");
     expect(selected(childBox).workspaceId).not.toBe(old.workspaceId);
     expect(selected(childBox).hubUrl).toBeNull();
     expect(bindingBytes(box)).toBe(parentBefore);
@@ -124,8 +127,13 @@ describe("workspace creation and promotion", () => {
   it("keeps loopback promotion admission private and requires login after logout", async () => {
     const box = await localWorkspace();
     const { hub, endpoint } = await hubFor(box);
+    const mcpEntry = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" } } } });
+    writeFileSync(join(box.cwd, ".mcp.json"), mcpEntry);
     const result = await runUbAsync(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(0);
+    expect(result.stderr).not.toContain("MCP registrations");
+    expect(result.stderr).not.toContain("ub mcp install");
+    expect(readFileSync(join(box.cwd, ".mcp.json"), "utf8")).toBe(mcpEntry);
     expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
@@ -210,6 +218,8 @@ describe("workspace creation and promotion", () => {
     const result = await runUbAsync(["workspace", "promote", endpoint], box,
       { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
+    expect(result.stderr).toContain("environment binding still takes precedence");
+    expect(result.stderr).not.toContain("ub mcp install");
     expect(result.stdout).toContain(`ub workspace use ${endpoint}/${selected(box).workspaceId}`);
     expect(result.output).not.toContain("waiting for approval…");
     expect(result.output).not.toContain(login.credential.key);
