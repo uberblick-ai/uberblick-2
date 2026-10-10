@@ -25,7 +25,7 @@
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { findProjectConfig, PROJECT_CONFIG_FILE, resolveProjectBinding } from "./project-binding.js";
 import { takeHelp } from "./help.js";
@@ -77,7 +77,7 @@ operands:
                     snippet to paste into that client's own config.
 
 options:
-  --project         this directory's config (the default)
+  --project         the project's config (the default)
   --user            the per-user config
   --print           print the snippet to paste, and run nothing
   -h, --help        show this help
@@ -128,11 +128,14 @@ function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
 }
 
-/** Describe the entry's future selection, independently of this shell's overrides. */
-function workspaceReport(scope: Scope, cwd: string, io: Io): string {
-  if (scope === "user") {
-    return field("workspace", "follows the nearest .uberblick.json of each project");
-  }
+interface ProjectContext {
+  root: string;
+  path: string;
+  selected: boolean;
+}
+
+/** Target and report use the same binding validation, ignoring this shell's overrides. */
+function projectContext(cwd: string): ProjectContext {
   let path = join(cwd, PROJECT_CONFIG_FILE);
   let selected = false;
   try {
@@ -142,11 +145,19 @@ function workspaceReport(scope: Scope, cwd: string, io: Io): string {
     // A missing or invalid binding does not prevent registration. Do not repeat
     // its contents or a parser diagnostic: only workspace selection is needed.
   }
-  if (!selected) {
+  return { root: selected ? dirname(path) : cwd, path, selected };
+}
+
+/** Describe the entry's future selection. User scope follows each project's binding. */
+function workspaceReport(project: ProjectContext | null, io: Io): string {
+  if (project === null) {
+    return field("workspace", "follows the nearest .uberblick.json of each project");
+  }
+  if (!project.selected) {
     io.err("ub mcp install: agents cannot start until a workspace is selected. " +
       "Run `ub workspace create <name>` or `ub workspace use <link|id>`.\n");
   }
-  return field("workspace", `follows ${path}`);
+  return field("workspace", `follows ${project.path}`);
 }
 
 function field(name: string, value: string): string {
@@ -248,8 +259,9 @@ type VendorRun =
  * enough to act on — which program ran and how it exited — and the caller says
  * how to see the rest, which is to run the vendor's command yourself.
  */
-function runVendor(vendor: Vendor): VendorRun {
+function runVendor(vendor: Vendor, cwd: string): VendorRun {
   const result = spawnSync(vendor.program, vendor.args, {
+    cwd,
     stdio: "ignore",
     env: vendorEnv(vendor),
   });
@@ -321,21 +333,23 @@ export async function installCommand(
   }
 
   const cwd = process.cwd();
-  const file = targetFile(flags.target, flags.scope, cwd);
+  const project = flags.scope === "project" ? projectContext(cwd) : null;
+  const root = project?.root ?? cwd;
+  const file = targetFile(flags.target, flags.scope, root);
   const where = `${flags.target} (${flags.scope})`;
 
   if (flags.print) {
     return printSnippet(io, file, entry, "--print runs nothing");
   }
 
-  const vendor = vendorCli(flags.target, flags.scope, entry, cwd);
+  const vendor = vendorCli(flags.target, flags.scope, entry, root);
   const installed = presence(file, entry);
   if (installed === "ours") {
     let report = "already installed\n\n";
     report += field("client", where);
     report += field("file", file.path);
     report += field("command", commandLine(entry));
-    report += workspaceReport(flags.scope, cwd, io);
+    report += workspaceReport(project, io);
     report += "\nNothing was run or written.\n";
     io.out(report);
     return 0;
@@ -375,10 +389,10 @@ export async function installCommand(
   // empty or not, and is never removed.
   const codexProject = flags.target === "codex" && flags.scope === "project";
   const made =
-    codexProject && mkdirSync(codexHome(cwd), { recursive: true }) !== undefined;
+    codexProject && mkdirSync(codexHome(root), { recursive: true }) !== undefined;
   let registered = false;
   try {
-    const ran = runVendor(vendor);
+    const ran = runVendor(vendor, root);
     if (ran.kind === "absent") {
       printSnippet(io, file, entry, `\`${vendor.program}\` is not installed`);
       return 1;
@@ -399,7 +413,7 @@ export async function installCommand(
     report += field("file", file.path);
     report += field("command", commandLine(entry));
     report += field("ran", `${vendor.program} ${vendor.args.join(" ")}`);
-    report += workspaceReport(flags.scope, cwd, io);
+    report += workspaceReport(project, io);
     report += "\nRestart running agents to pick this up.\n";
     io.out(report);
     return 0;
@@ -410,7 +424,7 @@ export async function installCommand(
     // did not write a config there after all.
     if (made && !registered) {
       try {
-        rmdirSync(codexHome(cwd));
+        rmdirSync(codexHome(root));
       } catch {
         // Something is in it. Leaving it is the whole intent.
       }

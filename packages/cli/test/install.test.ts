@@ -94,6 +94,8 @@ interface Stub {
   record: string;
   /** `CODEX_HOME` as the stub saw it. */
   home: string;
+  /** The working directory the vendor ran in. */
+  cwd: string;
   /** `NAME=present` or `NAME=absent`, one line per reported variable. */
   environment: string;
 }
@@ -114,6 +116,7 @@ function stubVendor(box: Sandbox, program: string, body = ""): Stub {
     path,
     `#!/bin/sh\nprintf '%s\\n' "$@" > "$${RECORD}"\n` +
       `printf '%s\\n' "$CODEX_HOME" > "$${RECORD}.home"\n` +
+      `pwd -P > "$${RECORD}.cwd"\n` +
       `{\n${report}\n} > "$${RECORD}.env"\n${body}`,
     "utf8",
   );
@@ -122,12 +125,19 @@ function stubVendor(box: Sandbox, program: string, body = ""): Stub {
     env: { PATH: dir, [RECORD]: record },
     record,
     home: `${record}.home`,
+    cwd: `${record}.cwd`,
     environment: `${record}.env`,
   };
 }
 
 function read(path: string): string {
   return readFileSync(path, "utf8");
+}
+
+function subfolder(box: Sandbox): Sandbox {
+  const cwd = join(box.cwd, "src", "feature");
+  mkdirSync(cwd, { recursive: true });
+  return { ...box, cwd };
 }
 
 /** A Codex configuration directory of this sandbox's own, never the machine's. */
@@ -251,8 +261,9 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 
   it.each(CELLS)("delegates $what", ({ program, argv, expected }) => {
     const box = sandbox();
+    const nested = subfolder(box);
     const stub = stubVendor(box, program);
-    const run = runUb(argv, box, {
+    const run = runUb(argv, nested, {
       ...stub.env,
       CODEX_HOME: codexHome(box),
       UB_WORKSPACE_ID: "invalid-ambient-workspace",
@@ -265,6 +276,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.stdout).toMatch(new RegExp(`ran\\s+${program} mcp add`));
     expect(run.output).not.toMatch(/pin/i);
     expect(read(stub.record).trimEnd().split("\n")).toEqual(expected);
+    expect(read(stub.cwd).trim()).toBe(argv.includes("--user") ? nested.cwd : box.cwd);
     // The vendor writes the file; `ub` must not also write one behind its back.
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
@@ -309,6 +321,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     // A client's own diagnostics quote the config it just read, so relaying
     // them would walk straight past everything this command refuses to print.
     const box = sandbox();
+    const nested = subfolder(box);
     const home = codexHome(box);
     const stub = stubVendor(
       box,
@@ -316,7 +329,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       `echo "conflict in config: API_TOKEN=${SECRET}" >&2\necho "${SECRET}"\nexit 1\n`,
     );
 
-    const run = runUb(argv, box, { ...stub.env, CODEX_HOME: home });
+    const run = runUb(argv, nested, { ...stub.env, CODEX_HOME: home });
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
     expect(run.output).not.toContain(SECRET);
@@ -326,6 +339,8 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.stderr).toContain(file(box, home));
     expect(existsSync(file(box, home))).toBe(false);
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+    expect(existsSync(join(nested.cwd, ".codex"))).toBe(false);
+    expect(existsSync(join(nested.cwd, ".mcp.json"))).toBe(false);
   });
 
   it.each(["claude", "codex"])("prints the entry when %s mcp add is killed by a signal", (program) => {
@@ -404,8 +419,9 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 
   it.each(CELLS)("prints the entry for missing $what and leaves nothing behind", ({ program, argv, file }) => {
     const box = sandbox();
+    const nested = subfolder(box);
     const home = codexHome(box);
-    const run = runUb(argv, box, { ...NO_VENDOR, CODEX_HOME: home });
+    const run = runUb(argv, nested, { ...NO_VENDOR, CODEX_HOME: home });
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
     expect(run.stderr).toContain(`\`${program}\` is not installed`);
@@ -415,6 +431,8 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     // Codex refuses a CODEX_HOME that is not there, so project scope creates
     // one — and a run that ended in a snippet must not leave it in a checkout.
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+    expect(existsSync(join(nested.cwd, ".codex"))).toBe(false);
+    expect(existsSync(join(nested.cwd, ".mcp.json"))).toBe(false);
   });
 
   it.each(["missing", "failed"])("leaves a `.codex` it did not create when the vendor is %s", (ending) => {
@@ -422,14 +440,16 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     // checkout already had is still somebody's state — and whether this run is
     // the one that made the directory is the only thing that decides it.
     const box = sandbox();
+    const nested = subfolder(box);
     const dir = join(box.cwd, ".codex");
     mkdirSync(dir, { recursive: true });
 
     const env = ending === "missing" ? NO_VENDOR : stubVendor(box, "codex", "exit 1\n").env;
-    const run = runUb(["mcp", "install", "codex", "--project"], box, env);
+    const run = runUb(["mcp", "install", "codex", "--project"], nested, env);
     expect(run.status, run.output).toBe(1);
     expect(run.stdout).toBe(entrySnippet("codex"));
     expect(existsSync(dir)).toBe(true);
+    expect(existsSync(join(nested.cwd, ".codex"))).toBe(false);
   });
 });
 
@@ -890,10 +910,11 @@ describe("binding-independent MCP registration", () => {
 
   it.each(AMBIENT)("prints only the plain entry with shell selectors %j", (env) => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const nested = subfolder(box);
     const bindingPath = join(box.cwd, ".uberblick.json");
     const before = read(bindingPath);
     for (const target of ["claude", "codex"]) {
-      const run = runUb(["mcp", "install", target, "--print"], box, env);
+      const run = runUb(["mcp", "install", target, "--print"], nested, env);
       expect(run.status, run.output).toBe(0);
       if (target === "codex") {
         expect(run.stdout).toBe('[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n');
@@ -905,8 +926,13 @@ describe("binding-independent MCP registration", () => {
       expect(run.output).not.toContain(SECRET);
       expect(run.output).not.toContain(OTHER);
       expect(run.output).not.toMatch(/UB_WORKSPACE_ID|UB_HUB_URL|WORKSPACE_ID|HUB_URL|pin/i);
+      expect(run.stderr).toContain(target === "codex"
+        ? join(box.cwd, ".codex", "config.toml")
+        : join(box.cwd, ".mcp.json"));
     }
     expect(read(bindingPath)).toBe(before);
+    expect(readdirSync(nested.cwd)).toEqual([]);
+    expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
   it.each(["project", "user"])("registers %s scope without creating a binding", (scope) => {
@@ -956,27 +982,93 @@ describe("binding-independent MCP registration", () => {
     },
   );
 
-  it("follows the nearest ancestor file while targeting the current directory", () => {
+  it.each(["claude", "codex"])("registers %s beside the nearest valid ancestor binding", (program) => {
     const box = sandbox();
     const path = join(box.cwd, ".uberblick.json");
     const before = read(path);
-    const nested = join(box.cwd, "src", "feature");
-    mkdirSync(nested, { recursive: true });
-    const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude"], { ...box, cwd: nested }, {
+    const nested = subfolder(box);
+    const file = program === "codex"
+      ? join(box.cwd, ".codex", "config.toml") : join(box.cwd, ".mcp.json");
+    const destination = program === "codex" ? '"$CODEX_HOME/config.toml"' : ".mcp.json";
+    const stub = stubVendor(box, program,
+      `printf '%s\\n' '${entrySnippet(program).trimEnd()}' > ${destination}\n`);
+    const run = runUb(["mcp", "install", program], nested, {
       ...stub.env, UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "invalid-ambient-hub",
     });
 
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toContain(join(nested, ".mcp.json"));
+    expect(run.stdout).toContain(`file        ${file}\n`);
+    expect(read(file)).toBe(entrySnippet(program));
+    expect(read(stub.cwd).trim()).toBe(box.cwd);
+    if (program === "codex") expect(read(stub.home).trim()).toBe(join(box.cwd, ".codex"));
     expect(run.stdout).toMatch(/^workspace\s+follows /m);
     expect(run.stdout).toContain(path);
     expect(run.stdout).not.toContain(OTHER);
     expect(run.stdout).not.toContain("invalid-ambient-hub");
     expect(run.stderr).toBe("");
     expect(read(path)).toBe(before);
-    expect(existsSync(join(nested, ".uberblick.json"))).toBe(false);
+    expect(readdirSync(nested.cwd)).toEqual([]);
   });
+
+  it.each(["plain", "foreign", "malformed", "unreadable"])(
+    "checks a %s config at the binding root before running any client", (held) => {
+      for (const program of ["claude", "codex"]) {
+        const box = sandbox();
+        const nested = subfolder(box);
+        const file = program === "codex"
+          ? join(codexHome(box, join(box.cwd, ".codex")), "config.toml")
+          : join(box.cwd, ".mcp.json");
+        const before = held === "plain" ? entrySnippet(program)
+          : held === "foreign" ? entrySnippet(program).replace('"ub"', '"other-command"')
+          : `invalid config ${SECRET}`;
+        if (held === "unreadable") mkdirSync(file);
+        else writeFileSync(file, before);
+        const stub = stubVendor(box, program);
+        const run = runUb(["mcp", "install", program], nested, stub.env);
+
+        expect(run.status, run.output).toBe(held === "plain" ? 0 : 1);
+        expect(run.output).toContain(file);
+        expect(run.output).not.toContain(SECRET);
+        if (held === "plain") expect(run.stdout).toMatch(/^already installed/m);
+        else expect(run.stderr).toContain(held === "foreign" ? "something other than this" : "could not be read");
+        expect(existsSync(stub.record)).toBe(false);
+        if (held === "unreadable") expect(readdirSync(file)).toEqual([]);
+        else expect(read(file)).toBe(before);
+        expect(readdirSync(nested.cwd)).toEqual([]);
+      }
+    },
+  );
+
+  it.each(["missing", "malformed", "invalid"])(
+    "registers in the current subfolder with a %s nearest binding", (binding) => {
+      for (const program of ["claude", "codex"]) {
+        const box = binding === "missing" ? unboundSandbox() : sandbox();
+        const nested = subfolder(box);
+        const path = join(box.cwd, "src", ".uberblick.json");
+        const raw = binding === "malformed" ? "{ not json"
+          : '{"workspaceId":"invalid","hubUrl":null}';
+        if (binding !== "missing") writeFileSync(path, raw);
+        const stub = stubVendor(box, program);
+        const run = runUb(["mcp", "install", program], nested, {
+          ...stub.env, ...LOCAL_BINDING_ENV,
+        });
+        const file = program === "codex"
+          ? join(nested.cwd, ".codex", "config.toml") : join(nested.cwd, ".mcp.json");
+
+        expect(run.status, run.output).toBe(0);
+        expect(run.stdout).toContain(`file        ${file}\n`);
+        expect(read(stub.cwd).trim()).toBe(nested.cwd);
+        if (program === "codex") expect(read(stub.home).trim()).toBe(join(nested.cwd, ".codex"));
+        expect(run.stderr).toMatch(/agents cannot start/i);
+        expect(run.stderr).toContain("ub workspace create <name>");
+        expect(run.stderr).toContain("ub workspace use <link|id>");
+        if (binding !== "missing") expect(read(path)).toBe(raw);
+        expect(existsSync(join(nested.cwd, ".uberblick.json"))).toBe(false);
+        expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
+        expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
+      }
+    },
+  );
 
   it.each([
     LOCAL_BINDING_ENV,
