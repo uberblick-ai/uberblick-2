@@ -3,7 +3,7 @@
 import { createWorkspaceCommand } from "./workspace-create.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
-import { useBindingLines } from "./workspace-use-output.js";
+import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -160,6 +160,11 @@ with the one currently in force marked. Shows names from readable local replicas
 without changing them or connecting to a hub. A workspace that exists elsewhere
 but has never been opened here is not listed unless configured.
 
+The last field is the hub this machine recorded, local for an explicit local
+record, or hub unknown when no record exists. It can differ from the hub in
+force for the active workspace. JSON adds hub: the stored endpoint, "local",
+or "unknown".
+
 options:
   --json            the same list as JSON on stdout, for a script to read
   -h, --help        show this help
@@ -181,9 +186,19 @@ function listCommand(argv: string[], io: Io): number {
     return 2;
   }
 
-  let listed: { entries: WorkspaceEntry[]; warnings: string[] };
+  let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[] };
   try {
-    listed = listWorkspaces();
+    const inventory = listWorkspaces();
+    // Validate records even for an empty inventory. Keep this CLI-only read out
+    // of listWorkspaces(), whose install and browser callers need only IDs/names.
+    recordedWorkspaceIds();
+    listed = {
+      ...inventory,
+      entries: inventory.entries.map((entry) => {
+        const hub = readWorkspaceHub(entry.uuid);
+        return { ...entry, hub: hub === undefined ? "unknown" : hub ?? "local" };
+      }),
+    };
   } catch (error) {
     io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
@@ -201,7 +216,9 @@ function listCommand(argv: string[], io: Io): number {
   }
   let text = "";
   for (const entry of entries) {
-    text += `${entry.active ? "*" : " "} ${entry.uuid}${entry.name === null ? "" : ` | ${entry.name}`}\n`;
+    const hub = entry.hub === "unknown" ? "hub unknown"
+      : entry.hub === "local" ? "local" : displayWorkspaceHub(entry.hub);
+    text += `${entry.active ? "*" : " "} ${entry.uuid}${entry.name === null ? "" : ` | ${entry.name}`} | ${hub}\n`;
   }
   io.out(text);
   return 0;
