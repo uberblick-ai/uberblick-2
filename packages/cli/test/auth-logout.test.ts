@@ -165,6 +165,30 @@ describe("ub auth logout retires devices", () => {
     assertPublicOnly(run, remote, current.login.credential.key);
   });
 
+  it("all-devices quotes an invalid stored username and escapes DEL and every C1 control", async () => {
+    const remote = await rig();
+    const username = 'synthetic"\\user\n\u001b\u007f' + String.fromCharCode(...Array.from({ length: 32 }, (_, index) => index + 0x80));
+    const escaped = '"synthetic\\"\\\\user\\n\\u001b\\u007f' +
+      '\\u0080\\u0081\\u0082\\u0083\\u0084\\u0085\\u0086\\u0087' +
+      '\\u0088\\u0089\\u008a\\u008b\\u008c\\u008d\\u008e\\u008f' +
+      '\\u0090\\u0091\\u0092\\u0093\\u0094\\u0095\\u0096\\u0097' +
+      '\\u0098\\u0099\\u009a\\u009b\\u009c\\u009d\\u009e\\u009f"';
+    remote.controls.transform = (path, status, result) => {
+      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
+      return { status, result: { ...result, identity: { ...(result.identity as Record<string, unknown>), githubUsername: username } } };
+    };
+    const { box, login } = await signedIn(remote);
+    expect(login.identity.githubUsername).toBe(username);
+    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    assertPublicOnly(run, remote, login.credential.key);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(`revoked    1 devices of ${escaped} on ${remote.origin}, including this computer\n` +
+      `removed    login for ${remote.origin} on this computer\n` +
+      `sign in again on the computers you still use: ub auth login ${remote.origin}\n`);
+    expect(run.stderr).toBe("");
+    expect(run.output).not.toMatch(/[\u007f-\u009f]/);
+  });
+
   it("all-devices cannot start without a login and does not contact the hub", async () => {
     const remote = await rig();
     const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], sandbox());
