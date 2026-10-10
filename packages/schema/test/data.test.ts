@@ -311,7 +311,8 @@ describe("document-owned data", () => {
     expect(readDocData(doc)!.valid).toBe(true);
   });
 
-  it("keeps retained Yjs history distinct from live JSON size and imposes no record-count ceiling", () => {
+  // Repeated 10,000-record validation and encoding exceed 5s on CI runners.
+  it("keeps retained Yjs history distinct from live JSON size and imposes no record-count ceiling", { timeout: 20_000 }, () => {
     const { doc, apply } = rig();
     apply([{ collection: "c", schema: SCHEMA, upsert: Array.from({ length: 10000 }, (_, i) => ({ id: String(i), value: {} })) }]);
     const live = readDocData(doc)!.bytes;

@@ -111,21 +111,23 @@ async function overGap(page: Page, table: Locator, boundary: number): Promise<vo
   await expect(indicator(page)).toHaveAttribute("data-gap", String(boundary));
 }
 
+function caretAtEnd(element: Element): boolean {
+  const selection = document.getSelection();
+  const anchor = selection?.anchorNode;
+  if (!selection?.isCollapsed || anchor === null || anchor === undefined || !element.contains(anchor)) return false;
+  const remaining = document.createRange();
+  remaining.selectNodeContents(element);
+  remaining.setStart(anchor, selection.anchorOffset);
+  return remaining.toString() === "";
+}
+
 async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
   if (info.project.use.hasTouch === true) await cell.tap();
   else await cell.click();
-  await cell.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element.querySelector("p") ?? element);
-    range.collapse(false);
-    const selection = document.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  });
-  await expect.poll(() => cell.evaluate((element) => {
-    const anchor = document.getSelection()?.anchorNode;
-    return anchor !== null && anchor !== undefined && element.contains(anchor);
-  })).toBe(true);
+  // Native keys update both the DOM and ProseMirror selection. A manually
+  // replaced DOM range can still leave PM holding the preceding click's caret.
+  await cell.page().keyboard.press(keys.lineEnd);
+  await expect.poll(() => cell.evaluate(caretAtEnd)).toBe(true);
   await cell.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
 
@@ -250,15 +252,7 @@ test("own gaps, outside release and Escape preserve the caret and focus without 
         await expect(editor(page)).toBeFocused();
         // Native selections can end at a text offset or an element's child
         // boundary. Both are a caret at the end when no target text follows.
-        await expect.poll(() => caret.evaluate((element) => {
-          const selection = document.getSelection();
-          const anchor = selection?.anchorNode;
-          if (!selection?.isCollapsed || anchor === null || anchor === undefined || !element.contains(anchor)) return false;
-          const remaining = document.createRange();
-          remaining.selectNodeContents(element);
-          remaining.setStart(anchor, selection.anchorOffset);
-          return remaining.toString() === "";
-        })).toBe(true);
+        await expect.poll(() => caret.evaluate(caretAtEnd)).toBe(true);
         await expect(bodyNames(table)).toHaveText(INITIAL);
         expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
         await page.keyboard.insertText(` ${ending}`);

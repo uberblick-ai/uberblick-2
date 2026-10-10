@@ -710,6 +710,7 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
+  const readinessTimeout = mixed ? 180_000 : 20_000;
   // Ten continuous tables contain over 400,000 cells. Repeated Playwright
   // selector walks dominate this workload; read one native DOM snapshot.
   await expect.poll(() => page.evaluate(() => {
@@ -720,13 +721,14 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
       rows: tables.map(table => table.tBodies[0]?.rows.length ?? 0),
       headers: tables[0]?.querySelectorAll("thead th[scope='col']").length ?? 0,
     };
-  }), { timeout: mixed ? 180_000 : 20_000 }).toEqual({
+  }), { timeout: readinessTimeout }).toEqual({
     tables: mixed ? 10 : 1,
     ready: mixed ? 20 : 1,
     rows: Array.from({ length: mixed ? 10 : 1 }, () => 4035),
     headers: 10,
   });
-  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first),
+    { timeout: readinessTimeout }).not.toBeNull();
   const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
   expect(initial.availableEntries).toBe(4402);
   expect(await page.evaluate(() => {
