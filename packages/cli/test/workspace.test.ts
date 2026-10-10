@@ -330,7 +330,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     ], box);
     expect(installed.status, installed.output).toBe(0);
     expect(JSON.parse(installed.stdout)).toEqual({ mcpServers: {
-      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+      uberblick: { command: "ub", args: ["mcp", "serve"] },
     } });
     expect(readFileSync(registry, "utf8")).toBe("{invalid");
   });

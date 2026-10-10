@@ -7,9 +7,8 @@
  *
  * **This command does not edit config files.** Claude Code ships `claude mcp
  * add` and Codex ships `codex mcp add`, so those are run, and the vendor writes
- * its own file. Cursor ships no such subcommand, so it gets the snippet to paste and
- * the path to paste it into; a client `ub` has never heard of gets the same
- * snippet and its own MCP configuration as the destination, because there is no
+ * its own file. A client `ub` has never heard of gets the snippet to paste and
+ * its own MCP configuration as the destination, because there is no
  * path to invent for a client nobody has described. Editing somebody else's
  * JSON or TOML in place bought one thing, an untouched file, at the price of a
  * parser per format; delegating and printing buy the same thing outright.
@@ -68,10 +67,9 @@ Install needs no workspace selection. Credentials stay in the private user
 store and are never copied into an MCP entry.
 
 Claude Code and Codex are wired up by running their own \`mcp add\` command, so
-the vendor writes its own file. Cursor gets the snippet to paste and the path to
-paste it into; a client \`ub\` does not know gets the same snippet, to paste into
-that client's own MCP configuration. This command edits no config file, and
-never replaces an entry it did not register.
+the vendor writes its own file. A client \`ub\` does not know gets the snippet,
+to paste into that client's own MCP configuration. This command edits no config
+file, and never replaces an entry it did not register.
 
 operands:
   client            one of: ${TARGETS.join(", ")}.
@@ -164,17 +162,13 @@ interface Vendor {
   env: NodeJS.ProcessEnv;
 }
 
-/**
- * The vendor's own installer for this target and scope, when there is one.
- *
- * Cursor 1.1.3 has no `mcp` subcommand, so it gets the snippet.
- */
+/** The vendor's own installer for this target and scope. */
 function vendorCli(
   target: TargetName,
   scope: Scope,
   entry: Entry,
   cwd: string,
-): Vendor | null {
+): Vendor {
   const command = [entry.command, ...entry.args];
   if (target === "claude") {
     return {
@@ -191,23 +185,20 @@ function vendorCli(
       env: {},
     };
   }
-  if (target === "codex") {
-    return {
-      program: "codex",
-      args: [
-        "mcp",
-        "add",
-        entry.name,
-        "--",
-        ...command,
-      ],
-      // `codex mcp add` has no scope flag; the scope *is* which configuration
-      // directory it is pointed at, and `targetFile` resolves the same one — so
-      // both agree on the file by construction rather than by coincidence.
-      env: scope === "project" ? { CODEX_HOME: codexHome(cwd) } : {},
-    };
-  }
-  return null;
+  return {
+    program: "codex",
+    args: [
+      "mcp",
+      "add",
+      entry.name,
+      "--",
+      ...command,
+    ],
+    // `codex mcp add` has no scope flag; the scope *is* which configuration
+    // directory it is pointed at, and `targetFile` resolves the same one — so
+    // both agree on the file by construction rather than by coincidence.
+    env: scope === "project" ? { CODEX_HOME: codexHome(cwd) } : {},
+  };
 }
 
 /** A variable `ub` resolves its own configuration from — see `config.ts`. */
@@ -374,15 +365,6 @@ export async function installCommand(
     );
     io.out(snippet(file.format, entry));
     return 1;
-  }
-
-  if (vendor === null) {
-    return printSnippet(
-      io,
-      file,
-      entry,
-      `${flags.target} has no command that registers an MCP server`,
-    );
   }
 
   // `codex mcp add` refuses outright when the directory `CODEX_HOME` names is
