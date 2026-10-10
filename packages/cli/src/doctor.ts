@@ -536,7 +536,6 @@ async function localHubCheck(
 const CLIENT_NAMES: Record<TargetName, string> = {
   claude: "Claude Code",
   codex: "Codex",
-  cursor: "Cursor",
 };
 
 /** Claude Code shares local scope with the main checkout of a linked worktree. */

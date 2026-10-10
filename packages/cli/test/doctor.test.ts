@@ -193,7 +193,6 @@ function wireMcp(box: Sandbox, entry: unknown = UNPINNED): string {
 const CLIENTS = [
   { name: "Claude Code", path: ".mcp.json", userPath: ".claude.json" },
   { name: "Codex", path: ".codex/config.toml", userPath: ".codex/config.toml" },
-  { name: "Cursor", path: ".cursor/mcp.json", userPath: ".cursor/mcp.json" },
 ] as const;
 
 type Client = (typeof CLIENTS)[number];
@@ -833,6 +832,33 @@ describe("ub doctor", () => {
 
 // These checks keep their real CLI exit and output assertions across base changes.
 describe("ub doctor MCP setup", () => {
+  it.each(["entry", "malformed", "unreadable"])("ignores %s Cursor configs in the project and home directory", async kind => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    for (const root of [box.cwd, homeOf(box)]) {
+      const path = join(root, ".cursor", "mcp.json");
+      if (kind === "entry") writeJson(path, { mcpServers: { uberblick: { type: "stdio", ...UNPINNED } } });
+      else {
+        mkdirSync(dirname(path), { recursive: true });
+        if (kind === "malformed") writeFileSync(path, "{", "utf8");
+        else mkdirSync(path);
+      }
+    }
+
+    const none = await mcpDoctor(box);
+    expect(check(none.checks, "mcp")).toEqual({
+      name: "mcp", status: "warn", reason: "MCP client is not set up for this project",
+      fix: "ub mcp install claude   (or codex)",
+    });
+    expect(none.run.output).not.toMatch(/cursor/i);
+
+    wireMcp(box);
+    const wired = await mcpDoctor(box);
+    expect(check(wired.checks, "mcp")).toEqual({
+      name: "mcp", status: "pass", reason: "Claude Code (.mcp.json)", fix: null,
+    });
+    expect(wired.run.output).not.toMatch(/cursor/i);
+  });
+
   it("reports which MCP client is wired up, and points at `ub mcp install` when none is", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const none = await mcpDoctor(box);

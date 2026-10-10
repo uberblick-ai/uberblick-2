@@ -2,8 +2,8 @@
  * What `ub mcp install` promises.
  *
  * It edits no configuration file. Claude Code and Codex are wired up by running
- * their own `mcp add`; every other client gets a snippet and the path to paste
- * it into. So the contracts under test are the ones that are left: the right
+ * their own `mcp add`; every other client needs `--print` for a generic snippet.
+ * So the contracts under test are the ones that are left: the right
  * delegation — the right program, the right arguments, the right configuration
  * directory — an entry somebody else wrote is never replaced and never quoted
  * back, a second run is a no-op, and no credential of this machine's ever
@@ -141,7 +141,7 @@ function entrySnippet(program: string): string {
   return program === "codex"
     ? '[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n'
     : `${JSON.stringify({ mcpServers: {
-      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+      uberblick: { command: "ub", args: ["mcp", "serve"] },
     } }, null, 2)}\n`;
 }
 
@@ -151,11 +151,7 @@ describe("ub mcp install --print", () => {
 
     const claude = runUb(["mcp", "install", "claude", "--project", "--print"], box);
     expect(claude.status).toBe(0);
-    expect(JSON.parse(claude.stdout).mcpServers.uberblick).toEqual({
-      type: "stdio",
-      command: "ub",
-      args: ["mcp", "serve"],
-    });
+    expect(claude.stdout).toBe(entrySnippet("claude"));
     expect(claude.stderr).toContain(join(box.cwd, ".mcp.json"));
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
 
@@ -176,11 +172,7 @@ describe("ub mcp install --print", () => {
     const box = sandbox();
     const run = runUb(["mcp", "install", "zed", "--print"], box);
     expect(run.status).toBe(0);
-    expect(JSON.parse(run.stdout).mcpServers.uberblick).toEqual({
-      type: "stdio",
-      command: "ub",
-      args: ["mcp", "serve"],
-    });
+    expect(run.stdout).toBe(entrySnippet("zed"));
     expect(run.stderr).toMatch(/not a client/);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
@@ -189,7 +181,7 @@ describe("ub mcp install --print", () => {
     const run = runUb(["mcp", "install", "emacs"], sandbox());
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
-    expect(run.stderr).toMatch(/claude, codex, cursor/);
+    expect(run.stderr).toMatch(/claude, codex\./);
     expect(run.stderr).toMatch(/--print/);
   });
 });
@@ -700,7 +692,7 @@ describe("ub mcp install, and what is registered already", () => {
     );
     // The way out is the snippet, and nothing out of their file comes with it:
     // not the command it runs, and certainly not what it sets.
-    expect(JSON.parse(run.stdout).mcpServers.uberblick.command).toBe("ub");
+    expect(run.stdout).toBe(entrySnippet("claude"));
     expect(run.output).not.toContain(SECRET);
     expect(run.output).not.toContain("somebody-elses");
     // Byte-identical afterwards, and the vendor was never given the chance.
@@ -724,7 +716,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(run.stderr).toMatch(/could not be read/);
     expect(run.output).not.toContain(SECRET);
     // The way out is the same snippet, and the file is untouched.
-    expect(JSON.parse(run.stdout).mcpServers.uberblick.command).toBe("ub");
+    expect(run.stdout).toBe(entrySnippet("claude"));
     expect(read(path)).toBe(before);
     expect(existsSync(stub.record)).toBe(false);
   });
@@ -755,60 +747,70 @@ describe("ub mcp install, and what is registered already", () => {
 });
 
 describe("ub mcp install cursor", () => {
-  it("prints the snippet and the file to paste it into, and writes nothing", () => {
-    // Cursor ships no `mcp add`, so there is nothing to delegate to — and a
-    // client `ub` cannot drive is told about rather than written to.
+  it.each([
+    { scope: "default", args: [] },
+    { scope: "project", args: ["--project"] },
+    { scope: "user", args: ["--user"] },
+  ])("rejects $scope scope before running a client or writing anything", ({ args }) => {
     const box = sandbox();
-    const run = runUb(["mcp", "install", "cursor", "--project"], box);
+    const claude = stubVendor(box, "claude");
+    const codex = stubVendor(box, "codex");
+    const cursor = stubVendor(box, "cursor");
+    const bindingPath = join(box.cwd, ".uberblick.json");
+    const bindingBefore = read(bindingPath);
+    const root = join(box.cwd, "..");
+    const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    expect(run.status).toBe(0);
-    expect(run.stderr).toContain(join(box.cwd, ".cursor", "mcp.json"));
-    expect(JSON.parse(run.stdout).mcpServers.uberblick).toEqual({
-      type: "stdio",
-      command: "ub",
-      args: ["mcp", "serve"],
+    const run = runUb(["mcp", "install", "cursor", ...args], box, {
+      ...claude.env,
+      PATH: [claude.env.PATH, codex.env.PATH, cursor.env.PATH].join(":"),
     });
-    expect(existsSync(join(box.cwd, ".cursor"))).toBe(false);
+
+    expect(run.status, run.output).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toBe(
+      'ub mcp install: unknown client "cursor" — expected one of claude, codex. ' +
+        "Add --print for the snippet to paste into any other client\n",
+    );
+    // Whichever stub is invoked, all share the same recording destination.
+    expect(existsSync(claude.record)).toBe(false);
+    expect(readdirSync(root, { recursive: true }).sort()).toEqual(filesBefore);
+    expect(read(bindingPath)).toBe(bindingBefore);
   });
 
-  it("recognises an existing plain entry with empty env without running anything", () => {
+  it("prints the same generic entry as zed without consulting any client config", () => {
     const box = sandbox();
-    const dir = join(box.cwd, ".cursor");
-    mkdirSync(dir, { recursive: true });
-    const path = join(dir, "mcp.json");
-    const before = JSON.stringify({ mcpServers: {
-      uberblick: { command: "ub", args: ["mcp", "serve"], env: {} },
-    } });
-    writeFileSync(path, before);
-    const run = runUb(["mcp", "install", "cursor", "--project"], box);
+    const home = box.env.HOME as string;
+    const paths = [
+      join(box.cwd, ".mcp.json"),
+      join(home, ".claude.json"),
+      join(box.cwd, ".cursor", "mcp.json"),
+      join(home, ".cursor", "mcp.json"),
+    ];
+    mkdirSync(join(box.cwd, ".cursor"), { recursive: true });
+    mkdirSync(join(home, ".cursor"), { recursive: true });
+    const before = `{ malformed config ${SECRET}`;
+    for (const path of paths) writeFileSync(path, before);
+    const stub = stubVendor(box, "cursor");
+    const root = join(box.cwd, "..");
+    const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toMatch(/already installed/);
-    expect(run.stdout).toContain(path);
-    expect(run.stdout).toMatch(/^workspace\s+follows /m);
-    expect(run.stdout).toContain(join(box.cwd, ".uberblick.json"));
-    expect(run.stdout).not.toMatch(/^ran\s+/m);
-    expect(read(path)).toBe(before);
-  });
+    const cursor = runUb(["mcp", "install", "cursor", "--print"], box, stub.env);
+    const zed = runUb(["mcp", "install", "zed", "--print"], box, stub.env);
 
-  it("protects an existing entry with nonempty env and prints the plain snippet", () => {
-    const box = sandbox();
-    const dir = join(box.cwd, ".cursor");
-    mkdirSync(dir, { recursive: true });
-    const path = join(dir, "mcp.json");
-    const before = JSON.stringify({ mcpServers: {
-      uberblick: { command: "ub", args: ["mcp", "serve"], env: LOCAL_BINDING_ENV },
-    } });
-    writeFileSync(path, before);
-    const run = runUb(["mcp", "install", "cursor", "--project"], box);
-
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain(path);
-    expect(run.stderr).toMatch(/something other than this/);
-    expect(JSON.parse(run.stdout)).toEqual({ mcpServers: {
-      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
-    } });
-    expect(read(path)).toBe(before);
+    expect(cursor.status, cursor.output).toBe(0);
+    expect(zed.status, zed.output).toBe(0);
+    expect(cursor.stdout).toBe(entrySnippet("cursor"));
+    expect(cursor.stdout).toBe(zed.stdout);
+    expect(cursor.stderr).toContain('"cursor" is not a client `ub` knows');
+    expect(cursor.stderr).toContain("there is no file of ours to name");
+    expect(cursor.output).not.toContain(SECRET);
+    for (const path of paths) {
+      expect(cursor.output).not.toContain(path);
+      expect(read(path)).toBe(before);
+    }
+    expect(existsSync(stub.record)).toBe(false);
+    expect(readdirSync(root, { recursive: true }).sort()).toEqual(filesBefore);
   });
 });
 
@@ -833,7 +835,8 @@ describe("ub mcp install requires a client", () => {
     expect(run.status, run.output).toBe(2);
     expect(run.stdout).toBe("");
     expect(run.stderr).toBe(`ub mcp install: missing client\n\n${INSTALL_HELP}`);
-    expect(run.stderr).toContain("one of: claude, codex, cursor");
+    expect(run.stderr).toContain("one of: claude, codex.");
+    expect(run.stderr).not.toMatch(/cursor/i);
     expect(existsSync(stub.record)).toBe(false);
     expect(readdirSync(root, { recursive: true }).sort()).toEqual(filesBefore);
     expect(read(bindingPath)).toBe(bindingBefore);
@@ -889,14 +892,14 @@ describe("binding-independent MCP registration", () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const bindingPath = join(box.cwd, ".uberblick.json");
     const before = read(bindingPath);
-    for (const target of ["claude", "cursor", "codex"]) {
+    for (const target of ["claude", "codex"]) {
       const run = runUb(["mcp", "install", target, "--print"], box, env);
       expect(run.status, run.output).toBe(0);
       if (target === "codex") {
         expect(run.stdout).toBe('[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n');
       } else {
         expect(JSON.parse(run.stdout)).toEqual({ mcpServers: {
-          uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+          uberblick: { command: "ub", args: ["mcp", "serve"] },
         } });
       }
       expect(run.output).not.toContain(SECRET);
@@ -994,7 +997,7 @@ describe("binding-independent MCP registration", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(JSON.parse(run.stdout)).toEqual({ mcpServers: {
-      uberblick: { type: "stdio", command: "ub", args: ["mcp", "serve"] },
+      uberblick: { command: "ub", args: ["mcp", "serve"] },
     } });
     expect(run.output).not.toContain(SECRET);
     expect(read(path)).toBe(before);
