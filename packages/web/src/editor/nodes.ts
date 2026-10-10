@@ -68,6 +68,7 @@ import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
+import { WIREFRAME_LANGUAGE, wireframeBlockView } from "./wireframe.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -282,8 +283,22 @@ export const CodeBlock = Node.create({
   // Same DOM as `renderHTML` above, plus a copy button in the chrome (#103).
   // `renderHTML` still governs serialization — getHTML, copy, paste — so the
   // button exists only while the block is on screen.
+  // SPIKE: `language: "wireframe"` draws a live preview (wireframe.ts). The
+  // node is unchanged; only its view differs. Each view refuses an update that
+  // crosses the wireframe boundary so ProseMirror rebuilds the other one.
   addNodeView() {
-    return sourceBlockView(codeBlockChrome);
+    const plain = sourceBlockView(codeBlockChrome);
+    const wireframe = wireframeBlockView();
+    return (props) => {
+      if (props.node.attrs.language === WIREFRAME_LANGUAGE) return wireframe(props);
+      const view = plain(props);
+      const update = view.update?.bind(view);
+      return {
+        ...view,
+        update: (node, decorations, innerDecorations) =>
+          node.attrs.language !== WIREFRAME_LANGUAGE && (update?.(node, decorations, innerDecorations) ?? false),
+      };
+    };
   },
   // No Enter override. Tiptap's core `keymap` extension already chains
   // newlineInCode → createParagraphNear → liftEmptyBlock → splitBlock, and

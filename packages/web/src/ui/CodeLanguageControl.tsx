@@ -13,7 +13,8 @@ import { codeLanguages } from "../editor/syntax-highlighting.js";
 import { PickerList } from "./PickerList.js";
 import { Popover, PopoverContent, PopoverTrigger } from "./shadcn/popover.js";
 
-const languages = ["", ...codeLanguages.filter((name) => name !== "plaintext").sort()];
+// SPIKE: "wireframe" draws a preview (editor/wireframe.ts), not highlighting.
+const languages = ["", ...[...codeLanguages.filter((name) => name !== "plaintext"), "wireframe"].sort()];
 
 interface Target {
   id: string;

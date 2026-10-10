@@ -84,8 +84,9 @@ describe("code block language", () => {
     const search = await open();
     expect(document.activeElement).toBe(search);
     const labels = options().map((item) => item.textContent?.replace("✓", "").trim());
-    expect(labels).toEqual(["Plain text", ...createLowlight(common).listLanguages()
-      .filter((name) => name !== "plaintext").sort()]);
+    // SPIKE: the picker also offers "wireframe", which draws a preview.
+    expect(labels).toEqual(["Plain text", ...[...createLowlight(common).listLanguages()
+      .filter((name) => name !== "plaintext"), "wireframe"].sort()]);
     expect(screen.queryByRole("option", { name: "plaintext" })).toBeNull();
     expect(screen.queryByRole("option", { name: "ts" })).toBeNull();
 
