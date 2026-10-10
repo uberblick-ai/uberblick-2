@@ -8,9 +8,10 @@ name: CI
 # it never stands in for the signoff. Standard runners cost no Actions minutes
 # in a public repository, macOS ones included.
 #
-# Linux runs everything. macOS runs the tests and browser e2e again, because
-# contributors and the loop work on Macs and some failures show up on only one
-# of the two; lint and typecheck do not depend on the platform.
+# Linux runs everything. macOS runs the tests again, because contributors and
+# the loop work on Macs and some failures show up on only one of the two; lint
+# and typecheck do not depend on the platform. Browser e2e stays Linux-only
+# until its specs hold on GitHub's macOS runners.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
 
@@ -78,19 +79,9 @@ jobs:
 
   # Separate from `checks` so it runs in parallel and only it downloads browsers.
   e2e:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    name: browser e2e
+    runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: browser e2e
-            browsers: ~/.cache/ms-playwright
-          - os: macos-latest
-            name: macOS browser e2e
-            browsers: ~/Library/Caches/ms-playwright
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -101,27 +92,24 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.pnpm-store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
 
       # Keyed on the lockfile because that is what pins @playwright/test, and
       # the browser build a Playwright version wants is a function of it.
-      # Playwright keeps its browsers in a different place on each platform.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ${{ matrix.browsers }}
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-playwright-
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
 
       - run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
 
       # Cached engines do not include system packages, so provision WebKit's
-      # host libraries on every Linux run; macOS needs none. Local e2e never
-      # installs host packages.
-      - if: ${{ runner.os == 'Linux' }}
-        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+      # host libraries on every run. Local e2e never installs host packages.
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
 
       # The task downloads pinned Chromium and WebKit (a no-op on a cache hit)
       # and starts its own hub and dev server, so there is nothing else to wire.
