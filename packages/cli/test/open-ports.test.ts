@@ -133,6 +133,8 @@ describe("ub open: hub, ports and serving role", () => {
 
   it("opens an allocated origin and refuses collisions without choosing another port", async () => {
     const { box, env } = configured();
+    const hub = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const port = await freePort();
     const args = ["--port", String(port)];
     const browser = browserRecorder(box);
@@ -168,6 +170,9 @@ describe("ub open: hub, ports and serving role", () => {
   // real binding and collision behavior above without reserving the product port.
   it.runIf(process.env.CI === "true")("uses the literal default origin in isolated review", async () => {
     const { box, env } = configured();
+    // Only the web origin is fixed; this fixture owns its hub's bound socket.
+    const hub = await startHub(box);
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const browser = browserRecorder(box);
     const app = await open(box, [], { ...env, BROWSER: browser.command });
     expect(app.url).toBe("http://127.0.0.1:13379/");

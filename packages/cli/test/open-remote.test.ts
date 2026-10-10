@@ -33,7 +33,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
-import { pointAt, sleep, waitUntil } from "./helpers.js";
+import { pointAt, sleep, waitUntil, WAIT_TIMEOUT_MS } from "./helpers.js";
 import {
   FIRST_REMOTE,
   SECRET,
@@ -470,15 +470,17 @@ describe("ub open: sharing through the upstream hub", () => {
       if (browserId === undefined || agentId === undefined) {
         throw new Error("the presence peers have no awareness");
       }
-      await waitUntil("presence to cross the local/upstream seam", () =>
-        browser.awareness?.getStates().has(agentId) === true &&
-        agent.awareness?.getStates().has(browserId) === true,
-      );
-      expect(browser.awareness?.getStates().get(agentId)).toMatchObject({
+      // Each field sends its own update; a peer can exist before its user or
+      // cursor has crossed the seam. Wait for the state we actually assert.
+      await expect.poll(() => browser.awareness?.getStates().get(agentId), {
+        timeout: WAIT_TIMEOUT_MS,
+      }).toMatchObject({
         client: "agent",
         cursor: { blockId: "block-1", anchor: 1, head: 1 },
       });
-      expect(agent.awareness?.getStates().get(browserId)).toMatchObject({
+      await expect.poll(() => agent.awareness?.getStates().get(browserId), {
+        timeout: WAIT_TIMEOUT_MS,
+      }).toMatchObject({
         client: "web",
         user: { name: "browser tab", color: "#112233" },
       });

@@ -11,8 +11,8 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
-import { editor, setupHarness } from "./app-helpers.js";
-import { keys } from "./harness.js";
+import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
+import { caretAtEdge, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -105,28 +105,17 @@ async function startMouse(page: Page, table: Locator, row = 1): Promise<void> {
 }
 
 async function overGap(page: Page, table: Locator, boundary: number): Promise<void> {
-  const destination = await gap(table, boundary);
-  await page.mouse.move(destination.x, destination.y, { steps: 12 });
-  await expect(indicator(page)).toHaveCount(1);
-  await expect(indicator(page)).toHaveAttribute("data-gap", String(boundary));
+  // Auto-scroll can move the gap after its coordinates were read. Steer the
+  // held pointer at the current gap; these moves cannot restart a canceled drag.
+  await expect.poll(async () => {
+    const destination = await gap(table, boundary);
+    await page.mouse.move(destination.x, destination.y);
+    return indicator(page).evaluateAll(elements => elements.map(element => element.getAttribute("data-gap")));
+  }).toEqual([String(boundary)]);
 }
 
 async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
-  if (info.project.use.hasTouch === true) await cell.tap();
-  else await cell.click();
-  await cell.evaluate((element) => {
-    const range = document.createRange();
-    range.selectNodeContents(element.querySelector("p") ?? element);
-    range.collapse(false);
-    const selection = document.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  });
-  await expect.poll(() => cell.evaluate((element) => {
-    const anchor = document.getSelection()?.anchorNode;
-    return anchor !== null && anchor !== undefined && element.contains(anchor);
-  })).toBe(true);
-  await cell.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await placeCaretIn(cell, { touch: info.project.use.hasTouch === true });
 }
 
 async function keyboardMove(page: Page, name: "Move row up" | "Move row down"): Promise<void> {
@@ -248,11 +237,9 @@ test("own gaps, outside release and Escape preserve the caret and focus without 
         await expect(indicator(page)).toHaveCount(0);
         await expect(page.getByRole("menu")).toHaveCount(0);
         await expect(editor(page)).toBeFocused();
-        await expect.poll(() => caret.evaluate((element) => {
-          const selection = document.getSelection();
-          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
-            && element.contains(selection.anchorNode) && selection.anchorOffset === selection.anchorNode.textContent?.length;
-        })).toBe(true);
+        // Native selections can end at a text offset or an element's child
+        // boundary. Both are a caret at the end when no target text follows.
+        await expect.poll(() => caret.evaluate(caretAtEdge)).toBe(true);
         await expect(bodyNames(table)).toHaveText(INITIAL);
         expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
         await page.keyboard.insertText(` ${ending}`);
@@ -303,7 +290,7 @@ test("Move entries repeat from the moved caret and keep typing in separate undo 
     await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
     await page.keyboard.press("End");
     await page.keyboard.insertText(" before");
-    await page.keyboard.press("Control+Alt+r");
+    await openKeyboardMenu(page, "Control+Alt+r");
     await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
     await keyboardMove(page, "Move row down");
     await expect(bodyNames(table)).toHaveText(["beta", "alpha before", "gamma"]);
@@ -311,10 +298,10 @@ test("Move entries repeat from the moved caret and keep typing in separate undo 
       const anchor = document.getSelection()?.anchorNode;
       return anchor !== null && anchor !== undefined && element.contains(anchor);
     })).toBe(true);
-    await page.keyboard.press("Shift+F10");
+    await openKeyboardMenu(page, "Shift+F10");
     await keyboardMove(page, "Move row down");
     await expect(bodyNames(table)).toHaveText(["beta", "gamma", "alpha before"]);
-    await page.keyboard.press("Control+Alt+r");
+    await openKeyboardMenu(page, "Control+Alt+r");
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
     await page.keyboard.press("Escape");
     // Escape returns trigger focus; re-enter the moved row before typing.
@@ -330,7 +317,7 @@ test("Move entries repeat from the moved caret and keep typing in separate undo 
     await page.keyboard.press("ControlOrMeta+z");
     await expect(bodyNames(table)).toHaveText(INITIAL);
     await caretIn(table.locator("th").first(), info);
-    await page.keyboard.press("Control+Alt+r");
+    await openKeyboardMenu(page, "Control+Alt+r");
     await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
   } finally { fixture.close(); }
@@ -483,15 +470,9 @@ test("native touch holds pick up rows and swallow release clicks, including canc
   const session = await page.context().newCDPSession(page);
   try {
     const table = await openTable(page, fixture.uuid);
-    for (const [round, ending] of (["own", "escape", "cancel", "move"] as const).entries()) {
+    for (const ending of ["own", "escape", "cancel", "move"] as const) {
       const cell = table.locator("tr").nth(1).locator("td").nth(1);
-      // ProseMirror groups mouse downs within 500 ms and 10 px into double and
-      // triple clicks. A fast round would make this tap a triple click, which
-      // selects the paragraph without focusing the editor.
-      // Keep these taps near the cell's left edge, away from border controls.
-      await cell.tap({ position: { x: 8 + round * 16, y: (await box(cell)).height / 2 } });
-      await page.keyboard.press(keys.lineEnd);
-      const offset = await cell.evaluate(() => document.getSelection()?.anchorOffset);
+      await placeCaretIn(cell, { touch: true });
       const bounds = await box(handle(page, 1));
       const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
       const before = Y.encodeStateVector(fixture.doc);
@@ -508,11 +489,7 @@ test("native touch holds pick up rows and swallow release clicks, including canc
       await expect(bodyNames(table)).toHaveText(ending === "move" ? ["beta", "gamma", "alpha"] : INITIAL);
       if (ending !== "move") {
         expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
-        await expect.poll(() => cell.evaluate((element) => {
-          const selection = document.getSelection();
-          return selection?.anchorNode !== null && selection?.anchorNode !== undefined
-            && element.contains(selection.anchorNode) ? selection.anchorOffset : null;
-        })).toBe(offset);
+        await expect.poll(() => cell.evaluate(caretAtEdge)).toBe(true);
       }
       const current = ending === "move" ? 3 : 1;
       // A stationary hold generates a native click after release; a later

@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { Hub, HubLogger } from "@uberblick/hub";
+import type { Hub, HubLogger, HubLogRecord } from "@uberblick/hub";
 import {
   createHub,
   importRootSecret,
@@ -343,9 +343,7 @@ export interface HubOptions {
   databasePath?: string;
   authSecret?: string;
   /**
-   * Where the hub's structured records go. Silent by default; a suite that has
-   * to count what the hub saw — connections accepted, rooms closed — reads them
-   * here rather than inventing a seam for it.
+   * An optional observer, in addition to this instance's captured records.
    */
   log?: HubLogger;
   /** A hub from another release, for the tests about protocol skew. */
@@ -354,12 +352,19 @@ export interface HubOptions {
   maxPendingDocuments?: number;
 }
 
-export function startHub(options: HubOptions = {}): Promise<Hub> {
-  return createHub({
+export interface TestHub extends Hub {
+  readonly records: readonly HubLogRecord[];
+}
+
+export async function startHub(options: HubOptions = {}): Promise<TestHub> {
+  // A restarted hub owns a new collector. Late callbacks from a stopped hub
+  // remain in its own evidence instead of crossing an array-clear boundary.
+  const records: HubLogRecord[] = [];
+  const hub = await createHub({
     authSecret: options.authSecret ?? TEST_SECRET,
     port: options.port ?? 0,
     databasePath: options.databasePath ?? tempDatabasePath(),
-    log: options.log ?? silentLogger,
+    log: (record) => { records.push(record); (options.log ?? silentLogger)(record); },
     ...(options.protocolVersion === undefined
       ? {}
       : { protocolVersion: options.protocolVersion }),
@@ -370,6 +375,7 @@ export function startHub(options: HubOptions = {}): Promise<Hub> {
     maxDebounce: 200,
     shutdownTimeoutMs: 5_000,
   });
+  return Object.assign(hub, { records });
 }
 
 export function hubUrl(port: number): string {

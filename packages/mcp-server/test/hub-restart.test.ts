@@ -16,7 +16,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Hub, HubLogRecord } from "@uberblick/hub";
+import type { Hub } from "@uberblick/hub";
 import {
   hubUrl,
   LIVE_HUB_SETTLE,
@@ -206,12 +206,11 @@ describe("a hub that restarts under connected servers", () => {
     hubs.splice(hubs.indexOf(first), 1);
     poisonRoom(database, `${WORKSPACE}/${doomed.uuid}`);
 
-    const records: HubLogRecord[] = [];
-    await hub({
+    const restarted = await hub({
       port,
       databasePath: database,
-      log: (record) => records.push(record),
     });
+    const records = restarted.records;
 
     // One record per connection this server completes with the restarted hub:
     // a rebuild re-authenticates every room, the healthy directory room

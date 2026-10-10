@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
+import { activateControl } from "./input-helpers.js";
+export { activateControl } from "./input-helpers.js";
 
 interface OpenAppOptions {
   contextOptions?: BrowserContextOptions;
@@ -73,13 +75,22 @@ export function editor(page: Page): Locator {
   return page.locator(".ub-editor .ProseMirror");
 }
 
+/** Keyboard input needs the opened menu's focus lifecycle, not just its paint. */
+export async function openKeyboardMenu(page: Page, shortcut: string, trigger?: Locator): Promise<void> {
+  await page.keyboard.press(shortcut);
+  if (trigger !== undefined) await expect(trigger).toHaveAttribute("data-state", "open");
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect.poll(() => menu.evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
+}
+
 export function docButton(page: Page, title: string): Locator {
   return page.locator(".ub-list").getByRole("button", { name: title, exact: true });
 }
 
 /** Open a pinned document through the same sidebar a second client sees. */
 export async function openDoc(page: Page, title: string): Promise<void> {
-  await docButton(page, title).click();
+  await activateControl(docButton(page, title));
   await expect(editor(page)).toBeVisible();
 }
 
@@ -95,7 +106,7 @@ export function docTitle(label: string): string {
 /** Wait for the new document, even when a previous editor is already visible. */
 export async function createDoc(page: Page, title: string, options: { pin?: boolean } = {}): Promise<string> {
   const before = openPath(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await activateControl(page.getByRole("button", { name: "+ new doc" }));
   await expect.poll(() => openPath(page)).not.toBe(before);
   await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(editor(page)).toBeVisible();
@@ -105,8 +116,8 @@ export async function createDoc(page: Page, title: string, options: { pin?: bool
   }
   await page.locator(".ub-title").fill(title);
   if (options.pin === true) {
-    await page.getByRole("button", { name: "Document actions" }).click();
-    await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+    await activateControl(page.getByRole("button", { name: "Document actions" }));
+    await activateControl(page.getByRole("menuitem", { name: "Pin to sidebar" }));
     await expect(docButton(page, title)).toBeVisible();
   }
   return uuid;

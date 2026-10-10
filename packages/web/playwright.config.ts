@@ -16,6 +16,8 @@
  *   short visual viewport. Chromium still runs every test, including its
  *   forced-width and forced-touch cases. Tagged WebKit tests inherit their
  *   project's viewport and input rather than resizing or enabling touch.
+ * - **Workload isolation.** The 400,000-cell timing fixture runs after all
+ *   interactive projects, so layout/GC cannot compete with their input.
  */
 
 import { defineConfig, devices } from "@playwright/test";
@@ -36,6 +38,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      grepInvert: /@workload(?:\s|$)/,
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -47,6 +50,13 @@ export default defineConfig({
       name: "webkit-macbook",
       grep: /@webkit(?:\s|$)/,
       use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "chromium-workload",
+      // Focused workload probes use --project=chromium-workload --no-deps.
+      grep: /@workload(?:\s|$)/,
+      dependencies: ["chromium", "webkit-iphone", "webkit-macbook"],
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });

@@ -710,14 +710,31 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
-  await expect(page.locator(".ub-data-table")).toHaveCount(mixed ? 10 : 1, { timeout: mixed ? 60_000 : 20_000 });
-  await expect(page.locator(".ub-chart-panel[data-state='ready']")).toHaveCount(mixed ? 20 : 1);
-  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
+  const readinessTimeout = mixed ? 180_000 : 20_000;
+  // Ten continuous tables contain over 400,000 cells. Repeated Playwright
+  // selector walks dominate this workload; read one native DOM snapshot.
+  await expect.poll(() => page.evaluate(() => {
+    const tables = [...document.querySelectorAll<HTMLTableElement>(".ub-data-table")];
+    return {
+      tables: tables.length,
+      ready: document.querySelectorAll(".ub-chart-panel[data-state='ready']").length,
+      rows: tables.map(table => table.tBodies[0]?.rows.length ?? 0),
+      headers: tables[0]?.querySelectorAll("thead th[scope='col']").length ?? 0,
+    };
+  }), { timeout: readinessTimeout }).toEqual({
+    tables: mixed ? 10 : 1,
+    ready: mixed ? 20 : 1,
+    rows: Array.from({ length: mixed ? 10 : 1 }, () => 4035),
+    headers: 10,
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first),
+    { timeout: readinessTimeout }).not.toBeNull();
   const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
   expect(initial.availableEntries).toBe(4402);
-  for (const table of await page.locator(".ub-data-table").all()) await expect(table.locator("tbody tr")).toHaveCount(4035);
-  await expect(page.locator(".ub-data-table").first().getByRole("columnheader")).toHaveCount(10);
-  expect(await page.locator(".ub-table-scroll").first().evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => {
+    const scroll = document.querySelector<HTMLElement>(".ub-table-scroll");
+    return scroll !== null && scroll.scrollWidth > scroll.clientWidth;
+  })).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   for (let iteration = 0; iteration < 10; iteration += 1) {
     const value = 900 + iteration;
@@ -731,7 +748,8 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
         ...(mixed ? [{ collection: "summaries", upsert: [{ id: "summary-00364", value: { day: new Date(Date.UTC(2012, 0, 365)).toISOString().slice(0, 10), value0: value, value1: value + 1, value2: value + 2 } }] }] : []),
       ],
     });
-    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length)).toBe(previous + 1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length),
+      { timeout: readinessTimeout }).toBe(previous + 1);
   }
   const probe = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[]; readsPerUpdate: number[]; localUpdates: number } }).tableProbe);
   expect(probe.localUpdates).toBe(0);
@@ -754,8 +772,10 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
 }
 
-test("one table and twenty shared views record bounded Chromium live-update timings", async ({ browser }, info) => {
-  test.setTimeout(180_000);
+test("one table and twenty shared views record bounded Chromium live-update timings", { tag: "@workload" }, async ({ browser }, info) => {
+  // Initial layout of 400,000 cells takes over a minute on GitHub's runner.
+  // Readiness is separate from the first-render/update measurements below.
+  test.setTimeout(360_000);
   const session = writer();
   for (const mixed of [false, true]) {
     const { uuid, bytes } = await workload(session, mixed);
