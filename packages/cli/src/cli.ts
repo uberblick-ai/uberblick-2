@@ -56,7 +56,7 @@ commands:
   install <client>   # Register Uberblick with an agent's MCP client: claude or codex
 
 options for install:
-  --user             # Register for every project of this user, not just this directory
+  --user             # Register for every project of this user, not just this project
   --print            # Print the entry to paste, and run nothing
 `;
 

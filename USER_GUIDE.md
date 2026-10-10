@@ -75,11 +75,12 @@ exported.
 
 The entry is always named `uberblick` and runs `ub mcp serve` with no `env`.
 Install needs no workspace selection and never creates or changes
-`.uberblick.json`. Project scope registers in the current directory, even when
-the project's binding is in a parent directory. With no valid project binding,
-it registers normally and warns that agents cannot start until you run
-`ub workspace create <name>` or `ub workspace use <link|id>`. `--user` works
-anywhere and follows each project's nearest `.uberblick.json`.
+`.uberblick.json`. Project scope registers beside the nearest valid
+`.uberblick.json`, including when run from a subfolder. With no valid project
+binding, it registers in the current directory and warns that agents cannot
+start until you run `ub workspace create <name>` or
+`ub workspace use <link|id>`. `--user` works anywhere and follows each project's
+nearest `.uberblick.json`.
 
 Terminal commands and MCP use the same [project binding](#configuration). The
 report names the client command that ran, its target file and the binding path
