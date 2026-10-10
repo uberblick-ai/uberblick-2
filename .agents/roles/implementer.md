@@ -71,8 +71,10 @@ finish `integrate` and state `none owed (<reason>)`. Require agent review when
 you can name a concrete unresolved risk that warrants it. Copilot is optional
 under that policy and is not requested automatically.
 
-When the change makes a corpus claim wrong, or adds behavior a corpus
-document should describe, draft the rewrite under the pull request's
+Find the pages that describe what the change touches: search the corpus for
+each changed command, tool or screen by name, beyond the issue's Pointers.
+When the change makes a claim on one of them wrong, or adds behavior no page
+describes yet, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
 following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
@@ -208,7 +210,7 @@ Closes #N
 None. | <material facts or links; no merge-tier ruling>
 
 ## Corpus update
-None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
+None — <pages searched, and why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
 
 ## Self-review
 KISS: <why this is the least defensible change>
