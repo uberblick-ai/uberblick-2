@@ -52,7 +52,6 @@
  * room-by-room wording.
  */
 
-import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import {
   AnnotationCellError,
   AnnotationRangeError,
@@ -157,9 +156,13 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "get_sidebar",
 ]);
 
-type ToolHints = Required<Pick<ToolAnnotations,
-  "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint"
->>;
+/** Keep the shared operation/failure path free of SDK types as well as values. */
+interface ToolHints {
+  readonly readOnlyHint: boolean;
+  readonly destructiveHint: boolean;
+  readonly idempotentHint: boolean;
+  readonly openWorldHint: boolean;
+}
 
 /**
  * Advisory MCP hints, not security guarantees. Keep a row for every tool:
