@@ -159,7 +159,7 @@ describe("ub mcp install --print", () => {
   it("prints a snippet for the named target and touches no file", () => {
     const box = sandbox();
 
-    const claude = runUb(["mcp", "install", "claude", "--project", "--print"], box);
+    const claude = runUb(["mcp", "install", "claude", "--print"], box);
     expect(claude.status).toBe(0);
     expect(claude.stdout).toBe(entrySnippet("claude"));
     expect(claude.stderr).toContain(join(box.cwd, ".mcp.json"));
@@ -214,7 +214,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     {
       what: "claude, project",
       program: "claude",
-      argv: ["mcp", "install", "claude", "--project"],
+      argv: ["mcp", "install", "claude"],
       file: (box) => join(box.cwd, ".mcp.json"),
       expected: [
         "mcp",
@@ -238,7 +238,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     {
       what: "codex, project",
       program: "codex",
-      argv: ["mcp", "install", "codex", "--project"],
+      argv: ["mcp", "install", "codex"],
       file: (box) => join(box.cwd, ".codex", "config.toml"),
       expected: [
         "mcp",
@@ -287,7 +287,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     // one this command then reports and probes.
     const box = sandbox();
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex", "--project"], box, {
+    const run = runUb(["mcp", "install", "codex"], box, {
       ...stub.env,
       CODEX_HOME: codexHome(box),
     });
@@ -303,7 +303,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
     const run = runUb(
-      ["mcp", "install", "claude", "--project"],
+      ["mcp", "install", "claude"],
       box,
       stub.env,
     );
@@ -350,7 +350,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       program,
       `echo "${SECRET}" >&2\necho "${SECRET}"\nkill -TERM $$\n`,
     );
-    const run = runUb(["mcp", "install", program, "--project"], box, stub.env);
+    const run = runUb(["mcp", "install", program], box, stub.env);
 
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
@@ -368,7 +368,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     const stub = stubVendor(box, program);
     // A non-executable file on PATH is distinct from a missing program.
     chmodSync(join(stub.env.PATH as string, program), 0o644);
-    const run = runUb(["mcp", "install", program, "--project"], box, stub.env);
+    const run = runUb(["mcp", "install", program], box, stub.env);
 
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
@@ -399,7 +399,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       WORKSPACES: "one,two",
     };
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, {
+    const run = runUb(["mcp", "install", "claude"], box, {
       ...stub.env,
       ...ours,
     });
@@ -445,7 +445,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     mkdirSync(dir, { recursive: true });
 
     const env = ending === "missing" ? NO_VENDOR : stubVendor(box, "codex", "exit 1\n").env;
-    const run = runUb(["mcp", "install", "codex", "--project"], nested, env);
+    const run = runUb(["mcp", "install", "codex"], nested, env);
     expect(run.status, run.output).toBe(1);
     expect(run.stdout).toBe(entrySnippet("codex"));
     expect(existsSync(dir)).toBe(true);
@@ -470,7 +470,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, {
+    const run = runUb(["mcp", "install", "claude"], box, {
       ...stub.env,
       UB_WORKSPACE_ID: "invalid-ambient-workspace",
       UB_HUB_URL: "invalid-ambient-hub",
@@ -704,7 +704,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    const run = runUb(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(path);
     expect(run.stderr).toMatch(
@@ -730,7 +730,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    const run = runUb(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(path);
     expect(run.stderr).toMatch(/could not be read/);
@@ -758,7 +758,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude", "--project"], box, stub.env);
+    const run = runUb(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(read(path)).toBe(before);
@@ -769,7 +769,6 @@ describe("ub mcp install, and what is registered already", () => {
 describe("ub mcp install cursor", () => {
   it.each([
     { scope: "default", args: [] },
-    { scope: "project", args: ["--project"] },
     { scope: "user", args: ["--user"] },
   ])("rejects $scope scope before running a client or writing anything", ({ args }) => {
     const box = sandbox();
@@ -839,9 +838,7 @@ describe("ub mcp install requires a client", () => {
     { args: [] },
     { args: ["--print"] },
     { args: ["--user"] },
-    { args: ["--project"] },
     { args: ["--user", "--print"] },
-    { args: ["--project", "--print"] },
   ])("refuses options without a client: $args", ({ args }) => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
@@ -865,6 +862,9 @@ describe("ub mcp install requires a client", () => {
 
 describe("ub mcp install rejects removed arguments", () => {
   const REMOVED = [
+    ["codex", "--project"],
+    ["codex", "--project", "--user"],
+    ["codex", "--project", "--print"],
     ["codex", "--workspace", WORKSPACE],
     ["codex", "--hub", "local"],
     ["codex", "--label", "research"],
@@ -943,7 +943,7 @@ describe("binding-independent MCP registration", () => {
     const configPath = join(box.configHome, "uberblick", "config.json");
     const before = read(configPath);
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude", `--${scope}`], box, stub.env);
+    const run = runUb(["mcp", "install", "claude", ...(scope === "user" ? ["--user"] : [])], box, stub.env);
 
     expect(run.status, run.output).toBe(0);
     expect(read(stub.record).trimEnd().split("\n")).toEqual([

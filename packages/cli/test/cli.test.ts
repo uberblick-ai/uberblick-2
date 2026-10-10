@@ -210,11 +210,12 @@ describe("ub status", () => {
 });
 
 describe("ub mcp", () => {
-  it("rejects anything but `install` and `serve`", () => {
+  it("rejects unknown commands without advertising the hidden server", () => {
     const run = runUb(["mcp", "bogus"], sandbox());
-    expect(run.status).not.toBe(0);
+    expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
+    expect(run.stderr).toMatch(/unknown command "bogus"/);
     expect(run.stderr).toMatch(/install/);
-    expect(run.stderr).toMatch(/serve/);
+    expect(run.stderr).not.toMatch(/serve/);
   });
 });

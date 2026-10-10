@@ -237,37 +237,28 @@ context is filtered by `Dockerfile.fue.dockerignore`, more strictly than the
 review `.dockerignore`: all local databases and configurations are excluded so
 existing state cannot stand in for what initialization should create.
 
-## Local CI
+## CI
 
-CI runs on a maintainer's machine from an `origin/main` checkout after the
-commit is pushed. Use the command in [Local development](.agents/development.md).
-It first runs the isolated lint, typecheck and test review below in a Linux
-container without network. Passing posts a green `signoff` commit status through
-[gh-signoff](https://github.com/basecamp/gh-signoff); merge requires that status.
-It then runs browser e2e on the host unless only documentation or agent process
-changed, reporting the advisory `signoff/e2e` status. A failed step posts red.
-Install the extension once:
+Every push to `main` and every pull request runs `.github/workflows/ci.yml`
+on GitHub: lint, typecheck, tests and browser e2e on Linux, and the tests again
+on macOS. The checks `lint, typecheck and tests` and `macOS tests` are required
+to merge; the main ruleset accepts them only from GitHub Actions. Browser e2e is
+advisory. On `main` the same run records whether `main` itself is clean. A pull
+request's run uses that pull request's own recipe, so a change to what CI runs
+is reviewed as a change to the merge rules.
 
-```sh
-gh extension install basecamp/gh-signoff
-```
-
-GitHub Actions retains release publishing and the Linux Homebrew upgrade proof
-after packaging changes. The latter runs after merges changing the formula or
-its payload, and on demand from the Actions tab, through
-`.github/workflows/homebrew-formula.yml`. Every push to `main` and every pull
-request also runs lint, typecheck, tests and browser e2e on Linux, and the
-tests again on macOS, through `.github/workflows/ci.yml`. It gates nothing: on
-`main` it records whether `main` itself is clean, and on a pull request it is
-an early signal that runs the pull request's own recipe.
+GitHub Actions also retains release publishing and the Linux Homebrew upgrade
+proof after packaging changes. The latter runs after merges changing the formula
+or its payload, and on demand from the Actions tab, through
+`.github/workflows/homebrew-formula.yml`.
 
 ## Review isolation
 
 Local CLI startup and collision tests use allocated ports. The literal default-web-port
-startup proof runs with `CI=true` in the mandatory container review, where networking
-is isolated from the developer host. A local `mise run test` leaves that proof to
-`mise run review <commit>`; do not set `CI=true` for a host run while the default port
-is occupied. Product startup still uses its documented default and refuses collisions.
+startup proof runs with `CI=true` in GitHub CI and in the container review, where the
+default port is free. A local `mise run test` leaves that proof to them; do not set
+`CI=true` for a host run while the default port is occupied. Product startup still
+uses its documented default and refuses collisions.
 
 `mise run review <commit>` resolves its argument (default `HEAD`), extracts
 that commit with `git archive`, and builds it with freshly fetched
@@ -295,7 +286,7 @@ attributes are disabled: otherwise `export-ignore` could drop a failing test or
 `export-subst` rewrite content. `GIT_NO_REPLACE_OBJECTS` prevents a replacement
 ref from making one SHA read another commit.
 
-This is why the gate is one command, without a preceding inspection ceremony.
+This is why the review is one command, without a preceding inspection ceremony.
 The reviewed code is still active: its manifests and lockfile are its own,
 and their install scripts run during the build.
 
@@ -312,8 +303,8 @@ lockfile need npm registry access, so build uses Docker's default network and
 branch-chosen install scripts execute there. Verification runs with
 `--network none --cap-drop ALL --security-opt no-new-privileges`.
 `docker build --network=none` fails at package-manager installation. Building
-requires an explicit review invocation, including via local CI; a push alone
-never builds a branch. Pass no build secrets, host mounts, privileged mode or
+requires an explicit review invocation; a push alone never builds a branch
+here. Pass no build secrets, host mounts, privileged mode or
 Docker socket, so a hostile build receives none of our credentials.
 
 ## Toolchain choices

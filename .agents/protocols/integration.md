@@ -7,36 +7,34 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 ## Gate mechanics
 
 - Resolve and record the PR's immutable `headRefOid`.
-- **GitHub CI first.** When the PR's `CI` check at that head has finished with
-  a failure (`gh pr checks <n>`, then `gh run view <id> --log-failed`), a lint,
-  typecheck, test or spec failure that main's `CI` run does not show the same
-  way (the base comparison below) is a branch failure, unless it is a timeout
-  in a test the diff leaves untouched: finish `changes` naming it, without
-  running local CI. Otherwise, and while the check is pending or green, go on.
-  The check runs the PR's own recipe, so it never replaces local CI.
-- **CI, every tier.** Run `mise run ci <headRefOid>` from a checkout at
-  freshly fetched `origin/main`. It posts the `signoff` commit status only when
-  the isolated review passes, and a failing status otherwise. A failing run
-  blocks agent merge. Always run it yourself at the exact head: a `signoff`
-  already on the commit only says someone posted it, not that checks ran. If
-  the run cannot complete for reasons outside the change, escalate to a
-  maintainer, who may merge by hand.
-- **Isolated review.** Local CI runs it as `mise run review <headRefOid>`,
-  which refuses unless the checkout is at freshly fetched `origin/main` with
-  that task's recipe unmodified, because the base supplies the recipe. The
-  reviewed commit contributes only file contents, via `git archive`, while its
-  manifests still install in the networked build stage. So pass the SHA rather
-  than checking the branch out, never treat tests from a mutable shared
-  checkout as evidence, and pass no secrets, host mounts, privileged mode or
-  container socket to the build or to the container, which runs without
-  network. [CONTRIBUTING.md's Review isolation](../../CONTRIBUTING.md#review-isolation)
-  section states the full boundary. Keep
-  the SHA-tagged image for the failure-path probes the policy requires at
-  stateful boundaries, then remove it when the PR is settled.
-- Local CI also runs browser e2e at the head, unless only documentation or
-  agent process changed, and reports it as the advisory `signoff/e2e` status.
-  That run uses the candidate's own e2e recipe, so for a browser-observable
-  outcome read its output rather than trusting the status. A
+- **CI, every tier.** The PR's `CI` workflow runs on every push. Its required
+  checks, `lint, typecheck and tests` and `macOS tests`, must have concluded
+  `success` at `headRefOid` (`gh pr checks <n>`). The ruleset accepts them
+  only from GitHub Actions. Wait for a pending check; for a failure, read
+  `gh run view <id> --log-failed`. A lint, typecheck, test or spec failure
+  that main's `CI` run does not show the same way (the base comparison below)
+  is a branch failure: finish `changes` naming it. When it does show the same
+  way, or it is a timeout in a test the diff leaves untouched, re-run the
+  failed jobs once (`gh run rerun <id> --failed`); if it is still red,
+  escalate to a maintainer, who may merge by hand. The checks run the PR's own
+  recipe, so a hunk that skips or weakens what CI runs — `.github/workflows/`,
+  `mise.toml` tasks, package scripts, test or lint configuration — is a
+  merge-rule change for the tier check.
+- **Isolated review, for probes.** `mise run review <sha>` builds a commit in a
+  container without network. It refuses unless the checkout is at freshly
+  fetched `origin/main` with that task's recipe unmodified, because the base
+  supplies the recipe. The reviewed commit contributes only file contents, via
+  `git archive`, while its manifests still install in the networked build
+  stage. So pass the SHA rather than checking the branch out, never treat
+  tests from a mutable shared checkout as evidence, and pass no secrets, host
+  mounts, privileged mode or container socket to the build or to the
+  container. [CONTRIBUTING.md's Review isolation](../../CONTRIBUTING.md#review-isolation)
+  section states the full boundary. Use the head's SHA-tagged image for the
+  failure-path probes the policy requires at stateful boundaries, then remove
+  it when the PR is settled; the merged-tree gate below uses the same task.
+- CI also runs browser e2e at the head as the advisory `browser e2e` check.
+  It uses the candidate's own e2e recipe, so for a browser-observable outcome
+  read its output rather than trusting the conclusion. A
   failure may be called environmental only after the same failing spec is run
   against the base, or when it failed the same way (same test, browser project
   and error) in the latest completed `CI` run on `main` at or before the base
@@ -48,8 +46,8 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   base-ref SHA the exact-head gate set began from as its base-freshness point.
   Link the check or failure evidence; do not paste full logs, test counts or
   timings. A Copilot review is already its own record. Any new commit on the
-  branch invalidates test, typecheck and immutable-review evidence: re-run
-  those gates at the new `headRefOid`.
+  branch invalidates CI and probe evidence: wait for CI and re-run the probes
+  at the new `headRefOid`.
 - **Merged-tree gate.** Whenever the unchanged PR head does not contain freshly
   fetched `origin/main`, run this separate gate, including at pickup in every
   integration run and after a later base advance, regardless of file overlap.
@@ -147,9 +145,9 @@ or restart another session's development processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —
 merge or escalation — once the probes on the retained review image are done,
-run `sh bin/housekeeping.sh` with every review SHA this run built — each
-exact head it gated and each merged-tree commit — from the same freshly fetched
-base-ref checkout used for the container review,
+run `sh bin/housekeeping.sh` with every review SHA this run built — each head
+it probed and each merged-tree commit — from the same freshly fetched base-ref
+checkout used for the container review,
 and record a concise summary on the PR. Besides the named review images, the
 command removes review images older than 24 hours and dangling images. It prunes
 build cache older than a week, for a free-space floor (`HOUSEKEEPING_MIN_FREE`,

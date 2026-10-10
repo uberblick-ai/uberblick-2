@@ -55,20 +55,17 @@ routes do not change the review or merge tiers below.
 3. **Gates, all before merge**, each at the exact head that merges. Effort
    follows semantic risk: paths and line counts are inspection signals, not
    extra rounds. Link exact-head evidence instead of repeating it.
-   - **CI.** Every tier requires a `signoff` commit status of `success` at the
-     merging head, from the integrator's own local CI run (`mise run ci <sha>`,
-     `integration.md`).
-     A missing or failing status blocks agent merge. If the run cannot
-     complete for reasons outside the change, escalate to a maintainer, who
-     may merge by hand.
-   - **Immutable review.** Local CI runs the isolated review
-     (`mise run review <sha>`) at the head, so every change has one. A change
-     whose head does not contain freshly fetched `origin/main` also passes the
-     merged-tree gate (`integration.md`). At stateful boundaries —
-     persistence, startup and shutdown, networking, concurrency — passing
-     happy-path tests is not enough: run focused failure-path probes and post
-     reproducible findings. Worktree tests help while building but are never
-     merge evidence.
+   - **CI.** Every tier requires GitHub CI's required checks to have
+     concluded `success` at the merging head (`integration.md`). A missing,
+     pending or failing check blocks agent merge. If CI cannot pass for
+     reasons outside the change, escalate to a maintainer, who may merge by
+     hand.
+   - **Merged tree and probes.** A change whose head does not contain freshly
+     fetched `origin/main` also passes the merged-tree gate
+     (`integration.md`). At stateful boundaries — persistence, startup and
+     shutdown, networking, concurrency — passing happy-path tests is not
+     enough: run focused failure-path probes and post reproducible findings.
+     Worktree tests help while building but are never merge evidence.
    - **Acceptance.** Every acceptance criterion of the issue, with evidence.
    - **Independent review**, per "Reviews owed" below, settled under
      `review-protocol.md`.

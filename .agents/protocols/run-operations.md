@@ -81,7 +81,7 @@ and `wait` on it, or signal the process group, or the trap is decoration.
 
 A run ends when its session ends, so a task your agent tool starts in the
 background never reports back. Wait in the foreground with a bounded command,
-such as `mise run ci <sha>` under the tool's timeout. A tool that returns while
+such as `mise run review <sha>` under the tool's timeout. A tool that returns while
 the command still runs leaves it yours: keep polling until it exits, or stop
 it. When what you wait for is still pending after that, finish `defer` and name it.
 

@@ -35,7 +35,7 @@ For a source checkout, follow [contributor updating](CONTRIBUTING.md#updating).
 `ub mcp install <client>` wires Uberblick into an MCP client, so nobody has to
 hand-edit JSON. The client is required; omitting it prints an error and install
 help on stderr and exits 2. It knows `claude` and `codex`; project scope
-is the default, `--project` selects it explicitly, and `--user` selects per-user config.
+is the default, and `--user` selects per-user config.
 `--print` emits the snippet and runs nothing, which is also the answer for a
 client it does not know:
 

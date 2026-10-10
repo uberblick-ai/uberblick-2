@@ -59,6 +59,17 @@ afterAll(removeTempDirs);
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 
+/** The live CLI: ub mcp Basic Usage output, without its shell prompt. */
+const MCP_BASIC_USAGE = `usage: ub mcp [command]
+
+commands:
+  install <client>   # Register Uberblick with an agent's MCP client: claude or codex
+
+options for install:
+  --user             # Register for every project of this user, not just this project
+  --print            # Print the entry to paste, and run nothing
+`;
+
 /**
  * One `ub` invocation through the dispatcher, without a process.
  *
@@ -82,11 +93,35 @@ async function dispatch(argv: string[]): Promise<Run> {
   return { status, stdout, stderr, output: `${stdout}${stderr}` };
 }
 
-it("advertises the default web port in ub open help", async () => {
+it("prints ub open's Basic Usage in the house help layout", async () => {
   const help = await dispatch(["open", "--help"]);
   expect(help.status).toBe(0);
-  expect(help.stdout).toMatch(/--port <n>.*\(default 13379\)/);
+  expect(help.stdout).toBe(`usage: ub open [options]
+
+Serve the web app for this project's workspace, with a hub behind it, and open the browser. Runs until Ctrl-C.
+
+options:
+  --no-browser      Print the address instead of opening a browser
+  --port <n>        Port for the web app (default 13379)
+  -h, --help        show this help
+
+BROWSER in the environment names the command used to open the URL; BROWSER=none
+suppresses it, like --no-browser.
+`);
   expect(help.stderr).toBe("");
+});
+
+it.each([
+  ["--browser"],
+  ["--no-browser", "--browser"],
+  ["--browser", "--no-browser"],
+  ["--port", "13380", "--browser"],
+])("rejects the hidden browser option: %j", async (...args) => {
+  const refused = await dispatch(["open", ...args]);
+  expect(refused.status).toBe(2);
+  expect(refused.stdout).toBe("");
+  expect(refused.stderr).toContain("ub open: Unknown option '--browser'");
+  expect(refused.stderr).toContain(`\n\n${OPEN_HELP}`);
 });
 
 it.each(["0", "65536", "1.5", "invalid"])("refuses invalid explicit web port %s", async (port) => {
@@ -174,7 +209,7 @@ const HIDDEN = ["serve", "help", "--help", "-h", "--version", "-v"];
 function commandRows(help: string, catalogOnly = false): Array<{ command: string; descriptionColumn: number }> {
   const catalog = help.match(catalogOnly
     ? /\ncommands:\n((?: {2}.+\n)+)$/
-    : /\ncommands:\n((?: {2}.+\n)+)\noptions:\n/);
+    : /\ncommands:\n((?: {2}.+\n)+)\noptions(?: for install)?:\n/);
   expect(catalog, "command help contains its complete catalog").not.toBeNull();
 
   return (catalog?.[1] ?? "")
@@ -230,6 +265,7 @@ describe("every human-facing command path", () => {
   for (const path of PATHS) {
     const name = ["ub", ...path.argv].join(" ");
     const isAuthGroup = path.argv.length === 1 && path.argv[0] === "auth";
+    const isMcpGroup = path.argv.length === 1 && path.argv[0] === "mcp";
 
     it(`answers --help and -h on \`${name}\``, async () => {
       for (const flag of ["--help", "-h"]) {
@@ -256,7 +292,7 @@ describe("every human-facing command path", () => {
           );
         }
       }
-      if (!isAuthGroup) {
+      if (!isAuthGroup && !isMcpGroup) {
         expect(path.help, `${name} help documents -h, --help`).toContain("-h, --help");
       }
       if (path.children !== undefined) {
@@ -426,6 +462,27 @@ commands:
     expect(login.stdout).not.toContain("does not revoke the previous device");
   });
 
+  it("prints mcp's exact Basic Usage for the bare group and each help spelling", async () => {
+    for (const args of [[], ["help"], ["--help"], ["-h"]]) {
+      const run = await dispatch(["mcp", ...args]);
+      expect(run.status).toBe(0);
+      expect(run.stdout).toBe(MCP_BASIC_USAGE);
+      expect(run.stderr).toBe("");
+    }
+    const root = await dispatch(["--help"]);
+    expect(root.stdout.split("\n")).toContain("  mcp [command]          register uberblick with an MCP client");
+  });
+
+  it("refuses unknown mcp commands with the same help and no hidden command", async () => {
+    for (const args of [[], ["--help"]]) {
+      const run = await dispatch(["mcp", "bogus", ...args]);
+      expect(run.status).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toBe(`ub mcp: unknown command "bogus"\n\n${MCP_BASIC_USAGE}`);
+      expect(run.stderr).not.toContain("serve");
+    }
+  });
+
   it("keeps the hidden `mcp serve` out of the group help it is dispatched by", async () => {
     const run = await dispatch(["mcp", "--help"]);
     expect(run.status).toBe(0);
@@ -507,10 +564,15 @@ syncBuiltinESMExports();
 `);
       const before = tree(box);
       for (const group of groups) {
-        const run = runUb(group.argv, box, { NODE_OPTIONS: `--import=${preload}` });
-        expect(run.status, run.output).toBe(0);
-        expect(run.stdout).toBe(group.help);
-        expect(run.stderr).toBe("");
+        const invocations = group.argv[0] === "mcp"
+          ? [group.argv, ...["help", "--help", "-h"].map(flag => [...group.argv, flag])]
+          : [group.argv];
+        for (const argv of invocations) {
+          const run = runUb(argv, box, { NODE_OPTIONS: `--import=${preload}` });
+          expect(run.status, run.output).toBe(0);
+          expect(run.stdout).toBe(group.help);
+          expect(run.stderr).toBe("");
+        }
       }
       expect(tree(box)).toEqual(before);
       expect(WORKSPACE_HELP).not.toContain("(none)");
@@ -532,7 +594,7 @@ describe("what is not a request for help", () => {
   });
 
   it("omits removed install options from the parser and help", () => {
-    for (const option of ["workspace", "hub", "label"]) {
+    for (const option of ["project", "workspace", "hub", "label"]) {
       expect(INSTALL_OPTIONS).not.toHaveProperty(option);
       expect(INSTALL_HELP).not.toContain(`--${option}`);
     }

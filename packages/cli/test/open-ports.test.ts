@@ -17,6 +17,7 @@ import { whoHoldsPort } from "../src/open.js";
 import { probeHub, probePort } from "../src/probes.js";
 import { pointAt, waitUntil } from "./helpers.js";
 import {
+  BANNER,
   SECRET,
   WORKSPACE,
   answeringListener,
@@ -53,8 +54,13 @@ describe("ub open: hub, ports and serving role", () => {
       const secret = JSON.parse(readFileSync(path, "utf8")).signingSecret as string;
       expect(secret).toMatch(/^[0-9a-f]{64}$/);
       expect(statSync(path).mode & 0o777).toBe(0o600);
-      expect(app.stdout()).toContain(`secret     created ${path} (0600)`);
-      expect(app.stdout()).toContain("started here");
+      expect(app.stdout()).toBe(
+        `secret     created ${path} (0600)\n` +
+        `web        ${app.url}\n` +
+        `hub        ${hubUrl} (started here)\n` +
+        `workspace  ${WORKSPACE} (http://127.0.0.1:${new URL(hubUrl).port})\n\n` +
+        "Ctrl-C to stop.\n",
+      );
       expect(app.stdout() + app.stderr()).not.toContain(secret);
       expect(await probeHub(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE,
         HUB_AUTH_TOKEN: secret, UBERBLICK_DB: join(box.cwd, "generated-secret-probe.sqlite") }), hubUrl)).toBe("connected");
@@ -160,7 +166,7 @@ describe("ub open: hub, ports and serving role", () => {
     const samePort = await openFails(other.box, args, other.env);
     expect(samePort.status).toBe(1);
     expect(samePort.output).toContain(`port ${port} is already serving an uberblick web app`);
-    expect(samePort.output).not.toContain("uberblick is at");
+    expect(samePort.output).not.toMatch(BANNER);
 
     expect((await app.interrupt()).status).toBe(0);
   });
@@ -186,7 +192,7 @@ describe("ub open: hub, ports and serving role", () => {
     const collision = await openFails(other.box, [], other.env);
     expect(collision.status).toBe(1);
     expect(collision.output).toContain("port 13379 is already serving an uberblick web app");
-    expect(collision.output).not.toContain("uberblick is at");
+    expect(collision.output).not.toMatch(BANNER);
     expect((await app.interrupt()).status).toBe(0);
   });
 
@@ -201,7 +207,10 @@ describe("ub open: hub, ports and serving role", () => {
     writeFileSync(join(configDir(box), "config.json"), JSON.stringify({ hubAdmissions: { [endpoint]: "device" } }));
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
-      expect(app.stdout()).toContain("hub unreachable; nothing started here");
+      expect(app.stdout()).toContain(
+        `hub        ${endpoint} (not signed in, changes stay here)\n` +
+        "             → ub auth login\n",
+      );
       expect(existsSync(credentials)).toBe(false);
       expect(app.stdout()).not.toContain("secret     created");
       expect((await probePort("127.0.0.1", port)).state).toBe("free");
@@ -232,7 +241,12 @@ describe("ub open: hub, ports and serving role", () => {
     // The hub it started is one a real client can open the workspace's
     // directory room on — which is what the document list hydrates from.
     expect(await hubAnswers(box, hubUrl)).toBe(true);
-    expect(app.stdout()).toContain("started here");
+    expect(app.stdout()).toBe(
+      `web        ${app.url}\n` +
+      `hub        ${hubUrl} (started here)\n` +
+      `workspace  ${WORKSPACE} (http://127.0.0.1:${hubPort})\n\n` +
+      "Ctrl-C to stop.\n",
+    );
 
     // The browser was handed the address that is actually being served. `ub
     // open` spawns that command and carries on without awaiting it, so the
@@ -263,7 +277,12 @@ describe("ub open: hub, ports and serving role", () => {
 
     // Nothing was started: a bind of the occupied port would have failed with
     // EADDRINUSE and taken the command down before it ever served.
-    expect(app.stdout()).toContain("already running — left alone");
+    expect(app.stdout()).toBe(
+      `web        ${app.url}\n` +
+      `hub        ${hubUrl} (already running — left alone)\n` +
+      `workspace  ${WORKSPACE} (http://127.0.0.1:${hub.port})\n\n` +
+      "Ctrl-C to stop.\n",
+    );
     expect(app.stderr()).not.toContain("EADDRINUSE");
     expect(await (await get(`${app.url}uberblick-config.json`)).json()).toMatchObject({
       hubUrl: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
@@ -283,7 +302,7 @@ describe("ub open: hub, ports and serving role", () => {
     pointAt(box, hubUrl);
 
     const first = await open(box, ["--port", String(webPort)], env);
-    expect(first.stdout()).toContain("started here");
+    expect(first.stdout()).toContain(`hub        ${hubUrl} (started here)\n`);
     // A request first, so a keep-alive connection is open when the signal
     // arrives: `close()` alone waits for it, and the port would still be held.
     expect((await get(first.url)).status).toBe(200);
@@ -483,7 +502,7 @@ describe("ub open: hub, ports and serving role", () => {
     // taking the hub down without the flush its durability contract is made of.
     expect(run.signal).toBeNull();
     expect(run.status).toBe(0);
-    expect(run.output).not.toContain("uberblick is at");
+    expect(run.output).not.toMatch(BANNER);
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
     expect((await probePort("127.0.0.1", hubPort)).state).toBe("free");
   });

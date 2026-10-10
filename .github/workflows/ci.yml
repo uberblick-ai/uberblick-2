@@ -1,12 +1,12 @@
 name: CI
 
-# It gates nothing; merges still require the local `signoff` from `mise run ci`
-# (CONTRIBUTING.md, "Local CI"). On main it records whether main itself is clean,
-# so a failure seen while validating a branch can be checked against main's
-# latest run instead of rerunning the base. On a pull request it is an early
-# signal the integrator reads before local CI; it runs the PR's own recipe, so
-# it never stands in for the signoff. Standard runners cost no Actions minutes
-# in a public repository, macOS ones included.
+# The merge gate (CONTRIBUTING.md, "CI"): the main ruleset requires the checks
+# `lint, typecheck and tests` and `macOS tests` from GitHub Actions; browser e2e
+# is advisory. On main it records whether main itself is clean, so a failure
+# seen while validating a branch can be checked against main's latest run
+# instead of rerunning the base. A pull request's run uses its own recipe, so a
+# change here is a change to the merge rules. Standard runners cost no Actions
+# minutes in a public repository, macOS ones included.
 #
 # Linux runs everything. macOS runs the tests again, because contributors and
 # the loop work on Macs and some failures show up on only one of the two; lint

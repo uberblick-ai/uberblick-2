@@ -13,8 +13,8 @@ export function displayWorkspaceHub(hub: string | null): string {
   return url.pathname === "/ws" || url.pathname === "/" ? url.origin : url.href;
 }
 
-export function workspaceLabel(binding: ProjectBinding): string {
-  const name = readWorkspaceName(defaultDatabasePath(binding.workspaceId), binding.workspaceId);
+export function workspaceLabel(binding: ProjectBinding, databasePath = defaultDatabasePath(binding.workspaceId)): string {
+  const name = readWorkspaceName(databasePath, binding.workspaceId);
   const hub = displayWorkspaceHub(binding.hubUrl);
   return name === null ? `${binding.workspaceId} (${hub})` : `${name} (${binding.workspaceId}, ${hub})`;
 }

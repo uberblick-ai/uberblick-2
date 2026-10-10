@@ -78,6 +78,7 @@ import {
 } from "@uberblick/hub/protocol";
 import { clampToken } from "@uberblick/hub/token";
 import { isLoopbackHost } from "@uberblick/hub/remote-url";
+import { readDeviceLogin } from "@uberblick/hub/device-login";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
@@ -104,6 +105,7 @@ import { readAccessAction, requestAccess, type AccessBinding } from "./open-acce
 import { requestAccount } from "./open-account.js";
 import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
+import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
 import {
   endpointOf,
   hubBind,
@@ -138,12 +140,11 @@ const DEFAULT_BUNDLE = join(packageRoot, "..", "web", "dist");
 
 export const OPEN_HELP = `usage: ub open [options]
 
-Serve the web app, make sure a hub is available, and open the browser. Runs in
-the foreground; Ctrl-C stops everything it started.
+Serve the web app for this project's workspace, with a hub behind it, and open the browser. Runs until Ctrl-C.
 
 options:
-  --no-browser      print the URL instead of opening a browser
-  --port <n>        port to serve the web app on (default ${DEFAULT_WEB_PORT})
+  --no-browser      Print the address instead of opening a browser
+  --port <n>        Port for the web app (default ${DEFAULT_WEB_PORT})
   -h, --help        show this help
 
 BROWSER in the environment names the command used to open the URL; BROWSER=none
@@ -935,6 +936,7 @@ interface HubDecision {
   started: Hub | null;
   /** One line for the banner: what happened about the hub, and why. */
   note: string;
+  signInRequired?: boolean;
 }
 
 /**
@@ -1002,12 +1004,17 @@ async function ensureHub(
   // scheme and whether a port was written down, which is what decides below
   // whether a hub may be started for it.
   const parsed = new URL(hubUrl);
+  const workspace = trimmed(resolved.WORKSPACE_ID);
+  const displayHub = isLocalHost(endpoint.host) ? hubUrl : displayWorkspaceHub(hubUrl);
+  const signInRequired = workspace !== null && readDeviceLogin(hubUrl, workspace, resolved).status === "sign-in-required";
+  if (usesDeviceLogin(hubUrl, resolved) && signInRequired) {
+    return { started: null, note: `${displayHub} (not signed in, changes stay here)`, signInRequired: true };
+  }
   if (!isLocalHost(endpoint.host)) {
-    return { started: null, note: `${hubUrl} (remote — nothing started here)` };
+    return { started: null, note: `${displayHub} (remote, nothing started here)` };
   }
 
   if (usesDeviceLogin(hubUrl, resolved)) {
-    const workspace = trimmed(resolved.WORKSPACE_ID);
     const probe = workspace === null ? null : await probeHubState(resolveMcpConfig(resolved), hubUrl);
     const state = probe?.status === "hub-down" || probe?.status === "connecting"
       ? "hub unreachable" : probe?.reason ?? "device-authenticated hub";
@@ -1015,7 +1022,6 @@ async function ensureHub(
   }
 
   const secret = trimmed(resolved.HUB_AUTH_TOKEN);
-  const workspace = trimmed(resolved.WORKSPACE_ID);
 
   if (secret === null) {
     // A hub with no secret would verify no tokens and accept anything, which is
@@ -1037,6 +1043,9 @@ async function ensureHub(
     if (probe.status === "auth-failed" || probe.status === "update-required") {
       // Refused authority proves the endpoint is occupied, not permission to
       // replace its hub. Device refusal keeps its sign-in recovery wording.
+      if (probe.authRecovery === "sign-in-required" && signInRequired) {
+        return { started: null, note: `${displayHub} (not signed in, changes stay here)`, signInRequired: true };
+      }
       return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)` };
     }
   } else {
@@ -1096,7 +1105,7 @@ async function ensureHub(
     }
     throw error;
   }
-  return { started: hub, note: `${hubUrl} (started here — Ctrl-C stops it)` };
+  return { started: hub, note: `${hubUrl} (started here)` };
 }
 
 // --- the command -------------------------------------------------------------
@@ -1108,7 +1117,7 @@ interface Options {
 
 /** Exported so the help above can be checked against the parser it describes. */
 export const OPEN_OPTIONS = {
-  browser: { type: "boolean" },
+  "no-browser": { type: "boolean" },
   port: { type: "string" },
 } as const;
 
@@ -1116,7 +1125,6 @@ function parseOptions(argv: string[]): Options {
   const { values, positionals } = parseArgs({
     args: argv,
     options: OPEN_OPTIONS,
-    allowNegative: true,
     allowPositionals: true,
   });
   if (positionals.length > 0) {
@@ -1130,7 +1138,7 @@ function parseOptions(argv: string[]): Options {
       throw new Error(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
     }
   }
-  return { port, browser: values.browser ?? true };
+  return { port, browser: !values["no-browser"] };
 }
 
 /** What this command started, and is therefore responsible for stopping. */
@@ -1299,6 +1307,7 @@ export async function openCommand(
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";
+  let hubSignInRequired = false;
 
   const plan = bundlePlan(env);
   // Before ensureHub: a bundle refusal starts no hub and creates no database.
@@ -1318,6 +1327,7 @@ export async function openCommand(
     const decided = await ensureHub(env, hubUrl, io);
     owned.hub = decided.started;
     hubNote = decided.note;
+    hubSignInRequired = decided.signInRequired ?? false;
   } catch (error) {
     io.err(`ub open: ${message(error)}\n`);
     return await foreground.shutdown(1);
@@ -1446,11 +1456,13 @@ export async function openCommand(
   }
 
   const url = servedUrl.href;
-  let banner = `uberblick is at ${url}\n\n`;
-  if (initial.secretCreated !== null) banner += `  secret     created ${initial.secretCreated} (0600)\n`;
-  banner += `  hub        ${hubNote}\n`;
-  banner += `  workspace  ${workspace ?? "none configured — run `ub workspace create <name>`"}\n\n`;
-  banner += "Ctrl-C to stop.\n";
+  let banner = "";
+  if (initial.secretCreated !== null) banner += useField("secret", `created ${initial.secretCreated} (0600)`);
+  banner += useField("web", url);
+  banner += useField("hub", hubNote);
+  if (hubSignInRequired) banner += useField("", "  → ub auth login");
+  banner += useField("workspace", workspaceLabel(projectBinding, owned.engine?.replicas.config.databasePath));
+  banner += "\nCtrl-C to stop.\n";
   io.out(banner);
 
   if (options.browser) {

@@ -9,8 +9,7 @@ merges, schedules and delivery roles publish nothing.
 
 Use the maintainer-invoked [release skill](.agents/skills/release/SKILL.md), also
 available at `.claude/skills/release`, for the attended procedure. It establishes
-the current `origin/main` candidate's signoff, running `mise run ci <sha>` when
-none exists. Its go/no-go report covers the PRs landed since the previous `v*`
+that GitHub CI is green on the current `origin/main` candidate. Its go/no-go report covers the PRs landed since the previous `v*`
 tag, trusted authors' open PRs marked `ready-to-merge` or `needs-review`, and each
 failing e2e spec. Known-red specs need an open tracking issue or evidence that
 the same spec fails at the previous release; an absent or newly failing spec
@@ -30,11 +29,12 @@ push tags. Docker must be running and meet
 runs the `linux/amd64` dry-run images under emulation.
 
 Before creating a tag, the task fetches `origin/main`, checks that both tags
-are unused on origin, that the candidate is that main commit and that its latest
-`signoff` status is `success`. It installs dependencies and runs both existing
+are unused on origin, that the candidate is that main commit and that the newest
+GitHub Actions run of each required CI check (`lint, typecheck and tests`,
+`macOS tests`) on it concluded `success`. It installs dependencies and runs both existing
 publisher dry runs in a detached worktree at that SHA, so dirty or untracked
 files in the maintainer's checkout cannot supply release evidence. A failed
-check stops the task and names the condition. It rechecks main, tags and signoff
+check stops the task and names the condition. It rechecks main, tags and CI
 before the push, then pushes both tag refs atomically at that one SHA.
 
 The task watches `Publish Homebrew release` and `Publish hub release`. It exits

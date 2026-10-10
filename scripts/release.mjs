@@ -20,9 +20,21 @@ function fail(message) {
   throw new Error(`release: ${message}`);
 }
 
-export function latestSignoff(statuses) {
-  return statuses.filter((status) => status.context === "signoff")
-    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)[0];
+// The merge gate's GitHub CI checks (CONTRIBUTING.md, "CI"). Browser e2e is
+// advisory there and here.
+export const REQUIRED_CHECKS = ["lint, typecheck and tests", "macOS tests"];
+
+/** Each required check whose newest GitHub Actions run on the commit is not a
+ * completed success, as "name: state". A re-run supersedes earlier attempts;
+ * a check another app posts under the same name never counts. */
+export function unmetChecks(checkRuns) {
+  return REQUIRED_CHECKS.flatMap((name) => {
+    const latest = checkRuns.filter((run) => run.name === name && run.app?.slug === "github-actions")
+      .sort((a, b) => b.id - a.id)[0];
+    const state = latest === undefined ? "missing"
+      : latest.status !== "completed" ? latest.status : latest.conclusion;
+    return state === "success" ? [] : [`${name}: ${state}`];
+  });
 }
 
 export function releaseNotes(prs) {
@@ -46,9 +58,9 @@ async function checkCandidate(sha, tags, services) {
   for (const tag of tags) if (remote.some((ref) => ref.name === tag)) {
     fail(`${tag} already exists on origin; no tags pushed`);
   }
-  const signoff = latestSignoff(await services.statuses(sha));
-  if (signoff?.state !== "success") {
-    fail(`latest signoff for ${sha} is ${signoff?.state ?? "missing"}; no tags pushed`);
+  const unmet = unmetChecks(await services.checkRuns(sha));
+  if (unmet.length > 0) {
+    fail(`CI at ${sha} is not green (${unmet.join("; ")}); no tags pushed`);
   }
   return remote;
 }
@@ -104,7 +116,7 @@ export async function release(tag, services) {
       }
     }
   });
-  // Builds may take minutes. Fail closed if main, signoff or either tag changed.
+  // Builds may take minutes. Fail closed if main, CI or either tag changed.
   const current = await checkCandidate(sha, tags, services);
   if (!current.some((ref) => /^hub-v/.test(ref.name))) {
     services.log("First hub release: a maintainer must make the GHCR hub and hub-web packages public after publication, as RELEASING.md describes. No package or organization settings are changed by this task.");
@@ -145,7 +157,7 @@ export function productionServices({ root = ROOT, command: execute = command } =
       }
       return [...refs.values()];
     },
-    statuses: async (sha) => api(`repos/${REPOSITORY}/commits/${sha}/statuses?per_page=100`).flat(),
+    checkRuns: async (sha) => api(`repos/${REPOSITORY}/commits/${sha}/check-runs?per_page=100`).flatMap((page) => page.check_runs),
     previousTag: async (sha, remote) => {
       const ancestors = new Set(run("git", ["rev-list", sha]).split("\n"));
       const names = remote.filter((ref) => CLIENT_TAG.test(ref.name) && ancestors.has(ref.sha)).map((ref) => ref.name);
