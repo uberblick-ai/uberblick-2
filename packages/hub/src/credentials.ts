@@ -109,7 +109,8 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
 }
 
 /**
- * Authorization is fixed at issuance; renewal replaces and retires the key.
+ * Existing credentials cannot gain authority or be restored; renewal replaces
+ * and retires the key.
  * Admission, sign-in and renewal must share this registry and database handle.
  * Rows belong to hub backups, never synchronized document content.
  */
