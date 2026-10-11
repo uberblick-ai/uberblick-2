@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const hub = await createTeamHub(config, {
     initializeDefaultWorkspace: true,
     operatorSetup: process.platform !== "win32" &&
-      !isEphemeralDatabase(config.databasePath!),
+      !isEphemeralDatabase(config.databasePath),
   });
 
   let shuttingDown = false;

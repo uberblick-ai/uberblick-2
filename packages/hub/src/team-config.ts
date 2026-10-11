@@ -26,8 +26,9 @@ export function requiredHubDatabasePath(env: NodeJS.ProcessEnv = process.env): s
 }
 
 /** Only standalone hub entry points offer the shared GitHub sign-in app. */
-export function resolveRemoteHubConfig(env: NodeJS.ProcessEnv = process.env): TeamHubConfig {
-  const config = resolveCoreHubConfig(env, requiredHubDatabasePath(env));
+export function resolveRemoteHubConfig(env: NodeJS.ProcessEnv = process.env): TeamHubConfig & { databasePath: string } {
+  const databasePath = requiredHubDatabasePath(env);
+  const config = resolveCoreHubConfig(env, databasePath);
   const clientId = env.HUB_GITHUB_CLIENT_ID;
-  return { ...config, github: { clientId: clientId === undefined || clientId === "" ? SHARED_GITHUB_CLIENT_ID : clientId } };
+  return { ...config, databasePath, github: { clientId: clientId === undefined || clientId === "" ? SHARED_GITHUB_CLIENT_ID : clientId } };
 }
