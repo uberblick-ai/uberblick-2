@@ -17,13 +17,11 @@ export const inputSchema = strictInput({
 export const insertBlockOperation = documentOperation("insert_block", inputSchema, (context, { uuid, after_block_id, type, text, level, language, inline }, _request, replica) => {
   const { replicas, blockInputFor } = context;
 
-  // Before the insert: an unknown reference target refuses the call with
-  // nothing written.
+  // Resolve targets before inserting so refusals leave nothing written.
   const input = blockInputFor({ type, text, level, language, inline });
   const blockId = insertBlock(replica.doc, after_block_id ?? null, input);
   const block = getBlock(replica.doc, blockId);
-  // The caret goes after what was actually written, which is not `text`
-  // when `inline` replaced it — and joined runs are usually longer.
+  // Use stored text length: inline runs can replace the supplied text.
   replicas.publishCursor(replica, blockId, block?.text.length ?? 0);
   return {
     uuid,

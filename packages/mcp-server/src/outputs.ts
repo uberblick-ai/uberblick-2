@@ -1,8 +1,3 @@
-/**
- * Successful tool answers, shared by tools/list and the server's result check.
- * Server-owned objects are closed at every level. The only untyped values are
- * caller-stored collection schemas and records, and data diagnostic details.
- */
 import { DECISION_STATUSES, DOCUMENT_KINDS, REQUIREMENT_STATUSES } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
@@ -35,7 +30,6 @@ const hub = z.object({
   hubProtocolVersion: z.number().int().optional().describe("Hub protocol version, learned from a protocol refusal."),
 }).strict().describe("Current connection state; an acknowledgement does not claim hub storage.");
 
-/** The durability contract is declared once for every writing tool. */
 const durability = {
   applied: z.literal(true).describe("The write is durable in this replica's local update log."),
   synced: z.boolean().describe("The hub acknowledged this write; acknowledgement does not mean hub storage."),
@@ -68,7 +62,6 @@ const tag = z.union([
 ]);
 const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
 
-/** Directory stubs expose normalized descriptions and catalog-aware tags. */
 const directoryEntry = z.object({
   uuid,
   title: z.string(),
@@ -149,8 +142,8 @@ const dataSummary = z.object({
 }).strict();
 
 /**
- * The SDK requires a root object. The existing mode primitive keeps this
- * superset's runtime branch rules and advertised oneOf in one definition.
+ * The SDK requires a root object; strictInput must enforce and advertise the
+ * same branches through this superset.
  */
 const getData = strictInput({
   uuid,

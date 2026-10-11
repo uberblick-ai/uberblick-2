@@ -1,25 +1,3 @@
-/**
- * MCP server configuration.
- *
- * Environment only — no config file, no CLI flags. An MCP client spawns this
- * process over stdio and hands it an environment; that is the whole interface.
- *
- * `HUB_URL` is plaintext config (an endpoint is not a secret) and the only
- * hardcoded address in this package is {@link DEFAULT_HUB_URL}. `HUB_AUTH_TOKEN`
- * is used only for local loopback admission; deployed hubs use this machine's
- * stored login even when a proxy is published on the host's loopback address.
- *
- * `WORKSPACE_ID` is required and has no default: it names the rooms, the token
- * claim and the local database, and a wrong guess would quietly open somebody
- * else's corpus or start an empty one. A workspace id is a uuid, optionally
- * decorated as `<slug>-<uuid>` for display — schema owns that parse, and only
- * the uuid survives it.
- *
- * Missing admission credentials never prevent local operation. Every tool
- * remains available against the durable store; sync_status names the sign-in,
- * workspace access or loopback secret needed to share pending edits.
- */
-
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
@@ -27,16 +5,10 @@ import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/
 export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
-/**
- * The only hub address in this package, and the one a checkout falls back to:
- * `mise.toml` commits no `HUB_URL`, deliberately (#376).
- */
+/** Internal fallback; public startup resolves the project's workspace binding. */
 export const DEFAULT_HUB_URL = "ws://localhost:1234";
 
-/**
- * Awareness colours for agent sessions. Picked by hashing the session id so a
- * session keeps one colour, and two concurrent sessions usually differ.
- */
+/** Hash the session id for a stable colour across its cursors. */
 const AGENT_COLORS = [
   "#7b5ec7",
   "#2f9e8f",
@@ -47,24 +19,15 @@ const AGENT_COLORS = [
 ] as const;
 
 export interface McpConfig {
-  /**
-   * The workspace whose rooms this server opens — the **bare uuid**, whatever
-   * spelling `WORKSPACE_ID` used. Never a decorated `<slug>-<uuid>`: it keys
-   * the rooms, the token claim and the database file, and two spellings of one
-   * workspace must resolve to one of each.
-   */
+  /** Bare UUID: decorated spellings must share rooms, token claims and database. */
   workspaceId: string;
   /** Websocket endpoint of the hub (`HUB_URL`). */
   hubUrl: string;
-  /**
-   * HMAC secret for minting hub tokens (`HUB_AUTH_TOKEN`), or null when unset —
-   * in which case hub sync is disabled and every tool still works.
-   */
+  /** Loopback HMAC secret; missing admission credentials leave local tools available. */
   authSecret: string | null;
   /**
-   * Remote endpoints use this machine's stored login. The process reads the
-   * private credential store itself, never a key supplied in configuration.
-   * Programmatic loopback callers may select the same stricter admission.
+   * Read this machine's private login, never a configured key, for deployed hubs
+   * including loopback proxies. Programmatic loopback callers may opt in too.
    */
   deviceLogin?: { env?: NodeJS.ProcessEnv };
   /** Credential-store location for a loopback hub that requires device admission. */
@@ -90,26 +53,14 @@ export interface McpConfig {
   /** Log entries per room that trigger a snapshot-and-prune. */
   compactAfter: number;
   /**
-   * How long to leave a directory entry alone after its index write failed (ms).
-   *
-   * A refused write is usually a locked database, and retrying it on every tool
-   * call would spend one SQLite busy timeout per attempt while the lock is
-   * exactly what it is waiting on. The entry stays queued either way — this only
-   * paces how often it is tried.
+   * Retry interval after an index write failure (ms); the entry stays queued.
+   * Pacing avoids spending a SQLite busy timeout on every tool call.
    */
   reconcileRetryMs: number;
   /**
-   * How stale a directory stub's `updatedAt` must be before a content change
-   * this server authored re-stamps it (ms).
-   *
-   * The whole point of the field is to be coarse. Every keystroke is a change,
-   * and stamping each one would put a directory update — broadcast to every
-   * client in the workspace — behind every one of them. A title or tag change
-   * still updates the stub immediately, because that write has to happen
-   * anyway.
-   *
-   * Only this server's own changes are on that clock at all: a change it merely
-   * observed is stamped by whoever made it, never here — see `repairStub`.
+   * Minimum age before re-stamping this server's own content edits (ms), to avoid
+   * a workspace-wide directory update per keystroke. Observed edits never stamp
+   * here; title and tag edits still update the stub immediately.
    */
   updatedAtCoarsenessMs: number;
 }
@@ -123,20 +74,9 @@ function hashToIndex(value: string, buckets: number): number {
 }
 
 /**
- * `<workspaceUuid>.sqlite` in the user's workspace directory — one database per
- * user per workspace. Which directory that is belongs to
- * `@uberblick/mcp-server/storage`, so the cli, this server and the hub cannot drift
- * into three answers; it is `$XDG_DATA_HOME/uberblick`, or
- * `~/.local/share/uberblick` when that variable names nothing absolute.
- *
- * Two MCP server instances sharing one file is the normal case, not an edge
- * case: the store runs in WAL with a busy timeout, and every tool call polls
- * the log tail before it serves.
- *
- * Keyed by the bare uuid, never by a decorated spelling: `<slug>-<uuid>` and
- * `<uuid>` are one workspace, and they must hydrate one file — a slug-prefixed
- * filename would give the same corpus two local replicas that never converge.
- * A uuid is inherently path-safe, so nothing else has to guard this join.
+ * Use the shared storage resolver and bare UUID so CLI and MCP processes for
+ * one user's workspace share one path-safe database, regardless of slug.
+ * Storage uses absolute XDG_DATA_HOME/uberblick, else ~/.local/share/uberblick.
  */
 export function defaultDatabasePath(
   workspaceId: string,
@@ -158,6 +98,7 @@ function missingWorkspace(): string {
   return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or UB_WORKSPACE_ID; add UB_HUB_URL (a hub address, or local) if this machine has no record for that workspace. Run `ub workspace create <name>` for local setup or `ub workspace use <link|id>` to use an existing workspace.";
 }
 
+/** Internal startup reads environment only; public startup resolves the binding. */
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): McpConfig {
@@ -165,8 +106,7 @@ export function resolveMcpConfig(
   if (configured === null) {
     throw new Error(missingWorkspace());
   }
-  // A decorated value is accepted and parsed down: the slug is display, the
-  // uuid is the identity, and only the identity goes any further.
+  // Require explicit identity; a guessed workspace could open the wrong corpus.
   const workspaceId = parseWorkspaceId(configured).uuid;
   const sessionId = `agent-${randomUUID()}`;
   const hubUrl = trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL;

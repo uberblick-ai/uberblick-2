@@ -1,48 +1,6 @@
-/**
- * The local SQLite mirror.
- *
- * Two different kinds of data live in this file, and confusing them is the one
- * mistake that matters:
- *
- * 1. **The update log** (`updates`, `snapshots`) is the authoritative local
- *    replica. Replicas hydrate from it on boot, never from the hub. Every
- *    update — local *and* remote origin — is appended synchronously before the
- *    call that produced it returns, which is what makes `kill -9` after a write
- *    lose nothing.
- * 2. **The derived index** (`doc_index`, `doc_index_seq`, `docs_fts`,
- *    `doc_tags`, `doc_links`, `decision_github_refs`) is a cache of what the
- *    Y.Docs say, rebuildable at any time from the log — see
- *    {@link MirrorStore.clearDerived}. It is never authoritative, and no
- *    document state exists only here.
- *
- * Alongside both, `meta` records replica facts that cannot be derived
- * from documents. The permanent `workspace` row binds the file to its corpus;
- * `last_sync_at` keeps this machine's latest hub acknowledgement time;
- * the serving engine's holder row is meaningful only while its separate
- * process-held SQLite lock is live — see `serving-role.ts`.
- *
- * Encoding is Yjs v1 everywhere (`Y.encodeStateAsUpdate` / `Y.applyUpdate`),
- * matching the hub's persistence and the schema package. Never v2.
- *
- * Concurrency: two MCP server instances sharing one database is the normal
- * case (a user runs Claude Code twice), so the file is opened in WAL with a
- * busy timeout, writes are small single-statement transactions, and readers
- * catch up by polling the log tail — see `replica.ts`.
- *
- * The binding is Node's built-in `node:sqlite` (`DatabaseSync`), synchronous
- * like the process it serves and with nothing to compile at install time. It
- * ships two conveniences fewer than better-sqlite3 did: pragmas go through
- * `exec`, and transactions through {@link transactional}. The file format is
- * ordinary SQLite either way, so a database written by the old binding opens
- * here unchanged.
- *
- * Sequence numbers come from an `AUTOINCREMENT` rowid. SQLite serialises
- * writers, so a row's `seq` order is also its commit order: a poller that has
- * applied everything up to `seq` cannot miss an earlier row appearing later.
- */
-
 import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
+// Decision: 90ce6355-9455-4e18-aa56-eb2347e57d6d
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/mcp-server/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
@@ -65,11 +23,8 @@ function isBusy(error: unknown): boolean {
 }
 
 /**
- * Enable WAL within the same bound as the connection's busy handler.
- *
- * SQLite does not consult that handler while the first connection converts a
- * new file from rollback journalling to WAL, so simultaneous creators have to
- * retry this pragma itself. Nothing after initialization is retried here.
+ * Initial WAL conversion bypasses SQLite's busy handler. Retry only this
+ * startup pragma, within the same timeout, so simultaneous creators can open.
  */
 function enableWal(db: DatabaseSync): void {
   const deadline = Date.now() + BUSY_TIMEOUT_MS;
@@ -87,7 +42,7 @@ function enableWal(db: DatabaseSync): void {
   }
 }
 
-/** Where an update came from. Both are logged; the distinction is diagnostic. */
+/** Both origins are logged; only local updates also raise the pending watermark. */
 export type UpdateOrigin = "local" | "remote";
 
 export interface LoggedUpdate {
@@ -95,6 +50,7 @@ export interface LoggedUpdate {
   payload: Uint8Array;
 }
 
+/** Yjs v1 state, compatible with hub persistence and schema replay. */
 export interface StoredSnapshot {
   state: Uint8Array;
   /** The last log `seq` folded into this snapshot. */
@@ -123,22 +79,13 @@ export interface SearchHit {
   tags: string[];
   /** The document's description, or null when it has none. */
   description: string | null;
-  /**
-   * A match excerpt from the body, or the title when the title matched.
-   *
-   * The description leads the indexed body, so this can be description text —
-   * either because the description is what matched, or because the match sat
-   * near enough to the start of a short document for the snippet window to
-   * reach back over it.
-   */
+  /** Body excerpt (possibly its leading description), or title for a title match. */
   snippet: string;
 }
 
 /**
- * A room holding local changes not known to have reached the hub, and the
- * highest local log sequence it is waiting on. The sequence is the watermark: a
- * room is only released up to a sequence that has been acknowledged, so a quiet
- * process cannot clear work another process appended after it last looked.
+ * Release only through the acknowledged local watermark; a quiet process must
+ * not clear work a peer appended after its last poll.
  */
 export interface PendingRoom {
   room: string;
@@ -170,10 +117,7 @@ export interface StoreSyncSnapshot {
   unappliedRooms: Set<string>;
 }
 
-/**
- * Read a search row's packed catalog identities. `json_group_array` preserves
- * the UUID strings without an in-band separator.
- */
+/** Parse packed catalog IDs without ambiguous in-band separators. */
 function parseTags(packed: string | null): string[] {
   if (packed === null) {
     return [];
@@ -185,17 +129,10 @@ function parseTags(packed: string | null): string[] {
 }
 
 /**
- * Facts about this file, as opposed to document state. The `workspace` row is
- * the uuid whose corpus this replica holds. The index tables
- * carry no workspace column, so the file itself is the boundary. `last_sync_at`
- * is the latest caught-up reading, in epoch milliseconds, across this machine's
- * processes. It means acknowledged by the hub, not durably stored there. The
- * serving role also keeps its diagnostic holder here; its authority is the
- * separate process-held lock, never this persistent row.
- *
- * Its own script, run before {@link SCHEMA}: it is everything the store is
- * allowed to write to a file it has not yet established is its own. See
- * \`claimWorkspace\`.
+ * File facts cannot be rebuilt from documents. Workspace binds the corpus;
+ * last_sync_at is the machine's latest hub acknowledgement in epoch ms, not
+ * hub storage. The serving holder row is diagnostic; its separate live lock
+ * supplies authority. Run only this schema before claimWorkspace checks ownership.
  */
 const META_SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -284,13 +221,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
 );
 `;
 
-/**
- * Turn a user query into an FTS5 MATCH expression.
- *
- * Every token is quoted, so a query containing FTS5 operators (`NEAR`, `OR`, a
- * stray quote) is searched for rather than executed. A trailing `*` survives as
- * a prefix match, which is the one operator worth keeping.
- */
+/** Quote tokens as literal search terms; only trailing * retains FTS5 operator meaning. */
 export function ftsQuery(raw: string): string | null {
   const tokens = raw.match(/[\p{L}\p{N}_]+\*?/gu);
   if (tokens === null || tokens.length === 0) {
@@ -303,11 +234,7 @@ export function ftsQuery(raw: string): string | null {
     .join(" ");
 }
 
-/**
- * A prepared statement whose parameter list is typed. `node:sqlite` types every
- * binding as `SQLInputValue[]`, which checks neither arity nor order, so the
- * statement table below is the one place those are declared.
- */
+/** node:sqlite's array bindings check neither arity nor order; declare both here. */
 interface Prepared<P extends SQLInputValue[]> {
   run(...params: P): StatementResultingChanges;
   get(...params: P): Record<string, SQLOutputValue> | undefined;
@@ -315,20 +242,10 @@ interface Prepared<P extends SQLInputValue[]> {
 }
 
 /**
- * better-sqlite3's `.transaction()` wrapper, in the lines `node:sqlite` leaves
- * to the caller: run `body` between BEGIN and COMMIT, roll back if it throws.
- *
- * The default deferred `BEGIN` is what the old binding issued. A read-only body
- * takes a consistent snapshot without blocking another instance's writer;
- * write bodies acquire their place in the writer queue at their first statement.
- * A migration can request an immediate transaction to serialize a schema
- * check with the alteration it authorizes.
- *
- * Nesting is unsupported and does not occur: none of the wrapped bodies calls
- * another (the one that spans three reads calls plain statement methods). A
- * nested call would fail loudly on SQLite's own "cannot start a transaction
- * within a transaction", raised by `BEGIN` before the `try`, leaving the outer
- * transaction intact for its own rollback.
+ * Deferred reads pin a snapshot without blocking writers; writes enter the
+ * queue on their first statement. Immediate migrations lock before checking.
+ * Do not nest wrappers: BEGIN fails before try and leaves the outer transaction
+ * intact to roll back. A successful body commits; a thrown body rolls back.
  */
 function transactional<A extends unknown[], R>(
   db: DatabaseSync,
@@ -456,11 +373,8 @@ export class MirrorStore {
   private readonly db: DatabaseSync;
 
   /**
-   * Same-process commits, observed only after their transaction completed.
-   *
-   * SQLite's `data_version` deliberately does not move for the connection that
-   * made a commit. A process driving replicas without MCP tool calls therefore
-   * needs this second wake path beside its foreign-commit poll.
+   * Wake after same-process commits: data_version detects only other connections,
+   * and a replica engine cannot rely on MCP calls arriving to discover changes.
    */
   private readonly appendListeners = new Set<() => void>();
 
@@ -525,9 +439,7 @@ export class MirrorStore {
 
   constructor(databasePath: string, workspaceId: string) {
     this.databasePath = databasePath;
-    // Owner-only: this replica holds the whole corpus, and it is as often as
-    // not the first thing to create the user's data tree — a directory left at
-    // the umask here is one `ub workspace create` then writes credentials.json into.
+    // Owner-only: this tree holds the corpus and may later receive credentials.
     const durable = databasePath !== ":memory:";
     const fresh = durable && !existsSync(databasePath);
     if (durable) {
@@ -542,21 +454,18 @@ export class MirrorStore {
     }
     // WAL so a reader never blocks the writer, and a busy timeout so a second
     // MCP server instance waits its turn instead of failing the tool call.
+    // Keep write transactions small; peer replicas catch up by polling the log.
     this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     enableWal(this.db);
     this.db.exec("PRAGMA foreign_keys = ON");
-    // Whether this file already held a corpus, asked before anything creates
-    // the table it asks about: it is what tells adopting an existing database
-    // apart from stamping a new one.
+    // Check before schema creation to distinguish adoption from a new database.
     const preexisting =
       this.db
         .prepare(
           "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'updates'",
         )
         .get() !== undefined;
-    // Ownership first, and on its own table: a file belonging to another
-    // workspace is left exactly as it was found — no tables created, no index
-    // built, no migration run.
+    // Refuse foreign workspaces before any corpus schema, index or migration writes.
     this.db.exec(META_SCHEMA);
     this.claimWorkspace(workspaceId, preexisting);
     this.db.exec(SCHEMA);
@@ -593,9 +502,7 @@ export class MirrorStore {
       updateAfter: prepare(
         "SELECT 1 AS present FROM updates WHERE room = ? AND seq > ? LIMIT 1",
       ),
-      // Monotonic: a compactor holding an older view of the document must never
-      // replace a newer snapshot, whose rows the newer transaction has already
-      // pruned. Losing the race means losing the write, not the data.
+      // Never replace a newer snapshot after its source rows have been pruned.
       putSnapshot: prepare(
         "INSERT INTO snapshots (room, state, through_seq, updated_at) VALUES (?, ?, ?, ?) " +
           "ON CONFLICT (room) DO UPDATE SET state = excluded.state, " +
@@ -651,10 +558,7 @@ export class MirrorStore {
       putFts: prepare(
         "INSERT INTO docs_fts (uuid, title, body) VALUES (?, ?, ?)",
       ),
-      // Tags come back packed into the row rather than one query per hit: a
-      // search over a growing corpus should cost one query, not 1 + limit.
-      // The packing is a JSON array, not a joined string, so the representation
-      // stays unambiguous and independently parseable.
+      // Pack unambiguous JSON IDs into each hit to keep search to one query.
       search: prepare(
         "SELECT f.uuid AS uuid, d.title AS title, d.description AS description, " +
           "snippet(docs_fts, 2, '', '', '…', 16) AS snippet, " +
@@ -678,8 +582,9 @@ export class MirrorStore {
       ),
     };
 
-    // The update and its pending marker land together, so a SIGKILL can never
-    // leave a logged local change that nothing remembers to push.
+    // AUTOINCREMENT follows serialized writer commits, so replay cannot miss
+    // an earlier seq arriving later. Commit local updates and pending markers
+    // together so even SIGKILL leaves offline work discoverable for pushing.
     this.appendTx = transactional(
       this.db,
       (room: string, payload: Uint8Array, origin: UpdateOrigin): number => {
@@ -697,11 +602,8 @@ export class MirrorStore {
       },
     );
 
-    // Snapshot-then-prune in ONE transaction: a crash between the two would
-    // otherwise drop updates that no snapshot covers. The upsert is monotonic,
-    // so a stale compactor's write is refused rather than overwriting a newer
-    // snapshot — and pruning stays safe either way, because whichever snapshot
-    // survives covers at least as far as this one.
+    // Atomically snapshot then prune: a crash must not drop uncovered updates.
+    // Monotonic upserts leave a snapshot covering the cut even if this write loses.
     this.compactTx = transactional(
       this.db,
       (room: string, state: Uint8Array, throughSeq: number): boolean => {
@@ -713,10 +615,8 @@ export class MirrorStore {
       },
     );
 
-    // Snapshot and tail in ONE transaction, so the pair is always consistent.
-    // Read apart, a concurrent compaction can prune the rows between the
-    // snapshot the reader saw and the tail it then reads, and the reader
-    // advances past a gap Yjs can never fill.
+    // Pin snapshot and tail together so concurrent compaction cannot prune an
+    // unseen gap that a reader then advances past.
     this.readSinceTx = transactional(
       this.db,
       (room: string, seq: number): LogSlice => {
@@ -731,9 +631,8 @@ export class MirrorStore {
       },
     );
 
-    // Pending watermarks and replica positions are one SQLite snapshot. Read
-    // separately, another process could append and release a room between the
-    // two reads, leaving neither half able to prove this replica is behind.
+    // Pin pending watermarks and unapplied cuts together: a peer append/release
+    // between separate reads could otherwise conceal that this replica is behind.
     this.syncSnapshotTx = transactional(
       this.db,
       (positions: readonly RoomLogPosition[]): StoreSyncSnapshot => {
@@ -755,9 +654,8 @@ export class MirrorStore {
       throughSeq: number,
       catalogThroughSeq: number,
     ) => {
-      // The guarded row is both the directory metadata and the generation
-      // marker for every dependent row below. A stale derivation loses before
-      // it can delete anything; the winner and all of its rows commit together.
+      // Reject stale cuts before deleting rows; the winning cuts, metadata and
+      // dependent rows must commit together.
       const written =
         this.statements.advanceIndex.run(
           doc.uuid,
@@ -781,9 +679,7 @@ export class MirrorStore {
         this.statements.putGithubRef.run(doc.uuid, target);
       }
       this.statements.dropFts.run(doc.uuid);
-      // The description leads the indexed body, so a description-only match
-      // gives a snippet that reads as the description rather than as an
-      // unrelated fragment of the document.
+      // Leading descriptions let description-only matches return relevant snippets.
       this.statements.putFts.run(
         doc.uuid,
         doc.title,
@@ -802,11 +698,9 @@ export class MirrorStore {
   }
 
   /**
-   * Append one update to the log and return its `seq`. A local-origin update
-   * also raises the room's pending watermark, in the same transaction.
-   *
-   * Synchronous and committed on return: the caller is a Yjs `update` observer,
-   * so by the time a mutating tool returns, the update is on disk.
+   * Commit both origins synchronously before a mutating tool returns; local
+   * updates raise the pending watermark atomically. Payloads must be Yjs v1,
+   * matching hub persistence and schema, never v2. Return the committed seq.
    */
   appendUpdate(
     room: string,
@@ -837,11 +731,7 @@ export class MirrorStore {
     };
   }
 
-  /**
-   * SQLite's connection-local view of commits made by other connections.
-   * Commits made through this instance are intentionally reported by
-   * {@link onAppend} instead.
-   */
+  /** Detect foreign commits; same-connection commits use onAppend instead. */
   dataVersion(): number {
     const row = this.statements.dataVersion.get() as {
       data_version: number;
@@ -882,12 +772,8 @@ export class MirrorStore {
   }
 
   /**
-   * One consistent read of everything a replica at `seq` has not seen: the
-   * snapshot to seed from when it is ahead of `seq`, then the log tail.
-   *
-   * This is the only way to read the log for replay. Reading the snapshot and
-   * the tail as two statements lets a concurrent compaction fall between them,
-   * and the reader then advances past updates neither half contained.
+   * Replay through this consistent snapshot-plus-tail read; separate reads can
+   * lose unseen updates to concurrent compaction. Apply an ahead snapshot first.
    */
   readSince(room: string, seq: number): LogSlice {
     return this.readSinceTx(room, seq);
@@ -927,14 +813,9 @@ export class MirrorStore {
   }
 
   /**
-   * Replace a room's log prefix with a state snapshot.
-   *
-   * `throughSeq` must be a sequence the caller has provably applied to the
-   * document `state` came from — everything above it stays in the log.
-   *
-   * Returns false when a newer snapshot already covers at least this far, in
-   * which case the stored state is left alone. The prefix is pruned regardless:
-   * the surviving snapshot covers it.
+   * throughSeq must be applied to the document supplying state; keep later rows.
+   * Return false if the stored snapshot already covers the cut, retaining its
+   * state but still pruning the prefix it covers.
    */
   compact(room: string, state: Uint8Array, throughSeq: number): boolean {
     return this.compactTx(room, state, throughSeq);
@@ -948,12 +829,7 @@ export class MirrorStore {
     return (this.statements.countAll.get() as { n: number }).n;
   }
 
-  /**
-   * Release a room's pending marker, but only up to `throughSeq` — the highest
-   * local sequence the caller saw acknowledged. A marker that has moved past it
-   * belongs to a change this caller never watched land, possibly one another
-   * process appended a moment ago.
-   */
+  /** Clear only acknowledged throughSeq; leave newer peer updates pending. */
   clearPending(room: string, throughSeq: number): void {
     this.statements.clearPending.run(room, throughSeq);
   }
@@ -968,11 +844,8 @@ export class MirrorStore {
   }
 
   /**
-   * Sample the store half of hub acknowledgement without loading update BLOBs.
-   *
-   * The batch is one read transaction so a peer cannot release the shared
-   * pending marker between that read and the check that this replica has
-   * applied the store's current cut.
+   * Sample pending and applied cuts in one transaction without update BLOBs;
+   * a peer releasing a marker must not conceal an unapplied cut.
    */
   syncSnapshot(
     positions: readonly RoomLogPosition[],
@@ -981,13 +854,9 @@ export class MirrorStore {
   }
 
   /**
-   * Upsert one document's derived rows when they came from a newer log cut.
-   *
-   * `throughSeq` and `catalogThroughSeq` are the highest contiguous document
-   * and settings log cuts used for the derivation. The metadata row, both cuts
-   * and every dependent row land in one transaction, so a derivation stale on
-   * either input cannot replace one newer on both. A migrated row can also be
-   * replaced once at equal cuts to derive newly introduced reference rows.
+   * Derive from contiguous document and settings cuts; stale input on either
+   * must not replace newer rows. Commit cuts, metadata and dependents together;
+   * allow one equal-cut replacement for rows lacking GitHub-reference derivation.
    */
   indexDoc(
     doc: IndexedDoc,
@@ -997,32 +866,17 @@ export class MirrorStore {
     this.indexTx(doc, throughSeq, catalogThroughSeq);
   }
 
-  /**
-   * Whether the derived index holds anything for this document.
-   *
-   * A primary-key lookup, and a read: in WAL a reader never waits on a writer,
-   * so asking is free even while the database is locked for writing. That is
-   * what makes it worth asking before attempting a delete that would otherwise
-   * sit out the busy timeout only to find nothing to remove.
-   */
+  /** Check before deleting: this WAL read avoids busy-timeout waits for absent rows. */
   isIndexed(uuid: string): boolean {
     return this.statements.hasDoc.get(uuid) !== undefined;
   }
 
-  /**
-   * Drop one document's derived rows — a document tombstoned in the directory
-   * must not surface in search. The doc's log is untouched: the tombstone is a
-   * directory fact, not a reason to forget the replica.
-   */
+  /** Archived docs must leave search, but retain their authoritative room log. */
   unindexDoc(uuid: string): void {
     this.unindexTx(uuid);
   }
 
-  /**
-   * Drop every derived row. The rebuild path: callers follow this by
-   * re-indexing each document read out of its log-hydrated replica, which is
-   * why nothing here has to be authoritative.
-   */
+  /** All index rows are disposable caches; rebuild from log-hydrated replicas. */
   clearDerived(): void {
     transactional(this.db, () => {
       this.db.exec(
@@ -1083,26 +937,10 @@ export class MirrorStore {
   }
 
   /**
-   * Bind this file to one workspace, or refuse to open it.
-   *
-   * The derived index has no workspace column and room keys are opaque to the
-   * store, so the file is the only thing separating two corpora — and
-   * `UBERBLICK_DB` outranks the per-workspace default path silently. Two
-   * servers pinned to different workspaces at one database would union their
-   * corpora in `search` and `backlinks`. Recording the workspace makes the file
-   * self-describing, so the second one to open says so and stops.
-   *
-   * It runs before the rest of the schema, on the one table it needs, so that
-   * a refused open leaves the other workspace's file byte-identical.
-   *
-   * The insert is `DO NOTHING` and the recorded value is read back after it:
-   * two processes creating one database at once both try, one wins, and the
-   * loser refuses rather than overwriting the claim.
-   *
-   * A database from before this row existed is adopted rather than refused —
-   * there is exactly one workspace it can belong to, the one whose server is
-   * opening it, and refusing would strand a corpus that is not in fact
-   * ambiguous. It is stamped once and is an ordinary file afterwards.
+   * The file isolates corpora: indexes lack workspace columns and room keys are
+   * opaque, even when UBERBLICK_DB overrides the default path. Claim before
+   * corpus schema writes; insert-if-absent then read back so concurrent openers
+   * cannot overwrite another workspace. Adopt an unclaimed legacy file once.
    */
   private claimWorkspace(workspaceId: string, preexisting: boolean): void {
     const claimed = this.db
@@ -1134,19 +972,9 @@ export class MirrorStore {
   }
 
   /**
-   * Bring a `pending_rooms` table from before the watermark up to the new shape.
-   *
-   * The old shape recorded only *that* a room was pending, which is not enough
-   * to release it safely — but it may be the only record that a room exists at
-   * all. The crash window the old code left open is exactly that: a local update
-   * logged and marked, with the directory stub never written. Deleting the marker
-   * would strand that document forever — nothing would attach its room, so it
-   * could never be discovered or pushed.
-   *
-   * So the marker is kept and given a conservative watermark: the room's highest
-   * logged sequence (or its snapshot's, or 0). Conservative means "assume none of
-   * it was acknowledged" — re-pushing an update the hub already has is free,
-   * losing one is not.
+   * Preserve legacy pending flags: a room may lack a directory stub after a
+   * crash and otherwise never attach or push. Use its highest log seq, snapshot
+   * cut or zero as unacknowledged; duplicate pushes are safe, lost writes are not.
    */
   private migratePendingRooms(): void {
     const columns = this.db
@@ -1170,15 +998,8 @@ export class MirrorStore {
   }
 
   /**
-   * Add `doc_index.description` to a database written before descriptions
-   * existed.
-   *
-   * A plain `ADD COLUMN` with a default, because `doc_index` is an ordinary
-   * table and the column starts empty for every row — which is exactly true:
-   * no document had a description before this migration, and each one's row is
-   * rewritten the moment it gets one. Nothing is dropped and no rebuild is
-   * needed, which is why the description rides `docs_fts.body` rather than a
-   * column FTS5 cannot add.
+   * An empty description default preserves rows without a rebuild. FTS5 cannot
+   * add columns, so descriptions join body and reindex as each document changes.
    */
   private migrateDocDescription(): void {
     const columns = this.db
@@ -1193,12 +1014,8 @@ export class MirrorStore {
   }
 
   /**
-   * Add the catalog half of the derived-index generation.
-   *
-   * Tag rows now depend on two replicas: the document that stores assignments
-   * and the settings document that resolves aliases to canonical identities.
-   * Existing rows were derived without that second cut, so zero is their exact
-   * starting value and the next catalog-aware pass replaces them.
+   * Tags depend on document assignments and settings alias resolution. Rows
+   * lacking a catalog cut start at zero so catalog-aware derivation replaces them.
    */
   private migrateCatalogIndexSequence(): void {
     const columns = this.db
@@ -1213,12 +1030,9 @@ export class MirrorStore {
   }
 
   /**
-   * Re-derive existing rows once to populate decision GitHub references.
-   *
-   * Their log cuts may be unchanged at startup. Marking their old derivation
-   * incomplete allows an equal-cut replacement without clearing the cuts and
-   * letting a slower replica overwrite newer rows. The flag and all derived
-   * rows commit together in indexTx; reopening the store never resets it.
+   * Mark missing GitHub derivation for one equal-cut replacement without
+   * clearing cuts and admitting stale replicas. indexTx commits flag and rows
+   * together; reopening must not reset the flag.
    */
   private migrateGithubRefsIndexSequence(): void {
     const hasFlag = (): boolean => {
@@ -1245,12 +1059,7 @@ export class MirrorStore {
     )();
   }
 
-  /**
-   * Idempotent, because a store outlives no single owner: the server closes it
-   * on shutdown and whoever handed it in may close it again. `node:sqlite`
-   * throws on a second close where better-sqlite3 shrugged, and a teardown path
-   * is the worst place to learn that.
-   */
+  /** Both server shutdown and the supplying owner may close; keep it idempotent. */
   close(): void {
     this.appendListeners.clear();
     if (this.db.isOpen) {

@@ -1,8 +1,7 @@
 /**
  * The three ways the local replica could quietly stop being the log.
  *
- * Each test here reproduces a real defect found in review, at the level where
- * the defect lived:
+ * These tests constrain three ways the live state can diverge from its log:
  *
  * 1. reading the snapshot and the log tail apart, so a concurrent compaction
  *    falls between them and the reader advances past a gap Yjs can never fill;
@@ -538,7 +537,7 @@ describe("the pending watermark", () => {
   });
 
   it("backfills a pre-watermark marker instead of orphaning its document", async () => {
-    // The old crash window: a local update logged and marked, with the
+    // A crash window: a local update logged and marked, with the
     // directory stub never written. The marker is the only record that this
     // room exists, so deleting it would strand the document — nothing would
     // attach its room, and it could never be discovered or pushed.
