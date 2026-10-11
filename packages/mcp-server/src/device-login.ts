@@ -4,11 +4,11 @@ import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs
 import { dirname, join } from "node:path";
 import { type StoredHubLogin, isHubLogin, readHubLogins, replaceHubLogin } from "./auth-store.js";
 import { LockWaitTimeoutError, acquireInitLock } from "./init-lock.js";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "./protocol.js";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { authenticationOrigin } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
-import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "./token.js";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;

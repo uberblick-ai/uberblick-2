@@ -1,7 +1,7 @@
 /** Optional credential display data; reading names never opens or stores rooms. */
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
-import { sanitizeWorkspaceNames } from "./auth-store.js";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import type { CredentialRecord } from "./credentials.js";
 import type { HubDatabase } from "./persistence.js";
 

@@ -19,14 +19,9 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub, HubLogger, HubLogRecord } from "@uberblick/hub";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { parseRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";

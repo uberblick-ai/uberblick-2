@@ -24,15 +24,15 @@ import {
   type Awareness,
 } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { MAX_PENDING_DOCUMENTS } from "./config.js";
-import { stderrLogger } from "./log.js";
-import type { HubLogger } from "./log.js";
 import {
+  MAX_PENDING_DOCUMENTS,
+  stderrLogger,
+  type HubLogger,
   createRoomAuthenticator,
   PEER_ADDRESS_HEADER,
   type HubContext,
-} from "./server.js";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "./protocol.js";
+} from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/schema/protocol";
 
 export const STORE_BUSY_REASON = "uberblick:store-busy";
 export const STORE_REFUSED_REASON = "uberblick:store-refused";

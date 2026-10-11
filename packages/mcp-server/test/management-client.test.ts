@@ -3,8 +3,8 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoredHubLogin } from "../src/auth-store.js";
 import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "../src/management-client.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { importCredentialKey, inspectRequestProof } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { importCredentialKey, inspectRequestProof } from "@uberblick/schema/token";
 
 const WORKSPACE = randomUUID();
 const PRINCIPAL = randomUUID();

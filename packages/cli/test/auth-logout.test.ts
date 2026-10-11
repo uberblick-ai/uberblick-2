@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { importCredentialKey, inspectRequestProof } from "@uberblick/hub/token";
+import { importCredentialKey, inspectRequestProof } from "@uberblick/schema/token";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manageRequest } from "../src/access-management.js";
 import {

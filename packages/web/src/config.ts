@@ -61,7 +61,7 @@
  * only their served document can supply a deployment value.
  */
 
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.

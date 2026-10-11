@@ -2,7 +2,7 @@
 import { createConnection } from "node:net";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { adminSocketPath } from "./admin-setup.js";
-import { hubDatabasePath } from "./config.js";
+import { requiredHubDatabasePath } from "./team-config.js";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -16,7 +16,15 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const path = adminSocketPath(hubDatabasePath());
+  let databasePath: string;
+  try {
+    databasePath = requiredHubDatabasePath();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+    return;
+  }
+  const path = adminSocketPath(databasePath);
   await new Promise<void>((done) => {
     const socket = createConnection(path);
     let input = "";

@@ -12,15 +12,11 @@ import type { Server, Socket } from "node:net";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Hub, TokenClaims, TokenScope } from "@uberblick/hub";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  createHub,
-  importRootSecret,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
+import type { Hub } from "@uberblick/hub";
+import type { TokenClaims, TokenScope } from "@uberblick/schema/token";
+import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { probeHub, probePort } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";

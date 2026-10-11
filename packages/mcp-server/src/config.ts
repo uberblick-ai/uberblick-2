@@ -22,9 +22,9 @@
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { resolveStorage } from "@uberblick/hub/storage";
-import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
-export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
+export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /**
@@ -125,7 +125,7 @@ function hashToIndex(value: string, buckets: number): number {
 /**
  * `<workspaceUuid>.sqlite` in the user's workspace directory — one database per
  * user per workspace. Which directory that is belongs to
- * `@uberblick/hub/storage`, so the cli, this server and the hub cannot drift
+ * `@uberblick/mcp-server/storage`, so the cli, this server and the hub cannot drift
  * into three answers; it is `$XDG_DATA_HOME/uberblick`, or
  * `~/.local/share/uberblick` when that variable names nothing absolute.
  *

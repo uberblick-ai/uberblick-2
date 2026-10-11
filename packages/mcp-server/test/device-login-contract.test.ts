@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { startDeviceSyncHub } from "./device-sync-hub.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();

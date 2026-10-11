@@ -2,7 +2,7 @@
 
 import { Console } from "node:console";
 import { Writable } from "node:stream";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   compareCorpus,
   inspectRemote,
@@ -19,7 +19,7 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/hub/remote-url";
+export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
   resolveConfig,

@@ -1,9 +1,9 @@
 /** Signed access requests share transport, never command-specific authority. */
 import type { StoredHubLogin } from "./auth-store.js";
-import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
-import { sanitizeDeviceName } from "./device-name.js";
-import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "./protocol.js";
-import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "./token.js";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "@uberblick/schema/protocol";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "@uberblick/schema/token";
 
 export type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 export interface ManagementReply { status: number; body: Record<string, unknown> }

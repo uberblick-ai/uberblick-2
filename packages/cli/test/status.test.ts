@@ -1,6 +1,6 @@
 /** The public status report answers whether this project's work reaches the hub. */
 
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { defaultDatabasePath } from "@uberblick/mcp-server";
 import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import { mkdirSync, existsSync } from "node:fs";

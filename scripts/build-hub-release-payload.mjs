@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const { build } = createRequire(join(root, "packages/cli/package.json"))("esbuild");
 
-async function bundle(entry, output) {
-	await build({
+export async function bundleHubEntry(entry, output) {
+	const result = await build({
 		entryPoints: [join(root, entry)],
 		outfile: output,
 		bundle: true,
@@ -18,8 +18,10 @@ async function bundle(entry, output) {
 		format: "esm",
 		target: "node26",
 		minify: true,
+		metafile: true,
 		sourcemap: false,
 	});
+	return result.metafile;
 }
 
 async function main() {
@@ -31,7 +33,7 @@ async function main() {
 		!/^[a-f0-9]{40}$/.test(sourceCommit ?? "")) {
 		throw new Error("release version and full source commit are required");
 	}
-	const protocol = readFileSync(join(root, "packages/hub/src/protocol.ts"), "utf8")
+	const protocol = readFileSync(join(root, "packages/schema/src/protocol.ts"), "utf8")
 		.match(/export const SYNC_PROTOCOL_VERSION = ([1-9]\d*);/);
 	if (protocol === null || protocol[1] !== protocolVersion) {
 		throw new Error("HUB_SYNC_PROTOCOL_VERSION must match the source SYNC_PROTOCOL_VERSION");
@@ -45,8 +47,8 @@ async function main() {
 	const destination = resolve(output);
 	mkdirSync(destination, { recursive: true });
 	await Promise.all([
-		bundle("packages/hub/src/main.ts", join(destination, "hub.mjs")),
-		bundle("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
+		bundleHubEntry("packages/hub/src/main.ts", join(destination, "hub.mjs")),
+		bundleHubEntry("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
 	]);
 	const release = join(destination, "release");
 	mkdirSync(release);
@@ -73,7 +75,9 @@ async function main() {
 	if (result.status !== 0) throw new Error(`web build failed (${result.signal ?? result.status})`);
 }
 
-main().catch((error) => {
-	console.error(`build-hub-release-payload: ${error.message}`);
-	process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	main().catch((error) => {
+		console.error(`build-hub-release-payload: ${error.message}`);
+		process.exitCode = 1;
+	});
+}

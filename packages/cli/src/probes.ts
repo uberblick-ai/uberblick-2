@@ -26,7 +26,7 @@
 
 import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
-import { isLoopbackHost } from "@uberblick/hub/remote-url";
+import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 import { budget } from "./budget.js";

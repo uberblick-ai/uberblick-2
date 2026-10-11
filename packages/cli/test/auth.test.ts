@@ -8,7 +8,7 @@ import {
 import { join } from "node:path";
 import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
