@@ -1050,6 +1050,7 @@ h3.ub-heading {
 }
 .ub-chart-editing > .ub-chart-footer > :not(.ub-copy),
 .ub-chart[data-annotated="true"] > .ub-chart-footer > :not(.ub-copy) { display: none; }
+.ub-chart-limit-notice,
 .ub-chart[data-view="table"] .ub-chart-notice,
 .ub-chart[data-view="table"] .ub-chart-diagnostics { color: var(--muted-foreground); }
 @media (hover: hover) {

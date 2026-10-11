@@ -18,7 +18,7 @@ import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
   prepareChart, formatChartX, formatChartNumber, chartAccessibleName,
-  chartAccessibleDescription, chartDiagnosticsText,
+  CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
 import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
@@ -106,6 +106,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared;
+        notice.classList.toggle("ub-chart-limit-notice", result.status === "ready" &&
+          result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
         // Reserve the actions beside the footnote, outside the table and its
@@ -137,7 +139,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           description.textContent = "";
           text(title, "");
           text(message, "");
-          text(notice, "Generated from document data · read-only");
+          text(notice, `Generated from document data · read-only${result.notice ? ` · ${result.notice}` : ""}`);
           text(diagnostics, tableDiagnosticsText(result));
           table.render(result);
           return;

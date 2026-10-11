@@ -329,6 +329,72 @@ describe("the chart's derived lifecycle", () => {
     peer.destroy(); doc.destroy(); directory.destroy();
   });
 
+  it("moves limited mixed views with remote data, retains unchanged rows and never writes the source", () => {
+    const { doc, directory, id } = fixture();
+    const limitedChart = JSON.stringify({ ...JSON.parse(mapping), limit: 2 });
+    const limitedTable = JSON.stringify({ ...JSON.parse(tableMapping), limit: 2, sort: { field: "day", direction: "desc" } });
+    editBlock(doc, id, mapping, limitedChart);
+    appendBlock(doc, { type: "chart", text: limitedTable });
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [
+      { id: "b", value: { day: 2, value: 4 } }, { id: "c", value: { day: 3, value: 5 } },
+    ] }]);
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    let local = 0;
+    doc.on("update", (_update, _origin, _doc, transaction: Y.Transaction) => { if (transaction.local) local += 1; });
+    const beforeMount = Y.encodeStateAsUpdate(doc);
+    const { editor } = mountEditor(doc);
+    flush();
+    const chart = charts.instances[0];
+    if (!chart) throw new Error("Chart did not draw");
+    const chartRoot = editor.view.dom.querySelector(".ub-chart[data-view=line]") as HTMLElement;
+    const tableRoot = editor.view.dom.querySelector(".ub-chart[data-view=table]") as HTMLElement;
+    const chartNotice = chartRoot.querySelector(".ub-chart-notice") as HTMLElement;
+    const tableNotice = tableRoot.querySelector(".ub-chart-notice") as HTMLElement;
+    const points = () => (chart.data as { datasets: { data: { x: number; y: number }[] }[] }).datasets[0]?.data;
+    const sources = () => getBlocks(doc).filter(block => block.type === "chart").map(block => block.text);
+    expect(points()).toEqual([{ x: 2, y: 4 }, { x: 3, y: 5 }]);
+    expect(chart.options).toMatchObject({ scales: { x: { min: 2, max: 3 } } });
+    expect(chartNotice.textContent).toBe("Showing the latest 2 of 3 records");
+    expect(tableNotice.textContent).toBe("Generated from document data · read-only · Showing 2 of 3 records");
+    const initialRows = [...tableRoot.querySelectorAll("tbody tr")];
+    expect(initialRows.map(row => row.textContent)).toEqual(["35", "24"]);
+    for (const notice of [chartNotice, tableNotice]) {
+      expect(notice.closest('[aria-live], [role="alert"], [role="status"]')).toBeNull();
+    }
+    expect(editor.view.dom.querySelector(".ub-table-pager, .ub-table-range")).toBeNull();
+    expect([...editor.view.dom.querySelectorAll(".ub-chart-diagnostics")].every(element => element.hasAttribute("hidden"))).toBe(true);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(beforeMount);
+
+    applyDocData(peer, directory, [{ collection: "trend", upsert: [{ id: "d", value: { day: 4, value: 6 } }] }]);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+    const beforeRedraw = Y.encodeStateAsUpdate(doc);
+    flush();
+    expect(points()).toEqual([{ x: 3, y: 5 }, { x: 4, y: 6 }]);
+    expect(chart.options).toMatchObject({ scales: { x: { min: 3, max: 4 } } });
+    const nextRows = [...tableRoot.querySelectorAll("tbody tr")];
+    expect(nextRows.map(row => row.textContent)).toEqual(["46", "35"]);
+    expect(nextRows[1]).toBe(initialRows[0]);
+    expect(initialRows[1]?.isConnected).toBe(false);
+    expect(chartNotice.textContent).toBe("Showing the latest 2 of 4 records");
+    expect(tableNotice.textContent).toBe("Generated from document data · read-only · Showing 2 of 4 records");
+    expect(sources()).toEqual([limitedChart, limitedTable]);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(beforeRedraw);
+    expect(local).toBe(0);
+
+    applyDocData(peer, directory, [{ collection: "trend", deleteRecords: ["a", "b"] }]);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+    flush();
+    expect(chartNotice.hasAttribute("hidden")).toBe(true);
+    expect(chartNotice.textContent).toBe("");
+    expect(tableNotice.textContent).toBe("Generated from document data · read-only");
+    expect([...tableRoot.querySelectorAll("tbody tr")]).toEqual(nextRows);
+    expect(sources()).toEqual([limitedChart, limitedTable]);
+    editor.destroy();
+    expect(local).toBe(0);
+    peer.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("drops snapshots after the last mixed view leaves and isolates documents over twenty remount cycles", () => {
     const { doc, directory } = fixture();
     appendBlock(doc, { type: "chart", text: tableMapping });

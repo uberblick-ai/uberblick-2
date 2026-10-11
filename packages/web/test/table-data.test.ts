@@ -35,6 +35,14 @@ function frozen<T>(value: T): T {
 }
 
 describe("table mapping", () => {
+  it.each([1, 14, 5_001, Number.MAX_VALUE])("accepts positive integer limit %s without an authoring ceiling", (limit) => {
+    expect(parseTableConfig(JSON.stringify({ ...mapping, limit }))).toMatchObject({ ok: true, config: { limit } });
+  });
+
+  it.each([0, -1, 1.5, "14", null, true, [], {}])("refuses non-positive or non-integer limit %j", (limit) => {
+    expect(prepareTable(JSON.stringify({ ...mapping, limit }), null).status).toBe("invalid-configuration");
+  });
+
   it("defaults format and page size on detached configuration only", () => {
     const source = JSON.stringify({ version: 1, type: "table", collection: "observations", columns: [{ field: "value", label: "Stored value" }] });
     expect(parseTableConfig(source)).toEqual({ ok: true, config: {
@@ -73,6 +81,10 @@ describe("table mapping", () => {
     JSON.stringify({ ...mapping, sort: null }),
   ])("refuses unsupported configuration without consulting or changing data: %s", (source) => {
     expect(prepareTable(source, null)).toMatchObject({ status: "invalid-configuration", message: expect.stringContaining("Invalid table configuration") });
+    const value: unknown = (() => { try { return JSON.parse(source); } catch { return null; } })();
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      expect(prepareTable(JSON.stringify({ ...value, limit: 1 }), null).status).toBe("invalid-configuration");
+    }
   });
 
   it("accepts the approved bounds and numeric options without adding a uniqueness restriction", () => {
@@ -142,6 +154,31 @@ describe("table cell values", () => {
 });
 
 describe("table projection and ordering", () => {
+  it.each([undefined, "asc", "desc"] as const)("recomputes the first valid rows in %s order without changing source or data", (direction) => {
+    const config: TableConfig = { ...mapping, limit: 2, pageSize: 1, columns: [{ field: "value", format: "number" }],
+      ...(direction === undefined ? {} : { sort: { field: "value", direction } }) };
+    const source = JSON.stringify(config);
+    const { doc, data } = fixture([
+      { id: "a", value: { value: 1 } }, { id: "b", value: { value: 2 } }, { id: "c", value: { value: 3 } },
+    ]);
+    const before = getDocDataEntries(doc);
+    frozen(data);
+    const table = ready(data, config);
+    expect(table.rows.map(record => record.id)).toEqual(direction === "desc" ? ["c", "b"] : ["a", "b"]);
+    expect(table.notice).toBe("Showing 2 of 3 records");
+    expect(tableDiagnosticsText(table)).toBe("");
+    expect(getDocDataEntries(doc)).toEqual(before);
+    applyDocData(doc, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "d", value: { value: 4 } }] }]);
+    const updated = prepareTable(source, readDocData(doc));
+    expect(updated.status).toBe("ready");
+    if (updated.status !== "ready") throw new Error(updated.message);
+    expect(updated.rows.map(record => record.id)).toEqual(direction === "desc" ? ["d", "c"] : ["a", "b"]);
+    expect(updated.notice).toBe("Showing 2 of 4 records");
+    expect(source).toBe(JSON.stringify(config));
+    expect(ready(data, config).rows).toEqual(table.rows);
+    for (const limit of [3, 100]) expect(ready(data, { ...config, limit }).notice).toBeUndefined();
+  });
+
   it("orders unsorted records and ties by Unicode code point without modifying the snapshot or Y.Doc", () => {
     const { doc, data } = fixture([
       { id: "😀", value: { value: 3 } }, { id: "\ufffd", value: { value: 3 } }, { id: "a", value: { value: 2 } },
@@ -221,6 +258,14 @@ describe("table projection and ordering", () => {
     expect(table.recordCount).toBe(2);
     expect(table.invalidSchema).toBe(1);
     expect(tableDiagnosticsText(table)).toBe("1 records not shown (invalid under the collection schema).");
+    applyDocData(other, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "second", value: { value: 20 } }] }]);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
+    const updated = readDocData(doc);
+    if (updated === null) throw new Error("Missing data");
+    const limited = ready(updated, { ...mapping, limit: 1 });
+    expect(limited.notice).toBe("Showing 1 of 2 records");
+    expect(limited.rows.map(record => record.id)).toEqual(["base"]);
+    expect(tableDiagnosticsText(limited)).toBe("1 records not shown (invalid under the collection schema).");
   });
 });
 
