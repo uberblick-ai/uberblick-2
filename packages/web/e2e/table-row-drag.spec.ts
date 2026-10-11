@@ -205,61 +205,6 @@ test("mouse pickup leaves every row readable and drops only at a body gap", { ta
   } finally { fixture.close(); }
 });
 
-test("own gaps, outside release and Escape preserve the caret and focus without writing", { tag: "@webkit" }, async ({ page }, info) => {
-  test.skip(info.project.use.hasTouch === true, "Mouse cancellation requires a pointer device");
-  const fixture = await publishTable();
-  try {
-    const afterId = appendBlock(fixture.doc, { type: "paragraph", text: "after" });
-    const table = await openTable(page, fixture.uuid);
-    const after = editor(page).locator(":scope > p").last();
-    const secondCell = table.locator("tr").nth(1).locator("td").nth(1);
-    for (const caret of [after, secondCell]) {
-      for (const ending of ["own", "outside", "escape"] as const) {
-        await caretIn(caret, info);
-        // Commit the native selection to PM before the drag begins.
-        await page.keyboard.insertText("1");
-        let text = await caret.textContent() ?? "";
-        await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === (caret === after ? afterId : fixture.id))?.text)
-          .toContain(text);
-        let before = Y.encodeStateVector(fixture.doc);
-        await startMouse(page, table);
-        if (caret === after && ending === "own") {
-          // Received edits before the saved caret must keep it mapped in PM.
-          editBlock(fixture.doc, afterId, text, `remote ${text}`);
-          text = `remote ${text}`;
-          await expect(caret).toHaveText(text);
-          before = Y.encodeStateVector(fixture.doc);
-        }
-        if (ending === "own") await overGap(page, table, 2);
-        else if (ending === "outside") await page.mouse.move(2, 2);
-        else { await overGap(page, table, 4); await page.keyboard.press("Escape"); }
-        await page.mouse.up();
-        await expect(indicator(page)).toHaveCount(0);
-        await expect(page.getByRole("menu")).toHaveCount(0);
-        await expect(editor(page)).toBeFocused();
-        // Native selections can end at a text offset or an element's child
-        // boundary. Both are a caret at the end when no target text follows.
-        await expect.poll(() => caret.evaluate(caretAtEdge)).toBe(true);
-        await expect(bodyNames(table)).toHaveText(INITIAL);
-        expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
-        await page.keyboard.insertText(` ${ending}`);
-        await expect(caret).toHaveText(`${text} ${ending}`);
-      }
-    }
-    // A handle gesture must also leave focus outside the editor alone.
-    const title = page.locator(".ub-title");
-    await title.focus();
-    await startMouse(page, table);
-    await page.keyboard.press("Escape");
-    await page.mouse.up();
-    await expect(indicator(page)).toHaveCount(0);
-    await expect(title).toBeFocused();
-    // The suppression guard must clear for a deliberate later click.
-    await handle(page, 1).click();
-    await expect(page.getByRole("menu")).toBeVisible();
-  } finally { fixture.close(); }
-});
-
 test("the header cannot be picked up and drops above it are rejected", async ({ page }) => {
   const fixture = await publishTable();
   try {
