@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { build } from "esbuild";
-import { defaultDatabasePath } from "../src/hub-config.js";
+import { defaultHubDatabasePath } from "../src/hub-config.js";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -114,7 +114,7 @@ describe("the layout", () => {
 describe("the hub database", () => {
   it("is the user's", () => {
     const root = home();
-    expect(defaultDatabasePath({ env: { HOME: root } })).toBe(
+    expect(defaultHubDatabasePath({ env: { HOME: root } })).toBe(
       join(root, ".local", "share", "uberblick", "hub.sqlite"),
     );
   });
@@ -132,8 +132,8 @@ describe("the hub database", () => {
       mkdirSync(relocated, { recursive: true });
       await build({
         stdin: {
-          contents: 'import { defaultDatabasePath } from "./hub-config.js";\n' +
-            "process.stdout.write(defaultDatabasePath());\n",
+          contents: 'import { defaultHubDatabasePath } from "./hub-config.js";\n' +
+            "process.stdout.write(defaultHubDatabasePath());\n",
           resolveDir: join(PACKAGE_ROOT, "src"),
           loader: "ts",
         },

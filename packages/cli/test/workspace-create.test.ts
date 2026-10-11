@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { defaultDatabasePath, readWorkspaceName, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, readWorkspaceName, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { afterAll, expect, it } from "vitest";
 import { credentialsPath, resolveConfig } from "../src/config.js";
 import { initLockPath, seedLockPath } from "../src/init-lock.js";
@@ -166,7 +166,7 @@ syncBuiltinESMExports();
     }
     const completed = await runInProcess(["workspace", "create", "Complete notes"], box);
     expect(completed.status, completed.output).toBe(0);
-    expect(defaultDatabasePath(binding(box).workspaceId, box.env)).not.toBe(partial);
+    expect(defaultWorkspaceDatabasePath(binding(box).workspaceId, box.env)).not.toBe(partial);
     expect(readFileSync(partial)).toEqual(partialBefore);
     await checkSeed(box, "Complete notes");
   },

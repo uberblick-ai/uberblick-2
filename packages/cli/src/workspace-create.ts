@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { defaultDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, storeWorkspaceName } from "@uberblick/mcp-server";
 import { validateWorkspaceName } from "@uberblick/schema";
 import { ensureLocalSigningSecret, SigningSecretExposureError } from "./config.js";
 import { resolveMcpConfig } from "./budget.js";
@@ -61,7 +61,7 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
       }
       const env = { ...process.env, WORKSPACE_ID: uuid, UB_WORKSPACE_ID: uuid, UB_HUB_URL: "local", HUB_URL: undefined,
         HUB_AUTH_TOKEN: undefined, HUB_ADMISSION: undefined,
-        UBERBLICK_DB: defaultDatabasePath(uuid, process.env) };
+        UBERBLICK_DB: defaultWorkspaceDatabasePath(uuid, process.env) };
       if (existsSync(env.UBERBLICK_DB)) throw new Error("generated workspace already exists; retry creation");
       const { deviceLogin: _deviceLogin, ...base } = resolveMcpConfig(env);
       const config = { ...base, authSecret: null };

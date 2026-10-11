@@ -8,6 +8,7 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { trimmed } from "./strings.js";
 
 export interface StorageOptions {
   env?: NodeJS.ProcessEnv;
@@ -34,11 +35,6 @@ const HUB_DATABASE = "hub.sqlite";
  */
 export const WORKSPACE_DATABASE_FILE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.sqlite$/;
-
-function trimmed(value: string | undefined): string | null {
-  const text = value?.trim();
-  return text === undefined || text === "" ? null : text;
-}
 
 /**
  * Ignore empty or relative XDG values so the working directory cannot change

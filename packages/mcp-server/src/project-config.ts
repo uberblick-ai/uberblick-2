@@ -9,7 +9,8 @@ import type { StoragePaths } from "./storage.js";
 import { resolveStorage } from "./storage.js";
 import { resolveProjectBinding, type ProjectBinding, NO_BINDING } from "./project-binding.js";
 import { CREDENTIALS_FILE, credentialsPath } from "./auth-store.js";
-export { CREDENTIALS_FILE, credentialsPath } from "./auth-store.js";
+export { credentialsPath } from "./auth-store.js";
+import { trimmed } from "./strings.js";
 import {
   publishOwnerOnly,
   publishStaged,
@@ -17,7 +18,7 @@ import {
 } from "./safe-write.js";
 
 /** Per-user identity, endpoint admission, and legacy migration information. */
-export const USER_CONFIG_FILE = "config.json";
+const USER_CONFIG_FILE = "config.json";
 
 /** The key holding the hub's HMAC signing secret in `credentials.json`. */
 const SIGNING_SECRET_KEY = "signingSecret";
@@ -69,7 +70,7 @@ export function exposedSigningSecretRemedy(path: string): string {
 export class SigningSecretExposureError extends Error {}
 
 /** CLI and MCP use the same storage layout. */
-export function configDir(env: NodeJS.ProcessEnv = process.env): string {
+function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolveStorage({ env }).configDir;
 }
 
@@ -79,11 +80,6 @@ export function userConfigPath(env: NodeJS.ProcessEnv = process.env): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function trimmed(value: string | undefined): string | null {
-  const text = value?.trim();
-  return text === undefined || text === "" ? null : text;
 }
 
 /**

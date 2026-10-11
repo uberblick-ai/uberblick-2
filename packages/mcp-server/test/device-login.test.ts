@@ -255,8 +255,9 @@ describe("stored device login renewal", () => {
     await waitForRequest(test.hub);
     const abort = new AbortController();
     const next = ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, signal: abort.signal });
-    abort.abort();
-    await expect(next).rejects.toMatchObject({ name: "AbortError" });
+    const reason = new Error("renewal cancelled");
+    abort.abort(reason);
+    await expect(next).rejects.toBe(reason);
     const locks = readdirSync(dirname(credentialsPath(test.env))).filter(name => name.endsWith(".lock"));
     expect(locks).toHaveLength(1);
     expect(existsSync(join(dirname(credentialsPath(test.env)), locks[0]!))).toBe(true);

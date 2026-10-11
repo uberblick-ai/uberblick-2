@@ -3,7 +3,7 @@
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as mcpServer from "@uberblick/mcp-server";
-import { defaultDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
 import { isTagCatalogSeeded, setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -338,7 +338,7 @@ describe("the last hub sync in ub status", () => {
     expect(initial.status, initial.stderr).toBe(0);
     expect(JSON.parse(initial.stdout).lastSync).toBeNull();
     const timestamp = Math.floor((Date.now() - 3 * 3_600_000 - 30_000) / 1_000) * 1_000;
-    const database = new DatabaseSync(defaultDatabasePath(WORKSPACE, box.env));
+    const database = new DatabaseSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env));
     try { database.prepare("INSERT INTO meta (key, value) VALUES ('last_sync_at', ?)").run(String(timestamp)); }
     finally { database.close(); }
     const json = await runInProcess(["status", "--json"], box);
@@ -355,7 +355,7 @@ describe("the real project's short report", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toBe("no .uberblick.json here or in any parent directory\n  → ub workspace create <name>, or ub workspace use <link|id>\n");
-    expect(existsSync(defaultDatabasePath(WORKSPACE, box.env))).toBe(false);
+    expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
   it("does not borrow the legacy machine default without a project binding", async () => {
@@ -364,7 +364,7 @@ describe("the real project's short report", () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("no .uberblick.json here or in any parent directory\n  → ub workspace create <name>, or ub workspace use <link|id>\n");
-    expect(existsSync(defaultDatabasePath(WORKSPACE, box.env))).toBe(false);
+    expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
   it("returns usage errors as exit 2 before opening a replica", async () => {
@@ -372,7 +372,7 @@ describe("the real project's short report", () => {
     const run = await runInProcess(["status", "--unknown"], box);
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
-    expect(existsSync(defaultDatabasePath(WORKSPACE, box.env))).toBe(false);
+    expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
   it.each([
@@ -403,13 +403,13 @@ describe("the real project's short report", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl },
       credentials: { signingSecret: "pending-status-test-secret" },
     });
-    const store = new MirrorStore(defaultDatabasePath(WORKSPACE, box.env), WORKSPACE);
+    const store = new MirrorStore(defaultWorkspaceDatabasePath(WORKSPACE, box.env), WORKSPACE);
     const settings = new Y.Doc();
     try {
       setWorkspaceName(settings, "Stored name");
       store.appendUpdate(settingsRoom(WORKSPACE), Y.encodeStateAsUpdate(settings), "local");
     } finally { settings.destroy(); store.close(); }
-    const database = new DatabaseSync(defaultDatabasePath(WORKSPACE, box.env));
+    const database = new DatabaseSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env));
     try {
       for (const room of ["_directory", "_sidebar", "a-document"]) {
         database.prepare("INSERT INTO pending_rooms (room, seq) VALUES (?, ?)").run(`${WORKSPACE}/${room}`, 1);
