@@ -1,17 +1,8 @@
 /**
- * shadcn/ui dropdown menu, vendored (#27).
- *
- * The set is what the first consumer needs (#74 — workspace switcher and user
- * menu): a trigger, a content surface, items, a label and a separator.
- * Upstream also ships checkbox items, radio groups and submenus; they are not
- * here because nothing asks for them yet, and each would drag in an icon
- * dependency for its indicator. Add them when a screen needs them.
- * The upstream destructive item variant is retained for lifecycle actions.
- *
- * The enter/exit animations are dropped for the same reason as in `popover.tsx`
- * (`tw-animate-css` is a dependency for a fade). `data-highlighted` is Radix's
- * "the pointer or the keyboard is on this item" state — one state for both, so
- * hovering and arrowing look identical.
+ * Trimmed shadcn dropdown with trigger, content, item, label and separator;
+ * retain destructive lifecycle styling. Unused checkbox/radio/submenu parts
+ * and their icon dependencies are omitted, as are animation utilities.
+ * Product tokens style Radix data-highlighted for both pointer and keyboard.
  */
 
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";

@@ -3,7 +3,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
 import type { MembershipRegistry } from "./memberships.js";
-import { sanitizeDeviceName } from "./device-name.js";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import {
   type ClampFailure,
   type RequestAction,
@@ -15,7 +15,7 @@ import {
   inspectToken,
   inspectRequestProof,
   readTokenKeyId,
-} from "./token.js";
+} from "@uberblick/schema/token";
 
 export interface CredentialRecord {
   id: string;

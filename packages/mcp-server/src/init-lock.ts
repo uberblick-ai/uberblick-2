@@ -1,9 +1,7 @@
 /**
- * Serialize machine-configuration read-modify-write operations beside credentials.json.
- * Secret, device-login and workspace-record writers preserve unrelated keys and
- * the winning secret under this lock; atomic publication separately protects readers.
- * Waits are bounded. Only the creator removes a lock; crashed holders need manual
- * removal because stale-lock takeover can unlink a successor's live lock.
+ * Serialize machine-configuration read-modify-write operations. Atomic file
+ * publication still protects readers from writers that do not hold this lock.
+ * Waiting is bounded; age never triggers takeover or removal.
  */
 
 import {
@@ -19,17 +17,19 @@ import { dirname, join } from "node:path";
 import { credentialsPath } from "./storage.js";
 import { removeQuietly } from "./safe-write.js";
 
+/** Beside the files it protects, so one directory holds one machine's state. */
 const LOCK_FILE = ".init.lock";
 
-/** Separate from short configuration writes: seeding takes seconds and must not duplicate documents. */
+/** Separate seed lock covers read-before-write eligibility checks and longer writes. */
 const SEED_LOCK_FILE = ".seed.lock";
 
 /**
- * Keep outside budget.ts's test ceiling: a live sibling needs the full wait to
- * finish real writes, while shortened terminal probes may legitimately expire.
+ * Do not apply the terminal-probe test ceiling: a live sibling may legitimately
+ * hold this lock while doing work, so shortening its wait creates false failures.
  */
 const WAIT_TIMEOUT_MS = 2_000;
 
+/** Long enough not to spin, short enough to be invisible. */
 const RETRY_MS = 20;
 
 export interface InitLock {
@@ -42,7 +42,7 @@ export function initLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), LOCK_FILE);
 }
 
-/** Workspace creation waits for seeding and writes the offline replica before publishing its binding. */
+/** Workspace creation holds this through offline seeding before publishing its binding. */
 export function seedLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), SEED_LOCK_FILE);
 }
@@ -62,23 +62,29 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** Quote arbitrary config paths literally for the pasted POSIX removal command; `rm --` guards options. */
+/**
+ * Quote recovery paths literally for POSIX shells, including embedded quotes.
+ * The recovery command uses `rm --` to prevent option parsing.
+ */
 function shellQuote(path: string): string {
   return `'${path.split("'").join(`'\\''`)}'`;
 }
 
-/** Never retry a failed close: POSIX releases the number, which another file can reuse. */
+/**
+ * Never retry close: POSIX releases the descriptor even on error, and its number
+ * may already belong to another file.
+ */
 function closeQuietly(fd: number): void {
   try {
     closeSync(fd);
   } catch {
-    // Cleanup must not mask the caller's failure.
+    // Cleanup must not replace the caller's error.
   }
 }
 
 /**
- * Keep fd open for the entire lock lifetime to prevent inode reuse fooling this
- * comparison. lstat refuses a replacement symlink instead of following its target.
+ * The held descriptor prevents inode reuse while comparing device and inode.
+ * `lstat` refuses a substituted symlink rather than following it.
  */
 function namesHeldFile(fd: number, path: string): boolean {
   try {
@@ -86,12 +92,14 @@ function namesHeldFile(fd: number, path: string): boolean {
     const named = lstatSync(path);
     return held.dev === named.dev && held.ino === named.ino;
   } catch {
-    // An absent, unreadable or closed file is no longer ours to remove.
+    // Missing or unreadable identity gives no permission to remove the name.
     return false;
   }
 }
 
-/** Diagnostic only; age never authorizes lock removal. */
+/**
+ * Lock age is diagnostic only; it never authorizes takeover.
+ */
 function describeAge(path: string): string {
   try {
     const seconds = Math.round((Date.now() - statSync(path).mtimeMs) / 1000);
@@ -108,7 +116,9 @@ export interface LockOptions {
   waitMs?: number;
   /** The command to retry; omitted callers name ub open. */
   command?: string;
-  /** Called once before waiting on contention; never called when waitMs is zero. */
+  /**
+   * Announce contention once before waiting; zero-wait callers never call it.
+   */
   onWait?: (path: string) => void;
   /** Cancel a waiting operation before it can acquire or publish. */
   signal?: AbortSignal;
@@ -122,11 +132,14 @@ export interface TryLockOptions {
 /** Contention lasted for the caller's whole wait, rather than the lock operation failing. */
 export class LockWaitTimeoutError extends Error {}
 
-/** One synchronous attempt lets readers fall back immediately; only contention returns null. */
+/**
+ * Try once synchronously so readers can fall back to a coherent cached value.
+ * Only contention returns `null`; other create/write failures throw.
+ */
 function tryAcquirePath(path: string): InitLock | null {
   let fd: number;
   try {
-    // Hold this exclusive-create descriptor until release; see namesHeldFile.
+    // Hold the exclusive-create descriptor until release to pin its identity.
     fd = openSync(path, "wx", 0o600);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {
@@ -136,11 +149,11 @@ function tryAcquirePath(path: string): InitLock | null {
   }
 
   try {
-    // Identify the holder for manual recovery.
+    // Identify the holder for timeout recovery.
     writeSync(fd, `${process.pid}\n`);
   } catch (error) {
-    // Failed initialization must not leave an orphan. Unlink our held file before
-    // closing its descriptor so its inode cannot be recycled during removal.
+    // Failed initialization must release our created lock; there is no takeover.
+    // Unlink before close so the descriptor still pins the compared identity.
     if (namesHeldFile(fd, path)) {
       removeQuietly(path);
     }
@@ -151,8 +164,8 @@ function tryAcquirePath(path: string): InitLock | null {
   let released = false;
   return {
     path,
-    // Remove only our held file, preserving a successor after manual deletion.
-    // Unlink before close to keep its inode pinned through removal.
+    // Remove only our created file, never a replacement lock. Unlink before
+    // close: the held descriptor prevents the compared inode from being reused.
     release() {
       if (released) {
         return;
@@ -161,13 +174,16 @@ function tryAcquirePath(path: string): InitLock | null {
       if (namesHeldFile(fd, path)) {
         removeQuietly(path);
       }
-      // A deferred close error must not mask the failure entering finally.
+      // A deferred close error must not mask the error that triggered cleanup.
       closeQuietly(fd);
     },
   };
 }
 
-/** Exclusive-create lock at any path, including directory-keyed build locks; null means contention. */
+/**
+ * Caller-supplied paths, including build locks, use the same exclusive create,
+ * held descriptor and creator-only removal as config-root locks.
+ */
 export function tryAcquireLock(path: string): InitLock | null {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   return tryAcquirePath(path);
@@ -181,7 +197,10 @@ export function tryAcquireInitLock(
   return tryAcquireLock(options.path ?? initLockPath(env));
 }
 
-/** Wait without blocking the event loop; timeout identifies the holder's path and manual recovery. */
+/**
+ * Wait without blocking the event loop; timeout reports the holder and a quoted
+ * recovery command, and cancellation prevents subsequent acquisition.
+ */
 export async function acquireInitLock(
   env: NodeJS.ProcessEnv = process.env,
   options: LockOptions = {},

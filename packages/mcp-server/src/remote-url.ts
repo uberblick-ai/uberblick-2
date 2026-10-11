@@ -1,6 +1,6 @@
 import { parseWorkspaceId } from "@uberblick/schema";
-import { isLoopbackHost } from "./loopback.js";
-export { isLoopbackHost } from "./loopback.js";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
+export { isLoopbackHost } from "@uberblick/schema/loopback";
 
 /** Wildcards and unrecognized host spellings always require device login. */
 export function isLoopbackEndpoint(endpoint: string): boolean {
@@ -11,9 +11,12 @@ export function isLoopbackEndpoint(endpoint: string): boolean {
 /** A value carrying its own scheme, as opposed to a bare host. */
 const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
-/** REMOTE.md's deployed path; fill it only when inventing a scheme and no path was supplied. */
+/**
+ * Default deployment path only for bare hosts or HTTP(S) forms without a path.
+ */
 const DEPLOYED_PATH = "/ws";
 
+/** An endpoint, read and validated, in the pieces both callers below need. */
 interface RemoteUrl {
   /** Exactly what was typed, trimmed. */
   text: string;
@@ -26,13 +29,13 @@ interface RemoteUrl {
 }
 
 /**
- * Accept bare hosts, HTTP(S) addresses and WS(S) endpoints; preserve plaintext
- * http/ws intent. Refuse userinfo, queries and fragments without echoing input:
- * authentication belongs in the auth message, and pasted URLs may contain secrets.
+ * Bare hosts default to WSS; HTTP(S) maps to WS(S). Refuse userinfo, query and
+ * fragment: credentials belong in authentication frames, never persisted URLs.
+ * No refusal may echo potentially secret input.
  */
 function readRemoteUrl(value: string): RemoteUrl {
   const text = value.trim();
-  // Detect schemes before parsing: URL treats bare localhost:1234 as a scheme.
+  // Detect schemes before URL parsing, which treats `localhost:1234` as one.
   const invented = !SCHEME.test(text);
   let url: URL;
   try {
@@ -78,30 +81,35 @@ function readRemoteUrl(value: string): RemoteUrl {
   };
 }
 
-/** Invented schemes get the default path; explicit websocket endpoints own even an empty path. */
+/**
+ * Invented forms get the deployment path only when no path was supplied.
+ * Explicit WebSocket endpoints keep their own path, including an empty one.
+ */
 function formatRemoteUrl(url: RemoteUrl, path = url.path): string {
   return `${url.scheme}://${url.host}${path === "" && url.invented ? DEPLOYED_PATH : path}`;
 }
 
-/** Preserve explicit WS(S) spelling after trimming; URL reconstruction changes case, ports and slashes. */
+/**
+ * Keep explicit WebSocket spelling after trimming; rebuilding through URL would
+ * alter host case, default ports and trailing slashes used in later comparisons.
+ */
 export function normalizeRemoteUrl(value: string): string {
   const url = readRemoteUrl(value);
   return url.invented ? formatRemoteUrl(url) : url.text;
 }
 
 /**
- * Split endpoint/<workspace-id>, retaining the schema-validated ID's spelling;
- * rooms, tokens and database filenames use its bare UUID. Shared endpoint parsing
- * refuses secret-bearing URLs without echoing them. Remove the ID before applying
- * any invented endpoint's deployed path.
+ * Read the schema-validated workspace id from the last path segment, retaining
+ * its decorated spelling. Use the shared endpoint validation and never echo
+ * rejected URLs; remove the id before applying an invented form's default path.
  */
 export function parseJoinTarget(value: string): {
   endpoint: string;
   workspace: string;
 } {
   const url = readRemoteUrl(value);
-  // Remove only the final segment: repeated slashes can affect proxy routing.
-  // Empty paths yield an empty workspace and use the same refusal below.
+  // Cut only the final separator and id; repeated path separators may route
+  // differently through a reverse proxy and must survive. Empty ids refuse.
   const cut = url.path.lastIndexOf("/");
   const workspace = url.path.slice(cut + 1);
   if (workspace === "") {
@@ -121,8 +129,8 @@ export function parseJoinTarget(value: string): {
         "wss://hub.example.ts.net/ws/<workspace-id> — `ub workspace promote` prints it",
     );
   }
-  // Slice explicit endpoints verbatim to retain case, port and path. Rebuild
-  // invented forms, collapsing a remaining root slash to the deployed default.
+  // Slice explicit endpoints verbatim to retain case, port and path. Invented
+  // forms collapse a leftover root slash to use the deployment default.
   const suffix = `/${workspace}`;
   const path = url.path.slice(0, cut);
   const endpoint =

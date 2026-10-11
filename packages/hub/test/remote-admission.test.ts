@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveHubConfig } from "../src/config.js";
+import { resolveCoreHubConfig } from "../src/config.js";
 import type { IssuedCredential } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
-import { isLoopbackEndpoint, isLoopbackHost } from "../src/remote-url.js";
-import { createHub, type Hub } from "../src/server.js";
-import { importCredentialKey, mintRequestProof, mintToken } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
+import { importCredentialKey, mintRequestProof, mintToken } from "@uberblick/schema/token";
 import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom, token,
   type TestClient, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -52,14 +52,10 @@ describe("one local boundary", () => {
       expect(isLoopbackHost(host), host).toBe(false);
     }
   });
-  it("uses endpoint host only and never treats wildcards as local", () => {
-    expect(isLoopbackEndpoint("ws://127.4.3.2:1234/ws")).toBe(true);
-    expect(isLoopbackEndpoint("ws://[::1]:1234/ws")).toBe(true);
-    expect(isLoopbackEndpoint("wss://example.com/127.0.0.1")).toBe(false);
-    expect(isLoopbackEndpoint("ws://0.0.0.0:1234")).toBe(false);
-    expect(resolveHubConfig({ HUB_HOST: "0.0.0.0", HUB_AUTH_TOKEN: "obsolete" })).not.toHaveProperty("authSecret");
-    expect(resolveHubConfig({ HUB_HOST: "::" })).not.toHaveProperty("authSecret");
-    expect(() => resolveHubConfig({ HUB_HOST: "127.0.0.1" })).toThrow(/HUB_AUTH_TOKEN/);
+  it("never treats wildcards as local and never reads remote shared secrets", () => {
+    expect(resolveCoreHubConfig({ HUB_HOST: "0.0.0.0", HUB_AUTH_TOKEN: "obsolete" }, ":memory:")).not.toHaveProperty("authSecret");
+    expect(resolveCoreHubConfig({ HUB_HOST: "::" }, ":memory:")).not.toHaveProperty("authSecret");
+    expect(() => resolveCoreHubConfig({ HUB_HOST: "127.0.0.1" }, ":memory:")).toThrow(/HUB_AUTH_TOKEN/);
   });
 });
 

@@ -1,1 +1,1 @@
-export * from "@uberblick/hub/auth-store";
+export * from "@uberblick/mcp-server/auth-store";

@@ -1,8 +1,7 @@
 /**
- * Publish configuration atomically from fresh 0600 files, including replacements
- * of files with broader modes. Refuse symlink targets; link/rename publication
- * cannot write through a symlink swapped in after classification. Path-based
- * reads may follow symlinks; this module protects writes.
+ * Publish configuration atomically from fresh owner-only files. Writers refuse
+ * symlinks; link/rename publication replaces names without following them, even
+ * if a symlink appears after classification. Reads may still follow symlinks.
  */
 
 import {
@@ -19,9 +18,12 @@ import {
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 
+/** Owner-only, and the mode every file in this module is created with. */
 const OWNER_ONLY = 0o600;
 
-/** Diagnostics may include paths and errno, never file contents. */
+/**
+ * Diagnostics may expose paths and errno, never file contents.
+ */
 function errno(error: unknown): string {
   const code = (error as NodeJS.ErrnoException).code;
   return code === undefined ? "" : ` (${code})`;
@@ -38,7 +40,9 @@ export type Target =
   | { kind: "regular" }
   | { kind: "refused"; because: string };
 
-/** Use one no-follow descriptor so type checks refer to one inode despite name replacement. */
+/**
+ * Classify one opened inode with `O_NOFOLLOW`, avoiding path-check races.
+ */
 export function classify(path: string): Target {
   let fd: number;
   try {
@@ -47,7 +51,7 @@ export function classify(path: string): Target {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "absent" };
     }
-    // Distinguish a refused symlink from permission failures for recovery.
+    // Distinguish symlink refusal from permission failures for recovery.
     if ((error as NodeJS.ErrnoException).code === "ELOOP") {
       return { kind: "refused", because: "it is a symbolic link" };
     }
@@ -62,7 +66,9 @@ export function classify(path: string): Target {
   }
 }
 
-/** writeSync may write only part of the buffer; publication requires every byte. */
+/**
+ * `writeSync` may write fewer bytes than requested; complete the entire buffer.
+ */
 function writeAll(fd: number, contents: string): void {
   const data = Buffer.from(contents, "utf8");
   let written = 0;
@@ -72,9 +78,9 @@ function writeAll(fd: number, contents: string): void {
 }
 
 /**
- * Stage a fresh 0600 file on the target filesystem for atomic link/rename.
- * An unpredictable exclusive-create name protects staged secrets. Failed writes
- * or closes remove staging; only a returned name may survive the call.
+ * Stage beside the target for same-filesystem atomic publication. An unpredictable
+ * exclusive name and chmod protect secret bytes even if the target had wider modes.
+ * Write and deferred close failures attempt cleanup of the unreturned staging name.
  */
 export function writeTempBeside(path: string, contents: string): string {
   const temp = join(
@@ -82,13 +88,11 @@ export function writeTempBeside(path: string, contents: string): string {
     `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
   const fd = openSync(temp, "wx", OWNER_ONLY);
-  // Mark before close: even a failed close releases the descriptor number,
-  // so a retry could close another file.
+  // Mark before close: POSIX releases the fd even on error, so never retry it.
   let closeAttempted = false;
   try {
     fchmodSync(fd, OWNER_ONLY);
     writeAll(fd, contents);
-    // Close may report a deferred write error; keep it inside staging cleanup.
     closeAttempted = true;
     closeSync(fd);
   } catch (error) {
@@ -96,7 +100,7 @@ export function writeTempBeside(path: string, contents: string): string {
       try {
         closeSync(fd);
       } catch {
-        // Preserve the original write failure; staging is removed below.
+        // Preserve the write error and still remove the secret staging file.
       }
     }
     removeQuietly(temp);
@@ -105,7 +109,10 @@ export function writeTempBeside(path: string, contents: string): string {
   return temp;
 }
 
-/** Link claims without overwriting; rename replaces. A lost claim returns false and preserves the winner. */
+/**
+ * Link an absent target without overwriting a racing winner; rename replaces
+ * a regular target atomically. A lost claim returns false.
+ */
 export function publishStaged(
   staged: string,
   path: string,
@@ -124,12 +131,15 @@ export function publishStaged(
     }
     throw error;
   } finally {
-    // Link and failed claims leave a secret-bearing staging name; rename consumes it.
+    // Link or a lost claim leaves secret bytes under this staging name.
     removeQuietly(staged);
   }
 }
 
-/** Atomic owner-only publication refuses symlinks, non-files, lost claims and write failures. */
+/**
+ * Refuse symlinks and non-files; a competing creator or write failure throws.
+ * Accepted targets receive an atomic owner-only replacement.
+ */
 export function publishOwnerOnly(
   path: string,
   contents: string,
@@ -151,13 +161,16 @@ export function publishOwnerOnly(
   }
 }
 
-/** Ignore consumed names; report other cleanup failures on stderr because staging may contain secrets. */
+/**
+ * Ignore an already-consumed name; other failures may leave secret staging bytes
+ * and must warn on stderr, keeping stdout available to reports and protocols.
+ */
 export function removeQuietly(path: string): void {
   try {
     unlinkSync(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      // Keep stdout available for reports and protocols; describe the failed unlink.
+      // Name the failed unlink operation without revealing contents.
       process.stderr.write(
         `ub: warning: could not remove ${path}${errno(error)}\n`,
       );

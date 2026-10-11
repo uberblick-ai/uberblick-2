@@ -1,3 +1,4 @@
+// Decision: 4b565a90-d152-4a51-ad63-cdb05606ec5f
 /** Native, continuous read-only table. Unchanged rows retain their DOM and cells. */
 import { tableCellFormatter, tableAccessibleName } from "./table-data.js";
 import type { TableCell, TableColumnMapping, TableProjection } from "./table-data.js";

@@ -3,12 +3,12 @@ import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { createClient, testRoom, token, WORKSPACE } from "./helpers.js";
+import { createClient, testRoom, token, WORKSPACE } from "../../hub/test/helpers.js";
 
-const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const PACKAGE_ROOT = fileURLToPath(new URL("../../hub", import.meta.url));
 const STORED_SECRET = "dev-preload-file-secret";
 const OVERRIDE_SECRET = "dev-preload-environment-secret";
 const roots: string[] = [];

@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { createHub } from "@uberblick/hub";
 import type { Hub, HubLogRecord } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 
 const SECRET = "protocol-mismatch-test-secret";

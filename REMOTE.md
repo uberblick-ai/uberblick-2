@@ -265,7 +265,7 @@ trap 'exit 143' HUP TERM
 mkdir "$candidate_root/source"
 git archive "$candidate_sha" | tar -x -C "$candidate_root/source"
 candidate_protocol=$(sed -n 's/^export const SYNC_PROTOCOL_VERSION = \([1-9][0-9]*\);$/\1/p' \
-  "$candidate_root/source/packages/hub/src/protocol.ts")
+  "$candidate_root/source/packages/schema/src/protocol.ts")
 test -n "$candidate_protocol"
 candidate_build_args=(
   --platform linux/amd64 --file "$candidate_root/source/Dockerfile.hub-release"
@@ -476,8 +476,8 @@ administrator, because the account approving it receives the grant.
 A malformed `HUB_GITHUB_CLIENT_ID` prevents hub startup and names that setting;
 it never falls back to the shared app. GitHub refusing or being unreachable
 fails only the attempt in progress. Local-only work never contacts GitHub. The
-hub started by `ub open` retains explicit-only sign-in: it offers it only when
-`HUB_GITHUB_CLIENT_ID` is set to a valid app client ID.
+hub started by `ub open` uses the machine's local signing secret and offers no
+GitHub sign-in, including when `HUB_GITHUB_CLIENT_ID` is set.
 
 ### Use an operator-owned app
 
@@ -766,7 +766,7 @@ The shared HTTP interface is `POST /auth/manage` with a JSON body
 `{protocolVersion, token, operation, ...targets}`. It requires configured
 GitHub sign-in. Only `resolve-account` and `grant-member` contact GitHub;
 the other management operations make no GitHub call. Use
-`mintRequestProof` from `@uberblick/hub/token` with the current device key,
+`mintRequestProof` from `@uberblick/schema/token` with the current device key,
 its credential UUID as `kid`, the operation and all targets below, and
 `lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
 `typ: "request"`, those exact fields, and `iat` and `exp` in epoch seconds.
@@ -1208,8 +1208,10 @@ sh bin/remote-compose.sh up --detach
 
 Deploying a newer release is [its own runbook](#updating-the-host--deliberately).
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
-it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh bin/remote-compose.sh down` preserve it.
+it exits. The image sets `HUB_DB_PATH=/data/hub.sqlite` in the `hub-data` named
+volume, so normal container replacement and `sh bin/remote-compose.sh down`
+preserve it. Both the hub and `hub-admin-setup` require a non-empty `HUB_DB_PATH`;
+an unset or empty value refuses startup and names the setting.
 
 ### Backing the hub up
 

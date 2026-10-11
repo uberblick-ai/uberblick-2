@@ -11,7 +11,7 @@ import { parseRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
-import { protocolMismatchReason, readAuthEnvelope } from "./protocol.js";
+import { protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { resolvePeer, TOKEN_QUERY_PARAMS } from "./server.js";
 
 export interface CredentialContext {

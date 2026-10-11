@@ -1,53 +1,26 @@
 /**
- * Local settings: this machine, this browser, and nowhere else (#176).
- *
- * "Local" is the whole point. What lives here is what *cannot* be synced —
- * per-device preferences — so this module deliberately imports nothing from the
- * collab layer and holds no reference to a Y.Doc. A settings value has no path
- * to a document, an export, or the hub: the only way one could get there is if
- * some other module read it and wrote it on, which is a review question rather
- * than an accident waiting in this file.
- *
- * One namespaced, versioned key holds one JSON object. The version is in the
- * key itself, so a future incompatible shape uses a new key and the old blob
- * is simply never read again — no migration branch, no half-understood object.
- *
- * Reads are read-through rather than cached: localStorage is the state, and a
- * cache would be a second copy to keep honest across tabs. Every read is
- * defensive — an unparseable blob, a JSON array, a field of the wrong type all
- * degrade to the default for that field. Corrupt storage returns defaults; it
- * never throws, because the alternative is a user menu that cannot open to fix
- * the thing that broke it.
- *
- * The subscription is same-tab only: `setSetting` notifies, so open UI reacts.
- * A write in another tab is not observed (no `storage` listener) — nobody has
- * needed it, and inventing it would be a contract to maintain for nothing.
+ * Store per-device preferences here; this module has no document, export or
+ * hub write path. Consumers explicitly publish presence values.
+ * Keep this module independent of synchronization. One versioned localStorage
+ * key holds JSON; an incompatible shape uses a new key without migration.
+ * Read through storage on each call. Unavailable/corrupt storage and invalid
+ * field types fall back safely. Subscribers observe only this tab's setSetting
+ * calls; there is no cross-tab storage listener.
  */
 
 /** The one key. Namespaced, and versioned by name — see the file comment. */
 export const SETTINGS_KEY = "uberblick.settings.v1";
 
-/**
- * How the app picks its token set: the system's preference, or the override
- * this browser was told to keep (#74).
- */
+/** Browser override or system preference for the token set. */
 export type Appearance = "system" | "light" | "dark";
 
-/**
- * Every local setting there is. New consumers add a field here and a default
- * below; nothing else in the app may reach for localStorage to store one.
- */
+/** Add settings and defaults here; consumers do not write localStorage directly. */
 export interface Settings {
-  /**
-   * The presence colour this browser picked, `#rrggbb`, or null for the random
-   * one the tab was given (#74).
-   *
-   * Published in awareness alongside the presence name.
-   */
+  /** Published six-digit hex color; null uses the tab's random default. */
   presenceColor: string | null;
   /** Published in awareness and on new comments; null uses the serving default. */
   presenceName: string | null;
-  /** The appearance override, or null to follow the system's preference (#74). */
+  /** Null follows the system's appearance preference. */
   appearance: Appearance | null;
 }
 
@@ -62,13 +35,7 @@ type Listener = () => void;
 
 const listeners = new Set<Listener>();
 
-/**
- * A stored presence colour, or null for anything else.
- *
- * Validated rather than merely typed, because this is the field that gets
- * *published*: y-prosemirror accepts `#rrggbb` and warns on everything else, so
- * a hand-edited blob must not become a peer's broken cursor.
- */
+/** Validate published colors as six-digit hex so peers never receive broken cursors. */
 function storedColor(value: unknown): string | null {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
 }
@@ -83,13 +50,7 @@ function storedAppearance(value: unknown): Appearance | null {
   return value === "light" || value === "dark" || value === "system" ? value : null;
 }
 
-/**
- * The whole settings object as it currently reads.
- *
- * Every failure mode lands on the same answer — the defaults — because there is
- * nothing better to say: unavailable storage (a browser with site data blocked,
- * a private window), a blob that is not JSON, JSON that is not an object.
- */
+/** Unavailable storage, invalid JSON and non-object blobs all return defaults. */
 function readAll(): Settings {
   let raw: string | null;
   try {
@@ -121,16 +82,8 @@ export function getSetting<K extends keyof Settings>(key: K): Settings[K] {
 }
 
 /**
- * Write one setting and notify subscribers.
- *
- * Null is erasure, not a stored null: fields at their default are dropped from
- * the serialised object, and an object with nothing left in it removes the key
- * entirely. Clearing a setting therefore leaves no residue to find in
- * localStorage afterwards.
- *
- * Subscribers are notified even when the write itself failed. They re-read, so
- * what they see is the truth either way, and a UI frozen on a value storage
- * rejected would be the worse of the two lies.
+ * Null removes the field; no retained fields removes the key. Notify even after
+ * storage rejects a write so subscribers reread the value actually retained.
  */
 export function setSetting<K extends keyof Settings>(
   key: K,

@@ -1,17 +1,17 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { publishOwnerOnly } from "@uberblick/hub/safe-write";
+import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { acquireInitLock } from "../src/init-lock.js";
 import { writeProjectBinding } from "../src/project-binding.js";
 import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, runUb, sandbox } from "./helpers.js";
 
-vi.mock("@uberblick/hub/safe-write", async (original) => {
-  const actual = await original<typeof import("@uberblick/hub/safe-write")>();
+vi.mock("@uberblick/mcp-server/safe-write", async (original) => {
+  const actual = await original<typeof import("@uberblick/mcp-server/safe-write")>();
   return { ...actual, publishOwnerOnly: vi.fn(actual.publishOwnerOnly) };
 });
-const { publishOwnerOnly: realPublish } = await vi.importActual<typeof import("@uberblick/hub/safe-write")>("@uberblick/hub/safe-write");
+const { publishOwnerOnly: realPublish } = await vi.importActual<typeof import("@uberblick/mcp-server/safe-write")>("@uberblick/mcp-server/safe-write");
 afterAll(removeTempDirs);
 afterEach(() => vi.mocked(publishOwnerOnly).mockImplementation(realPublish));
 const previous = "11111111-1111-4111-8111-111111111111";

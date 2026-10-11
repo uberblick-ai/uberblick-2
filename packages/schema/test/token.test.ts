@@ -138,8 +138,10 @@ describe("mintToken / verifyToken", () => {
       "a.b.c",
       "!!!.!!!",
       Buffer.from('{"sub":"s"}').toString("base64url"),
-      // `atob` accepts these aliases for the same bytes; string-keyed replay
-      // caches require one spelling to prevent bypass.
+      // One spelling only. `atob` is forgiving about all three of these and
+      // would decode each to the bytes of the token above — which is what
+      // would let a replay cache (#242) keyed on the token string be walked
+      // straight past.
       `${payload.slice(0, 8)} ${payload.slice(8)}.${signature}`,
       `${payload}.${Buffer.from(signature, "base64url").toString("base64")}`,
       `${payload}.${signature}=`,
@@ -149,7 +151,8 @@ describe("mintToken / verifyToken", () => {
   });
 
   it("refuses a v1 token — no typ, no exp — however well it is signed", async () => {
-    // Missing token type and expiry must be refused even with a valid signature.
+    // The exact payload this hub minted before claims v2. There is no
+    // compatibility branch, and nobody may add one back.
     const v1 = await forge({
       sub: "s",
       workspace: WORKSPACE,

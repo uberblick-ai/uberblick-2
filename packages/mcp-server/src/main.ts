@@ -1,14 +1,5 @@
 /**
- * @uberblick/mcp-server — MCP stdio server.
- *
- * Offline-first Y.Doc replicas over a local SQLite mirror, exposing the v0 tool
- * set. The append-only update log is the authoritative local replica: the
- * server starts and serves every tool with the hub unreachable, writes apply
- * locally and return before the hub acknowledges them, and sync happens in the
- * background.
- *
- * stdout is the JSON-RPC transport for this process: it carries MCP frames and
- * nothing else. Every diagnostic goes to stderr through ./log.ts.
+ * Reserve stdout for MCP frames; diagnostics go to stderr through ./log.ts.
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

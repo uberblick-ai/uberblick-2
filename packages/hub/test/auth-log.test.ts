@@ -20,7 +20,7 @@ import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { PEER_ADDRESS_HEADER, resolvePeer } from "../src/server.js";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "../src/token.js";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import {
   createClient,
   forgeToken,

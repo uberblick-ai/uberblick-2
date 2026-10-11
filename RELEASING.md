@@ -202,7 +202,7 @@ Each release's `/release/release.json` records its `version`, `sourceCommit`,
 labels as well. Operators can read this metadata with Docker alone as shown in
 [REMOTE.md](REMOTE.md), even without repository access.
 
-`SYNC_PROTOCOL_VERSION` in `packages/hub/src/protocol.ts` is the compatibility
+`SYNC_PROTOCOL_VERSION` in `packages/schema/src/protocol.ts` is the compatibility
 unit. From 0.5.0 on, the hub and Homebrew client share a release number and source
 commit; matching release numbers alone do not establish wire compatibility.
 An incompatible change to `/auth/github/start`, `/auth/github/collect`,

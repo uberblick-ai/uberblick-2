@@ -15,7 +15,8 @@
 
 import { dirname } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_HOST, resolveHubConfig } from "../src/config.js";
+import { DEFAULT_HOST, resolveCoreHubConfig } from "../src/config.js";
+import { createHub } from "../src/server.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { removeTempDatabases, startHub, tempDatabasePath } from "./helpers.js";
@@ -49,18 +50,22 @@ describe("bind address", () => {
   it("is loopback unless HUB_HOST says otherwise", () => {
     const env = { HUB_AUTH_TOKEN: "secret" };
 
-    expect(resolveHubConfig(env).address).toBe(DEFAULT_HOST);
-    expect(resolveHubConfig({ ...env, HUB_HOST: "  " }).address).toBe(
+    expect(resolveCoreHubConfig(env, ":memory:").address).toBe(DEFAULT_HOST);
+    expect(resolveCoreHubConfig({ ...env, HUB_HOST: "  " }, ":memory:").address).toBe(
       DEFAULT_HOST,
     );
     // Exposing the hub to the network is a deliberate act, never a default.
-    expect(resolveHubConfig({ ...env, HUB_HOST: "0.0.0.0" }).address).toBe(
+    expect(resolveCoreHubConfig({ ...env, HUB_HOST: "0.0.0.0" }, ":memory:").address).toBe(
       "0.0.0.0",
     );
   });
 });
 
 describe("createHub", () => {
+  it("requires its embedding client to supply the database path", async () => {
+    await expect(createHub({ authSecret: "secret", port: 0 })).rejects.toThrow(/databasePath/);
+    await expect(createHub({ authSecret: "secret", port: 0, databasePath: "  " })).rejects.toThrow(/databasePath/);
+  });
   it("rejects without listening when the database cannot be opened", async () => {
     // A directory cannot be opened as SQLite; reject before binding the socket.
     const directory = dirname(tempDatabasePath());

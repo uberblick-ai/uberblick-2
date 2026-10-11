@@ -1,3 +1,4 @@
+// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /** A chart derives a bounded view from the shared reader; it never repairs data. */
 import { compareCodePoints } from "@uberblick/schema";
 import type { DocData, JSONObject } from "@uberblick/schema";
@@ -72,7 +73,7 @@ const DAY = 86_400_000;
 // RFC 3339's complete-date/date-time grammar, with an explicit timezone. Native
 // Date parsing alone accepts nonstandard strings and normalizes impossible days.
 const DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2}))?$/;
-// Announced UTC leap-second boundaries, from IERS Bulletin 72 (July 2026):
+// UTC leap-second boundaries; keep the authoritative IERS list:
 // https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat
 const LEAP_SECOND_BOUNDARIES = new Set([
   "1972-07-01", "1973-01-01", "1974-01-01", "1975-01-01", "1976-01-01", "1977-01-01", "1978-01-01",

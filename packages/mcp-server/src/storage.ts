@@ -1,10 +1,8 @@
 /**
- * Shared cross-platform defaults, including macOS: uberblick/{config,credentials}.json
- * under XDG_CONFIG_HOME or ~/.config; uberblick/{hub,<uuid>}.sqlite under
- * XDG_DATA_HOME or ~/.local/share.
- * Roots resolve independently and only absolute XDG values apply. Resolution
- * creates nothing; writers create directories. Callers apply explicit HUB_DB_PATH
- * and UBERBLICK_DB file overrides above these defaults.
+ * CLI and MCP resolve roots independently on every platform: absolute XDG config
+ * and data roots override ~/.config and ~/.local/share respectively. Resolution
+ * creates nothing; callers apply HUB_DB_PATH and UBERBLICK_DB above these defaults.
+ * The released hub takes its database path from HUB_DB_PATH.
  */
 
 import { mkdirSync } from "node:fs";
@@ -18,7 +16,7 @@ export interface StorageOptions {
 export interface StoragePaths {
   /** Holds `config.json`, `credentials.json` and `ub workspace create`'s lock. */
   configDir: string;
-  /** Default root for durable data. */
+  /** Root of this layout's durable data. */
   dataDir: string;
   /** The hub's document persistence, absent `HUB_DB_PATH`. */
   hubDatabase: string;
@@ -26,11 +24,14 @@ export interface StoragePaths {
   workspaceDir: string;
 }
 
+/** The directory name both roots end in. */
 const XDG_DIR = "uberblick";
 
 const HUB_DATABASE = "hub.sqlite";
 
-/** Shared with workspace enumeration so filename recognition cannot drift from this layout. */
+/**
+ * Keep workspace enumeration consistent with this layout's UUID filenames.
+ */
 export const WORKSPACE_DATABASE_FILE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.sqlite$/;
 
@@ -39,26 +40,31 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/** Ignore relative XDG values rather than make machine storage depend on the working directory. */
+/**
+ * Ignore empty or relative XDG values so the working directory cannot change
+ * storage identity; an ignored value uses the same fallback as an unset one.
+ */
 function xdgDir(value: string | undefined): string | null {
   const text = trimmed(value);
   return text === null || !isAbsolute(text) ? null : text;
 }
 
 /**
- * All first writers create owner-only directories, including parents. mkdir's
- * mode cannot tighten existing directories; umask can only remove these bits.
+ * All first writers use owner-only creation: mkdir's mode cannot repair an
+ * existing directory. The umask can only remove permission bits from 0o700.
  */
 export function createDataDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
 }
 
-/** Resolve the supplied environment's home without mutating the process environment. */
+/**
+ * Resolve against the supplied HOME without mutating the process environment.
+ */
 function home(env: NodeJS.ProcessEnv): string {
   return trimmed(env.HOME) ?? homedir();
 }
 
-/** Pure, non-throwing path resolution, with no platform branch or filesystem access. */
+/** Resolve paths without opening files or platform-specific branches. */
 export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   const env = options.env ?? process.env;
   const configHome = xdgDir(env.XDG_CONFIG_HOME) ?? join(home(env), ".config");

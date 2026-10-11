@@ -1,4 +1,4 @@
-// Decision: a5e7cea9-7702-4ff4-880a-cc82256d8a55
+/** Machine knowledge of replicas, independent of project selection and settings. */
 import { lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { normalizeRemoteUrl } from "./remote-url.js";
@@ -48,8 +48,9 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
 }
 
 /**
- * Caller holds the init lock through synchronous binding publication and rollback.
- * Only verified promotion, fetch or completed init attach may replace a known hub.
+ * Caller holds the init lock. Publish records first; restore them if binding publication fails.
+ * Keep the callback synchronous so publication and restoration cannot interleave.
+ * Only verified promotion, fetch or completed init attach may replace an existing hub.
  */
 export function withWorkspaceBindings<T>(
   bindings: readonly ProjectBinding[],
@@ -71,7 +72,7 @@ export function withWorkspaceBindings<T>(
   }
   if (!changed) return action();
   mkdirSync(dirname(current.path), { recursive: true, mode: 0o700 });
-  // Stage rollback before publication so a later disk-full error needs no new write.
+  // Stage restoration first: disk-full during binding publication must not prevent recovery.
   const restore = current.text === null ? null : writeTempBeside(current.path, current.text);
   try {
     publishOwnerOnly(current.path, `${JSON.stringify(hubs, null, 2)}\n`);

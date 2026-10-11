@@ -1,7 +1,8 @@
-/** Device logins stay in the owner-only store, never resolved configuration or child environments. */
+/** Device logins stay in the owner-only store, outside config and child environments. */
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import { validateWorkspaceName } from "@uberblick/schema";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
+export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
 import { authenticationOrigin, isLoopbackEndpoint } from "./remote-url.js";
@@ -24,7 +25,7 @@ export interface StoredHubLogin {
       revokedAt: number | null;
     };
     key: string;
-    /** Decision: f80c8445-03d1-47ed-9d95-d8004f7039f4. */
+    /** Optional display data, replaced with each issued credential. */
     workspaceNames?: Record<string, string>;
   };
 }
@@ -54,27 +55,6 @@ function uuid(value: unknown): value is string {
 
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-/** Bad display data never invalidates a credential or adds workspace authority. */
-export function sanitizeWorkspaceNames(
-  value: unknown,
-  workspaces: readonly string[],
-  credentialKey: string,
-  collectionSecret?: string,
-): Record<string, string> | undefined {
-  if (!object(value)) return undefined;
-  const names: Record<string, string> = {};
-  for (const workspace of workspaces) {
-    if (!Object.hasOwn(value, workspace)) continue;
-    const name = value[workspace];
-    if (typeof name !== "string" || name.includes(credentialKey) ||
-        (collectionSecret !== undefined && name.includes(collectionSecret))) continue;
-    try {
-      if (validateWorkspaceName(name) === name) names[workspace] = name;
-    } catch { /* Unsafe names remain unnamed. */ }
-  }
-  return Object.keys(names).length === 0 ? undefined : names;
 }
 
 /** Validate exactly the identity and issued credential that collection supplies. */
@@ -146,8 +126,7 @@ function readStore(env: NodeJS.ProcessEnv): Store {
         reason: `credential store ${path} mode ${permissions.toString(8).padStart(4, "0")} lets other users access it`,
         fix: `chmod 600 ${path}` };
     }
-    // Permissions and contents are read from the same descriptor. A replaced
-    // path cannot turn a checked owner-only file into an exposed credential.
+    // Check permissions and read contents through one descriptor despite path replacement.
     raw = JSON.parse(readFileSync(fd, "utf8"));
   } catch {
     return unreadableJson;
@@ -166,8 +145,7 @@ function readStore(env: NodeJS.ProcessEnv): Store {
   const logins: Record<string, StoredHubLogin> = {};
   const unreadableHubs: string[] = [];
   for (const [origin, login] of Object.entries(entries ?? {})) {
-    // Invalid origin keys may be future fields or misplaced secrets. Preserve
-    // them on write, but never use them as names in output.
+    // Preserve unrecognized keys on write; they may contain secrets, so never print them.
     if (!authOrigin(origin)) continue;
     if (isHubLogin(login)) {
       const names = sanitizeWorkspaceNames(login.credential.workspaceNames,
@@ -265,8 +243,8 @@ export async function writeHubLogin(
 ): Promise<StoredHubLogin | null> {
   if (!authOrigin(origin) || !isHubLogin(login)) throw new Error("cannot store an invalid hub login");
   signal?.throwIfAborted();
-  // Read under the config writers' lock to preserve logins and signing-secret updates.
-  // Browser approval and network waits must not hold this lock.
+  // Lock before reading to preserve concurrent login and signing-secret writes.
+  // Browser approval and network waits never hold this lock.
   const lock = await acquireInitLock(env, { command: "ub auth login" });
   try {
     signal?.throwIfAborted();
@@ -313,7 +291,7 @@ export async function replaceHubLogin(
     if (current?.credential.record.id !== expected.credential.record.id ||
       current.credential.key !== expected.credential.key) return false;
     const entries = (store.raw?.hubLogins ?? {}) as Record<string, unknown>;
-    // Replace only the credential, preserving identity and unknown sibling fields.
+    // Replace only the credential; preserve identity and unknown sibling fields.
     publish(store, { ...entries, [origin]: {
       ...(entries[origin] as Record<string, unknown>),
       credential: projectLoginFields(replacement).credential,

@@ -1,7 +1,7 @@
 /** Login checks the existing credential-free version reply before starting sign-in. */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { protocolSkew, SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { protocolSkew, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   assertPublicOnly, cleanUp, credentialPath, fixture, privateDeviceRows, rig, savedLogin, serve,

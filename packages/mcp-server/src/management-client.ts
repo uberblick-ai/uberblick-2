@@ -1,9 +1,9 @@
 /** Signed access requests share transport, never command-specific authority. */
 import type { StoredHubLogin } from "./auth-store.js";
-import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
-import { sanitizeDeviceName } from "./device-name.js";
-import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "./protocol.js";
-import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "./token.js";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "@uberblick/schema/protocol";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "@uberblick/schema/token";
 
 export type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 export interface ManagementReply { status: number; body: Record<string, unknown> }
@@ -22,8 +22,7 @@ export async function manageRequest(
   options: { signal?: AbortSignal; maxResponseBytes?: number } = {},
 ): Promise<ManagementReply> {
   options.signal?.throwIfAborted();
-  // A credential-free request can distinguish missing sign-in from an older or
-  // shared-secret hub. It has no authority to read or mutate management state.
+  // Credential-free requests diagnose sign-in/protocol state without management authority.
   const token = login === null ? "" : await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
     ...action, kid: login.credential.record.id, lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,
   });
@@ -71,10 +70,7 @@ function member(value: unknown): Record<string, unknown> {
     githubUsername: value.githubUsername, role: value.role };
 }
 
-/**
- * Project public fields only: even valid upstream responses can carry credentials
- * or private messages beside the public data.
- */
+/** Project only public contract fields; upstream extras and messages may contain credentials. */
 export function sanitizeManagementReply(
   action: ManagementAction,
   reply: ManagementReply,

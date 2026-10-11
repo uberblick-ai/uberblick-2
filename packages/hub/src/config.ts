@@ -1,15 +1,9 @@
 import type { HubLogger } from "./log.js";
-import type { GithubSignInConfig } from "./github-sign-in.js";
-import type { StorageOptions } from "./storage.js";
-import { resolveStorage } from "./storage.js";
-import { isLoopbackHost } from "./loopback.js";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
 
 /** Loopback by default; exposing a hub requires an explicit bind address. */
 export const DEFAULT_PORT = 1234;
 export const DEFAULT_HOST = "127.0.0.1";
-
-/** Public Uberblick Login GitHub App; device flow needs no client secret. */
-export const SHARED_GITHUB_CLIENT_ID = "Iv23liLW6D5SqP77El3z";
 
 /**
  * Per-socket auth-in-flight memory bound: each pending room owns a queue and
@@ -29,8 +23,6 @@ export interface HubConfig {
   databasePath?: string;
   /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
   authSecret?: string;
-  /** Remote device admission is unavailable without configured sign-in. */
-  github?: GithubSignInConfig;
   log?: HubLogger;
   /** Store debounce in ms; defaults to Hocuspocus' 2s / 10s maximum. */
   debounce?: number;
@@ -46,24 +38,6 @@ export interface HubConfig {
   shutdownTimeoutMs?: number;
 }
 
-/**
- * Resolve hub.sqlite from the user's data root, independent of cwd/install path
- * so upgrades cannot replace it. Checkout tasks override HUB_DB_PATH to isolate dev data.
- */
-export function defaultDatabasePath(options: StorageOptions = {}): string {
-  return resolveStorage(options).hubDatabase;
-}
-
-/** Shared with ub status: HUB_DB_PATH overrides the user-root database. */
-export function hubDatabasePath(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const configured = env.HUB_DB_PATH?.trim();
-  return configured === undefined || configured === ""
-    ? defaultDatabasePath({ env })
-    : configured;
-}
-
 function parsePort(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "") {
     return DEFAULT_PORT;
@@ -75,19 +49,13 @@ function parsePort(raw: string | undefined): number {
   return port;
 }
 
-/** Public app identifiers, distinct from an App ID or OAuth App client ID. */
-export function validateGithubClientId(clientId: string): void {
-  if (typeof clientId !== "string" || !/^(?:Iv1\.[a-fA-F0-9]{16}|Iv23[A-Za-z0-9]{16})$/.test(clientId)) {
-    throw new Error("HUB_GITHUB_CLIENT_ID must be a GitHub App client ID (Iv1. followed by 16 hex digits, or Iv23 followed by 16 alphanumeric characters)");
-  }
-}
-
 /**
  * Bind HUB_HOST:PORT; HUB_URL selects client endpoints only.
- * @throws for an invalid port or missing loopback secret; createHub validates GitHub config.
+ * @throws when a loopback hub has no `HUB_AUTH_TOKEN`, or the port is invalid.
  */
-export function resolveHubConfig(
-  env: NodeJS.ProcessEnv = process.env,
+export function resolveCoreHubConfig(
+  env: NodeJS.ProcessEnv,
+  databasePath: string,
 ): HubConfig {
   const host = env.HUB_HOST?.trim();
   const address = host === undefined || host === "" ? DEFAULT_HOST : host;
@@ -100,22 +68,10 @@ export function resolveHubConfig(
     );
   }
 
-  const githubClientId = env.HUB_GITHUB_CLIENT_ID;
-
   return {
     port: parsePort(env.PORT),
     address,
-    databasePath: hubDatabasePath(env),
+    databasePath,
     ...(authSecret === undefined ? {} : { authSecret }),
-    ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
-}
-
-/** Standalone hubs offer sign-in by default; embedded hubs require explicit config. */
-export function resolveRemoteHubConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): HubConfig {
-  const config = resolveHubConfig(env);
-  config.github ??= { clientId: SHARED_GITHUB_CLIENT_ID };
-  return config;
 }

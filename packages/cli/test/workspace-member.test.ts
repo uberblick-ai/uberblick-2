@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { writeHubLogin } from "@uberblick/hub/auth-store";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { writeHubAdmission } from "../src/config.js";
 import {

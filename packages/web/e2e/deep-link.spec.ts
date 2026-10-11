@@ -1,5 +1,5 @@
 /**
- * Deep links, in a real browser (#68).
+ * Deep links, in a real browser.
  *
  * One spec, because only two of this feature's claims are out of jsdom's reach
  * and both are in the same story:
@@ -20,12 +20,11 @@
  * workspace, a malformed link, the waiting-state copy — is pinned in
  * `test/route.test.tsx` against no browser at all, and is not repeated here.
  *
- * The switcher (#151) is here for the same reason: that two configured
+ * The switcher is here for the same reason: that two configured
  * workspaces are two corpora is a claim about rooms and a hub, and jsdom has
  * neither. What the list *means* is pinned in `test/workspaces.test.tsx`.
  *
- * And the served configuration (#189), because the deployed client is the one
- * this repository keeps getting wrong: a real bundle, a real fetch of
+ * And the served configuration: a real bundle, a real fetch of
  * `/uberblick-config.json`, and a workspace — and a credential — the build was
  * never told about.
  * Where the value comes from is pinned in `test/hub-config.test.ts`; that a
@@ -342,7 +341,7 @@ test("the served configuration names the workspaces, and the build's define is o
       body: JSON.stringify({
         hubUrl: harness().hubUrl,
         workspaces: served,
-        // The whole configuration comes from this document since #426, the
+        // The whole configuration comes from this document, the
         // credential included — a body without it could not connect at all.
         hubAuthToken: harness().authSecret,
       }),
@@ -367,18 +366,18 @@ test("the served configuration names the workspaces, and the build's define is o
   // itself *synced* is a hub that answered, not a socket that never opened.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
 
-  // And the surfaces say *which* document decided it (#362). This is the only
+  // And the surfaces say *which* document decided it. This is the only
   // place that can be shown end to end: `resolveClientConfig` memoises per
   // module, so a component test can hold one resolved endpoint, never the path
   // from a served document through the shell to both surfaces. On a document
-  // route, because that is where the status surfaces are (#424).
+  // route, because that is where the status surfaces are.
   await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
   const source = page.getByRole("dialog", { name: "Sync and presence" })
     .locator('.ub-sync-fact:has(dt:text-is("Source")) dd');
   // "served …", not either of the two "… not used" answers: falling back to
-  // the compiled value while still reading *synced* is the failure #362 exists
-  // to remove. The wording itself is `config.ts`'s, pinned in
+  // the compiled value while still reading *synced* is the failure being guarded.
+  // The wording itself is `config.ts`'s, pinned in
   // `test/sync-panel.test.tsx` — matched loosely here so this test says only
   // what it is for.
   await expect(source).toHaveText(/^served\b/);

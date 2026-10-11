@@ -1,28 +1,3 @@
-/**
- * Offline-first Y.Doc replicas over the local update log.
- *
- * The contract this module implements, in order of importance:
- *
- * 1. **The log is the replica.** A replica is built by replaying its room's log
- *    (snapshot + tail), never by asking the hub. The hub's updates arrive as
- *    ordinary remote updates and are logged like any other.
- * 2. **Every update is logged synchronously.** One `doc.on("update")` observer
- *    appends to the log inside the Yjs transaction's completion, local and
- *    remote origin alike, so a mutating tool cannot return before its update is
- *    committed to disk. `kill -9` right after a write loses nothing.
- * 3. **Another instance's writes are picked up at tool-call start.** Two MCP
- *    servers on one database is the normal case, so {@link Replicas.settle}
- *    polls the log tail for every replica before any tool serves a read.
- * 4. **Discovery is a synced doc.** The directory replica is hydrated, logged
- *    and attached exactly like a document; `list_docs` reads it and never a
- *    locally-observed set of creations.
- *
- * The derived index (FTS5, tags, links) is maintained here as a side effect of
- * observed updates — never as the source of truth. {@link Replicas.rebuildIndex}
- * throws it away and rebuilds it from the replicas, which is the proof it is
- * derived.
- */
-
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import {
@@ -59,21 +34,12 @@ import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
 import { HubSync } from "./sync.js";
 
-/**
- * Transaction origin for updates replayed out of the log. The observer skips
- * them: they are, by definition, already logged.
- */
+/** Replayed updates are already durable; the update observer must skip them. */
 const LOG_ORIGIN = Symbol("uberblick/log");
 
 /**
- * What an MCP session publishes as its `client` awareness field (#73, #494).
- *
- * The positive counterpart of the web client's own marker: a reader classifies
- * a session by what it *says* it is rather than by what it fails to say, so a
- * browser tab running a bundle too old to have said anything is no longer
- * mistaken for an agent. The value is a wire constant shared with the web
- * client by literal — `packages/web/src/collab/identity.ts` holds the other
- * end, and neither package imports the other.
+ * Match the wire marker in web's collab/identity.ts. Readers identify agents
+ * positively; an unmarked browser session must not be counted as an agent.
  */
 export const AGENT_CLIENT = "agent";
 
@@ -94,12 +60,8 @@ export interface Replica {
 }
 
 /**
- * Thrown by every tool once an update could not be appended to the log.
- *
- * Not recoverable in-process: the live replica holds a change the log does not,
- * so it can no longer be trusted to answer anything. A restart rebuilds it from
- * the log — losing the unlogged change, which was never durable in the first
- * place.
+ * A failed append leaves live state ahead of the authoritative log. Recovery
+ * requires a restart, which drops the unlogged change rather than serving it.
  */
 export class PersistenceError extends Error {
   readonly room: string;
@@ -141,12 +103,8 @@ export interface DocLinkRange {
 }
 
 /**
- * The `docLink` ranges in one block, in document order, with adjacent runs of
- * the same target merged — the same shape `commentRuns` gives an annotation
- * anchor, and the offsets `annotate` and `link_range` speak in.
- *
- * The one place the ranges are derived, so `get_doc` reports exactly the edges
- * the index unions in.
+ * Merge adjacent same-target runs in document order, using annotation offsets
+ * in UTF-16 units. Share this derivation between get_doc and the link index.
  */
 export function docLinkRanges(
   block: Block,
@@ -187,40 +145,19 @@ export class Replicas {
 
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
 
-  /**
-   * Document rooms currently publishing this session's presence, and the timer
-   * that withdraws each.
-   *
-   * Its own clock, deliberately not the caret's: a read publishes presence
-   * without drawing a caret, and the two expire independently. See
-   * {@link touch}.
-   */
+  /** Reads publish presence without a caret, so each has an independent TTL. */
   private readonly presenceTimers = new Map<string, NodeJS.Timeout>();
 
   /**
-   * Directory uuids whose stub changed and whose index rows have not caught up.
-   *
-   * Filled by the directory map's own observer, which Yjs runs before the
-   * document's `update` listener, and drained by {@link reconcileDirectory}
-   * once that listener has the update safely in the log. The two-step exists so
-   * reconciliation stays *after* the append — a failed append must not leave
-   * the index describing a write the log refused — while still knowing which
-   * handful of entries actually changed.
+   * The map observer collects changed stubs before the update listener runs;
+   * reconcile them only after that listener durably appends the update.
    */
   private readonly staleStubs = new Set<string>();
 
   /**
-   * Entries owed a reconciliation that is paced, and the moment each is due.
-   *
-   * Separate from {@link staleStubs} because the two deserve opposite
-   * treatment: a stub that just changed is reconciled at once, while work that
-   * lands here is rationed to one entry per drain. Two things arrive here — a
-   * reconciliation the store refused, due again after `reconcileRetryMs`, and a
-   * tombstone found still holding index rows at adoption time, due immediately.
-   *
-   * Insertion order is the queue order, and re-queuing deletes before setting,
-   * so an entry the store keeps refusing rotates to the back instead of
-   * monopolising the single slot.
+   * One due entry drains per pass: refused work waits reconcileRetryMs;
+   * indexed tombstones are due immediately. Fresh stubs bypass this queue.
+   * Re-queuing at the back prevents one persistent refusal starving the rest.
    */
   private readonly pacedStubs = new Map<string, number>();
 
@@ -236,10 +173,7 @@ export class Replicas {
   /** Monotonic process time of the last metadata write attempt. */
   private lastSyncWriteAt: number | null = null;
 
-  /**
-   * The first failure to persist an update, if any. Sticky and fatal by design
-   * — see {@link assertHealthy}.
-   */
+  /** The first failed append remains fatal until restart; see assertHealthy. */
   private persistenceFailure: { room: string; error: unknown } | null = null;
 
   private destroyed = false;
@@ -254,18 +188,14 @@ export class Replicas {
     this.publishOwnPresence = options.publishOwnPresence ?? true;
     this.agentName = "agent";
     this.sync = new HubSync(config, () => {
-      // A hub that just came up may hold docs (or updates) this replica set has
-      // never seen, so the next tool call settles again rather than answering
-      // from a state that was complete only while offline.
+      // A reconnect can reveal unseen documents; settle before serving again.
       this.settleNeeded = true;
     });
 
-    // The directory doc exists from boot: discovery is a synced doc, and every
-    // stub repair needs it in hand.
+    // Discovery reads this synced directory, not this process's creations.
+    // Attach from boot so stub repair and the first tool's hydration can use it.
     this.directory();
-    // So do the two curated workspace documents. Rooms attached from boot are
-    // ones the hub gets to fill before a tool reads them, so neither sidebar
-    // curation nor the tag catalog is guessed from an unhydrated empty doc.
+    // Hydrate curation and tags before tools read an otherwise empty replica.
     this.sidebar();
     this.settings();
     for (const pending of this.store.pendingRooms()) {
@@ -273,16 +203,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * Refuse to serve once an update could not be logged.
-   *
-   * The log is the authoritative replica, so a failed append leaves the live
-   * document ahead of the truth: it holds a change that a restart will not
-   * bring back. Serving reads from it would hand out state that is about to
-   * vanish, and serving writes would stack more of them. The failure is
-   * therefore sticky and every tool stops — a restart rebuilds the replica from
-   * the log and drops the unlogged change, which is the only honest outcome.
-   */
+  /** Refuse workspace reads and writes from state the log cannot restore. */
   assertHealthy(): void {
     const failure = this.persistenceFailure;
     if (failure === null) {
@@ -308,9 +229,7 @@ export class Replicas {
   setAgentName(name: string): void {
     this.agentName = name;
     for (const replica of this.replicas.values()) {
-      // Only where this session is already published. Renaming must not turn a
-      // passively attached document room — or one whose presence has expired —
-      // into a session the document shows.
+      // Renaming must not publish presence in passive or expired rooms.
       if (replica.awareness.getLocalState()?.user === undefined) continue;
       replica.awareness.setLocalStateField("user", this.userState());
     }
@@ -321,14 +240,7 @@ export class Replicas {
     return { name: this.agentName, color: this.config.color };
   }
 
-  /**
-   * The three fields that together *are* this session's presence: who it is,
-   * that it is an agent, and which session it is.
-   *
-   * Written as one and withdrawn as one. A marker or a session id outliving the
-   * `user` beside it would name a session the room no longer holds — a reader
-   * counting agents, or drawing an avatar, would answer from a leftover.
-   */
+  /** Keep user, agent marker and session ID together when publishing or withdrawing. */
   private presenceState(): {
     user: { name: string; color: string };
     client: string;
@@ -342,44 +254,9 @@ export class Replicas {
   }
 
   /**
-   * Publish this session's presence in a document room, because a tool call is
-   * reading or writing it, and withdraw it once the room goes untouched.
-   *
-   * Presence in a document means "this session is working here", not "this
-   * process exists": the server attaches a replica for every live document in
-   * the directory, so publishing on attach made one agent show up as a peer in
-   * every document at once. Attachment is therefore silent, and this is the one
-   * thing that speaks — called from the document-room access boundary in
-   * `tools/context.ts`, so a tool answering from the derived index or the directory
-   * stub never announces anything.
-   *
-   * Withdrawal removes the presence keys rather than dropping the whole state,
-   * because a peer never sees the drop. The hub re-encodes each inbound
-   * awareness update from a scratch `Awareness`, relaying only the clients that
-   * update leaves alive (`@hocuspocus/server`'s `MessageReceiver`), so a
-   * removal's client id is absent from what it broadcasts:
-   * `setLocalState(null)` would leave every peer holding this session's last
-   * presence — name, agent marker, session id — until y-protocols expires the
-   * entry 30 seconds later, showing an agent as working in a document it has
-   * left. Removing the keys is an ordinary update and lands at once; the caret
-   * is safe either way, because the cursor's own timer fires no later than
-   * presence and that update is relayed too. Only an *inbound* removal is
-   * swallowed: the hub broadcasts the one it generates itself when a connection
-   * closes (`Document.removeConnection`), which is what the web's
-   * departed-agent grace waits for.
-   *
-   * The price is that "not present" then has two shapes. A room this session has
-   * touched keeps a non-null local state for the rest of its life in this
-   * process — heartbeated by y-protocols and re-sent on every reconnect — where
-   * a never-touched room publishes nothing at all. No reader can see the
-   * difference today, because that residual is `{cursor: null}` or `{}` — no
-   * `user`, no anchor, nothing any reader counts or draws; one that counted
-   * awareness *entries* instead would count this server as present in every
-   * document it has ever opened, which is the bug #493 exists to fix.
-   *
-   * The workspace-level rooms are exempt — the directory publishes from attach
-   * because the "MCP connections" count reads it, and nobody renders the
-   * sidebar room.
+   * Publish only document-room tool access; index and stub reads stay silent.
+   * The directory publishes on attach for the workspace connection count;
+   * sidebar and settings rooms publish no document presence.
    */
   touch(replica: Replica): void {
     if (
@@ -403,6 +280,12 @@ export class Replicas {
       this.presenceTimers.delete(replica.room);
       const state = replica.awareness.getLocalState();
       if (state === null) return;
+      // The hub's MessageReceiver relays live clients after re-encoding inbound
+      // awareness, so setLocalState(null) would not reach peers for 30 seconds.
+      // Delete all presence keys together; the caret expires no later than this.
+      // A touched room retains heartbeated state across reconnects: readers must
+      // count user/marker fields, never raw awareness entries. Hub-generated
+      // connection-close removals still reach the web's departed-agent grace.
       const { user: _user, client: _client, session: _session, ...rest } = state;
       replica.awareness.setLocalState(rest);
     }, this.config.cursorTtlMs);
@@ -411,6 +294,7 @@ export class Replicas {
     this.presenceTimers.set(replica.room, timer);
   }
 
+  /** Discovery uses a directory hydrated, logged and synced like document rooms. */
   directory(): Replica {
     return this.ensureRoom(
       directoryRoom(this.config.workspaceId),
@@ -418,10 +302,7 @@ export class Replicas {
     );
   }
 
-  /**
-   * The workspace's sidebar replica — the curated navigation doc, hydrated,
-   * logged and synced exactly like the directory and like any document.
-   */
+  /** Curated navigation uses the same logged, synced replica as other rooms. */
   sidebar(): Replica {
     return this.ensureRoom(
       sidebarRoom(this.config.workspaceId),
@@ -463,11 +344,8 @@ export class Replicas {
 
     const doc = new Y.Doc();
     const awareness = new Awareness(doc);
-    // Attaching is not working here. Hydration, sync, search indexing and the
-    // directory-driven attach loop all open rooms passively, so a document room
-    // publishes nothing until a tool call touches it ({@link touch}); the
-    // directory is workspace-level presence and publishes from the moment it
-    // attaches.
+    // Passive room attachment is silent; only touch publishes document presence.
+    // The directory publishes immediately as workspace-level presence.
     if (this.publishOwnPresence && id === DIRECTORY_SUFFIX) {
       awareness.setLocalState(this.presenceState());
     } else {
@@ -486,10 +364,8 @@ export class Replicas {
       indexedThroughSeq: 0,
     };
 
-    // Which stubs changed is knowable only here: the update payload says a
-    // directory update happened, not which handful of entries it touched, and
-    // re-deriving the whole corpus per update would put a SQLite write per
-    // document behind every keystroke in a title.
+    // Only this observer identifies changed entries; an update payload cannot.
+    // Collect them here to avoid reindexing the whole corpus for a title edit.
     if (replica.isDirectory) {
       getDirectoryMap(doc).observe((event) => {
         for (const uuid of event.keysChanged) {
@@ -506,9 +382,8 @@ export class Replicas {
       });
     }
 
-    // Observe before hydrating. Replayed updates carry LOG_ORIGIN and are
-    // skipped, so hydration cannot double-log, and any update that arrives
-    // mid-hydration is still recorded.
+    // Observe before replay so live updates during hydration are still logged.
+    // LOG_ORIGIN avoids logging an already durable update twice.
     doc.on("update", (payload: Uint8Array, origin: unknown) => {
       if (origin === LOG_ORIGIN) {
         return;
@@ -516,14 +391,11 @@ export class Replicas {
       const kind: UpdateOrigin = this.sync.isRemoteOrigin(origin)
         ? "remote"
         : "local";
-      // The append (and, for a local change, its pending watermark) is one
-      // transaction, so an update is never logged without being remembered.
-      //
-      // A failure is recorded rather than thrown: this runs inside Yjs'
-      // transaction cleanup, where throwing can leave the document unable to
-      // emit later updates — which would turn a broken replica into a silent
-      // one, reporting `applied: true` for writes nothing ever logged. Recorded
-      // here, it stops every tool through `assertHealthy`.
+      // Synchronously commit local and remote updates during Yjs cleanup before
+      // a tool can return; local updates and pending watermarks commit together.
+      // Record failures instead of throwing from cleanup, which can suppress
+      // later update events and allow false applied:true answers. assertHealthy
+      // then refuses further workspace tools.
       let appendedSeq: number;
       try {
         appendedSeq = this.store.appendUpdate(room, payload, kind);
@@ -533,24 +405,18 @@ export class Replicas {
           room,
           error: String(error),
         });
-        // Quarantine before returning, and before any other listener on this
-        // document runs. Yjs calls every `update` listener in turn, and the
-        // Hocuspocus provider's listener is one of them: without this, the very
-        // mutation the log just refused would be broadcast to every other
-        // client, while this tool call reported `applied: false`.
+        // Disconnect before the provider's later update listener can broadcast
+        // a mutation the log refused and this tool reports as unapplied.
         this.sync.quarantine();
         return;
       }
-      // Another process can append to this room after our last settle and
-      // before this append. Replaying from the last cut used for indexing
-      // folds those rows in, plus this already-applied update as a no-op,
-      // before any derived row certifies itself through `appendedSeq`.
+      // Replay intervening peer appends before certifying the index's cut.
+      // Re-applying this already present Yjs update is harmless.
       try {
         this.catchUpForIndex(replica, appendedSeq);
       } catch (error) {
-        // The update is durable and the Y.Doc has it, so this is an index-cache
-        // failure rather than a persistence failure. A later settle replays
-        // from `lastSeq` and derives the rows again.
+        // This update is durable; only its index failed. A later settle replays
+        // from lastSeq and derives the rows again without poisoning the replica.
         log.warn("failed to catch up before indexing a document change", error);
         return;
       }
@@ -584,18 +450,8 @@ export class Replicas {
   }
 
   /**
-   * Apply everything in the log this replica has not seen.
-   *
-   * The snapshot and the tail come from one consistent read
-   * ({@link MirrorStore.readSince}), and that is the whole point: read
-   * separately, a compaction landing between them prunes the rows that bridge
-   * the two, and this replica would advance `lastSeq` past updates Yjs never
-   * received — a gap it can never close, because the snapshot that replaced
-   * them is now *behind* `lastSeq`.
-   *
-   * A snapshot whose `through_seq` is ahead of us is applied first: another
-   * instance compacted away the rows we were about to read, and the snapshot is
-   * exactly what replaced them.
+   * Hydrate only from the room log. readSince pins snapshot and tail together
+   * so compaction cannot prune an unseen gap; apply an ahead snapshot first.
    */
   private poll(replica: Replica): boolean {
     const replayed = this.replayLog(replica, replica.lastSeq);
@@ -606,21 +462,15 @@ export class Replicas {
     );
     const applied = replayed.applied;
     if (applied) {
-      // A replay is this replica catching up on writes it did not make — its own
-      // from before a restart, or another instance's on the same database.
+      // Replay restores durable writes; it must not claim a new authored change.
       this.afterChange(replica, false);
     }
     return applied;
   }
 
   /**
-   * Apply the room log after `fromSeq` without changing the settle watermark.
-   *
-   * Local appends deliberately do not advance `lastSeq`: pending-room release
-   * and compaction still use the existing poll-owned watermark. Indexing has a
-   * narrower need — prove which contiguous cut the current Y.Doc includes — so
-   * it tracks that cut separately and a later settle may harmlessly replay the
-   * same idempotent Yjs rows.
+   * Keep index replay separate from poll's lastSeq, used by pending release and
+   * compaction. A later settle may safely replay the same idempotent Yjs rows.
    */
   private replayLog(
     replica: Replica,
@@ -660,32 +510,17 @@ export class Replicas {
   }
 
   /**
-   * Repair a changed document's directory stub, then reindex it.
-   *
-   * `authored` says whether this server made the change being reacted to; only
-   * the stub's `updatedAt` depends on it, and {@link repairStub} explains why.
-   *
-   * The stub write comes first because it is document state — the one thing here
-   * that is not rebuildable — and this is the only place stubs are written:
-   * "upserted on create/rename" falls out of observing the document's own
-   * updates, local and remote alike, rather than being remembered at each call
-   * site.
-   *
-   * Guarded as a whole: the update it reacts to is already logged, so a failure
-   * must not turn an applied write into an error. The index is derived; the stub
-   * is repaired again on the next observed update or connect. A stub write that
-   * cannot itself be logged is *not* swallowed here — the directory replica's
-   * own observer records that as a sticky persistence failure, which stops every
-   * tool regardless of what this catch does.
+   * Repair the logged, non-rebuildable stub before deriving index rows for local
+   * and remote document updates. authored affects only updatedAt. Mirroring
+   * failures must not reject an already logged write; retry on updates or connect.
+   * A failed stub append still poisons the directory through its own observer.
    */
   private afterChange(replica: Replica, authored: boolean): void {
     if (replica.isDirectory) {
       this.reconcileDirectory();
       return;
     }
-    // Workspace-owned docs hold curation rather than document blocks or meta,
-    // so there is no stub to repair. A catalog change does affect the derived
-    // tag rows: re-index every held document against the new vocabulary.
+    // Workspace curation has no stub; a catalog change re-derives all tag rows.
     if (replica.isSettings) {
       for (const document of this.replicas.values()) {
         if (
@@ -706,11 +541,8 @@ export class Replicas {
           }
           this.indexRows(document, meta);
         } catch (error) {
-          // Catalog state is authoritative and logged; the index is only a
-          // cache. Nothing else would come back for this document — the
-          // catalog update is already applied, so no later settle replays it —
-          // so it joins the paced reconciliation queue that drains one entry
-          // per settle, the same one a refused stub reconciliation uses.
+          // The catalog update is already applied and will not replay; queue
+          // this cache repair explicitly so it gets a paced retry on settle.
           this.recordStubFailure(meta.uuid, error);
         }
       }
@@ -725,8 +557,7 @@ export class Replicas {
       if (meta.uuid === "") {
         return;
       }
-      // A tombstoned document must not come back through the index — not on a
-      // live update, and not on a rebuild.
+      // Live updates and rebuilds must keep archived documents out of the index.
       if (meta.kind === "decision") this.repairStub(meta, authored);
       if (decisionTopicArchived(this.directory().doc, meta.uuid)) {
         this.store.unindexDoc(meta.uuid);
@@ -740,18 +571,10 @@ export class Replicas {
   }
 
   /**
-   * One document's derived rows, read off the document itself.
-   *
-   * Link rows are the union of the curated `meta.links` and every inline
-   * `docLink` in the document's prose: an inline mention is a link edge, so
-   * backlinks answer for it without anyone duplicating the edge by hand.
-   * `meta.links` itself is never touched — it stays the curated list a human or
-   * an agent wrote. The store de-dupes the union and drops a self-link.
-   * Decision GitHub references come only from external hrefs in prose, using
-   * the schema's inline runs so a concurrent docLink retains precedence.
-   *
-   * One traversal for both the body text and the marks: looking each block's
-   * inline runs up by id would rescan the fragment per block.
+   * Derive body and marks in one traversal to avoid rescanning per block.
+   * Union curated links with inline prose/table links without changing meta;
+   * the store deduplicates and excludes self-links. Decision GitHub references
+   * use only external prose hrefs, with schema docLink precedence retained.
    */
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
@@ -793,25 +616,10 @@ export class Replicas {
   }
 
   /**
-   * Bring the derived index in line with the directory.
-   *
-   * A directory update changes which documents are supposed to be findable
-   * without changing any document, and nothing else notices: `afterChange`
-   * reacts to *document* updates, and `adoptKnownDocs` only ever attaches
-   * documents it has not attached before. Without this, an archive or a restore
-   * performed on another replica leaves this one's index as it was — and a
-   * restored document stays unsearchable here until somebody happens to edit
-   * it.
-   *
-   * Runs from the same observer that logs the directory update, so it fires for
-   * local and remote origins alike, and only after that update is durable. Only
-   * the entries that update actually changed are touched — see
-   * {@link staleStubs} — because the common directory write by far is a title
-   * being typed, not a document being archived.
-   *
-   * Deliberately does not repair stubs: that would write to the directory from
-   * inside the directory's own update handler. Titles are cached data, repaired
-   * from the document on the document's own updates, and on restore.
+   * Reconcile changed entries after local or remote directory updates are logged;
+   * archive/restore can change searchability without a document update.
+   * Never repair stubs inside their directory observer: repair cached titles
+   * from document updates or restore instead.
    */
   private reconcileDirectory(): void {
     const fresh = [...this.staleStubs];
@@ -822,16 +630,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * The one previously-failed entry due another attempt, if any.
-   *
-   * One, not all: a persistent refusal is usually a locked database, where each
-   * attempt spends SQLite's busy timeout before failing again. Retrying every
-   * queued entry on every settle would multiply that wait by the backlog and
-   * charge it to whichever tool call happened to arrive — a slow database would
-   * become a stalled server. Taking one per drain keeps any single call's cost
-   * flat while still draining the backlog, since every call takes the next one.
-   */
+  /** Retry one due entry per drain so busy-timeout waits cannot scale with backlog. */
   private stubDueForRetry(fresh: Set<string>): string | null {
     const now = Date.now();
     for (const [uuid, dueAt] of this.pacedStubs) {
@@ -845,12 +644,7 @@ export class Replicas {
     return null;
   }
 
-  /**
-   * Bring one document's index rows in line with its directory entry.
-   *
-   * Clears the entry's failure record first, so a stub that changed again is
-   * treated as fresh work rather than as a pending retry.
-   */
+  /** Clear the prior failure first: a changed stub counts as fresh reconciliation. */
   private reconcileStub(uuid: string): void {
     this.pacedStubs.delete(uuid);
     try {
@@ -866,10 +660,8 @@ export class Replicas {
         }
         return;
       }
-      // A live entry for a document this replica has never attached is left
-      // to `adoptKnownDocs`, which attaches and indexes it on the next
-      // settle. Attaching from in here would join rooms as a side effect of
-      // an observer.
+      // Leave attachment and indexing to the next settle's adoptKnownDocs;
+      // this observer must not join document rooms.
       if (!this.known(uuid)) {
         return;
       }
@@ -883,13 +675,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * Remember that an entry's reconciliation was refused.
-   *
-   * Never a give-up: the entry stays queued and a later drain takes it. Deleting
-   * before setting moves it to the back of the retry order, so one entry the
-   * store keeps refusing cannot starve the rest.
-   */
+  /** Keep refused entries queued at the back so later drains retry them fairly. */
   private recordStubFailure(uuid: string, error: unknown): void {
     this.pace(uuid, Date.now() + this.config.reconcileRetryMs);
     log.warn("failed to reconcile a directory entry", error);
@@ -901,14 +687,7 @@ export class Replicas {
     this.pacedStubs.set(uuid, dueAt);
   }
 
-  /**
-   * Whether this replica's index is in line with the directory for one
-   * document.
-   *
-   * False while a reconciliation is still owed for it — either because none has
-   * run yet, or because one ran and the store refused, in which case the uuid
-   * stays queued and a later settle retries it.
-   */
+  /** False until fresh or previously refused directory reconciliation succeeds. */
   indexReconciled(uuid: string): boolean {
     return !this.staleStubs.has(uuid) && !this.pacedStubs.has(uuid);
   }
@@ -919,41 +698,22 @@ export class Replicas {
   }
 
   /**
-   * Republish one document's stub from its own metadata, where this replica
-   * holds the document. Returns whether it could — i.e. whether the document is
-   * hydrated here.
-   *
-   * Stub repair otherwise rides document updates, and those skip tombstoned
-   * entries: a rename or a retag applied while a document was archived never
-   * reaches the directory. Restoring is the moment to catch up, or the document
-   * comes back under the title it was archived with while search answers from
-   * the newer one. Writes only when the stub and the document actually differ.
+   * Restore must refresh title/tags changed while archived, when ordinary stub
+   * repair was skipped. Write only differences; return false if not hydrated.
    */
   republishStub(uuid: string): boolean {
     if (!this.hydrated(uuid)) {
       return false;
     }
-    // A restore changes the directory, not the document, so it repairs the stub
-    // without claiming the document changed now.
+    // Restore repairs metadata without stamping a new document edit.
     this.repairStub(getMeta(this.replica(uuid).doc), false);
     return true;
   }
 
   /**
-   * Delete shadowed duplicate blocks as soon as this instance observes them.
-   *
-   * Two replicas re-typing one block concurrently converge on two elements
-   * sharing its id. Reads already skip the shadowed copy, but leaving it in the
-   * document leaves the stable-block-id invariant dented for every other
-   * consumer, so the first instance to see it deletes it. The winner is the
-   * document-order one — the same element every replica's reads resolve — so two
-   * instances repairing at once delete the same element and converge; a repair
-   * with nothing to do writes nothing.
-   *
-   * This is an ordinary local write: its update goes through the observer above
-   * and is logged like any other. Skipped on a poisoned replica for the same
-   * reason nothing else touches one — the document is ahead of its log, and a
-   * repair would add another change the log will not keep.
+   * Preserve the document-order winner used by reads so concurrent duplicate
+   * repairs converge on stable block IDs. Repairs are logged local writes;
+   * skip poisoned replicas and write nothing when no repair is needed.
    */
   private repairDuplicates(replica: Replica): void {
     if (this.persistenceFailure !== null) {
@@ -978,47 +738,10 @@ export class Replicas {
   }
 
   /**
-   * Bring the directory stub back in line with the document, and stamp it where
-   * this server authored the change it is reacting to.
-   *
-   * The cache-repair rule lives beside {@link directoryStubDiffers}. A
-   * tombstone is left alone — `upsertDirectoryEntry` keeps it
-   * sticky, but rewriting it on every observed update would churn the directory
-   * for nothing.
-   *
-   * The description is cached exactly like the title, and costs the directory
-   * exactly what a rename costs: it is written wholesale by `set_metadata`,
-   * so a change to it is a metadata change and publishes one directory update.
-   * There is no per-keystroke path into it — nothing edits a description a
-   * character at a time.
-   *
-   * Timestamps ride the same write, on this server's own clock:
-   *
-   * - `createdAt` is set once. Passing it on every repair costs nothing (the
-   *   schema keeps the existing one) and is what backfills a stub written
-   *   before the field existed, on the first repair.
-   * - `updatedAt` is stamped only for a change this server authored — `authored`
-   *   — because the field says when someone changed the document, not when a
-   *   replica noticed it. An update that merely arrived, a log replay, an index
-   *   rebuild and an archive restore all still repair a stub that disagrees, and
-   *   still backfill `createdAt`; they just never claim the document changed
-   *   now. A repair this server itself writes is authored even when received
-   *   state prompted it: the stamp records that document write, not the receipt.
-   *   Without that, hydrating a corpus stamped every document in it with today's
-   *   date and made "last changed" unreadable (#544).
-   * - An authored change stamps immediately when the metadata changed — that
-   *   write is happening anyway — and otherwise once the stored stamp is older
-   *   than `updatedAtCoarsenessMs`. A burst of edits to one document therefore
-   *   costs one directory update per window, not one per keystroke.
-   *
-   * The web uses the same comparison, with `transaction.local` where this
-   * server uses `authored`, and keeps its own clock, window and write gate.
-   *
-   * The stamp read back is the directory's resolved maximum, so a second
-   * replica that has already stamped this window suppresses this one's write
-   * too. Concurrent stamps keep the greater value even when that replica's
-   * whole-entry write loses Yjs ordering. A future-skewed value therefore
-   * stands until a later authored stamp exceeds it.
+   * Repair cached metadata without churning sticky tombstones. Description
+   * updates are whole-field metadata writes, like renames, not keystrokes.
+   * Cache comparisons are shared with web, which uses transaction.local,
+   * its own clock and its own coarseness window for authored stamping.
    */
   private repairStub(meta: DocMeta, authored: boolean): void {
     const directory = this.directory();
@@ -1032,10 +755,13 @@ export class Replicas {
     const staleStamp =
       stub?.updatedAt === undefined ||
       now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
+    // Stamp authored writes, including local repairs prompted by remote state,
+    // never receipt, replay, rebuild or restore. Metadata changes stamp now;
+    // content-only bursts share a coarseness window. The directory's resolved
+    // maximum suppresses peer stamps and keeps future-skewed values until a
+    // later authored stamp exceeds them, even if a whole-entry write loses.
     const stamp = authored && (metaChanged || staleStamp);
-    // Whether to write and whether to stamp are separate questions: a stub
-    // missing `createdAt` is written to backfill it even when nothing else
-    // changed and nothing is stamped.
+    // Backfill createdAt once even without other changes or an updatedAt stamp.
     if (!metaChanged && !stamp && stub?.createdAt !== undefined) {
       return;
     }
@@ -1043,17 +769,10 @@ export class Replicas {
       uuid: meta.uuid,
       title: meta.title,
       tags: meta.tags,
-      // Always stated, never carried forward: this replica holds the document,
-      // so it knows the authoritative answer — including that there is none,
-      // which the empty string is how to say. It is stated from THIS replica's
-      // copy of the document, which is the same discipline the title has: two
-      // replicas describing one document converge last-write-wins on the stub,
-      // and whichever of them saw the newer document then repairs the entry on
-      // its next observed update. The cache heals; it is not arbitrated.
+      // State this replica's answer, including absence. Stubs converge LWW;
+      // a replica holding newer document state repairs the cache on an update.
       description: meta.description ?? "",
-      // Always stated like description: this replica holds the authoritative
-      // document, so omission clears a stale cached lifecycle rather than
-      // carrying it forward.
+      // Explicit absence clears a stale cached lifecycle instead of retaining it.
       kind: meta.kind ?? "",
       status: meta.status ?? "",
       ...decisionFields,
@@ -1069,17 +788,9 @@ export class Replicas {
       includeDeleted: true,
     })) {
       if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
-        // A doc deleted elsewhere leaves the derived index; `list_docs` reads
-        // the directory, and search must not surface a tombstoned doc. This is
-        // the safety net for rows the observer never saw go stale — a mirror
-        // rebuilt from an older corpus, or a tombstone learned by replaying the
-        // log, where hydration is not an observed update.
-        //
-        // It asks rather than deletes, and hands any real work to the paced
-        // queue rather than doing it here. In steady state the rows are long
-        // gone, so this costs one indexed read and no write at all; when they
-        // are not, a whole backlog of deletes must not land on whichever tool
-        // call happens to arrive while the database is locked.
+        // Catch tombstones missed by observers during hydration or old rebuilds.
+        // Queue actual deletes so lock waits do not multiply with the backlog;
+        // an already absent index row costs only a read.
         if (!this.pacedStubs.has(entry.uuid) && this.store.isIndexed(entry.uuid)) {
           this.pace(entry.uuid, 0);
         }
@@ -1100,14 +811,9 @@ export class Replicas {
   }
 
   /**
-   * Bring this instance up to date before a tool serves.
-   *
-   * Always: replay the log tail (another MCP instance's writes) and attach any
-   * newly discovered document. Additionally, when a hub connection is worth
-   * waiting for — boot, or a reconnect — wait briefly for the directory and the
-   * documents it names to sync, so a fresh client with an empty database can
-   * enumerate and search the whole corpus. Bounded and skipped entirely when
-   * the hub is unreachable: no tool call blocks on the network.
+   * Before tools read, poll every replica for peer writes and attach discovered
+   * documents. Boot/reconnect hydration waits are bounded and skipped when the
+   * hub is unreachable, so fresh clients can enumerate and search after syncing.
    */
   async settle(options: { requireHealthy?: boolean } = {}): Promise<void> {
     const requireHealthy = options.requireHealthy !== false;
@@ -1118,19 +824,13 @@ export class Replicas {
       return;
     }
 
-    // A poisoned replica does nothing at all — not even the parts that look
-    // read-only. Polling reindexes from a document that is ahead of the log and
-    // repairs directory stubs from it; compaction would fold the unlogged change
-    // into a snapshot and make it durable, which is how a write reported as
-    // refused came back after a restart. Diagnostics may look, never touch.
+    // Diagnostics may inspect poisoned state, never refresh it: index/stub
+    // repair would expose unlogged changes, and compaction would make them durable.
     if (this.persistenceFailure !== null) {
       return;
     }
 
-    // Concurrent tool calls share one settle. Without this, the first caller
-    // would clear `settleNeeded` and then await hub hydration while a second
-    // caller sails past and answers from a directory, document set or index
-    // that is still filling up.
+    // Share hydration with concurrent callers so none serves a half-filled corpus.
     const inFlight = this.settling;
     if (inFlight !== null) {
       await inFlight;
@@ -1153,23 +853,13 @@ export class Replicas {
       this.settling = null;
     }
 
-    // Re-checked after the waits: an append can fail at any moment, including
-    // while this call was waiting on the hub. Serving what follows would answer
-    // from a replica that stopped being the log mid-call.
+    // An append may fail during the waits; re-check before serving any result.
     if (requireHealthy) {
       this.assertHealthy();
     }
   }
 
-  /**
-   * Run one hub-free engine pass.
-   *
-   * This is the local half of {@link settle}: replay the log tail, attach newly
-   * discovered documents, repair derived state, release pending markers whose
-   * providers are already quiet, and compact. It never waits for the hub, so a
-   * transport-free engine may call it on every refresh tick even while the hub
-   * is unavailable.
-   */
+  /** Synchronous local settle work, safe on refresh ticks without waiting for the hub. */
   refresh(): void {
     this.assertHealthy();
     if (this.destroyed || this.persistenceFailure !== null) {
@@ -1190,10 +880,8 @@ export class Replicas {
   private refreshReplicas(): void {
     this.pollAll();
     this.adoptKnownDocs();
-    // Retry whatever the store refused last time. Reconciliation normally rides
-    // directory updates, and a failed entry would otherwise wait for the next
-    // one — which may never come for a document nobody touches again. At most
-    // one previously-failed entry is retried per call; see stubDueForRetry.
+    // Retry even without another directory update; each call drains at most
+    // one previously refused entry, so untouched documents still recover.
     if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
       this.reconcileDirectory();
     }
@@ -1205,9 +893,7 @@ export class Replicas {
     if (this.sync.enabled && this.settleNeeded) {
       try {
         await this.sync.waitForQuiet();
-        // Re-checked after every wait: an append that failed while we waited
-        // (a remote update, say) means everything below would be working from a
-        // document the log does not back.
+        // Re-check after each await: remote appends can fail while waiting.
         if (this.persistenceFailure !== null) return;
         this.pollAll();
         if (this.adoptKnownDocs() > 0) {
@@ -1216,16 +902,8 @@ export class Replicas {
           this.pollAll();
         }
       } finally {
-        // Cleared only once the wait is over — a caller joining this settle is
-        // waiting for exactly that, and a caller arriving after it should not
-        // repeat it.
-        //
-        // Unless the corpus is still joining the hub: rooms attach in waves and
-        // a settle is one wave's budget, so a fresh client's queue outlasts it.
-        // Hydration is not complete while rooms are still queued, and the wait
-        // does not grow to cover them — this call keeps the budget it promised
-        // and the settle stays owed, so the next call resumes the drain instead
-        // of answering from a corpus that never finished arriving.
+        // Clear only after waiting. Queued room waves keep settling owed on
+        // the next call without extending this call's hydration budget.
         this.settleNeeded = this.sync.isDraining();
       }
     }
@@ -1269,14 +947,9 @@ export class Replicas {
   }
 
   /**
-   * A room whose local changes reached the hub is no longer pending.
-   *
-   * Released only through `min(marker, lastSeq)` — at most what *this* replica
-   * has applied, and therefore at most what its provider can have had
-   * acknowledged. The marker in the database is not a safe watermark on its own:
-   * another process can raise it between this replica's poll and this read, and
-   * clearing through it would forget a change nobody has seen acknowledged. A
-   * room with no replica here is left entirely alone.
+   * Clear quiet rooms only through min(marker, lastSeq), the cut this replica
+   * could have acknowledged. A peer may raise the marker after our poll;
+   * unknown rooms and updates beyond our applied cut must remain pending.
    */
   private releaseQuietRooms(): void {
     for (const pending of this.store.pendingRooms()) {
@@ -1291,13 +964,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * Replace a long log prefix with a state snapshot.
-   *
-   * `lastSeq` — everything this replica has provably applied — is the cut, so
-   * the snapshot always covers what it deletes, and both happen in one SQLite
-   * transaction.
-   */
+  /** Snapshot and prune atomically through lastSeq, which this replica has applied. */
   private compactLargeLogs(): void {
     // Never from a replica that is ahead of its log: the snapshot would make the
     // unlogged change durable, which is worse than the failure that caused it.
@@ -1325,13 +992,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * Throw the derived index away and rebuild it from the replicas.
-   *
-   * Exists to keep the invariant honest: FTS5, tags and links are derived from
-   * the Y.Docs, which are derived from the log. Nothing is lost by deleting
-   * them.
-   */
+  /** FTS5, tags and links are rebuildable from log-hydrated Y.Docs, never authoritative. */
   rebuildIndex(): void {
     this.store.clearDerived();
     this.adoptKnownDocs();
@@ -1341,12 +1002,7 @@ export class Replicas {
     }
   }
 
-  /**
-   * Publish this agent's caret in a block, in y-prosemirror's wire format: an
-   * encoded relative position under `cursor` (`{anchor, head}`), alongside the
-   * `user` field the web UI renders. The cursor is withdrawn after a TTL — an
-   * agent that wrote once and went away must not leave a caret behind forever.
-   */
+  /** Publish a TTL-bound caret using y-prosemirror's cursor {anchor, head} wire format. */
   publishCursor(replica: Replica, blockId: string, index: number): void {
     if (!this.publishOwnPresence) {
       return;
@@ -1386,10 +1042,8 @@ export class Replicas {
     // Never a reason to hold the process open.
     timer.unref?.();
     this.cursorTimers.set(replica.room, timer);
-    // Drawing a caret is working in the document, and a caret must never be
-    // drawn without the name beside it (#304). Re-arming presence *after* the
-    // cursor's own timer is what keeps the identity alive at least as long as
-    // the caret it labels, however long the write that drew it took.
+    // Arm presence after the caret timer so identity lasts at least as long as
+    // the caret, regardless of how long the write took.
     this.touch(replica);
   }
 

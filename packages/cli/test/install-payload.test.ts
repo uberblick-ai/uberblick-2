@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   REPO_ROOT,
@@ -316,7 +316,7 @@ describe("the versioned install payload", () => {
     pointAt(box, `ws://127.0.0.1:${hubPort}`);
     const opened = spawn("ub", ["open", "--no-browser", "--port", String(webPort)], {
       cwd: box.cwd,
-      env: runtimeEnv(box),
+      env: { ...runtimeEnv(box), HUB_GITHUB_CLIENT_ID: "Iv23AbCdEF0123456789" },
     });
     let stdout = "";
     let stderr = "";
@@ -337,6 +337,16 @@ describe("the versioned install payload", () => {
       expect(await (await fetch(`http://127.0.0.1:${webPort}/`)).text()).toContain(
         "payload web",
       );
+      const claimState = await fetch(`http://127.0.0.1:${hubPort}/auth/claim-state`);
+      expect(claimState.status).toBe(200);
+      expect(await claimState.json()).toEqual({ unclaimed: false, canClaim: false });
+      for (const path of ["/auth/github/start", "/auth/credential/renew"]) {
+        const refused = await fetch(`http://127.0.0.1:${hubPort}${path}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+        });
+        expect(refused.status).toBe(503);
+        expect(await refused.json()).toMatchObject({ status: "not-configured" });
+      }
       expect(stderr).not.toMatch(/mise run|pnpm|building/);
     } finally {
       if (opened.exitCode === null && opened.signalCode === null) opened.kill("SIGINT");

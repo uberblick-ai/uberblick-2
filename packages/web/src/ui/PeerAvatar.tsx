@@ -1,12 +1,7 @@
 /**
- * The circle a session is drawn as (#494).
- *
- * One avatar language in two places: the status line's collaborator controls
- * and the sync panel's present-now list.
- *
- * The name initial is primary for every session. An agent adds one small robot
- * badge. Live sessions use their caret colour; retained departures use muted
- * ink and a dashed ring without lowering the initial's contrast.
+ * Use the same session avatar in compact status and details: name initial
+ * plus an agent badge, live caret colour, or full-strength muted ink and
+ * dashed ring for departures.
  */
 
 import type { ReactElement } from "react";
@@ -19,13 +14,8 @@ const AGENT_GLYPH = "🤖";
 const NO_INITIAL = "?";
 
 /**
- * The first *character* of a name, upper-cased — by code point, so a name
- * starting outside the BMP contributes one glyph rather than half a surrogate
- * pair. Trimmed first: a leading space is not an initial.
- *
- * Exported because the sidebar's identity tiles (#482) draw a first character
- * too. One rule, so a workspace tile and a session circle never disagree about
- * what the first character of the same string is.
+ * Take the first trimmed Unicode code point and uppercase it; shared sidebar
+ * initials must follow this same rule without splitting surrogate pairs.
  */
 export function initialOf(name: string): string {
   const [first] = Array.from(name.trim());

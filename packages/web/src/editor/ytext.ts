@@ -1,11 +1,6 @@
 /**
- * Reading a Y.XmlText as plain text.
- *
- * `Y.XmlText.prototype.toString()` is an XML serialiser, not a text accessor: a
- * formatting mark comes back as a tag, so an annotated block reads as
- * `The <comment threadId="…">quick</comment> brown fox`. Every place that wants
- * the block's source scans the delta instead — the same thing the schema
- * package's internal `readText` does.
+ * Read delta string inserts for source text. Y.XmlText.toString serializes XML,
+ * so formatting would otherwise leak into copied or parsed source as tags.
  */
 
 import * as Y from "yjs";

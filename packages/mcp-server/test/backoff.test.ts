@@ -46,8 +46,7 @@ describe("socket reconnect band", () => {
 
 describe("rebuild ladder band", () => {
   it("draws each rung from half its ceiling to the ceiling", () => {
-    // The ladder the fixed version walked exactly — 250, 500, 1000 — is now the
-    // top of each rung's band.
+    // Each doubled ceiling bounds its rung's jitter band.
     expect(rebuildDelayMs(0, 250, 2_000, () => 0)).toBe(125);
     expect(rebuildDelayMs(0, 250, 2_000, () => 1)).toBe(250);
 

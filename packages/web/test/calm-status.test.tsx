@@ -1,10 +1,10 @@
 /**
- * The sync indicator's timing contract (#76).
+ * The sync indicator's timing contract.
  *
- * The status line used to redraw once per keystroke, because that is how often
- * the provider actually goes unsynced and back. `useCalmSyncState` is the whole
- * fix, so this pins the numbers that define it: busy has to persist before it
- * is drawn, good news has to hold before it is believed, and bad news is never
+ * The provider can go unsynced and back on every keystroke.
+ * `useCalmSyncState` must keep that from redrawing the status each time:
+ * busy has to persist before it is drawn, good news has to hold before it is
+ * believed, and bad news is never
  * delayed at all.
  *
  * Two deliberate choices about how it is pinned:
@@ -204,7 +204,7 @@ describe("the sync indicator only draws a state that has persisted", () => {
     const view = probe(room());
     view.feed(OFFLINE);
     // No timer advanced: offline is on screen as soon as it is reported, which
-    // is what keeps #49's "surfaces within ~5s" true.
+    // keeps the disconnect visible within ~5s.
     expect(view.shown()).toBe("offline");
   });
 });

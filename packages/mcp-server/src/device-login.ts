@@ -4,11 +4,11 @@ import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs
 import { dirname, join } from "node:path";
 import { type StoredHubLogin, isHubLogin, readHubLogins, replaceHubLogin } from "./auth-store.js";
 import { LockWaitTimeoutError, acquireInitLock } from "./init-lock.js";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "./protocol.js";
+import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { authenticationOrigin } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
-import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "./token.js";
+import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;
@@ -31,10 +31,10 @@ export interface DeviceLoginOptions {
   env?: NodeJS.ProcessEnv;
   /** Credential used by the refused connection, never a credential from configuration. */
   rejected?: StoredHubLogin;
-  /** A successful promotion just granted this workspace; refresh an older no-access snapshot. */
+  /** Bypass a stale no-access cooldown after promotion grants this workspace. */
   membershipGranted?: boolean;
   signal?: AbortSignal;
-  /** How long a renewal outcome is shared; {@link DEVICE_RENEWAL_COOLDOWN_MS} unless a test shortens it. */
+  /** Duration for sharing a renewal outcome. */
   renewalCooldownMs?: number;
 }
 
@@ -161,9 +161,9 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
     let body = await readRenewalReply(response);
     if (body === null) return invalid();
     if (ifWorkspacesChanged && response.status === 400 && body.status === "invalid-request" && Object.keys(body).length === 1) {
-      // Hubs may reject the conditional field before checking version. Probe once
-      // without a credential under the same deadline; never retry a proof that
-      // could retire the working key, and accept only a protocol mismatch.
+      // If the conditional field is refused before version checking, probe once
+      // without a credential, within this deadline. Accept only protocol skew;
+      // retrying a proof could retire the working credential.
       response = await request(wrapToken(""));
       body = await readRenewalReply(response);
       if (body === null || response.status !== 409 || body.status !== "protocol-mismatch") return invalid();
@@ -194,8 +194,8 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
 }
 
 /**
- * The origin lock spans the bounded exchange; the config lock spans conditional publication.
- * Reread after either lock so concurrent renewal, login and logout win.
+ * The origin lock spans one bounded exchange; the config lock spans publication only.
+ * Reread under both locks to preserve concurrent renewal, login and logout.
  */
 export async function ensureDeviceLogin(endpoint: string, workspace: string, options: DeviceLoginOptions = {}): Promise<DeviceLoginResult> {
   const env = options.env ?? process.env;
@@ -225,8 +225,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
     if (cached !== null && cached.retryAt > Date.now() &&
         !(options.membershipGranted && !current.login.credential.record.workspaces.includes(workspace))) {
-      // Reuse replacements for old refusals; cool down refusals of the new key
-      // instead of repeatedly retiring every process's working credential.
+      // Reuse replacements for old connections; cool down a new credential's
+      // refusal to avoid repeatedly retiring other processes' working keys.
       if (cached.status === "renewed" && options.rejected !== undefined &&
         sameCredential(current.login, options.rejected) && current.login.credential.record.workspaces.includes(workspace)) return offline(origin);
       return cachedResult(cached, origin, workspace, current.login);
@@ -237,8 +237,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       (options.rejected === undefined || !sameCredential(expected, options.rejected)), options.signal);
     if (typeof result === "object" && "identity" in result) {
       try {
-        // Issuance retires the old key: finish bounded conditional publication
-        // even after cancellation; concurrent login/logout still wins.
+        // The old key is retired: finish bounded publication despite cancellation;
+        // conditional replacement still lets concurrent login/logout win.
         await replaceHubLogin(origin, expected, result, env);
       } catch {
         options.signal?.throwIfAborted();
@@ -246,7 +246,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       }
       current = readDeviceLogin(endpoint, workspace, env);
       if (current.status !== "ready") return current;
-      // A concurrent login supersedes this exchange's authority; use its newer credential.
+      // A concurrent login has its own authority; this exchange cannot describe it.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
       publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + cooldownMs,
         status: "renewed" } satisfies Outcome));
