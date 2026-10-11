@@ -1,4 +1,4 @@
-import { resolveDecisionTopics, tombstoneDirectoryEntry, unpinDocIncludingUnseen } from "@uberblick/schema";
+import { archiveDocument } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -41,7 +41,6 @@ export const archiveDocOperation = operation("archive_doc", inputSchema, (contex
   const directory = replicas.directory();
   const sidebarReplica = replicas.sidebar();
   const title = titleFor(uuid, stub);
-  const affected = resolveDecisionTopics(directory.doc).find(topic => topic.records.some(record => record.uuid === uuid))?.records.map(record => record.uuid) ?? [uuid];
   const { completed, stage } = roomStages(
     replicas,
     "archive_doc",
@@ -55,29 +54,8 @@ export const archiveDocOperation = operation("archive_doc", inputSchema, (contex
     (_purpose, failedAt) => ARCHIVE_RECOVERY[failedAt] ?? ARCHIVE_RECOVERY.other,
   );
 
-  // The directory first, so a refused append leaves the document listed and
-  // pinned rather than unpinned and still listed: an archive nobody can see
-  // is worse than a pin the reader can still remove. The unpin follows only
-  // once the tombstone is durable.
-  stage("directory", directory, () => {
-    tombstoneDirectoryEntry(directory.doc, uuid);
-  });
-  // Unconditionally, and without asking this replica whether it holds a
-  // pin: `settle()` is not a promise that the sidebar arrived, so a pin
-  // made elsewhere can still be in flight, and skipping the write would let
-  // it merge in behind the tombstone and leave the document archived *and*
-  // pinned for good. Raising the unpin count past everything this replica
-  // can see hides such a pin when it lands, as long as it was stamped at or
-  // below that ceiling; one stamped above it — made under an unpin this
-  // replica has not received either — still surfaces, which is #969's
-  // window and what the description tells the caller to expect. A
-  // deliberate `pin_doc` after the archive wins in every case. The sidebar
-  // is therefore always a room this call wrote, and `rooms` always names
-  // it.
-  stage("sidebar", sidebarReplica, () => {
-    sidebarReplica.doc.transact(() => {
-      for (const recordUuid of affected) unpinDocIncludingUnseen(sidebarReplica.doc, recordUuid);
-    });
+  const affected = archiveDocument(directory.doc, sidebarReplica.doc, uuid, (purpose, write) => {
+    stage(purpose, purpose === "directory" ? directory : sidebarReplica, write);
   });
   return {
     uuid,

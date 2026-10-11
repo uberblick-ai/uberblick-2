@@ -35,6 +35,7 @@ export {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
   META_KEY,
+  decisionContentLocked,
   getAnnotationsMap,
   getBlocksFragment,
   getMeta,
@@ -57,6 +58,7 @@ export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, 
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
 export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
+export { archiveDocument } from "./lifecycle.js";
 
 export {
   appendBlock,

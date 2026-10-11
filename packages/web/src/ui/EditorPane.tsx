@@ -6,6 +6,7 @@
 import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
+  decisionContentLocked,
   getAnnotation,
   getBlocksFragment,
   getMeta,
@@ -56,8 +57,7 @@ import type { SelectThread, ThreadView } from "./threads.js";
 
 /** Read the document itself, including before its React subscription answers. */
 function isDecided(connection: RoomConnection): boolean {
-  const meta = getMeta(connection.ydoc);
-  return meta.kind === "decision" && meta.status === "decided";
+  return decisionContentLocked(getMeta(connection.ydoc));
 }
 
 /**
@@ -979,7 +979,7 @@ export function EditorPane({
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
-  const decided = meta?.kind === "decision" && meta.status === "decided";
+  const decided = meta !== null && decisionContentLocked(meta);
   const contentReadOnly = archived || decided;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
