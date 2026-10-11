@@ -1,9 +1,8 @@
 /**
- * The peer strip's avatars (#494).
+ * The peer strip's avatars.
  *
  * The strip is the constrained surface: a circle is all a reader sees, so
- * everything a name used to carry has to be in the hover and in the
- * accessibility tree instead.
+ * the session name and details must be in the hover and accessibility tree.
  *
  * Three things are worth a test and the rest is not. The *label* is a pure
  * function of a reading, so it is asserted as one. One live case is the
@@ -36,7 +35,7 @@ import type { ReactElement } from "react";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import { PeerCluster } from "../src/ui/PeerCluster.js";
 import { usePresence } from "../src/ui/hooks.js";
-import { presenceLabel, samePresence } from "../src/ui/doc-chrome.js";
+import { groupAgentPresence, presenceLabel, samePresence } from "../src/ui/doc-chrome.js";
 import type { RemotePresence } from "../src/ui/doc-chrome.js";
 import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -136,6 +135,23 @@ describe("the compact collaborator cluster", () => {
     );
   }
 
+  it("uses a live session caret for its label and activation when another connection is idle", () => {
+    const idle = reading({ clientId: 10, block: null, blockId: null });
+    const editing = reading({ clientId: 20 });
+    const activate = vi.fn();
+    const view = render(<PeerCluster presence={groupAgentPresence([idle, editing])} onActivate={activate} />);
+    const control = within(view.container).getByRole<HTMLButtonElement>("button", {
+      name: `Claude Code · agent · ${SESSION} · editing block 5`,
+    });
+    act(() => control.click());
+    expect(activate).toHaveBeenCalledWith(editing);
+
+    view.rerender(<PeerCluster presence={groupAgentPresence([idle, { ...editing, departed: true }])} onActivate={activate} />);
+    expect(within(view.container).getByRole("button", {
+      name: `Claude Code · agent · ${SESSION}`,
+    })).toBe(control);
+  });
+
   it("caps the circles at three and makes every remaining session operable", () => {
     const activate = vi.fn();
     const view = render(<PeerCluster presence={peers(5)} onActivate={activate} />);
@@ -166,12 +182,39 @@ describe("the compact collaborator cluster", () => {
     expect(screen.queryByRole("dialog", { name: "More collaborators" })).toBeNull();
   });
 
+  it("counts a session once in overflow and keeps its focused control through connection changes", () => {
+    const roster = peers(5);
+    const agent = roster[3]!;
+    const draw = (connections: RemotePresence[]) => groupAgentPresence(connections);
+    const view = render(<PeerCluster presence={draw([
+      ...roster, { ...agent, clientId: 6, departed: true },
+    ])} />);
+    const more = within(view.container).getByRole<HTMLButtonElement>("button", { name: "2 more collaborators" });
+    act(() => more.click());
+    const label = `Peer 4 · agent · ${SESSION} · editing block 4`;
+    const row = screen.getByRole<HTMLButtonElement>("button", { name: label });
+    expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+    act(() => row.focus());
+    view.rerender(<PeerCluster presence={draw([
+      ...roster.slice(0, 3), { ...agent, clientId: 6 }, roster[4]!,
+    ])} />);
+    expect(screen.getByRole("button", { name: label })).toBe(row);
+    expect(document.activeElement).toBe(row);
+    view.rerender(<PeerCluster presence={draw([
+      ...roster.slice(0, 3), { ...agent, clientId: 6, departed: true }, roster[4]!,
+    ])} />);
+    expect(screen.getByRole("button", { name: `Peer 4 · agent · ${SESSION} · left` })).toBe(row);
+    expect(document.activeElement).toBe(row);
+    expect(within(view.container).getByRole("button", { name: "2 more collaborators" }).textContent).toBe("+2");
+  });
+
   it("marks retained avatars and overflow rows as left, then restores their live display", () => {
     vi.useFakeTimers();
     const visible = reading({ departed: true });
     const overflowPeer = reading({
       clientId: 4,
       name: "Overflow Agent",
+      session: "overflow-session",
       departed: true,
     });
     const sessions = [visible, ...peers(3).slice(1), overflowPeer];
@@ -195,7 +238,7 @@ describe("the compact collaborator cluster", () => {
     }).click());
     const row = within(screen.getByRole("dialog", { name: "More collaborators" }))
       .getByRole<HTMLButtonElement>("button", {
-        name: `Overflow Agent · agent · ${SESSION} · left`,
+        name: "Overflow Agent · agent · overflow-session · left",
       });
     expect(row.textContent).toContain("agent · left");
     expect(row.querySelector(".ub-avatar-departed")).not.toBeNull();

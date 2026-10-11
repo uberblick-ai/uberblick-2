@@ -1,28 +1,8 @@
 /**
- * Where uberblick keeps a user's files — one answer, for every process and
- * every platform.
- *
- * **One layout.** `XDG_CONFIG_HOME` and `XDG_DATA_HOME` when they name absolute
- * directories, and `~/.config` / `~/.local/share` otherwise:
- * `<config home>/uberblick/{config,credentials}.json` and
- * `<data home>/uberblick/{hub,<uuid>}.sqlite`. macOS included — there is no
- * platform branch, so a resolution has no `platform` to be told, cannot depend
- * on where the tests run, and cannot fail.
- *
- * The two variables are resolved independently — each is honoured when it names
- * an absolute directory and falls back to its own default otherwise — so
- * setting `XDG_CONFIG_HOME` alone moves the config root and leaves the
- * databases under `~/.local/share/uberblick`.
- *
- * **Nothing here creates anything.** Resolution is string joins; the writers
- * (`ub workspace create`, the replicas, the hub) create directories when they write.
- *
- * The CLI and MCP clients share this desktop layout. The released hub takes
- * its database path from `HUB_DB_PATH` instead.
- *
- * `HUB_DB_PATH` and `UBERBLICK_DB` are unchanged and untouched by any of this:
- * they name a file outright, and a file someone named outright is not a layout
- * question. They are applied by their own packages, above this default.
+ * CLI and MCP resolve roots independently on every platform: absolute XDG config
+ * and data roots override ~/.config and ~/.local/share respectively. Resolution
+ * creates nothing; callers apply HUB_DB_PATH and UBERBLICK_DB above these defaults.
+ * The released hub takes its database path from HUB_DB_PATH.
  */
 
 import { mkdirSync } from "node:fs";
@@ -36,7 +16,7 @@ export interface StorageOptions {
 export interface StoragePaths {
   /** Holds `config.json`, `credentials.json` and `ub workspace create`'s lock. */
   configDir: string;
-  /** The data root: everything durable is under it, and it is what to name. */
+  /** Root of this layout's durable data. */
   dataDir: string;
   /** The hub's document persistence, absent `HUB_DB_PATH`. */
   hubDatabase: string;
@@ -50,11 +30,7 @@ const XDG_DIR = "uberblick";
 const HUB_DATABASE = "hub.sqlite";
 
 /**
- * `<uuid>.sqlite` — the workspace database filenames this layout produces.
- *
- * Exported because `ub workspace list` enumerates them: the module that decides
- * what the files are called is the one that says how to recognise them, and two
- * copies of this pattern would be two answers to "is this file ours".
+ * Keep workspace enumeration consistent with this layout's UUID filenames.
  */
 export const WORKSPACE_DATABASE_FILE =
   /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.sqlite$/;
@@ -65,12 +41,8 @@ function trimmed(value: string | undefined): string | null {
 }
 
 /**
- * An `XDG_*` value, or null when there is none to honour.
- *
- * The XDG base directory spec says a relative value "must be ignored", and it
- * is right: resolving one against the working directory would put a machine's
- * config and databases in as many places as the command is started from.
- * Ignored means *unset*, so such a value is not an override either.
+ * Ignore empty or relative XDG values so the working directory cannot change
+ * storage identity; an ignored value uses the same fallback as an unset one.
  */
 function xdgDir(value: string | undefined): string | null {
   const text = trimmed(value);
@@ -78,31 +50,21 @@ function xdgDir(value: string | undefined): string | null {
 }
 
 /**
- * Create a directory in the user's storage tree, owner-only, parents included.
- *
- * The first writer is whoever runs first — the hub opening `hub.sqlite`, a
- * replica opening its workspace file, `ub workspace create` writing `credentials.json` —
- * and `mkdirSync` applies its mode only to directories it creates. So a
- * process that made `uberblick/` at the umask's 0755 would leave every later
- * `mode: 0o700` a no-op on a directory anyone can already read. One helper, so
- * that whichever of them is first creates the same thing. (`0o700` is safe
- * under any umask: a umask can only clear permission bits, never add them.)
+ * All first writers use owner-only creation: mkdir's mode cannot repair an
+ * existing directory. The umask can only remove permission bits from 0o700.
  */
 export function createDataDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
 }
 
 /**
- * The home directory, from the environment being resolved rather than from the
- * process. On POSIX `os.homedir()` reads exactly this variable; taking it from
- * the environment argument is what makes a resolution against a throwaway home
- * possible without touching the process's own.
+ * Resolve against the supplied HOME without mutating the process environment.
  */
 function home(env: NodeJS.ProcessEnv): string {
   return trimmed(env.HOME) ?? homedir();
 }
 
-/** Resolve the layout. It is the same one everywhere, and it cannot throw. */
+/** Resolve paths without opening files or platform-specific branches. */
 export function resolveStorage(options: StorageOptions = {}): StoragePaths {
   const env = options.env ?? process.env;
   const configHome = xdgDir(env.XDG_CONFIG_HOME) ?? join(home(env), ".config");

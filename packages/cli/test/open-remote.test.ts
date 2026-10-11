@@ -1,8 +1,8 @@
 /**
  * `ub open` against an upstream hub: device admission, recovery of remote
  * sharing, durable browser and MCP edits through the shared store, presence
- * across a reconnect, and the served search and status readings. Split from
- * `open.test.ts`, whose header explains the real-world rig; the fixtures are in
+ * across a reconnect, and the served search and status readings. The
+ * `open.test.ts` header explains the real-world rig; the fixtures are in
  * `open-fixtures.ts`.
  */
 
@@ -51,7 +51,7 @@ import {
 afterEach(cleanUp);
 
 /**
- * #752's budget: an MCP write reaches a served tab within 250 ms at p95.
+ * An MCP write reaches a served tab within 250 ms at p95.
  *
  * A round is 20 samples. Transient stalls on a host shared with other suites can
  * spoil a round without the product being slow, so a missed round is retaken,

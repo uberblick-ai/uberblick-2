@@ -1,21 +1,8 @@
 /**
- * Changing a block's type from the editor.
- *
- * The invariant: a block-type change preserves the block id and the
- * text delta, marks included. Never delete-and-reinsert, which churns ids and
- * orphans annotation anchors.
- *
- * `setNodeMarkup` is the ProseMirror move that satisfies it: it swaps the node
- * type in place and leaves the content untouched, and the new attributes are
- * built from the old node's, so the id carries over verbatim.
- *
- * What y-prosemirror then does with it is worth knowing. `updateYFragment`
- * compares node names, so a re-typed block does not match its Y.XmlElement and
- * gets replaced: a new element with the same id and a rebuilt Y.XmlText (marks
- * included, via `marksToAttributes`). The block keeps its identity, its text and
- * its annotations, but the CRDT items behind the text are new — so a *concurrent*
- * edit to the same block loses its characters. That is the same trade-off the
- * schema package documents for `setBlockType`, arrived at from the other side.
+ * Retype with setNodeMarkup, preserving the block id and marked text rather
+ * than deleting/reinserting its logical identity. y-prosemirror still replaces
+ * the underlying element/text because node names differ: concurrent edits to
+ * the replaced text can be lost, as with schema setBlockType.
  */
 
 import type { Editor } from "@tiptap/core";
@@ -54,23 +41,10 @@ export function selectedBlock(
 }
 
 /**
- * Re-type the block at `pos` by adding a `setNodeMarkup` step to `tr`. Returns
- * false — leaving `tr` untouched — when there is no block there, when it is
- * already that type with those attrs, or when the target type cannot hold the
- * block's content.
- *
- * That last case is prose with inline marks going to `code` or `mermaid`, which
- * hold source text and allow only the `comment` mark. `setNodeMarkup` would
- * *throw* there — `validContent` checks marks as well as node types — and the
- * callers are UI handlers, so the refusal is a `false`, not an exception. The
- * schema package refuses the same transition with a typed error; neither side
- * strips marks to force it through.
- *
- * A transaction rather than a dispatch, because the block menu composes the
- * re-type with the step that consumes its typed `/query`: both belong to one
- * gesture, so both belong in one transaction and therefore one undo step. The
- * block is read off `tr.doc`, so an earlier step in the same transaction is what
- * `validContent` sees.
+ * Refuse missing blocks, unchanged types/attrs and unsupported content without
+ * mutating tr or throwing. validContent checks marks too: prose-to-source must
+ * not strip formatting to fit. Read tr.doc so earlier slash-consumption steps
+ * and retyping compose into the same undo transaction.
  */
 export function retypeBlockInTransaction(
   tr: Transaction,
@@ -109,9 +83,7 @@ export function retypeBlockInTransaction(
     );
   }
 
-  // Both sides normalised to `string | null`: an absent attribute reads as
-  // `undefined` on a ProseMirror node but `null` in `next`, and comparing those
-  // directly would make every no-op look like a change.
+  // Normalize absent attrs to null so no-ops do not become writes.
   const unchanged =
     currentType === type &&
     (next.level ?? null) === attrString(node.attrs.level) &&

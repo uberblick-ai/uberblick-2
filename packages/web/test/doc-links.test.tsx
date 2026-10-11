@@ -1,5 +1,5 @@
 /**
- * Inline document references in the browser (#444).
+ * Inline document references in the browser.
  *
  * Four contracts, and they are the whole file:
  *
@@ -22,7 +22,7 @@
  * Everything is read back out of the Y.Doc through the schema package, because
  * the document is the deliverable. What is *not* here: that a real browser
  * routes the click and that Back returns — `e2e/doc-link.spec.ts` — and the
- * two-replica merge of both link marks, which is #443's test in
+ * two-replica merge of both link marks, which is tested in
  * `test/palette.test.ts`.
  */
 
@@ -573,7 +573,7 @@ describe("following a reference", () => {
 
     // ---- and an archived target is still somewhere you can go ----
     // Archiving says which document this is, not whether it opens: the read
-    // view is still the destination (#146), so the click keeps navigating.
+    // view is still the destination, so the click keeps navigating.
     tombstoneDirectoryEntry(directory, TARGET);
     expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
     expect(click(anchor).defaultPrevented).toBe(true);

@@ -40,6 +40,8 @@ it("lists every concept and registered tool once, with the same Markdown through
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const { topics } = await rig.ok("get_help");
+  expect(topics.find(({ id }: { id: string }) => id === "lifecycle")?.description)
+    .toContain("when to create decision records");
   expect(topics.map(({ id }: { id: string }) => id).sort()).toEqual(
     [...concepts, ...tools.map(({ name }) => name)].sort(),
   );
@@ -176,6 +178,42 @@ it("keeps shared guarantees in the owning topics after shortening descriptions",
   expect(contracts).toContain("re-sends it on reconnect");
 });
 
+it("explains when a decision record is useful without turning examples into project policy", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  const guidance = lifecycle.split("### When to create a decision record\n")[1]?.split("\n## ")[0];
+  for (const rule of [
+    "deliberate architectural, product or UX choice", "its enduring reason",
+    "guidance future work should follow", "code or configuration alone cannot tell you",
+    "guide multiple tasks", "prevent a consequential accidental reversal",
+    "repeatedly debated or reconsidered", "A rarely consulted record can still be valuable",
+    "compatibility, security or product commitment", "they do not prove historical intent",
+    "**Do not** create a record just to describe existing code, configuration, a routine fix",
+    "a temporary workaround or implementation mechanics", "Do not turn every changed detail into policy",
+    "leaving its implementation flexible",
+    "What concrete future choice would it guide, or what consequential mistake would it prevent?",
+    "ordinary documentation, code comments, an issue or a PR", "Check existing decision topics first",
+    "Reuse the current topic", "follow the successor lifecycle",
+    "not automatically authorized for creation", "follow the project’s approval rules",
+    "they do not establish policies for your project",
+  ]) expect(guidance, rule).toContain(rule);
+
+  const examples = guidance!.split("\n").filter((line: string) => line.startsWith("| ")).slice(2);
+  expect(examples).toHaveLength(4);
+  for (const [index, choice, description] of [
+    [0, "users’ devices and maintenance budget", "The deployment target is set to this version."],
+    [1, "read and edit previously opened documents offline", "This function reads from the local database."],
+    [2, "shadcn/ui as the sole component library", "This screen imports a Button component from shadcn/ui."],
+    [3, "shared service rather than directly with each other", "A list of endpoints, classes or dependencies."],
+  ] as const) {
+    const cells = examples[index]!.split("|");
+    expect(cells[1]).toContain(choice);
+    expect(cells[2]?.trim()).toBe(description);
+  }
+  expect(examples[0]).toContain("minimum support, an explicit set or tested versions");
+  expect(examples[2]).toContain("Custom alternatives require clear justification and human approval");
+});
+
 it("advertises the server identity and instructions in initialize", async () => {
   const rig = await local();
   expect({
@@ -305,7 +343,7 @@ it("documents the table mapping through both help routes and accepts its source 
     sort: { field: "day", direction: "desc" },
   });
   expect(JSON.parse(source!)).not.toHaveProperty("pageSize");
-  expect(section).toContain("Every valid record appears in one continuous native table");
+  expect(section).toContain("Without limit, every valid record appears in one continuous native table");
   expect(section).toContain("Generated from document data · read-only");
   expect(section).toContain("never affect display; omit pageSize from new mappings");
   expect(section).not.toContain("Page controls");
@@ -322,7 +360,7 @@ it("documents the table mapping through both help routes and accepts its source 
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
     "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
-    "Every valid record appears in one continuous native table", "Generated from document data · read-only",
+    "Without limit, every valid record appears in one continuous native table", "Generated from document data · read-only",
     "Open table source appears on hover or keyboard focus and stays reachable without hover",
     "Unknown mapping keys and options are invalid", "contain no record values",
   ]) expect(constraints, guidance).toContain(guidance);
@@ -331,4 +369,21 @@ it("documents the table mapping through both help routes and accepts its source 
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
+});
+
+it("documents optional record limits for both views through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional limit is an integer of 1 or more",
+      "selects the latest N records with a valid x in x-then-record-id order, still at most 5,000",
+      "shows only the first N valid rows in sort order (record-id order without sort)",
+      "limit has no upper bound of its own", "Records hidden by the author limit are not omissions",
+      "no pager or page state", "footnote includes shown and total valid-record counts",
+      "when it hides nothing, no count appears", "notice and diagnostics when N exceeds 5,000",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
 });

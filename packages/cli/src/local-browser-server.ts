@@ -1,13 +1,3 @@
-/**
- * The loopback Hocuspocus server `ub open` puts in front of its local store.
- *
- * The browser-facing server owns protocol mechanics; its caller owns the
- * store. The only bridge between this server and the full upstream replica is
- * therefore the callbacks below: read a room from the update log, append a
- * browser update before Hocuspocus may apply or ack it, and pair the room's
- * awareness with its full upstream replica.
- */
-
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { WebSocketLike } from "@hocuspocus/server";
@@ -57,13 +47,9 @@ interface AwarenessChange {
 }
 
 /**
- * Relay presence between one served room and the full replica of that room.
- *
- * The served client ids stay owned for the bridge's lifetime, even after a
- * removal. The upstream provider clears every remote awareness state when its
- * socket closes; replaying those removals into the served room would otherwise
- * erase a live tab's own state and make its cursor flicker. The tab's periodic
- * awareness renewal re-adds it to the replica once the hub is reachable again.
+ * Retain served client IDs for the bridge's lifetime, even after removal:
+ * upstream disconnect cleanup must not erase a live tab's awareness.
+ * Periodic tab renewals re-add it upstream after reconnection.
  */
 export function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
   const servedClients = new Set<number>();
@@ -136,8 +122,11 @@ export interface LocalBrowserServerConfig {
   log?: HubLogger;
   /** Prepare an authenticated room's replica before reading its store. */
   prepareRoom?(room: string): Promise<void>;
+  /** The caller owns the store; load rooms from its update log. */
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
+  /** Commit browser bytes before Hocuspocus applies or acknowledges them. */
   appendUpdate(room: string, payload: Uint8Array): void;
+  /** Pair each served room's awareness with its full upstream replica. */
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
 }
@@ -204,10 +193,7 @@ async function listen(server: Server<HubContext>): Promise<void> {
   }
 }
 
-/**
- * Start the authenticated loopback server for its caller's local replicas.
- * The HTTP callback lets the same port serve the web bundle and websocket.
- */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {
@@ -240,6 +226,7 @@ export async function createLocalBrowserServer(
     maxPendingDocuments: MAX_PENDING_DOCUMENTS,
 
     async onRequest({ request, response }) {
+      // Share this loopback port between the web bundle and websocket.
       config.onRequest(request, response);
       // The callback answered every request. An empty rejection stops the
       // dependency's default "Welcome to Hocuspocus" response without being

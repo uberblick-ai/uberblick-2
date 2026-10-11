@@ -1,5 +1,5 @@
 /**
- * The sidebar renders the `_sidebar` document (#115).
+ * The sidebar renders the `_sidebar` document.
  *
  * One claim, and everything here is a way of asking it: **the sidebar on screen
  * is the sidebar document, and every gesture is a write to it.** So each test
@@ -60,8 +60,8 @@ const LIVE: RoomStatus = {
 
 /**
  * What every stubbed room reports. Live unless a test sets it before the
- * rooms are made, which is how the directory line's readings are exercised
- * (#448); reset after each test with the rooms that were handed it.
+ * rooms are made, which is how the directory line's readings are exercised;
+ * reset after each test with the rooms that were handed it.
  */
 let roomStatus: RoomStatus = LIVE;
 
@@ -395,7 +395,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(rowTitles(host, 0)).toEqual(["Overview"]);
 
     // ---- the two-writer test: an agent pins and groups on its own replica ----
-    // The schema functions are the whole of what `pin_doc` does (#114), so
+    // The schema functions are the whole of what `pin_doc` does, so
     // driving them on a peer doc is what an agent's write looks like from here.
     act(() => {
       pinDoc(peer, reading, TWO);
@@ -444,9 +444,8 @@ describe("the sidebar is the _sidebar document", () => {
     openActions(host);
     expect(documentAction("Unpin from sidebar")).not.toBeUndefined();
 
-    // The open document's row says so the way the All-docs entry always has
-    // (#481): one state, `aria-current`, reaching the styling and a screen
-    // reader together — where a class reached only the styling. The navigation
+    // The open document's row shares the All-docs entry's `aria-current` state,
+    // reaching the styling and a screen reader together. The navigation
     // entry is the discriminator: "current" has to mean the thing that is
     // open, not every row in the column.
     expect(rows(host, 0)[0]?.getAttribute("aria-current")).toBe("page");
@@ -615,7 +614,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(groupToggle(host, 0)?.getAttribute("aria-expanded")).toBe("false");
     expect(groupToggle(host, 0)?.textContent).toBe("Reading");
     expectNoExtraGroupChrome(host);
-    // Still in the DOM — the transition is a CSS animation (#110) — and inert,
+    // Still in the DOM — the transition is a CSS animation — and inert,
     // so a collapsed group is out of the tab order all the same.
     expect(body()?.dataset.collapsed).toBe("true");
     expect(body()?.hasAttribute("inert")).toBe(true);
@@ -636,7 +635,7 @@ describe("the sidebar is the _sidebar document", () => {
     // The pair an agent works over: a tombstoned directory stub, and the pins
     // `get_sidebar` reads through it. The tombstone arrives over the wire from
     // a peer rather than from this client's own archive, because a local
-    // archive would take the pin with it (#957).
+    // archive would take the pin with it.
     const directoryPeer = peerOf(directory);
     const sidebarPeer = peerOf(sidebar);
 
@@ -647,13 +646,12 @@ describe("the sidebar is the _sidebar document", () => {
     act(() => {
       tombstoneDirectoryEntry(directoryPeer, ONE);
     });
-    // The title the stub still carries, marked — never the eight characters of
-    // uuid this used to fall back to (#287).
+    // The title the stub still carries, marked — never an eight-character uuid.
     expect(rowTitles(host, 0)).toEqual(["Overview \u00b7 archived", "Editing"]);
     expect(within(host).getByLabelText("Sidebar").textContent ?? "").not.toContain(
       ONE.slice(0, 8),
     );
-    // The pin is untouched. Archiving unpins now (#957), but this archive came
+    // The pin is untouched. Local archiving unpins, but this archive came
     // from another replica, so nothing here removed the pin — which is exactly
     // the race that leaves an archived pin to render.
     expect(stored(sidebarPeer)).toEqual([["Reading", [ONE, TWO]]]);
@@ -666,9 +664,9 @@ describe("the sidebar is the _sidebar document", () => {
   });
 
   it("offers the whole name a clipped row can only show part of", async () => {
-    // A 34px row ellipsises anything longer than the 16rem column (#481), so
-    // the tooltip is the only way back to the name — and it used to offer the
-    // uuid instead (#529). All four things a row can say, in one group.
+    // A 34px row ellipsises anything longer than the 16rem column, so
+    // the tooltip must offer the name rather than the uuid.
+    // All four things a row can say, in one group.
     const directory = seedDirectory();
     upsertDirectoryEntry(directory, { uuid: THREE, title: "" });
     tombstoneDirectoryEntry(directory, TWO);
@@ -810,7 +808,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
 });
 
 /**
- * The fixed navigation section (#483). Everything here asks one question: is it
+ * The fixed navigation section. Everything here asks one question: is it
  * chrome? Curation moves, is stored in `_sidebar` and can be dropped into;
  * chrome is in the same place on every page, and the two destinations that do
  * not exist yet are shown as absent affordances rather than as broken links.
@@ -894,15 +892,12 @@ describe("the sidebar's fixed navigation", () => {
 });
 
 /**
- * The directory line — the line the owner actually read on a freshly joined
- * machine, where a refused page said `syncing…` and left no way to tell why
- * without opening a document (#448).
- *
- * It now takes a refusal's word from the shared derivation, whose precedence
+ * The directory line must show a refusal without opening a document.
+ * It takes the refusal's word from the shared derivation, whose precedence
  * and wording `status-reading.test.ts` pins; what is asked here is only that
  * this line shows it, and that its own three readings are otherwise untouched —
  * uncalmed, and still saying "directory", because this line is about the
- * directory room and normalizing it is a different change.
+ * directory room.
  */
 describe("the sidebar's directory line reads a refusal", () => {
   /** The line under the head, for a directory room in the given state. */

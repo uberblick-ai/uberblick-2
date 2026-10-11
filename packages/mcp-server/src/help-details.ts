@@ -201,16 +201,25 @@ export const toolHelpDetails = {
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
     "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
-    "missing (gap or connect, default gap) control presentation. A data table also uses a chart block, " +
+    "missing (gap or connect, default gap) control presentation. Optional limit is an integer of 1 or more " +
+    "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
+    "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
     "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
     "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title " +
     "supplies only the table's accessible name, and sort (one column field, direction asc or desc) orders rows. " +
-    "Every valid record appears in one continuous native table, with Generated from document data · read-only below it. " +
+    "Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order " +
+    "(record-id order without sort). Without limit, every valid record appears in one continuous native table, " +
+    "with Generated from document data · read-only below it. Limited rows remain one continuous table, " +
+    "with no pager or page state; when limit hides rows, the footnote includes shown and total valid-record counts. " +
     "Open table source appears on hover or keyboard focus and stays reachable without hover. " +
     "Existing pageSize values remain accepted as integers from one to one hundred for compatibility and never affect display; " +
-    "omit pageSize from new mappings. Unknown mapping keys and options are invalid. Both views only " +
+    "omit pageSize from new mappings. For both views, limit has no upper bound of its own. Records hidden by " +
+    "the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and " +
+    "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
+    "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +
+    "Unknown mapping keys and options are invalid. Both views only " +
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:

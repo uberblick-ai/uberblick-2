@@ -505,7 +505,7 @@ describe("inline marks in the document", () => {
       );
     }
 
-    // `_` *is* a delimiter now, so a literal one is escaped — except between two
+    // `_` is a delimiter, so a literal one is escaped — except between two
     // word characters, where CommonMark's intraword rule means it can never
     // delimit anything and `snake_case` needs no help.
     expect(importMarkdown("__underscores__").blocks[0]?.inline).toEqual([
@@ -641,8 +641,8 @@ describe("inline marks in the document", () => {
   /**
    * A code span's content is verbatim, so the whitespace rules that keep emphasis
    * off spaces must not reach inside one. Hoisting the leading whitespace out of a
-   * code run whose text is *only* whitespace used to empty the span entirely and
-   * emit `` `` ``, which reads back as two literal backticks.
+   * code run whose text is *only* whitespace would empty the span and emit
+   * `` `` ``, which reads back as two literal backticks.
    */
   it("does not hoist whitespace out of a code span", () => {
     const doc = seeded();
@@ -1059,8 +1059,8 @@ describe("inline marks in the document", () => {
   });
 
   /**
-   * The shorthand spellings the owner asked for are the *callers'* — the
-   * editor's input rule and the MCP write path, which have the directory a
+   * Shorthand spellings belong to the editor's input rule and the MCP write
+   * path, which have the directory a
    * title has to come from. This package neither reads nor writes them: an
    * empty label is not a link in either direction.
    */
@@ -1148,10 +1148,8 @@ describe("inline marks in the document", () => {
  * The closure contract, as a property rather than a list of examples.
  *
  * Named cases pin the failures we know about; this catches the ones we do not.
- * Every bug the reader and writer had — nested emphasis, adjacent delimiter runs,
- * the rule of three, whitespace at a span edge, a tilde next to a `~~` — was
- * found by generating documents like these, and each was invisible to a
- * hand-written case until it was written down.
+ * Generated documents exercise nested emphasis, adjacent delimiter runs, the
+ * rule of three, whitespace at span edges and tildes next to ~~ together.
  *
  * Three properties, all about the pair rather than either half:
  *
@@ -1497,11 +1495,8 @@ describe("export and import are closed over the marks the model allows", () => {
       if (runs.some((run) => run.marks.docLink !== undefined)) docLinked += 1;
     }
 
-    // The corpus has to be worth checking, and a generator can go quietly
-    // degenerate — the first version of this one did, and every document came out
-    // a single run, so the transitions between runs (where the delimiters are)
-    // were never exercised at all. Assert the shape of the corpus, not just that
-    // it ran.
+    // A degenerate generator producing only single runs never exercises delimiter
+    // transitions. Assert the corpus shape as well as its size.
     expect(checked).toBeGreaterThan(150);
     expect(multiRun).toBeGreaterThan(100);
     expect(marked).toBeGreaterThan(100);

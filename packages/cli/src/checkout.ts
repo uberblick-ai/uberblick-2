@@ -1,10 +1,3 @@
-/**
- * Whether `ub` is being run inside an uberblick checkout.
- *
- * Used by `ub update` to recognize the source-checkout installation. Nothing is
- * written by this detector.
- */
-
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -23,11 +16,7 @@ function isUberblickPackage(dir: string): boolean {
   }
 }
 
-/**
- * The nearest ancestor that is an uberblick checkout, or null.
- *
- * Both markers are required: `mise.toml` alone is any mise project.
- */
+/** Require both markers: mise.toml alone identifies any mise project. */
 export function findCheckoutRoot(from: string): string | null {
   let dir = from;
   for (;;) {

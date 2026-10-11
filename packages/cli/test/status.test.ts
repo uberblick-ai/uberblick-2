@@ -1,8 +1,10 @@
 /** The public status report answers whether this project's work reaches the hub. */
 
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { defaultDatabasePath } from "@uberblick/mcp-server";
-import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as mcpServer from "@uberblick/mcp-server";
+import { defaultDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
+import { isTagCatalogSeeded, setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -10,7 +12,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { StatusReport } from "../src/status.js";
-import { renderStatus, shortStatusReport } from "../src/status.js";
+import { readSyncStatus, renderStatus, shortStatusReport } from "../src/status.js";
 import { fixture } from "./auth-fixtures.js";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
 
@@ -56,6 +58,52 @@ function report(overrides: Partial<StatusReport> = {}): StatusReport {
 function row(text: string, name: string): string {
   return text.split("\n").find((line) => line.startsWith(`${name} `)) ?? "";
 }
+
+describe("the status replica reading", () => {
+  it("reads a real replica without MCP assembly or engine side effects, then closes it", async () => {
+    const box = sandbox();
+    const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE });
+    const server = vi.spyOn(mcpServer, "createMcpServer");
+    const engine = vi.spyOn(mcpServer, "createMcpEngine");
+    const tool = vi.spyOn(McpServer.prototype, "registerTool");
+    let store: MirrorStore | undefined;
+    try {
+      const status = await readSyncStatus(config, replicas => {
+        store = replicas.store;
+        expect(isTagCatalogSeeded(replicas.settings().doc)).toBe(false);
+        expect(replicas.directory().awareness.getLocalState()).toMatchObject({
+          client: "agent", session: config.sessionId,
+        });
+      });
+      expect(status.hub.status).toBe("disabled");
+      expect(status.rooms.map(({ room }) => room).sort()).toEqual([
+        `${WORKSPACE}/_directory`, `${WORKSPACE}/_settings`, `${WORKSPACE}/_sidebar`,
+      ]);
+      expect(server).not.toHaveBeenCalled();
+      expect(engine).not.toHaveBeenCalled();
+      expect(tool).not.toHaveBeenCalled();
+      expect(store).toBeDefined();
+      expect(() => store?.dataVersion()).toThrow();
+    } finally {
+      server.mockRestore();
+      engine.mockRestore();
+      tool.mockRestore();
+    }
+  });
+
+  it("closes the real replica store when inspection fails", async () => {
+    const box = sandbox();
+    const config = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE });
+    const failure = new Error("inspection failed");
+    let store: MirrorStore | undefined;
+    await expect(readSyncStatus(config, replicas => {
+      store = replicas.store;
+      throw failure;
+    })).rejects.toBe(failure);
+    expect(store).toBeDefined();
+    expect(() => store?.dataVersion()).toThrow();
+  });
+});
 
 describe("the short status report", () => {
   it("prints the hub example in its specified order with no internal diagnostics", () => {

@@ -1,4 +1,3 @@
-/** Desktop configuration for the loopback hub started by `ub open`. */
 import { resolveCoreHubConfig, type HubConfig } from "@uberblick/hub/config";
 import { resolveStorage, type StorageOptions } from "@uberblick/mcp-server/storage";
 

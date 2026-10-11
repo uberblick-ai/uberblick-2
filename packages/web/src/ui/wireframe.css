@@ -11,10 +11,10 @@
   --wf-danger-ink: var(--destructive-foreground);
   --wf-focus: var(--ring);
   --wf-info: var(--syntax-name);
-  --wf-warning: var(--muted-foreground);
+  --wf-warning: var(--status-warning);
   --wf-neutral-tint: var(--muted);
   --wf-info-tint: color-mix(in oklab, var(--syntax-name) 8%, var(--card));
-  --wf-warning-tint: var(--muted);
+  --wf-warning-tint: var(--status-warning-subtle);
   --wf-danger-tint: var(--destructive-subtle);
   --wf-radius: var(--radius-sm);
   --wf-radius-lg: var(--radius);

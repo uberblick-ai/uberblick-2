@@ -1,6 +1,5 @@
 /**
- * Editor construction. One factory, used by the app and by the tests, so the
- * golden round-trip test exercises the same schema the browser does.
+ * Share this factory with round-trip tests so they exercise the browser schema.
  */
 
 import { Editor, getSchema } from "@tiptap/core";
@@ -29,8 +28,7 @@ import { TerminalBlocks } from "./terminal.js";
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
 
 /**
- * The ProseMirror schema the editor uses. Exported so callers can assert the
- * palette is what they think it is.
+ * Share one schema; context-dependent behavior belongs to each editor.
  */
 export const uberblickSchema: Schema = getSchema(paletteOnlyExtensions);
 
@@ -47,10 +45,8 @@ export interface CreateEditorOptions {
   /** Gate for editor-side CRDT repairs while the room is not writable. */
   canWrite?: () => boolean;
   /**
-   * The workspace half of a document reference — its address, the directory
-   * that names it, and where a click goes (`doc-links.ts`). Null in an editor
-   * with no workspace behind it: the input and paste rules still make
-   * references, and a stored one still renders, but nothing navigates.
+   * Per-editor directory and routing context. Null still permits references but
+   * leaves them inert because there is no workspace address to navigate.
    */
   docLinks?: DocLinkContext | null;
 }
@@ -70,38 +66,27 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
       ...(options.newBlockId === undefined ? {} : { newId: options.newBlockId }),
       ...(options.canWrite === undefined ? {} : { canWrite: options.canWrite }),
     }),
-    // Behaviour, not schema — which is why the markdown input rules are here
-    // and not in `paletteExtensions`: `uberblickSchema` above has to stay the
-    // node and mark set alone. After `BlockIds`, because a rule names the block
-    // it converts by the id that plugin assigns.
+    // Keep behavior outside the shared schema. BlockIds runs before rules so
+    // conversions can address the block it identifies.
     BlockInputRules,
     // Installed once: reconfiguring plugins on menu mount destroys collaboration
     // views (including its UndoManager). The UI only registers live handlers.
     CaretMenuKeys,
-    // Code colouring is derived from source text and its language attribute as
-    // inline decorations. It is behaviour, never another stored mark.
+    // Syntax colors are derived decorations, never stored marks.
     CodeHighlighting,
-    // Behaviour too: Tab/Shift-Tab/Enter/Backspace inside a list item — the
-    // bindings refuse everywhere else, so the core keymap still owns those keys
-    // in every other block — plus the numbers an ordered item is drawn with.
+    // List keys fall through outside items; numbering remains a decoration.
     ListBlocks,
     // TableKit supplies cell editing and navigation; the integration limits
     // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
-    // …and the terminal block's one: the same class, opening a
-    // demonstration's transcript under the caret — which is also what stops the
-    // demonstration playing while it is being written.
+    // Opening transcript source also pauses its derived playback.
     TerminalBlocks,
     ChartBlocks,
     WireframeBlocks,
-    // …and the document reference's: the two typed and pasted spellings, the
-    // live anchor, and the address they resolve against. Behaviour again — the
-    // mark itself is schema, declared once in `marks.ts`, because
-    // `uberblickSchema` above is one object for the whole process.
+    // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
-    // The annotation mark's live half: resolved state sits beside the blocks
-    // fragment in the Y.Doc, so a mark view reads it without storing it twice.
+    // Read resolved state from annotations rather than duplicating it in marks.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
     Collaboration.configure({
       fragment: options.fragment,
@@ -113,13 +98,8 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     element: options.element,
     extensions,
     editable: options.editable ?? true,
-    // No `content`: it comes from Yjs, never from here — ySyncPlugin renders the
-    // fragment into ProseMirror on its first view update. Passing
-    // `content: undefined` explicitly is not the same thing under
-    // exactOptionalPropertyTypes, so the key is simply absent.
-    //
-    // Make foreign content loud. With this off, Tiptap's content parser drops
-    // node types it does not know; with it on, `insertContent` throws instead.
+    // Omit content: ySync supplies it on the first view update. Reject unknown
+    // inserted types so the content parser cannot silently drop them.
     enableContentCheck: true,
     injectCSS: false,
   });

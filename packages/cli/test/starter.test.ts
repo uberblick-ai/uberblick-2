@@ -382,9 +382,8 @@ it("seeds two complete new workspaces when creates race", async () => {
  * The shipped copy, verbatim.
  *
  * Kept as a literal rather than derived from the file, because the file is what
- * is under test: this is the provisional onboarding text the owner approved,
- * and a diff to it is a product change to be made deliberately rather than
- * noticed later in a new user's workspace.
+ * is under test. Changes to this onboarding copy are product changes to be
+ * made deliberately rather than noticed later in a new user's workspace.
  */
 const COPY: Record<string, string> = {
   "welcome-to-uberblick.md": `This is your Überblick workspace. It is shared by you and the agents you connect,

@@ -157,8 +157,7 @@ describe("set_metadata", () => {
       tldr: "Keep this summary.",
       links: [target.uuid],
     });
-    // Stored changelog metadata belongs to a separate issue and is not changed
-    // by replacing the tool which used to write it.
+    // Updating declared fields preserves stored changelog metadata.
     getMetaMap(rig.instance.replicas.replica(source.uuid).doc)
       .set("changelogSuggestion", "Keep this existing suggestion.");
     const before = await rig.ok("get_doc", { uuid: source.uuid });

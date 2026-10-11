@@ -1,4 +1,3 @@
-/** Hub-owned workspace access, outside synchronized document content. */
 
 import type { StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -61,13 +60,9 @@ function validateRole(role: MembershipRole): void {
 }
 
 /**
- * Trusted hub callers grant initial memberships; actor-facing grants and other
- * management read the actor's current authority from this database. Admission
- * and management must share this instance so removal reaches its subscribers.
- * Checks and each single-statement mutation stay synchronous on the hub's one
- * database connection, so another operation cannot interleave between them.
- * Sign-in grants only when claiming a fresh deployed hub; afterwards it reads
- * this registry. Remote admission uses these same membership records.
+ * Admission and management must share this instance so removal reaches all
+ * subscribers. Check current authority and mutate without yielding on the hub's
+ * one database connection; memberships never enter synchronized document content.
  */
 export class MembershipRegistry {
   private readonly insert: StatementSync;
@@ -115,7 +110,7 @@ export class MembershipRegistry {
     `);
   }
 
-  /** Internal grant for hub claiming, first-admin setup and authorized management. */
+  /** Trusted callers only; sign-in may grant only while claiming a fresh hub. */
   grant(record: MembershipRecord): MembershipRecord {
     validateIdentity(record.workspaceId, record.principalId);
     validateRole(record.role);
@@ -153,7 +148,6 @@ export class MembershipRegistry {
     return this.selectWorkspaces.all({ principalId }).map((row) => row.workspace_id as string);
   }
 
-  /** Reusable by account resolution and workspace access management. */
   requireAdmin(workspaceId: string, actorPrincipalId: string): void {
     if (this.roleFor(workspaceId, actorPrincipalId) !== "admin") {
       throw new MembershipRefusal("admin-required");

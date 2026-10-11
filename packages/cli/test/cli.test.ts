@@ -43,6 +43,14 @@ describe("ub", () => {
 });
 
 describe("ub status", () => {
+  it.each(["Caller.Run_1570-1", "invalid/session"])("ignores serve's UB_AGENT_SESSION=%s", (value) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const run = runUb(["status", "--json"], box, { UB_AGENT_SESSION: value });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout).workspace.id).toBe(WORKSPACE);
+    expect(run.stderr).not.toContain("UB_AGENT_SESSION");
+  });
+
   it("reports an explicitly local-only workspace", () => {
     const run = runUb(["status"], sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
     expect(run.status).toBe(0);

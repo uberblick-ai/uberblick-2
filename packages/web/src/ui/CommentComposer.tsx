@@ -1,12 +1,8 @@
 /**
- * Selection chrome for prose and single-cell text: inline formatting, external links and the
- * existing comment composer.
- *
- * A selection wholly inside one prose block or cell gets the compact toolbar. Source
- * blocks and cross-block ranges keep the older Comment-only affordance because
- * the annotation API can clamp them honestly while inline marks cannot.
- * Decided records keep Comment, without formatting or link controls. Archived
- * and foreign-content panes never mount this component.
+ * Inline formatting and external links require one prose block or single
+ * cell. Source and cross-block selections offer Comment alone because
+ * annotations can clamp honestly. Decided content offers only Comment;
+ * archived or foreign-content panes never mount this surface.
  */
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -203,6 +199,7 @@ function FormatButton({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function CommentComposer({
   editor,
   contentReadOnly = false,

@@ -1,48 +1,12 @@
 /**
- * Binding an editor to a fragment without letting it destroy content.
+ * Refuse foreign content before binding and synchronously destroy the editor
+ * before y-prosemirror observes incoming foreign content. Its catch-and-delete
+ * paths can destroy unknown elements or text with unknown marks; unrepresented
+ * embeds disappear on the next edit.
  *
- * This is the load-time *and* run-time half of the palette gate, in one place,
- * because both halves have to be right for the preservation rule to hold: unknown
- * blocks degrade loudly, never silently dropped.
- *
- * ## The hazard
- *
- * y-prosemirror's `createNodeFromYElement` builds a ProseMirror node with
- * `schema.node(el.nodeName, …)`. For a node name the editor's schema does not
- * declare that throws, and its catch block deletes the Y.XmlElement from the
- * document. So an unknown block is not merely unrendered — it is destroyed in
- * the CRDT, and the deletion replicates to every peer including the one that
- * wrote it. A ProseMirror schema cannot have a catch-all node type, so there is
- * no in-editor placeholder that would make binding safe.
- *
- * The same trap sits *inside* a known block: a nested Y.XmlElement, or a mark
- * the editor schema does not declare, throws one level down and takes the
- * nested element or the whole Y.XmlText with it. An embed inside a Y.XmlText is
- * the quiet variant — it throws nothing, it simply has no ProseMirror
- * representation, so the next edit rewrites the text without it.
- * `findForeignBlocks` therefore scans recursively (see palette.ts), and this
- * guard is only as good as that scan.
- *
- * ## The two halves
- *
- * **Load time** is easy: check the fragment first, and do not bind when it holds
- * anything foreign.
- *
- * **Run time** is the subtle one. Foreign content arriving from another client is
- * deleted inside the very Yjs transaction cleanup that delivered it, so a React
- * re-render cannot get there first. What does get there first is
- * `beforeObserverCalls`: Yjs emits it on the Y.Doc after the transaction has
- * been applied and *before* any `observe`/`observeDeep` listener runs, and
- * y-prosemirror's binding listens with `observeDeep`. Destroying the editor from
- * that callback unregisters the binding's observer before Yjs ever reaches it,
- * so the content survives.
- *
- * A shallow `fragment.observe` is not enough here and used to be the bug: it
- * never fires for a change one level down (a nested element, a formatting mark),
- * which is exactly where the second half of the hazard lives.
- *
- * The guard is registered *before* the editor is created, and it destroys the
- * editor synchronously inside the callback. Both are load-bearing.
+ * Register beforeObserverCalls before editor creation. Shallow fragment.observe
+ * misses nested edits, while observeDeep runs too late. findForeignBlocks must
+ * scan recursively, including marks and string-only text inserts.
  */
 
 import { normalizeLegacyTables, repairDuplicateBlocks } from "@uberblick/schema";

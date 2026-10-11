@@ -1,7 +1,6 @@
 /**
  * `ub auth login` against an unavailable or misbehaving hub, and the finite
- * lifetime of an attempt. Split from `auth.test.ts`; the fixtures are in
- * `auth-fixtures.ts`.
+ * lifetime of an attempt. The fixtures are in `auth-fixtures.ts`.
  */
 
 import { existsSync, readFileSync } from "node:fs";

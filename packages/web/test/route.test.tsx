@@ -1,5 +1,5 @@
 /**
- * Deep-link routing (#68).
+ * Deep-link routing.
  *
  * Three contracts, and nothing else. The address bar is the selection, so
  * pinning them is pinning the feature:
@@ -163,7 +163,7 @@ describe("an address names a document, a workspace mode, or neither", () => {
 
   it("calls a first segment that is not a workspace id an invalid link", () => {
     // `WS.toUpperCase()` is there because the case rule is the same one the
-    // document segment now answers to: a workspace id is lowercase, and a
+    // document segment answers to: a workspace id is lowercase, and a
     // shouted one is not a workspace this client can fold into an id it knows.
     for (const bad of ["other", "main", `${WS}x`, `foo--${WS}`, WS.toUpperCase()]) {
       const parsed = parseRoute(`/${bad}/${UUID}`, CONFIGURED);
@@ -207,9 +207,9 @@ describe("an address names a document, a workspace mode, or neither", () => {
   });
 
   it("folds a shouted document uuid to the document it names, and says so in the address bar", () => {
-    // One case rule for both uuids in an address (#196): the workspace segment
-    // is lowercase-only, and the document segment now is too. Rejecting the
-    // shouted spelling would break links that predate the rule, so it resolves
+    // One case rule for both uuids in an address: the workspace segment
+    // is lowercase-only, and the document segment is too. The shouted spelling
+    // must still resolve for compatibility with existing links
     // — document uuids are generated lowercase, so an upper-case one is a
     // mis-spelling of a lowercase identity, not an identity of its own.
     const shouted = UUID.toUpperCase();
@@ -375,12 +375,9 @@ describe("a fresh deep link does not open a writable empty replica", () => {
     expect(notice(host)?.textContent).toContain("Waiting for sync");
     expect(within(host).queryByRole("textbox", { name: "Document content" })).toBeNull();
 
-    // AC3 is about the document page, and this screen is one — it is this
-    // document's address, showing why it is not here yet. The control moved to
-    // the identity line, which this screen does not draw, so it is rendered
-    // here too; a link is *more* worth sending from a document that has not
-    // arrived, and the address bar is not a keyboard-reachable control
-    // (Codex round 1).
+    // This waiting screen still represents a document address and needs a
+    // keyboard-reachable copy link even without the document's identity line.
+    // The address bar cannot serve as that control.
     const copy = within(host).getByRole("button", { name: `Copy link — copies the canonical document URL for ${WS}/${UUID}` });
     expect(copy?.textContent).toBe("Copy link");
     expect(copy?.getAttribute("aria-label")).toBe(
@@ -681,7 +678,7 @@ describe("the copy control hands back the document's canonical link", () => {
 
     const { label, ariaLabel, said, revisionIsInsideControl } = await clickCopy();
 
-    // The short uuid is the action now; the revision remains outside it.
+    // The short uuid is the action; the revision remains outside it.
     expect(label).toBe(`uuid ${UUID.slice(0, 8)}`);
     expect(revisionIsInsideControl).toBe(false);
     // The accessible name adds the part a reader cannot see — the address that

@@ -12,6 +12,7 @@ import type { WorkspacePromotions } from "./workspace-promotion.js";
 
 type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function handleAccessManagement(
   credentials: CredentialRegistry | undefined,
   memberships: MembershipRegistry | undefined,

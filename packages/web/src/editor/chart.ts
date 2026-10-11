@@ -1,3 +1,4 @@
+// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /**
  * A document-owned data view. Only the JSON mapping is block content. Drawing,
  * diagnostics and subscriptions never dispatch a content transaction or repair
@@ -17,7 +18,7 @@ import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
   prepareChart, formatChartX, formatChartNumber, chartAccessibleName,
-  chartAccessibleDescription, chartDiagnosticsText,
+  CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
 import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
@@ -34,7 +35,9 @@ type Point = { x: number; y: number | null };
 const LIGHT = ["#1d4ed8", "#b91c1c", "#047857", "#7e22ce", "#a16207", "#0e7490", "#be185d", "#334155"];
 const DARK = ["#93c5fd", "#fca5a5", "#6ee7b7", "#d8b4fe", "#fde047", "#67e8f9", "#f9a8d4", "#cbd5e1"];
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
     let instance: Chart<"line", Point[]> | null = null;
@@ -93,6 +96,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       element.hidden = value === "";
     };
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
     const draw = (data: DocData | null, readError?: unknown): void => {
       if (destroyed) return;
       try {
@@ -105,6 +109,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared;
+        notice.classList.toggle("ub-chart-limit-notice", result.status === "ready" &&
+          result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
         // Reserve the actions beside the footnote, outside the table and its
@@ -136,7 +142,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           description.textContent = "";
           text(title, "");
           text(message, "");
-          text(notice, "Generated from document data · read-only");
+          text(notice, `Generated from document data · read-only${result.notice ? ` · ${result.notice}` : ""}`);
           text(diagnostics, tableDiagnosticsText(result));
           table.render(result);
           return;

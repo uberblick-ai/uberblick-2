@@ -1,58 +1,15 @@
 /**
- * The editor palette: nine block types, TableKit's row/cell nodes, seven marks.
+ * Mirror schema-owned elements and marks exactly; StarterKit's wider palette
+ * and nested list trees cannot preserve block-scoped storage. Lists remain flat
+ * list-item blocks with string list/indent attributes.
  *
- * The marks live in marks.ts — the six inline ones (`bold`, `italic`, `strike`,
- * `inlineCode`, `link`, `docLink`) plus the `comment` anchor defined below.
- * StarterKit is
- * deliberately absent. Every node here mirrors a schema-owned Y.XmlElement
- * one-for-one:
+ * Declare every top-level id: updateYFragment removes undeclared attributes.
+ * Keep attribute values as stored strings because y-prosemirror compares with
+ * !==; clamp level and indent only while rendering.
  *
- *   <paragraph id="…">        Y.XmlText
- *   <heading   id="…" level="2">  Y.XmlText
- *   <code      id="…" language="ts">  Y.XmlText
- *   <mermaid   id="…">        Y.XmlText
- *   <list-item id="…" list="bullet" indent="1">  Y.XmlText
- *   <quote     id="…">        Y.XmlText
- *   <table     id="…">        tableRow > tableHeader|tableCell > paragraph > Y.XmlText
- *   <terminal  id="…">        Y.XmlText (a scripted terminal transcript)
- *   <chart     id="…">        Y.XmlText (a versioned JSON mapping)
- *
- * A list is a *run* of adjacent `list-item` blocks, exactly as markdown means
- * it — no `bulletList` wrapper, no nested `listItem` tree. Stock Tiptap's list
- * extensions were rejected for that reason (#59): a nested tree has no
- * block-scoped text for an agent to edit, which is the contract the whole model
- * rests on. Depth is the `indent` attribute, and the keyboard that changes it
- * lives in list-keys.ts.
- *
- * Three non-obvious constraints, each of which comes from reading
- * y-prosemirror's sync-plugin rather than from taste:
- *
- * 1. **Every top-level block declares `id`.** `updateYFragment` removes any Yjs attribute
- *    that is `undefined` in `node.attrs`. An undeclared `id` would therefore be
- *    stripped from the Y.XmlElement the first time the editor wrote the block —
- *    the block would lose its identity and orphan every reference to it.
- *
- * 2. **Attribute values stay strings, verbatim.** Both `equalAttrs` and
- *    `updateYFragment` compare Yjs attributes to ProseMirror attributes with
- *    `!==`. The schema writes `level` as the string `"2"`, so parsing it to the
- *    number `2` here would make every comparison fail and rewrite the attribute
- *    on the first keystroke. `level` is a string in this schema for exactly that
- *    reason; clamping to 1–6 happens at render time only, so the stored value
- *    round-trips untouched.
- *
- * 3. **Every text block allows the `comment` mark, including `code`.** Annotation
- *    threads are anchored by a `comment` formatting mark on the block's
- *    Y.XmlText, and an agent may annotate a code block. A `marks: ""` node spec
- *    would make `schema.text(…, [commentMark])` throw, and y-prosemirror's catch
- *    block **deletes the Y.XmlText from the document** — data loss, not a render
- *    failure.
- *
- *    Prose blocks take `PROSE_MARKS` on top of that — the inline set. `code`,
- *    `mermaid`, `terminal` and `chart` never do: their text is source, so
- *    `comment` is the only mark they may hold, and an inline mark found inside
- *    one is foreign content the palette gate refuses to bind (see palette.ts).
- *    TableKit's cells each hold one paragraph, which allows those formatting
- *    marks and comment. The table integration refuses document links in cells.
+ * Every text block allows comment anchors. Source blocks allow only comment;
+ * the palette gate rejects other marks before binding. TableKit cells hold one
+ * prose paragraph with formatting/comments; table integration refuses docLinks.
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
@@ -71,10 +28,8 @@ import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
 
 /**
- * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
- * the schema package everywhere else. `null` means "not yet assigned" — a null
- * attribute is skipped by y-prosemirror's attribute writer, so a transient null
- * never clears an existing id in the document.
+ * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
+ * null must not clear an existing document id.
  */
 const idAttribute = {
   default: null as string | null,
@@ -146,7 +101,7 @@ export const Heading = Node.create({
   addAttributes() {
     return {
       id: idAttribute,
-      // A string, on purpose — see the module comment, constraint 2.
+      // Preserve the stored string; y-prosemirror compares attributes verbatim.
       level: {
         default: "1",
         parseHTML: (element: HTMLElement): string =>
@@ -172,21 +127,9 @@ export const Heading = Node.create({
 });
 
 /**
- * One item of a list. Flat: `list` is its marker and `indent` its depth, and
- * the run of items around it is the list.
- *
- * Rendered as a bare `<li>` — no `<ul>` to put it in, since the document has no
- * nesting to build one from. The marker is drawn by CSS off `data-list` and
- * `data-indent`; an ordered item's number comes from `data-number`, which
- * `listStructurePlugin` (list-keys.ts) decorates onto the block using the
- * schema package's own numbering, so the marker on screen is the one the
- * markdown export writes. See styles.css. That same plugin is what makes a run
- * of items a list for a screen reader — `role="listitem"` with its level and
- * position, inside an off-screen list container claiming the run (#227).
- *
- * A bare `<li>` is also what makes a list copied out of this editor paste back
- * as list items, and what lets an HTML list pasted *in* land as one item per
- * line.
+ * Render flat items as li so clipboard lists round-trip one item per line.
+ * listStructurePlugin supplies schema-aligned numbering and accessible list
+ * containers; CSS renders data-list/data-indent/data-number markers.
  */
 export const ListItem = Node.create({
   name: "list-item",
@@ -196,7 +139,7 @@ export const ListItem = Node.create({
   addAttributes() {
     return {
       id: idAttribute,
-      // Strings, verbatim, like every other attribute — see constraint 2.
+      // Preserve stored strings; clamp only rendering.
       list: {
         default: "bullet",
         parseHTML: (element: HTMLElement): string =>
@@ -223,7 +166,9 @@ export const ListItem = Node.create({
   },
 });
 
-/** A block quote. One block, one quote — nested quotes are out of scope (#59). */
+/**
+ * One block per quote; nested quotes are outside this schema.
+ */
 export const Quote = Node.create({
   name: "quote",
   group: "block",
@@ -296,11 +241,8 @@ export const CodeBlock = Node.create({
       return view;
     };
   },
-  // No Enter override. Tiptap's core `keymap` extension already chains
-  // newlineInCode → createParagraphNear → liftEmptyBlock → splitBlock, and
-  // `code: true` above is what makes its first link fire inside this node. A
-  // node-level `Enter` binding wins over that chain *globally* — not just
-  // inside this node — which silently breaks Enter in paragraphs.
+  // Keep the core Enter keymap: code enables newlineInCode, while a node-level
+  // Enter override would also intercept paragraph splits.
 });
 
 /**
@@ -339,12 +281,8 @@ export const Mermaid = Node.create({
 });
 
 /**
- * A scripted terminal demonstration, stored as its transcript (#843).
- *
- * A source block like `code`, `mermaid` and `table` — the node spec is theirs.
- * Everything that makes the transcript play, and everything that stops it,
- * lives in the NodeView (terminal.ts); nothing about a run is stored, so the
- * text remains the only representation of the demonstration.
+ * Persist only transcript source; playback state belongs to the NodeView and
+ * must not enter the document.
  */
 export const Terminal = Node.create({
   name: "terminal",
@@ -399,15 +337,8 @@ export const ChartBlock = Node.create<{ ydoc: Y.Doc | null }>({
 });
 
 /**
- * The annotation anchor.
- *
- * `excludes` is left at its ProseMirror default — "exclusive with marks of the
- * same type". That is load-bearing: y-prosemirror's `marksToAttributes` checks
- * `mark.type.excludes(mark.type)` and, when a mark type does *not* exclude
- * itself, writes the Yjs attribute under a hashed key (`comment--A1b2C3d4`)
- * instead of the bare mark name. The schema package writes and reads the bare
- * key `comment`, so setting `excludes: ""` here would silently stop annotations
- * round-tripping. Do not touch it.
+ * Keep default self-exclusion: y-prosemirror otherwise hashes comment keys,
+ * while the schema reads and writes the bare comment key.
  */
 export const CommentMark = Mark.create({
   name: COMMENT_MARK,
@@ -421,20 +352,9 @@ export const CommentMark = Mark.create({
           typeof attributes.threadId === "string"
             ? {
                 "data-comment-thread": attributes.threadId,
-                // The keyboard's half of the prose→rail link (#101). A
-                // highlight is a control: Tab reaches it, Enter and Space
-                // activate it through the same delegated handler the click
-                // goes through, and focus lands on the thread's card.
-                //
-                // On the attribute rather than in `renderHTML` below, so the
-                // three ride exactly with `data-comment-thread`: a mark with
-                // no thread id has nothing to activate, and a focusable span
-                // that does nothing is a tab stop that wastes the reader's
-                // time.
-                //
-                // `CommentAnchors` owns these attributes on the live editor's
-                // mark view; this schema rendering remains the static HTML and
-                // clipboard form of the same mark.
+                // Only attributed anchors are focusable controls. Enter/Space
+                // share click activation into the rail. CommentAnchors owns
+                // live views; these attributes cover static HTML/clipboard.
                 tabindex: "0",
                 role: "button",
                 "aria-label": "Comment thread",

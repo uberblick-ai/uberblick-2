@@ -16,6 +16,7 @@ These instructions apply to interactive sessions and delivery roles alike.
   first record's UUID, retained by successors. How the system works belongs in
   the live corpus document that owns it, when one exists. Comments that tools
   read, such as `biome-ignore` or `@ts-expect-error` with their reason, stay allowed.
+  A new suppression needs a reason the reviewer accepts as justifying the exception.
 - **GitHub:** authorized work scope, maintainer decisions, reviews and evidence.
 
 A discrepancy is a gap to resolve, not permission to silently override another
@@ -149,6 +150,13 @@ A pointer is a route to the source, not a substitute for reading it.
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a
   doc edit. An unsettled change to those commitments requires a maintainer decision.
+  Pages describe intended behavior, which can be ahead of the code: never
+  remove or weaken intent because the code does not deliver it yet. An issue
+  tracks each such gap so the code catches up: whoever writes intent ahead of
+  the code files it, and whoever finds a gap with no issue files one or asks a
+  maintainer. Change a page to match the code only where delivered behavior
+  changes or extends what it describes. When unsure which applies, ask a
+  maintainer instead of editing.
 
 When instructions come from a different checkout than the code being examined,
 identify both sources and revisions. Verify code and path claims at the stated

@@ -326,6 +326,37 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   }
 });
 
+test("warning banners use the product warning colours in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
+  const uuid = await wireframeDoc(writer(), "Wireframe banner tones", "banner\n  icon archive\n  text Archived.\nbanner.warning\n  icon archive\n  text Archived.");
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  const banners = preview(page).locator(".wf-banner");
+  await expect(banners).toHaveCount(2);
+  for (const appearance of ["light", "dark"]) {
+    await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), appearance);
+    const tones = await banners.evaluateAll((elements) => elements.map((element) => {
+      const icon = element.querySelector(".wf-icon");
+      if (icon === null) throw new Error("e2e: banner icon is missing");
+      const style = getComputedStyle(element);
+      return { background: style.backgroundColor, border: style.borderColor, icon: getComputedStyle(icon).color };
+    }));
+    expect(tones[1].background).not.toBe(tones[0].background);
+    expect(tones[1].border).not.toBe(tones[0].border);
+    expect(tones[1].icon).not.toBe(tones[0].icon);
+    const warning = await banners.last().evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.color = "var(--status-warning)";
+      probe.style.backgroundColor = "var(--status-warning-subtle)";
+      element.append(probe);
+      const style = getComputedStyle(probe);
+      const result = { background: style.backgroundColor, icon: style.color };
+      probe.remove();
+      return result;
+    });
+    expect(tones[1]).toMatchObject(warning);
+    await evidence(page, info, `wireframe-banners-${appearance}`);
+  }
+});
+
 test("a phone keeps very wide wireframe content scrolling inside the block", { tag: "@webkit-iphone" }, async ({ browser }, info) => {
   const uuid = await wireframeDoc(writer(), "Phone wireframe", wideSource(12));
   for (const appearance of ["light", "dark"] as const) {
