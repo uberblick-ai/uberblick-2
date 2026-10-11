@@ -6,10 +6,8 @@
  * two processes speak the same sync language", so a client that has not been
  * updated is refused with a message saying so instead of silently diverging.
  *
- * It lives in `packages/hub` because the wire it rides on is the hub's (the
- * Hocuspocus auth message, defined by `./token.ts`) and the hub is lowest in the
- * dependency graph: web, MCP server and cli all reach it on the leaf subpath
- * `@uberblick/hub/protocol`. One definition, never a local copy.
+ * The hub and its clients import this shared contract from
+ * `@uberblick/schema/protocol`. One definition, never a local copy.
  */
 
 import { MAX_TOKEN_LENGTH } from "./token.js";

@@ -466,9 +466,9 @@ function SettingsNavigation({
 }
 
 /**
- * Fixed navigation is outside sidebar curation and dragging. Keep both
- * unbuilt destinations visible as focusable aria-disabled rows without
- * handlers; keyboard readers must encounter their unavailable state.
+ * Fixed navigation is outside sidebar curation and dragging. The two current
+ * unbuilt destinations are focusable aria-disabled rows without handlers so
+ * keyboard readers encounter their unavailable state.
  */
 function Navigation({
   allOpen,

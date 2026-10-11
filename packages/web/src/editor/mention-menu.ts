@@ -25,7 +25,9 @@ export interface MentionTrigger {
 
 /**
  * `@` at the start of the text before the caret or after a space, then a run of
- * characters that are neither space nor another `@`.
+ * characters that are neither space nor another `@`; e-mail addresses never
+ * trigger. Multi-word queries would need another terminator to return Enter
+ * to prose.
  */
 const MENTION_QUERY = /(?:^|\s)@([^\s@]*)$/;
 

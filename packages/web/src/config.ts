@@ -34,7 +34,7 @@
  * Hub release bundles disable endpoint and workspace fallbacks entirely.
  */
 
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.

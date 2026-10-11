@@ -27,7 +27,7 @@ function buildStampPlugin(): Plugin {
     apply: "build",
     async generateBundle() {
       const { module } =
-        await runnerImport<typeof import("@uberblick/hub/protocol")>("@uberblick/hub/protocol");
+        await runnerImport<typeof import("@uberblick/schema/protocol")>("@uberblick/schema/protocol");
       this.emitFile({
         type: "asset",
         fileName: BUILD_STAMP,

@@ -4,8 +4,8 @@
  * upstream cookie and Cmd+B would conflict with them and editor bold. Mobile
  * state stays separate and unsaved. Omit unused
  * icon/rail/tooltip/Slot/variant helpers. MIT source:
- * https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-
- * york-v4/ui/sidebar.tsx; public/LICENSE-shadcn.txt.
+ * https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/sidebar.tsx
+ * See public/LICENSE-shadcn.txt.
  */
 import { createContext, useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";

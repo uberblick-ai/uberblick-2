@@ -144,8 +144,8 @@
 /*
  * Bundle relative WOFF2 assets for offline use and build base paths. swap
  * keeps system first paint; normal faces use synthetic oblique. SIL Open Font
- * License 1.1 requires public/LICENSE-Geist.txt and public/LICENSE-
- * Fraunces.txt for bundled Geist 1.7.2 and Fraunces v38.
+ * License 1.1 requires public/LICENSE-Geist.txt and public/LICENSE-Fraunces.txt
+ * for bundled Geist 1.7.2 and Fraunces v38.
  */
 @font-face {
   font-family: "Geist";

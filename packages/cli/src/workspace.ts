@@ -7,7 +7,7 @@ import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js"
 
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/hub/storage";
+import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
 import { defaultDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";

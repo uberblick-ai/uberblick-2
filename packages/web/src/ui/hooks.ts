@@ -221,10 +221,10 @@ function observeSidebar(
 }
 
 /**
- * Only the decision topic's first-record directory tombstone archives it,
- * including partial writes. Unknown UUIDs are not archived. Read
- * synchronously during render with useSyncExternalStore so an archive never
- * paints an editable first frame or route-switch frame.
+ * Decisions use only their topic's first-record directory tombstone, including
+ * partial writes; other documents use their own. Unknown UUIDs are not archived.
+ * Read synchronously during render with useSyncExternalStore so an archive
+ * never paints an editable first frame or route-switch frame.
  */
 export function useArchived(
   directory: RoomConnection | null,

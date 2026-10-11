@@ -1,6 +1,6 @@
 /**
- * Show elapsed time for activity younger than 30 days and a calendar date
- * thereafter; hover exposes exact local time. Return null for invalid values.
+ * Show elapsed time for activity younger than 30 days, with exact local time
+ * on hover, and a calendar date thereafter. Return null for invalid values.
  * Share one clock per surface rather than one timer per row.
  */
 

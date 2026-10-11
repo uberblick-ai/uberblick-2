@@ -6,8 +6,8 @@
  * Sort starts last-changed first; pane state preserves it through filtering and
  * updates but not reload. Stamps are greatest-authored cache hints, not history;
  * a future-skewed clock can pin one. Missing stamps sort last only by changed.
- * Ages turn absolute at 30 days, refresh at most a minute late, and retain exact
- * time on hover and in dateTime.
+ * Ages turn absolute at 30 days and refresh at most a minute late. dateTime
+ * stays exact; relative ages expose exact time on hover.
  */
 
 import { useId, useMemo, useState } from "react";
@@ -112,7 +112,7 @@ function pinLabel(entry: DirectoryEntry, pinned: boolean): string {
   return pinned ? `Unpin ${named} from the sidebar` : `Pin ${named} to the sidebar`;
 }
 
-/** Keep exact time on hover and in dateTime alongside the shared age label. */
+/** Keep exact dateTime; expose exact time on hover while the age label is relative. */
 function ChangedStamp({
   at,
   now,

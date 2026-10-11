@@ -5,7 +5,7 @@
  * returns and pass it into this pure derivation.
  */
 
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomStatus } from "../collab/rooms.js";
 import type { SyncState } from "./calm.js";
 

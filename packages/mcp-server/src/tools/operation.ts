@@ -3,7 +3,7 @@ import { DOCUMENT_MUTATING_TOOLS } from "../failures.js";
 import type { Replica } from "../replica.js";
 import type { ToolContext } from "./context.js";
 
-/** Request information only; operations do not act on cancellation or metadata yet. */
+/** Operations receive this information but do not act on cancellation or metadata. */
 export interface OperationRequest {
   signal: AbortSignal;
   _meta?: { progressToken?: string | number | undefined; [key: string]: unknown } | undefined;
@@ -11,8 +11,8 @@ export interface OperationRequest {
 }
 
 /**
- * Args must already be parsed with the tool's exported inputSchema. The MCP
- * SDK does this before calling the adapter; direct callers must do it too.
+ * Args must be parsed with the exported inputSchema. The MCP SDK refuses
+ * invalid args as plain text before the adapter runs; direct callers must parse too.
  */
 export type Operation<Args, Payload extends object = object> = (
   context: ToolContext,
@@ -21,8 +21,8 @@ export type Operation<Args, Payload extends object = object> = (
 ) => Promise<Payload>;
 
 /**
- * The common prologue belongs to operations, including callers without MCP.
- * The schema infers Args here; input parsing remains the caller's responsibility.
+ * Callers must parse input; _input only infers Args. Keep settling and briefing
+ * here so callers without MCP use the same gates.
  */
 export function operation<Args, Payload extends object>(
   tool: string,
@@ -38,7 +38,7 @@ export function operation<Args, Payload extends object>(
   };
 }
 
-/** Content locks and content-change nudges are separate existing guarantees. */
+/** Content locks and content-change nudges have separate scopes. */
 const DOCUMENT_WRITES = {
   edit_block: { content: true, contentDurability: true },
   insert_block: { content: true, contentDurability: true },
@@ -50,7 +50,7 @@ const DOCUMENT_WRITES = {
   annotate: { content: false, contentDurability: false },
 } as const;
 
-/** Synchronous writes after settling retain the existing refusal and append order. */
+/** Keep refusal, synchronous write and durability checking in this order. */
 export function documentOperation<Args extends { uuid: string }, Payload extends object>(
   tool: keyof typeof DOCUMENT_WRITES,
   input: z.ZodType<Args>,
@@ -74,12 +74,8 @@ export function sidebarOperation<Args extends object, Payload extends object>(
   body: (context: ToolContext, args: Args, request: OperationRequest, sidebar: Replica) => Payload,
 ) {
   return operation(tool, input, (context, args, request) => {
-    // The sidebar stores uuids and nothing else, so a typo pinned here is a
-    // reference nothing can ever resolve. Identity is checked against the
-    // directory — an archived document is still pinnable, deliberately:
-    // archive_doc unpins, so this is the one way back to a pin, and
-    // get_sidebar surfaces the archived state either way. Unknown pins must
-    // remain removable, so the other sidebar operations have no check.
+    // New pins need a known stub, including archived stubs surfaced by get_sidebar.
+    // Do not gate other operations: unknown pins must remain removable.
     if (tool === "pin_doc") context.requireStub((args as Args & { uuid: string }).uuid);
     const sidebar = context.replicas.sidebar();
     return { ...body(context, args, request, sidebar), ...context.durability(sidebar) };

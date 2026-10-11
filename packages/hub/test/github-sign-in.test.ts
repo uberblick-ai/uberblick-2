@@ -1,12 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveHubConfig, resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/config.js";
+import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/team-config.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { SignInCollection } from "../src/github-sign-in.js";
 import type { HubLogRecord } from "../src/log.js";
 import { HubDatabase } from "../src/persistence.js";
-import type { Hub } from "../src/server.js";
-import { importCredentialKey, mintToken } from "../src/token.js";
+import type { TeamHub as Hub } from "../src/team.js";
+import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { removeTempDatabases, startHub, tempDatabasePath, TEST_SECRET, WORKSPACE } from "./helpers.js";
 
 const CLIENT_ID = "Iv23AbCdEF0123456789";
@@ -377,10 +377,10 @@ describe("bounded device requests", () => {
   });
 });
 
-describe("optional GitHub configuration", () => {
+describe("standalone GitHub configuration", () => {
   it("uses the shared app for remote deployments with an empty client ID", async () => {
     const github = new GithubFake();
-    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: "" });
+    const config = resolveRemoteHubConfig({ HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: "", HUB_DB_PATH: tempDatabasePath() });
     expect(config.github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
     const hub = await startHub({ ...config, databasePath: tempDatabasePath(), port: 0,
       github: { ...config.github!, fetch: github.fetch, now: () => github.time } });
@@ -391,7 +391,7 @@ describe("optional GitHub configuration", () => {
   });
 
   it("uses an operator app and returns to the default when the setting is removed", () => {
-    const env = { HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: CLIENT_ID } as NodeJS.ProcessEnv;
+    const env = { HUB_AUTH_TOKEN: TEST_SECRET, HUB_GITHUB_CLIENT_ID: CLIENT_ID, HUB_DB_PATH: ":memory:" } as NodeJS.ProcessEnv;
     expect(resolveRemoteHubConfig(env).github).toEqual({ clientId: CLIENT_ID });
     delete env.HUB_GITHUB_CLIENT_ID;
     expect(resolveRemoteHubConfig(env).github).toEqual({ clientId: SHARED_GITHUB_CLIENT_ID });
@@ -403,16 +403,11 @@ describe("optional GitHub configuration", () => {
     for (const path of ["start", "collect", "cancel"]) {
       expect(await post(hub, path, {})).toMatchObject({ code: 503, result: { status: "not-configured" } });
     }
-    expect(resolveHubConfig({ HUB_AUTH_TOKEN: "secret" }).github).toBeUndefined();
-    expect(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: "" }).github).toBeUndefined();
-    expect(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: CLIENT_ID }).github).toEqual({ clientId: CLIENT_ID });
-    expect(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: "Iv1.0123456789abcdef" }).github).toEqual({ clientId: "Iv1.0123456789abcdef" });
   });
 
   it("names invalid or missing client ID without echoing its value, before listening", async () => {
     for (const clientId of [" ", "OAuth-client", "Iv23.short", TEST_SECRET]) {
-      await expect(startHub(resolveHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
-      await expect(startHub(resolveRemoteHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
+      await expect(startHub(resolveRemoteHubConfig({ HUB_AUTH_TOKEN: "secret", HUB_GITHUB_CLIENT_ID: clientId, HUB_DB_PATH: tempDatabasePath() }))).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     }
     await expect(startHub({ github: {} as { clientId: string } })).rejects.toThrow(/HUB_GITHUB_CLIENT_ID/);
     try { await startHub({ github: { clientId: TEST_SECRET } }); }

@@ -363,8 +363,8 @@ export function App(): ReactElement {
           : { url: serving.remoteHubUrl === null ? "local" : endpointLabel(serving.remoteHubUrl), source: "document" },
     [endpoint, hubReady, serving],
   );
-  // The URL selects its workspace independently of the configured menu. Null
-  // means the address names no usable workspace and no room can be joined.
+  // The URL selects its workspace independently of the configured menu.
+  // Document search needs ub open serving and a usable workspace.
   const documentSearch = useMemo(
     () =>
       !hubReady

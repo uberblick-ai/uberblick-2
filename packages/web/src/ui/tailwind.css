@@ -1,6 +1,7 @@
 /*
  * Skip global preflight: it would reset editor margins, list markers and
  * native controls. Layer all Tailwind output so unlayered product rules win.
+ * Delete a surface's unlayered product rules when migrating it to utilities.
  * Map canonical shadcn colors to existing light-dark() tokens. Read radius
  * and shadow directly to avoid self-referential namespace cycles; inherit
  * root type and scope form-control resets to data-slot.

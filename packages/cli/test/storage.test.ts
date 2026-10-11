@@ -1,7 +1,7 @@
 /**
  * Where `ub` puts a user's files, and what it says about it.
  *
- * The layout itself is proved in `@uberblick/hub`'s suite; this one is about
+ * The layout itself is proved in the CLI storage-layout suite; this one is about
  * the commands: that whoever creates the tree first leaves it owner-only, that
  * `ub workspace status` reports the resolved replica path, and that there is
  * no layout question left for `ub doctor` to have an opinion about.
@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHub, silentLogger } from "@uberblick/hub";
-import { hubDatabasePath } from "@uberblick/hub/config";
+import { hubDatabasePath } from "../src/hub-config.js";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";

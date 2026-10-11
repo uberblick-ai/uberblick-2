@@ -46,12 +46,8 @@ import { expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import {
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock,
   assignDocumentTags,

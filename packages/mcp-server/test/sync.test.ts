@@ -22,7 +22,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
 import {
@@ -548,7 +548,7 @@ describe("hub sync", () => {
     // only thing left that can decide whether it stamps. `updatedAt` says when
     // someone changed the document, not when a replica watched it change: the
     // human's own client stamps for the human's edit, and this one must not
-    // stamp for having received it (#544). The coarseness window itself is the
+    // stamp for having received it. The coarseness window itself is the
     // timestamps suite's business, which is why it is out of the way here.
     const rig = await serverOn(running.port, { updatedAtCoarsenessMs: 0 });
     const created = await rig.ok("create_doc", {
@@ -679,10 +679,8 @@ describe("hub sync", () => {
   });
 
   it("settles at once under a mismatch instead of waiting out the budget", async () => {
-    // `waitForQuiet` used to wait the full sync budget here: the socket stayed
-    // connected and no room ever synced, so every tool call — and every fresh
-    // `inspectRemote` probe — paid the whole timeout to learn what the first
-    // refusal already knew.
+    // A protocol refusal must end waitForQuiet immediately, even when the
+    // socket is connected and no room has synced.
     const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
     const rig = await serverOn(running.port, { syncTimeoutMs: 30_000 });
 

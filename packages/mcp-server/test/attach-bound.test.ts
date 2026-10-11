@@ -68,7 +68,7 @@ import {
  * hoping to land in it.
  *
  * Releasing one hands back the mint's *own* completion, because the mint is
- * asynchronous (WebCrypto, `packages/hub/src/token.ts`): a test that asserts on
+ * asynchronous (WebCrypto, `packages/schema/src/token.ts`): a test that asserts on
  * what a released call did — or did not — do waits for the moment its token
  * exists, not for a duration it hopes is longer than the machine takes.
  */
@@ -125,8 +125,8 @@ const mints = vi.hoisted(() => {
   };
 });
 
-vi.mock("@uberblick/hub/token", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@uberblick/hub/token")>();
+vi.mock("@uberblick/schema/token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@uberblick/schema/token")>();
   return {
     ...actual,
     mintToken: (...args: Parameters<typeof actual.mintToken>) =>

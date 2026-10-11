@@ -1,8 +1,8 @@
 /** Everyday document targets retain native actions on desktop and iPad. */
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { createTagCatalogEntry, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { devices, expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";

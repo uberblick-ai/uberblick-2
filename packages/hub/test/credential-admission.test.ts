@@ -25,14 +25,14 @@ import {
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import {
   importCredentialKey,
   importRootSecret,
   MAX_TOKEN_LIFETIME_SECONDS,
   mintRequestProof,
   mintToken,
-} from "../src/token.js";
+} from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,

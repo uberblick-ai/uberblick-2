@@ -140,9 +140,9 @@ async function main() {
   if (positional.length !== 1) fail("usage: mise run publish-hub-release -- hub-vMAJOR.MINOR.PATCH [--dry-run]");
   const tag = positional[0];
   versionForTag(tag);
-  const source = readFileSync(join(ROOT, "packages/hub/src/protocol.ts"), "utf8");
+  const source = readFileSync(join(ROOT, "packages/schema/src/protocol.ts"), "utf8");
   const protocol = /^export const SYNC_PROTOCOL_VERSION = ([1-9][0-9]*);$/m.exec(source);
-  if (protocol === null) fail("cannot read SYNC_PROTOCOL_VERSION from the hub source");
+  if (protocol === null) fail("cannot read SYNC_PROTOCOL_VERSION from the schema source");
   const scratch = mkdtempSync(join(tmpdir(), `hub-release-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   try {
     const headSha = run("git", ["rev-parse", "HEAD"]);

@@ -1,11 +1,11 @@
-/** Random, self-asserted per-tab name/color; ub open and settings override them before publication. */
+/** Self-asserted per-tab defaults; ub open supplies the name and settings republish live. */
 
 /**
  * Positively classify agents by AGENT_CLIENT; omission renders as a person and
  * must not activate the agent cursor grace period. Keep markers independent of
  * rooms so presentation readers need no provider, replica or token imports.
- * AGENT_CLIENT is shared wire spelling with mcp-server/src/replica.ts; web does
- * not depend on that package.
+ * AGENT_CLIENT is shared wire spelling with mcp-server/src/replica.ts; importing
+ * that replica for one marker would pull in its Node-only runtime.
  */
 export const WEB_CLIENT = "web";
 export const AGENT_CLIENT = "agent";

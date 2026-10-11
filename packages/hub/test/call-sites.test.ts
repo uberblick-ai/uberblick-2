@@ -37,7 +37,7 @@ function productionSources(): string[] {
 }
 
 /** The module that defines the token functions is not a call site. */
-const DEFINITION = "packages/hub/src/token.ts";
+const DEFINITION = "packages/schema/src/token.ts";
 
 function mentioning(needle: string): string[] {
   return productionSources()
@@ -55,8 +55,8 @@ describe("production token minting sites", () => {
     ]);
     // Operation-bound request proofs: 60 seconds, stored credential kid.
     expect(mentioning("mintRequestProof(")).toEqual([
-      "packages/hub/src/device-login.ts",
-      "packages/hub/src/management-client.ts",
+      "packages/mcp-server/src/device-login.ts",
+      "packages/mcp-server/src/management-client.ts",
     ]);
   });
 });

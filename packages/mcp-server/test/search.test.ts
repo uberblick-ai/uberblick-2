@@ -3,12 +3,8 @@
  *
  * The installed tool description promises all-terms matching over one document,
  * underscore adjacency, no stemming, and a trailing `*` as the way to loosen a
- * term. Nothing else in the suite would notice any of those changing: a
- * multi-term query appears in `title.test.ts` without defending the semantics,
- * and all-terms silently becoming any-term would turn correct empty answers into
- * wrong populated ones while every existing test still passed. #560 exists
- * because a correct zero-hit result was read as a broken index, so the promise is
- * what this defends.
+ * term. Pair empty results with populated controls to distinguish the matching
+ * semantics from a broken index.
  */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -70,8 +66,7 @@ describe("search", () => {
     // proof the empty answer above is the AND and not a broken index.
     expect(await hits(rig, "presence withdrawing")).toEqual(["Presence"]);
 
-    // Nothing is stemmed or inflection-folded, which is the whole reason the
-    // rule is worth stating: this is the query that cost #560 a bug report.
+    // Inflections are distinct terms without an explicit prefix wildcard.
     expect(await hits(rig, "presence withdrawal")).toEqual([]);
     // And the documented way out of it.
     expect(await hits(rig, "presence withdraw*")).toEqual(["Presence"]);

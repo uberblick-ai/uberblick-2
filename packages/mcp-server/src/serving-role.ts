@@ -1,13 +1,7 @@
 /**
- * Crash-safe ownership of the one serving replica for a store.
- *
- * The sidecar transaction is the process-held lock: SQLite and the OS release
- * it when the process exits, including after SIGKILL. The holder record lives
- * in the store because the exclusive sidecar cannot be read by a contender.
- * A short store write transaction serializes the two, so a loser can only read
- * the record committed by the process whose sidecar transaction is still live.
- * Deleting or replacing the sidecar under a live holder is unsupported: no
- * file-based lock can defend against removing its file.
+ * The sidecar transaction releases on process exit, including SIGKILL. Keep
+ * holder identity in the store since contenders cannot read the locked sidecar.
+ * Removing or replacing a live sidecar invalidates this file-based lock.
  */
 
 import { chmodSync, existsSync } from "node:fs";
@@ -66,13 +60,9 @@ function parseHolder(value: unknown): ServingReplicaHolder | null {
 }
 
 /**
- * Acquire the serving role for one file-backed store.
- *
- * Ordering is load-bearing. Every candidate first takes the store's writer
- * slot, then tries the sidecar lock. A winner records itself before releasing
- * the writer slot. A loser therefore reads that exact winner without writing;
- * a winner killed before its record commits releases both transactions and is
- * never observable as the holder.
+ * Take the store writer slot before the sidecar lock and commit holder identity
+ * before releasing it. A loser reads that winner without writing; a crash before
+ * commit releases both transactions without publishing a holder.
  */
 export function acquireServingReplicaRole(
   databasePath: string,
