@@ -135,10 +135,8 @@ describe("the Documents filter and the @ picker match one title one way", () => 
   });
 
   it("folds the query and the title through one function, not two copies", () => {
-    // The equivalence above is a property of the surfaces; this is why it
-    // cannot drift. `İ` decomposes to `I` plus a combining dot the fold drops,
-    // and `toLowerCase` is locale-independent by specification — the two things
-    // a second, hand-rolled copy of the rule has historically got wrong.
+    // One shared fold keeps both surfaces aligned: `İ` decomposes to `I` plus
+    // a combining dot the fold drops, and `toLowerCase` is locale-independent.
     expect(foldForTitleMatch("İSTANBUL")).toBe("istanbul");
     expect(foldForTitleMatch("École")).toBe("ecole");
     expect(foldForTitleMatch("I")).toBe("i");

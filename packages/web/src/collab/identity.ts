@@ -1,4 +1,4 @@
-/** Self-asserted per-tab defaults; ub open supplies the name and settings republish live. */
+/** Random, self-asserted per-tab defaults; ub open supplies the name and settings republish live. */
 
 /**
  * Positively classify agents by AGENT_CLIENT; omission renders as a person and
