@@ -1,7 +1,6 @@
 import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
-// Synchronous built-in SQLite avoids native compilation during installation;
-// files remain ordinary SQLite, compatible with other bindings.
+// Decision: 90ce6355-9455-4e18-aa56-eb2347e57d6d
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/hub/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";

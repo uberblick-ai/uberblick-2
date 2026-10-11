@@ -387,8 +387,7 @@ export class HubSync {
       return;
     }
 
-    // Share one transport across rooms: full hydration must not multiply
-    // TCP connections, authentication handshakes and reconnect backoffs.
+    // Decision: 27805659-0dda-404c-a884-599cad021f64
     this.socket = new UnqueuedHocuspocusProviderWebsocket({
       url: config.hubUrl,
       WebSocketPolyfill: this.connection.websocket(),
