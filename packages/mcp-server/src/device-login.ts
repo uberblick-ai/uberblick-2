@@ -197,6 +197,7 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
  * The origin lock spans one bounded exchange; the config lock spans publication only.
  * Reread under both locks to preserve concurrent renewal, login and logout.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function ensureDeviceLogin(endpoint: string, workspace: string, options: DeviceLoginOptions = {}): Promise<DeviceLoginResult> {
   const env = options.env ?? process.env;
   options.signal?.throwIfAborted();

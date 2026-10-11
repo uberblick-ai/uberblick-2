@@ -205,6 +205,7 @@ export function readDocData(doc: Y.Doc): DocData | null {
 }
 
 /** Validate all touched collections before writing; local transactions cannot roll back. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): { changed: boolean } {
   const meta = getMeta(doc);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });

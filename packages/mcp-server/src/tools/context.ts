@@ -89,6 +89,7 @@ function toBlockInput(
 }
 
 /** Shared per-server helpers; each closure keeps the registering replica and briefing. */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
 
   /** One refusal builder; callers retain their original message and identity field. */

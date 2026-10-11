@@ -314,6 +314,7 @@ function TldrCallout({
  * Persistent backlogs still read busy; counts and recovery prose belong to
  * details and notices so the compact line does not shift.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function StatusLine({
   connection,
   presence,

@@ -102,6 +102,7 @@ function already(value: Member, io: Io): void {
   io.out(`already a member: ${describe(value)} as ${value.role}; use \`ub workspace member role ${value.githubAccountId} <admin|member>\` to change the role\n`);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function workspaceMemberCommand(argv: string[], io: Io): Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || ["help", "--help", "-h"].includes(command)) {

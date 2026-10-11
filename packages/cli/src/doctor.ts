@@ -269,6 +269,7 @@ async function hubCheck(
   return { check: hubVerdict(config, hub, "hub", deviceLogin), status: hub.status };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin: DeviceLoginResult | null = null): Check {
   const local = config.deviceLogin === undefined;
   const origin = local ? config.hubUrl : authenticationOrigin(config.hubUrl);

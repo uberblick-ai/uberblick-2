@@ -71,6 +71,7 @@ function member(value: unknown): Record<string, unknown> {
 }
 
 /** Project only public contract fields; upstream extras and messages may contain credentials. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function sanitizeManagementReply(
   action: ManagementAction,
   reply: ManagementReply,

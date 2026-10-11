@@ -102,6 +102,7 @@ function carriesComment(node: ProseMirrorNode): boolean {
 /**
  * Keep playback, controls and transcript inside the NodeView's owned chrome.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export const terminalBlockView: NodeViewRenderer = ({
   node,
   editor,

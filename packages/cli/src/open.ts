@@ -1117,6 +1117,7 @@ function takeForeground(owned: Owned, io: Io): Foreground {
   return { interrupted: () => seen, signalled, shutdown };
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export async function openCommand(
   argv: string[],
   io: Io = processIo,

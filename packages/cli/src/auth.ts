@@ -426,6 +426,7 @@ function terminal(result: Record<string, unknown>): never {
   throw new SignInFailure(messages[String(result.status)] ?? "the hub returned an invalid GitHub sign-in response; update the hub");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 async function login(selection: Selection, io: Io, nextAction: boolean): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);

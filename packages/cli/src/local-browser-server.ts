@@ -193,6 +193,7 @@ async function listen(server: Server<HubContext>): Promise<void> {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {

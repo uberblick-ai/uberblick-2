@@ -437,6 +437,7 @@ export class MirrorStore {
 
   private readonly unindexTx: (uuid: string) => void;
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   constructor(databasePath: string, workspaceId: string) {
     this.databasePath = databasePath;
     // Owner-only: this tree holds the corpus and may later receive credentials.

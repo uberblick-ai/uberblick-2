@@ -98,6 +98,7 @@ function gutterTop(
   return Number.isFinite(top) ? top : 0;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function BlockMenu({
   editor,
   host,
