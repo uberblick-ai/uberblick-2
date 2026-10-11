@@ -339,9 +339,11 @@ test("warning banners use the product warning colours in both appearances", { ta
       const style = getComputedStyle(element);
       return { background: style.backgroundColor, border: style.borderColor, icon: getComputedStyle(icon).color };
     }));
-    expect(tones[1].background).not.toBe(tones[0].background);
-    expect(tones[1].border).not.toBe(tones[0].border);
-    expect(tones[1].icon).not.toBe(tones[0].icon);
+    const [neutralTone, warningTone] = tones;
+    if (neutralTone === undefined || warningTone === undefined) throw new Error("e2e: banner tones are missing");
+    expect(warningTone.background).not.toBe(neutralTone.background);
+    expect(warningTone.border).not.toBe(neutralTone.border);
+    expect(warningTone.icon).not.toBe(neutralTone.icon);
     const warning = await banners.last().evaluate((element) => {
       const probe = document.createElement("span");
       probe.style.color = "var(--status-warning)";
@@ -352,7 +354,7 @@ test("warning banners use the product warning colours in both appearances", { ta
       probe.remove();
       return result;
     });
-    expect(tones[1]).toMatchObject(warning);
+    expect(warningTone).toMatchObject(warning);
     await evidence(page, info, `wireframe-banners-${appearance}`);
   }
 });
