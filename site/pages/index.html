@@ -1,0 +1,218 @@
+<head>
+<title>Uberblick: local-first documents for people and agents</title>
+<meta name="description" content="A workspace for the plans, research and decisions behind your software. You write in a browser; your coding agent reads and edits the same documents over MCP.">
+<link rel="stylesheet" href="/css/landing.css">
+</head>
+<div class="wrap">
+<header class="top"><a class="brand" href="/">uberblick<i></i></a><nav aria-label="Site"><a href="/" aria-current="page">Uberblick</a><a href="#usecases">Use cases</a><a href="#compare">Compare</a><a href="#docs">Docs</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav><a class="gh" href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></header>
+
+<section class="hero">
+  <h1>Local-first documents for people and agents.</h1>
+  <p class="lede">A workspace for the plans, research and decisions behind your software. You write in a browser; your coding agent reads and edits the same documents over MCP. Everything is stored on your computer, and a hub syncs it to the people you share with.</p>
+  <div class="actions"><a class="button primary" href="#why">Why Uberblick</a><a class="button" href="#install">Install in four commands</a></div>
+</section>
+
+<section class="frame wide" id="demo" aria-label="Uberblick, a demo of one document being edited by an agent and a person">
+  <div class="fbar"><span class="fdots" aria-hidden="true"><i></i><i></i><i></i></span><span class="furl">127.0.0.1:7777 · Uberblick product</span><button type="button" id="demoReplay">Replay</button></div>
+  <div class="fbody">
+    <aside class="fside">
+      <div class="fws"><span class="brand small-brand">uberblick<i></i></span><span>Uberblick product</span></div>
+      <div class="fgroup"><span class="flabel">Pinned</span><span class="frow" aria-current="page">Delivery report</span><span class="frow">Web UI: typography</span><span class="frow">Release plan 0.5</span></div>
+      <div class="fgroup"><span class="flabel">Decisions</span><span class="frow">Where does the web UI use monospace?</span><span class="frow">What does the brand amber mark?</span></div>
+      <div class="fgroup"><span class="frow">All documents</span></div>
+      <div class="ffoot"><span class="frow">Workspace settings</span></div>
+    </aside>
+    <main class="fdoc">
+      <h2 class="ftitle">Delivery report</h2>
+      <div class="fmeta"><span class="dot"><i id="fsync" aria-hidden="true"></i><span id="fedited">Edited 2 hours ago</span></span><span>rev 1f3a</span></div>
+      <p class="fpara" id="fpara">Seven issues merged this week without a person stepping in. Two needed a second review round; both were retry-limit questions the preparer could have settled from the decision record.<span id="typed"></span><span class="fcaret agent" id="fcaret" hidden aria-hidden="true"><b>Claude</b></span></p>
+      <section class="block chart fchart"><div class="cap"><span>Line chart · deliveries</span><span id="frecords">6 records</span></div>
+        <svg viewBox="0 0 560 170" aria-label="Deliveries per day, Monday to Sunday" id="fsvg">
+          <g class="grid"><line x1="40" y1="20" x2="540" y2="20"/><line x1="40" y1="60" x2="540" y2="60"/><line x1="40" y1="100" x2="540" y2="100"/><line x1="40" y1="140" x2="540" y2="140"/></g>
+          <g class="axis"><text x="30" y="24">9</text><text x="30" y="64">6</text><text x="30" y="104">3</text><text x="30" y="144">0</text></g>
+          <g class="xaxis"><text x="60" y="162">Mon</text><text x="140" y="162">Tue</text><text x="220" y="162">Wed</text><text x="300" y="162">Thu</text><text x="380" y="162">Fri</text><text x="460" y="162">Sat</text><text x="540" y="162" id="fsun">Sun</text></g>
+          <path class="line" d="M60 100 L140 73.3 L220 86.7 L300 60 L380 73.3 L460 46.7"/>
+          <path class="line seg" id="fseg" d="M460 46.7 L540 60" pathLength="1"/>
+          <g class="pts"><circle cx="60" cy="100" r="3"/><circle cx="140" cy="73.3" r="3"/><circle cx="220" cy="86.7" r="3"/><circle cx="300" cy="60" r="3"/><circle cx="380" cy="73.3" r="3"/><circle cx="460" cy="46.7" r="3"/><circle cx="540" cy="60" r="3.5" class="new" id="fnew"/></g>
+        </svg>
+      </section>
+      <div class="fcomment fmobile" id="fcomment2" hidden></div>
+      <div class="fpointer" id="fpointer" hidden aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><title>Pointer</title><path d="M2 1l11 7-4.5 1.2L6 14z"/></svg><b>You</b></div>
+    </main>
+    <aside class="frail">
+      <div class="fcontents"><span>On this page</span><b>Summary</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></div>
+      <div class="fcomment" id="fcomment" hidden>
+        <div class="who"><span class="av person" aria-hidden="true">Y</span><span>You</span><small>just now</small><button type="button" class="fresolve" id="fresolve" title="Resolve this thread">Resolve</button></div>
+        <div class="on">on “one wasted run”</div>
+        <p id="fq"></p>
+        <div class="freply" id="freply" hidden><div class="who"><span class="av agent" aria-hidden="true">C</span><span>Claude</span><small>just now</small></div><p>Yes. The timeout on #1588; its retrospective is linked from today's record.</p></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<div class="col">
+<section class="q" id="why"><h2>The docs folder is where context goes to die.</h2>
+<p>Every team keeps the reasoning behind its code somewhere: a Markdown folder in the repo, a Notion space, a few notebooks. The folder goes stale because nobody reads it. The wiki is far from the code and farther from the agents. The notebook is one person's.</p>
+<p>Now most teams also have agents working in the same codebase, and they need the same context: what was decided, why, and what the numbers say. They don't need it in a chat window. They need it in a place they can search, read and edit, next to the people who wrote it.</p>
+<p>Uberblick is that place. One workspace of documents, on your computer, built MCP first: agents write most of it, and you review and adjust in the browser. Comments sit beside the text they are about. Decisions are records, not paragraphs. Numbers live in the document that explains them.</p>
+</section>
+
+<section class="q" id="blocks"><h2>A document can hold more than prose.</h2>
+<p>The Markdown you already write, plus the blocks that never survive in a README. Data tables and line charts read records stored inside the document, so when an agent updates the records, the chart updates with them.</p>
+</section>
+</div>
+<section class="gallery wide" aria-label="Block types">
+  <figure class="mini" style="--bar: var(--bar-code)"><div class="art code"><i style="width:62%"></i><i style="width:38%;margin-left:12%"></i><i style="width:50%;margin-left:12%"></i><i style="width:20%"></i></div><figcaption>Code</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-terminal)"><div class="art term"><span>$ ub open</span><span class="o">Editor at 127.0.0.1</span><span class="cur">$ <em></em></span></div><figcaption>Terminal demo</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-mermaid)"><div class="art"><svg viewBox="0 0 120 56" aria-hidden="true"><rect x="4" y="18" width="34" height="20" rx="3"/><rect x="82" y="18" width="34" height="20" rx="3"/><rect x="43" y="4" width="34" height="14" rx="3"/><path d="M38 28h44M60 18v10" class="ln"/></svg></div><figcaption>Mermaid / flow charts</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-chart)"><div class="art"><svg viewBox="0 0 120 56" aria-hidden="true"><path d="M6 48h66" class="ax"/><path d="M6 30h66M6 12h66" class="gr"/><polyline points="6,44 20,36 34,38 48,22 60,18 72,10" class="ln"/><circle cx="72" cy="10" r="2.5" class="pt"/><g transform="translate(100 30)"><circle r="18" class="pie-a"/><path d="M0 0 L0 -18 A18 18 0 0 1 17.1 5.6 Z" class="pie-b"/><path d="M0 0 L17.1 5.6 A18 18 0 0 1 -10.6 14.6 Z" class="pie-c"/></g></svg></div><figcaption>Charts</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-chart)"><div class="art grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><figcaption>Data table</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-decision)"><div class="art decision"><i style="width:70%"></i><b></b><i style="width:50%"></i></div><figcaption>Decision</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-embed)"><div class="art embed"><svg viewBox="0 0 120 56" aria-hidden="true"><g transform="translate(14 8)"><rect x="0" y="0" width="13" height="13" rx="6.5" class="f1"/><rect x="0" y="13" width="13" height="13" rx="6.5" class="f2"/><rect x="0" y="26" width="13" height="13" rx="6.5" class="f3"/><rect x="13" y="0" width="13" height="13" rx="6.5" class="f4"/><circle cx="19.5" cy="19.5" r="6.5" class="f5"/></g><rect x="48" y="10" width="62" height="36" rx="3" class="shot"/><rect x="54" y="16" width="22" height="6" rx="1" class="sb"/><rect x="54" y="26" width="50" height="4" rx="1" class="sb"/><rect x="54" y="34" width="36" height="4" rx="1" class="sb"/></svg></div><figcaption>Embeds</figcaption></figure>
+  <figure class="mini" style="--bar: var(--bar-wire)"><div class="art"><svg viewBox="0 0 120 56" aria-hidden="true"><rect x="4" y="4" width="112" height="48" rx="2" class="wf"/><path d="M34 4v48" class="wl"/><rect x="9" y="10" width="18" height="3" class="wb"/><rect x="9" y="17" width="14" height="3" class="wb"/><rect x="9" y="24" width="16" height="3" class="wb"/><rect x="42" y="10" width="40" height="5" class="wb"/><rect x="42" y="20" width="66" height="3" class="wb"/><rect x="42" y="26" width="58" height="3" class="wb"/><rect x="42" y="36" width="24" height="9" rx="2" class="wbtn"/></svg></div><figcaption>Wireframes</figcaption></figure>
+</section>
+
+<div class="col">
+<section class="q" id="compare"><h2>Why not use Notion, Obsidian or Jupyter?</h2>
+<p>Use them for what they are best at: Notion for company-wide and non-engineering content, Obsidian for a personal knowledge base, Jupyter for reproducible analysis. Uberblick takes one idea from each and aims them at a small team of people and agents working on one codebase. <a href="/compare">Which tool fits your team?</a> has the full comparison.</p>
+</section>
+<section class="q" id="usecases"><h2>What teams use it for.</h2>
+<p>These are the jobs we built it around, and the ones we use it for ourselves. Each has its own page.</p>
+<div class="cases">
+  <a href="/use-cases/product-intent"><span class="t">Product intent that agents read before they build</span><span class="d">Pin the documents that say what the product should do. An agent loop reads them before it prepares, implements or reviews an issue. This is how Uberblick itself is built.</span></a>
+  <a href="/use-cases/decisions"><span class="t">Decisions that stay decided</span><span class="d">Record the answer once, with the reason and the issues it affects. The next person, or the next agent, finds it before reopening the question.</span></a>
+  <a href="/use-cases/reports"><span class="t">Reports with the numbers inside</span><span class="d">A daily delivery report writes its records into a document. The chart on the page is the data, not a screenshot of it.</span></a>
+  <a href="/use-cases/research"><span class="t">Research that doesn't get lost in chat</span><span class="d">An agent's findings land as a document in the workspace, linked from the plan, with your comments beside the parts you disagree with.</span></a>
+</div>
+</section>
+
+<section class="q" id="decision"><h2>A decision looks like this.</h2>
+<p>From our own product workspace. The answer is the first thing on the page; the reason and the links follow. When the question comes up again, a new record supersedes this one on the same topic.</p>
+<section class="block decision" aria-label="Example decision record"><div class="cap"><span>Decision · decided 10 October 2026</span><span>Uberblick product workspace</span></div>
+  <div class="body">
+    <h3>Where does the web UI use monospace?</h3>
+    <p class="answer">Only for text a person would paste somewhere: code, terminal output and ids in Settings. Everything else is set in the UI face.</p>
+    <p class="ui">Mono reads as machine output. Used for labels and timestamps it made the chrome look like a debug overlay and competed with real code blocks.</p>
+    <div class="links"><span>Links</span><a href="https://github.com/uberblick-ai/uberblick-2/issues/1551">uberblick-2#1551</a><span>Web UI: typography</span></div>
+  </div>
+</section>
+</section>
+
+<section class="q" id="install"><h2>Install in four commands.</h2>
+<p>Homebrew on Apple Silicon macOS or Linux x86_64. No account, no server. The fourth command registers the MCP server with Claude Code; use <code>codex</code> for Codex.</p>
+</section>
+</div>
+<section class="block terminal wide"><div class="cap"><span>Terminal</span><span class="capx"><button type="button" id="replay">Replay</button><button type="button" data-copy="brew install uberblick-ai/tap/uberblick
+mkdir uberblick-notes &amp;&amp; cd uberblick-notes
+ub workspace create &quot;My Workspace&quot;
+ub open
+ub mcp install claude">Copy</button></span></div>
+<pre id="term"><span class="p">$</span> brew install uberblick-ai/tap/uberblick
+<span class="p">$</span> mkdir uberblick-notes &amp;&amp; cd uberblick-notes
+<span class="p">$</span> ub workspace create "My Workspace"
+<span class="p">$</span> ub open
+<span class="o">Editor at http://127.0.0.1:… Keep this terminal open.</span>
+
+<span class="c"># Second terminal, same directory</span>
+<span class="p">$</span> ub mcp install claude</pre></section>
+<div class="col">
+<p>To share a workspace, run a hub on a computer the team can reach. It is one Docker release; <a href="/docs/hub">Run a hub</a> walks through it.</p>
+
+<section class="q" id="docs"><h2>Docs</h2>
+<div class="doclinks">
+  <a href="/docs/install"><span class="t">Install and update</span><span class="d">Homebrew, <code>ub update</code>, where your files live.</span></a>
+  <a href="/docs/workspaces"><span class="t">Workspaces</span><span class="d">Create, select and switch; what <code>.uberblick.json</code> decides.</span></a>
+  <a href="/docs/editor"><span class="t">The editor</span><span class="d">Blocks, comments, the sidebar, document data.</span></a>
+  <a href="/docs/agents"><span class="t">Agents over MCP</span><span class="d">Install for Claude Code or Codex; the 25 tools and what each is for.</span></a>
+  <a href="/docs/decisions"><span class="t">Decisions</span><span class="d">Records, topics, superseding, linking issues.</span></a>
+  <a href="/docs/hub"><span class="t">Run a hub</span><span class="d">The Docker release, localhost, Tailscale (recommended) or a public host name; membership and <code>ub auth login</code>.</span></a>
+  <a href="/docs/cli"><span class="t">CLI reference</span><span class="d">Every <code>ub</code> command, with examples.</span></a>
+</div>
+</section>
+</div>
+
+<footer class="end"><span>Uberblick is open source under the MIT license.</span><nav><a href="https://github.com/uberblick-ai/uberblick-2">GitHub</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a><a href="https://github.com/uberblick-ai/uberblick-2/blob/main/SECURITY.md">Security</a></nav></footer>
+</div>
+<div class="toast" role="status" aria-live="polite"></div>
+<script>
+const toast = document.querySelector('.toast');
+for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', async () => {
+  const t = b.getAttribute('data-copy');
+  try { await navigator.clipboard.writeText(t); toast.textContent = 'Copied'; }
+  catch { const r = document.createRange(); r.selectNodeContents(b.closest('.block').querySelector('pre')); getSelection().removeAllRanges(); getSelection().addRange(r); toast.textContent = 'Select and copy'; }
+  toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1400);
+});
+(() => {
+  const $ = id => document.getElementById(id);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const typed = $('typed'), caret = $('fcaret'), sync = $('fsync'), edited = $('fedited'), seg = $('fseg'), dot = $('fnew'), recs = $('frecords');
+  const pointer = $('fpointer'), comment = $('fcomment'), q = $('fq'), reply = $('freply'), para = $('fpara'), frame = $('demo');
+  const sentence = ' Today: six deliveries, one wasted run. Chart updated from the record.';
+  const question = 'Was the wasted run the timeout on #1588?';
+  let run = 0, timers = [];
+  const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+  function reset() {
+    timers.forEach(clearTimeout); timers = []; run++;
+    typed.textContent = ''; caret.hidden = true; caret.classList.remove('fade'); sync.classList.remove('pulse'); edited.textContent = 'Edited 2 hours ago';
+    seg.classList.remove('drawn'); dot.classList.remove('shown'); recs.textContent = '6 records';
+    pointer.hidden = true; pointer.classList.remove('move', 'fade'); comment.hidden = true; comment.classList.remove('focus', 'resolved'); q.textContent = ''; reply.hidden = true;
+    const old = para.querySelector('mark'); if (old) old.replaceWith(...old.childNodes); para.normalize();
+  }
+  function finalState() {
+    typed.textContent = sentence; seg.classList.add('drawn'); dot.classList.add('shown'); recs.textContent = '7 records'; edited.textContent = 'Edited just now by Claude';
+    markPhrase(); comment.hidden = false; comment.classList.add('focus'); q.textContent = question; reply.hidden = false;
+  }
+  function markPhrase() {
+    const node = typed.firstChild; if (!node) return; const i = node.data.indexOf('one wasted run'); if (i < 0) return;
+    const r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + 'one wasted run'.length);
+    const m = document.createElement('mark'); m.className = 'sel'; r.surroundContents(m); return m;
+  }
+  function play() {
+    reset(); const id = run;
+    if (reduce) { finalState(); return; }
+    later(() => { caret.hidden = false; }, 900);
+    later(() => { let k = 0; (function type() { if (id !== run) return; if (k < sentence.length) { typed.textContent += sentence[k++]; later(type, 38 + Math.random() * 40); } else { later(afterType, 500); } })(); }, 1500);
+    function afterType() {
+      sync.classList.add('pulse'); edited.textContent = 'Edited just now by Claude';
+      later(() => { recs.textContent = '7 records'; seg.classList.add('drawn'); }, 500);
+      later(() => dot.classList.add('shown'), 1300);
+      later(() => { caret.classList.add('fade'); }, 1800);
+      later(human, 2600);
+    }
+    function human() {
+      const node = typed.firstChild; const i = node.data.indexOf('one wasted run');
+      const r = document.createRange(); r.setStart(node, i + 'one wasted run'.length); r.setEnd(node, i + 'one wasted run'.length);
+      const b = r.getBoundingClientRect(), f = frame.querySelector('.fdoc').getBoundingClientRect();
+      pointer.hidden = false; pointer.style.transform = `translate(${Math.min(b.left - f.left + 140, f.width - 60)}px, ${b.top - f.top + 120}px)`;
+      later(() => { pointer.classList.add('move'); pointer.style.transform = `translate(${b.left - f.left + 2}px, ${b.top - f.top + b.height - 4}px)`; }, 60);
+      later(() => { markPhrase(); }, 1000);
+      later(() => { comment.hidden = false; comment.classList.add('focus'); pointer.classList.add('fade'); }, 1500);
+      later(() => { let k = 0; (function type() { if (id !== run) return; if (k < question.length) { q.textContent += question[k++]; later(type, 30 + Math.random() * 30); } })(); }, 1900);
+      later(() => { reply.hidden = false; }, 1900 + question.length * 45 + 1400);
+    }
+  }
+  $('fresolve').addEventListener('click', () => {
+    comment.classList.add('resolved');
+    const m = para.querySelector('mark'); if (m) { m.replaceWith(...m.childNodes); para.normalize(); }
+    later(() => { comment.hidden = true; comment.classList.remove('resolved', 'focus'); }, 500);
+  });
+  $('demoReplay').addEventListener('click', play);
+  play();
+})();
+(() => {
+  const pre = document.getElementById('term'), btn = document.getElementById('replay');
+  const full = pre.innerHTML; let run = 0;
+  btn.addEventListener('click', () => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = ++run, lines = full.split('\n'); pre.innerHTML = ''; let li = 0;
+    (function next() {
+      if (id !== run || li >= lines.length) return;
+      const line = lines[li++]; const tmp = document.createElement('div'); tmp.innerHTML = line;
+      if (!line.includes('class="p"')) { pre.innerHTML += `${line}\n`; setTimeout(next, 260); return; }
+      const rest = tmp.textContent.slice(1); pre.innerHTML += '<span class="p">$</span>'; let k = 0;
+      (function type() { if (id !== run) return; if (k < rest.length) { pre.innerHTML += rest[k++].replace('<', '&lt;'); setTimeout(type, 22 + Math.random() * 30); } else { pre.innerHTML += '\n'; setTimeout(next, 320); } })();
+    })();
+  });
+})();
+</script>
