@@ -235,6 +235,7 @@ describe("`ub doctor`", () => {
       "hub",
       "clock",
       "local hub",
+      "web server",
       "mcp",
     ]);
   });
