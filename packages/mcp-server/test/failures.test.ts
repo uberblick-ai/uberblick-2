@@ -269,7 +269,7 @@ describe("the failure contract", () => {
       uuid: doc.uuid, type: "card", text: "label: Missing title",
     })).payload);
     const card = await rig.ok("insert_block", {
-      uuid: doc.uuid, type: "card", text: "title: Card\n\nBody",
+      uuid: doc.uuid, after_block_id: doc.blockId, type: "card", text: "title: Card\n\nBody",
     });
     record((await rig.call("annotate", {
       uuid: doc.uuid, block_id: card.block.id, start: 0, end: 3, text: "Open this in the web editor",
