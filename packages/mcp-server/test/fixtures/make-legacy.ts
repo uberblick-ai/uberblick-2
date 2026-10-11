@@ -24,7 +24,7 @@ const OTHER = "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11";
 // Preserve the fixture's opaque room key to reproduce its bytes.
 const ROOM = `main/${UUID}`;
 
-// Preserve the named workspace and binding without a workspace meta row.
+// Keep the named workspace for the fixture's opaque room keys.
 const store = new MirrorStore(target, "main");
 
 // A snapshot plus a live tail, so the fixture exercises both BLOB columns.

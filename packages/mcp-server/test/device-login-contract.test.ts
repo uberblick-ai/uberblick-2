@@ -45,7 +45,7 @@ describe("device renewal response and recovery contracts", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const body = JSON.parse(options?.body as string) as Record<string, unknown>;
       requests.push(body);
-      // The previous handler checks this exact envelope shape before version.
+      // A hub on the preceding protocol checks this two-field shape before version.
       if (Object.keys(body).length !== 2) return Response.json({ status: "invalid-request" }, { status: 400 });
       return send(input, options);
     });

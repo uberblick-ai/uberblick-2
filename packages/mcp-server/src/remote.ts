@@ -97,9 +97,9 @@ export interface Corpus {
    */
   unsettled: string[];
   /**
-   * True only after the directory arrived and went quiet. An incomplete empty
-   * listing says nothing about hub contents, even with status connected; using
-   * it to permit attachment could merge into an unread populated workspace.
+   * Whether the directory read finished; inspectRemote also waits for quiet.
+   * Check unsettled separately. An incomplete empty listing proves nothing
+   * about hub contents and must not permit attachment.
    */
   complete: boolean;
 }

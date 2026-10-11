@@ -510,9 +510,9 @@ export class Replicas {
   }
 
   /**
-   * Repair authoritative stub state before deriving rows, for local and remote
-   * document updates. authored affects only updatedAt. Mirroring failures must
-   * not reject an already logged write; retry stub repair on updates or connect.
+   * Repair the logged, non-rebuildable stub before deriving index rows for local
+   * and remote document updates. authored affects only updatedAt. Mirroring
+   * failures must not reject an already logged write; retry on updates or connect.
    * A failed stub append still poisons the directory through its own observer.
    */
   private afterChange(replica: Replica, authored: boolean): void {

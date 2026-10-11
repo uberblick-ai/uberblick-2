@@ -145,8 +145,9 @@ interface Recovery {
 }
 
 /**
- * Only mapped codes have known recovery and mutation state. Throw sites may
- * specialize the recovery sentence, but must preserve its class.
+ * Mapped codes supply default recovery and mutation state. Throw sites with
+ * more context may replace recovery, including its class; never suggest retry
+ * when the unchanged call cannot succeed after a transient condition passes.
  */
 const RECOVERIES: Record<string, Recovery> = {
   unknown_help_topic: {

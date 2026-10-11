@@ -156,16 +156,13 @@ describe("directory timestamps", () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Old", description: "A test document." });
 
-    // A stub exactly as a writer that predates the fields left it: right title,
-    // right tags, no stamps at all. Written into the map directly, because
-    // `upsertDirectoryEntry` would carry the existing createdAt forward and
-    // there would be nothing left to backfill.
+    // Write a stub without stamps directly; upsertDirectoryEntry would preserve
+    // createdAt and leave nothing to backfill.
     getDirectoryMap(rig.instance.replicas.directory().doc).set(doc.uuid, {
       title: "Old",
       tags: [],
     });
-    // The current writer also records a max candidate. An entry that truly
-    // predates that representation has neither half.
+    // Clear the separate max candidate too, so neither timestamp representation remains.
     rig.instance.replicas.directory().doc.getMap("updatedAt").clear();
     expect(stub(rig, doc.uuid).createdAt).toBeUndefined();
 

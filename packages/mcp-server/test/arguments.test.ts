@@ -13,7 +13,7 @@
  * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
  *   block and a range; a reply names a thread and may resolve or reopen it.
  * - **`sidebar_group` is three shapes, and each takes only its own field.** A
- *   A `rename` carrying an `index` must be refused before writing.
+ *   `rename` carrying an `index` must be refused before writing.
  *
  * `tools/list` is asserted alongside the calls on purpose: a caller that cannot
  * read the rule from the advertised schema has to learn it by being refused,

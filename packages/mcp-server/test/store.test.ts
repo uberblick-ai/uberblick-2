@@ -91,8 +91,7 @@ describe("a database written by the better-sqlite3 build", () => {
         uuid: LEGACY.uuid,
         title: LEGACY.title,
         tags: ["legacy"],
-        // The column this file predates, added by migration and empty for
-        // every row it already held.
+        // Migrating a fixture without the description column leaves its rows empty.
         description: null,
         snippet: expect.stringContaining("old binding"),
       },
