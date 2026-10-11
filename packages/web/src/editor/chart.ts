@@ -307,7 +307,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       dom, contentDOM,
       update(updated: PMNode): boolean {
         if (updated.type !== current.type || contentDOM.parentNode !== dom) return false;
-        if (updated.textContent !== current.textContent) dirty = true;
+        if (updated.textContent !== current.textContent) {
+          dirty = true;
+          table.resetSort();
+        }
         current = updated;
         syncChrome();
         // Source visibility follows ProseMirror decorations. Caret moves and

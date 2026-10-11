@@ -2,7 +2,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { writeFileSync } from "node:fs";
-import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
@@ -75,6 +75,23 @@ async function tabTo(page: Page, target: Locator): Promise<void> {
     await page.keyboard.press("Tab");
   }
   await expect(target).toBeFocused();
+}
+
+function documentSelection(page: Page): Promise<{ from: number; to: number }> {
+  return editor(page).evaluate((element) => {
+    const mounted = element as HTMLElement & { editor: { state: { selection: { from: number; to: number } } } };
+    const { from, to } = mounted.editor.state.selection;
+    return { from, to };
+  });
+}
+
+async function expectHeaderOrder(table: Locator, label: string, direction: "ascending" | "descending"): Promise<void> {
+  const header = table.getByRole("columnheader", { name: label, exact: true });
+  await expect(header).toHaveAttribute("aria-sort", direction);
+  await expect(header.locator("[aria-hidden='true']")).toHaveText(direction === "ascending" ? "↑" : "↓");
+  await expect(header.locator("[aria-hidden='true']")).toBeVisible();
+  await expect(table.locator("th[aria-sort]")).toHaveCount(1);
+  await expect(table.locator("th [aria-hidden='true']:visible")).toHaveCount(1);
 }
 
 async function expectPopup(page: Page, activate: () => Promise<unknown>): Promise<void> {
@@ -386,6 +403,160 @@ test("all rows read like an ordinary table with secondary source and isolated li
   }
 });
 
+test("every header sorts through native pointer and keyboard input without moving the document selection", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = { ...MAPPING, sort: { field: "day", direction: "desc" } };
+  const uuid = await tableDoc(session, "Native header sorting", mapping);
+  await measurements(session, uuid);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  await expect(table).toBeVisible();
+  await expectHeaderOrder(table, "Day", "descending");
+  await editor(page).locator(":scope > p").first().click();
+  const selection = await documentSelection(page);
+  for (const { label } of MAPPING.columns) {
+    const button = table.getByRole("button", { name: label, exact: true });
+    expect(await button.evaluate(element => element.tagName)).toBe("BUTTON");
+    await activateControl(button);
+    await expectHeaderOrder(table, label, "ascending");
+    await expect(button).toBeFocused();
+    expect(await documentSelection(page)).toEqual(selection);
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+    if (label === "Autonomous") {
+      await expect(table.locator("tbody tr td:first-child")).toHaveText([
+        "Relative link", "<strong>kept as text</strong>", '{"compact":true}', "Absent", "Null", "Invalid values",
+      ]);
+    }
+    await editor(page).locator(":scope > p").first().click();
+    await tabTo(page, button);
+    await page.keyboard.press("Enter");
+    await expectHeaderOrder(table, label, "descending");
+    await expect(button).toBeFocused();
+    await page.keyboard.press("Space");
+    await expectHeaderOrder(table, label, "ascending");
+    await expect(button).toBeFocused();
+    expect(await documentSelection(page)).toEqual(selection);
+    await expect(page.locator(".ub-chart-source")).toBeHidden();
+  }
+  const screenshot = info.outputPath("header-sorting.png");
+  await page.screenshot({ path: screenshot, fullPage: true });
+  await info.attach("header-sorting", { path: screenshot, contentType: "image/png" });
+});
+
+test("reader sorting keeps the Recent days window local and read-free through live updates and source resets", async ({ browser }) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Recent days", limit: 7,
+    columns: [{ field: "day", label: "Day", format: "date" }, { field: "deliveries", label: "Deliveries", format: "number" }],
+    sort: { field: "day", direction: "desc" },
+  };
+  const uuid = await tableDoc(session, "Local Recent days", mapping);
+  const stored = await session.call<DocPayload>("get_doc", { uuid });
+  const chart = stored.blocks.find(block => block.type === "chart");
+  if (chart === undefined) throw new Error("e2e: the Recent days source is missing");
+  await session.call("insert_block", { uuid, after_block_id: chart.id, type: "chart", text: JSON.stringify(mapping) });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: [999, 888, 777, 70, 10, 40, 30, 60, 20, 50].map((deliveries, index) => ({
+      id: `day-${index + 1}`, value: { day: `2026-10-${String(index + 1).padStart(2, "0")}`, deliveries },
+    })),
+  }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { locale: "en-US" }, beforeNavigate: loading => installProbe(loading, uuid),
+  });
+  const tables = page.getByRole("table", { name: "Recent days", exact: true });
+  await expect(tables).toHaveCount(2);
+  const table = tables.first();
+  const other = tables.nth(1);
+  const observer = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: { locale: "en-US" } });
+  const observerTable = observer.getByRole("table", { name: "Recent days", exact: true }).first();
+  const dayCells = (target: Locator) => target.locator("tbody tr td:first-child");
+  const days = (...values: number[]) => values.map(day => `Oct ${day}, 2026`);
+  const initial = days(10, 9, 8, 7, 6, 5, 4);
+  await expect(dayCells(table)).toHaveText(initial);
+  await expect(dayCells(other)).toHaveText(initial);
+  await expect(dayCells(observerTable)).toHaveText(initial);
+  const block = page.locator(".ub-chart[data-view='table']").first();
+  const notice = block.locator(".ub-chart-notice");
+  const diagnostics = block.locator(".ub-chart-diagnostics");
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 10 records");
+  const before = await session.call("get_data", { uuid, collection: "measurements", limit: 1000 });
+  const probe = () => page.evaluate(() => {
+    const { reads, localUpdates } = (window as unknown as { tableProbe: { reads: number; localUpdates: number } }).tableProbe;
+    return { reads, localUpdates };
+  });
+  const counts = await probe();
+  expect(counts.reads).toBeGreaterThan(0);
+  const diagnosticsText = await diagnostics.textContent();
+  const deliveries = table.getByRole("button", { name: "Deliveries", exact: true });
+  await deliveries.click();
+  await expect(dayCells(table)).toHaveText(days(5, 9, 7, 6, 10, 8, 4));
+  await expectHeaderOrder(table, "Deliveries", "ascending");
+  await deliveries.click();
+  await expect(dayCells(table)).toHaveText(days(4, 8, 10, 6, 7, 9, 5));
+  await expectHeaderOrder(table, "Deliveries", "descending");
+  await expect(dayCells(other)).toHaveText(initial);
+  await expectHeaderOrder(other, "Day", "descending");
+  await expect(dayCells(observerTable)).toHaveText(initial);
+  await expectHeaderOrder(observerTable, "Day", "descending");
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 10 records");
+  expect(await diagnostics.textContent()).toBe(diagnosticsText);
+  expect(await probe()).toEqual(counts);
+  expect(await session.call("get_data", { uuid, collection: "measurements", limit: 1000 })).toEqual(before);
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.filter(block => block.type === "chart").map(block => block.text))
+    .toEqual([JSON.stringify(mapping), JSON.stringify(mapping)]);
+
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "day-11", value: { day: "2026-10-11", deliveries: 5 } },
+  ] }] });
+  await expect(dayCells(table)).toHaveText(days(8, 10, 6, 7, 9, 5, 11));
+  await expectHeaderOrder(table, "Deliveries", "descending");
+  await expect(deliveries).toBeFocused();
+  await expect(dayCells(other)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
+  await expect(dayCells(observerTable)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 11 records");
+
+  await editMapping(session, uuid, `${JSON.stringify(mapping)}\n`);
+  await expect(dayCells(table)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
+  await expectHeaderOrder(table, "Day", "descending");
+  await deliveries.click();
+  await expectHeaderOrder(table, "Deliveries", "ascending");
+  await page.reload();
+  await expect(dayCells(table)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
+  await expectHeaderOrder(table, "Day", "descending");
+});
+
+test("touch header sorting starts from record order when the mapping has no sort", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const session = writer();
+  const uuid = await tableDoc(session, "Touch header sorting", {
+    version: 1, type: "table", collection: "measurements", title: "Touch order",
+    columns: [{ field: "name" }, { field: "value", format: "number" }],
+  });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "Third", value: 3 } }, { id: "b", value: { name: "First", value: 1 } },
+    { id: "c", value: { name: "Second", value: 2 } },
+  ] }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: info.project.name === "chromium" ? { hasTouch: true } : {},
+  });
+  const table = page.getByRole("table", { name: "Touch order", exact: true });
+  const rows = table.locator("tbody tr td:first-child");
+  await expect(rows).toHaveText(["Third", "First", "Second"]);
+  await expect(table.locator("th[aria-sort], th [aria-hidden='true']:visible")).toHaveCount(0);
+  await editor(page).locator(":scope > p").first().tap();
+  const selection = await documentSelection(page);
+  const button = table.getByRole("button", { name: "value", exact: true });
+  await button.tap();
+  await expect(rows).toHaveText(["First", "Second", "Third"]);
+  await expectHeaderOrder(table, "value", "ascending");
+  await expect(button).toBeFocused();
+  await button.tap();
+  await expect(rows).toHaveText(["Third", "Second", "First"]);
+  await expectHeaderOrder(table, "value", "descending");
+  await expect(button).toBeFocused();
+  expect(await documentSelection(page)).toEqual(selection);
+  await expect(page.locator(".ub-chart-source")).toBeHidden();
+});
+
 test("MCP data and mapping updates keep all rows and sort across reload and reopen", async ({ browser }) => {
   const session = writer();
   const uuid = await tableDoc(session, "Live data table");
@@ -504,6 +675,14 @@ test("problem states recover without editing stored values and decided or archiv
   await session.call("set_status", { uuid, status: "decided" });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  const sort = table.getByRole("button", { name: "Autonomous", exact: true });
+  await sort.click();
+  await expectHeaderOrder(table, "Autonomous", "ascending");
+  await expect(table.locator("tbody tr td:first-child")).toHaveText([
+    "Relative link", "<strong>kept as text</strong>", '{"compact":true}', "Absent", "Null", "Invalid values",
+  ]);
+  await expect(sort).toBeFocused();
+  await expect(page.locator(".ub-chart-source")).toBeHidden();
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });
   await page.locator(".ub-chart").hover();
   await openSource.click();
@@ -517,6 +696,12 @@ test("problem states recover without editing stored values and decided or archiv
   await page.reload();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await tabTo(page, sort);
+  await page.keyboard.press("Space");
+  await expectHeaderOrder(table, "Autonomous", "ascending");
+  await expect(sort).toBeFocused();
+  await expect(table.locator("tbody tr").first()).toContainText("Relative link");
+  await expect(page.locator(".ub-chart-source")).toBeHidden();
   await tabTo(page, openSource);
   await page.keyboard.press("Enter");
   await expect(page.locator(".ub-chart-source")).toBeVisible();

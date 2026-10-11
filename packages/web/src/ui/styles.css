@@ -1076,6 +1076,14 @@ h3.ub-heading {
 .ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
 .ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
 .ub-data-table th { max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
+.ub-data-sort {
+  display: flex; align-items: center; gap: 0.3rem;
+  width: 100%; min-height: 1.5rem;
+  border: 0; border-radius: var(--radius-sm); background: transparent;
+  padding: 0; font: inherit; color: inherit; text-align: inherit; cursor: pointer;
+}
+.ub-data-sort:hover { background: var(--accent); color: var(--accent-foreground); }
+@media (any-pointer: coarse) { .ub-data-sort { min-height: 2.75rem; min-width: 2.75rem; } }
 .ub-data-table td { color: var(--prose-text); }
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
