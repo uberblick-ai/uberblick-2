@@ -154,11 +154,6 @@ export function findBlockElement(
 }
 
 /** @internal — shared with the annotations module. */
-export function blockTextType(element: Y.XmlElement): Y.XmlText | null {
-  return textOf(element);
-}
-
-/** @internal — shared with the annotations module. */
 export function requireBlockText(
   ydoc: Y.Doc,
   element: Y.XmlElement,

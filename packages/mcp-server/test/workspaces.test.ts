@@ -23,7 +23,7 @@ import { basename, dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { directoryRoom, listDirectory, parseWorkspaceId } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import { defaultDatabasePath } from "../src/config.js";
+import { defaultWorkspaceDatabasePath } from "../src/config.js";
 import {
   hubUrl,
   peerClient,
@@ -74,7 +74,7 @@ async function serverFor(
       workspaceId: parseWorkspaceId(workspaceId).uuid,
       authSecret: TEST_SECRET,
       hubUrl: hubUrl(port),
-      databasePath: defaultDatabasePath(workspaceId, { XDG_DATA_HOME: dataHome }),
+      databasePath: defaultWorkspaceDatabasePath(workspaceId, { XDG_DATA_HOME: dataHome }),
     }),
   );
   rigs.push(rig);

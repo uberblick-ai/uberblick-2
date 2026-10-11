@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { InvalidWorkspaceIdError } from "@uberblick/schema";
 import {
   DEFAULT_HUB_URL,
-  defaultDatabasePath,
+  defaultWorkspaceDatabasePath,
   resolveAgentSession,
   resolveMcpConfig,
 } from "../src/config.js";
@@ -121,6 +121,7 @@ describe("resolveMcpConfig", () => {
   it("keys the rooms and the database by the workspace uuid", () => {
     const config = resolveMcpConfig(env());
     expect(config.workspaceId).toBe(WORKSPACE);
+    expect(DEFAULT_HUB_URL).toBe("ws://localhost:1234");
     expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
     expect(config.authSecret).toBeNull();
     expect(config.databasePath).toBe(
@@ -145,11 +146,11 @@ describe("resolveMcpConfig", () => {
     // one file — two replicas of one corpus would converge with neither.
     const dataHome = mkdtempSync(join(tmpdir(), "uberblick-data-home-"));
     const expected = join(dataHome, "uberblick", `${WORKSPACE}.sqlite`);
-    expect(defaultDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
+    expect(defaultWorkspaceDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
       expected,
     );
     expect(
-      defaultDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
+      defaultWorkspaceDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
     ).toBe(expected);
     // Resolution reads; it never creates. Nothing to clean up but the shell.
     rmSync(dataHome, { recursive: true, force: true });

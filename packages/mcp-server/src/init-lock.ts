@@ -14,6 +14,7 @@ import {
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { credentialsPath } from "./storage.js";
 import { removeQuietly } from "./safe-write.js";
 
@@ -45,21 +46,6 @@ export function initLockPath(env: NodeJS.ProcessEnv = process.env): string {
 /** Workspace creation holds this through offline seeding before publishing its binding. */
 export function seedLockPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(dirname(credentialsPath(env)), SEED_LOCK_FILE);
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    }, ms);
-    const abort = () => {
-      clearTimeout(timer);
-      reject(signal?.reason);
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-  });
 }
 
 /**
@@ -229,6 +215,6 @@ export async function acquireInitLock(
       announced = true;
       options.onWait?.(path);
     }
-    await sleep(RETRY_MS, options.signal);
+    await delay(RETRY_MS, undefined, { signal: options.signal });
   }
 }

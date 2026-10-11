@@ -6,7 +6,7 @@ import { publishOwnerOnly } from "./safe-write.js";
 import { readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
 
 export const PROJECT_CONFIG_FILE = ".uberblick.json";
-export const LOCAL_HUB = "local";
+const LOCAL_HUB = "local";
 
 export interface ProjectBinding {
   workspaceId: string;
