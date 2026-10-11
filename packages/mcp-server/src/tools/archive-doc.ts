@@ -1,4 +1,4 @@
-import { resolveDecisionTopics, tombstoneDirectoryEntry, unpinDocIncludingUnseen } from "@uberblick/schema";
+import { archiveDocument } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { roomStages } from "./helpers.js";
 import { uuidArg } from "./schemas.js";
@@ -32,7 +32,6 @@ export const archiveDocOperation = operation("archive_doc", inputSchema, (contex
   const directory = replicas.directory();
   const sidebarReplica = replicas.sidebar();
   const title = titleFor(uuid, stub);
-  const affected = resolveDecisionTopics(directory.doc).find(topic => topic.records.some(record => record.uuid === uuid))?.records.map(record => record.uuid) ?? [uuid];
   const { completed, stage } = roomStages(
     replicas,
     "archive_doc",
@@ -46,18 +45,8 @@ export const archiveDocOperation = operation("archive_doc", inputSchema, (contex
     (_purpose, failedAt) => ARCHIVE_RECOVERY[failedAt] ?? ARCHIVE_RECOVERY.other,
   );
 
-  // Persist the tombstone before unpinning; a refusal must leave listing/pin intact.
-  stage("directory", directory, () => {
-    tombstoneDirectoryEntry(directory.doc, uuid);
-  });
-  // Always unpin: settle does not guarantee that remote pins have arrived.
-  // The raised counter hides unseen pins at/below its ceiling; pins stamped
-  // under an unseen higher unpin can still surface. A deliberate later pin wins.
-  // Report the sidebar room even when this replica saw no pin.
-  stage("sidebar", sidebarReplica, () => {
-    sidebarReplica.doc.transact(() => {
-      for (const recordUuid of affected) unpinDocIncludingUnseen(sidebarReplica.doc, recordUuid);
-    });
+  const affected = archiveDocument(directory.doc, sidebarReplica.doc, uuid, (purpose, write) => {
+    stage(purpose, purpose === "directory" ? directory : sidebarReplica, write);
   });
   return {
     uuid,

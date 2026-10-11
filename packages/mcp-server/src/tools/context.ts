@@ -1,6 +1,7 @@
 import {
   decisionApprovalChanged,
   decisionApprovalFingerprint,
+  decisionContentLocked,
   decisionRelations,
   decisionTopicArchived,
   getBlocksWithInline,
@@ -165,7 +166,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
     const replica = requireDoc(uuid);
     const meta = getMeta(replica.doc);
-    if (contentMutation && meta.kind === "decision" && meta.status === "decided") {
+    if (contentMutation && decisionContentLocked(meta)) {
       throw new ToolError("decision_read_only", "A decided record's title, decision line, blocks and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
     return replica;

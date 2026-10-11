@@ -369,6 +369,45 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(document.activeElement).toBe(restoreButton(host));
   });
 
+  it("hides a pin received after archive, without repinning on restore", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+    const group = createGroup(sidebar, "Reading");
+    const peer = new Y.Doc();
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      pinDoc(peer, group, UUID);
+      expect(readSidebar(peer)[0]?.docs).toEqual([UUID]);
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      openActions(host);
+      act(() => action("Archive document")?.click());
+      act(() => screen.getByRole("button", { name: "Archive document" }).click());
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+
+      act(() => Y.applyUpdate(sidebar, Y.encodeStateAsUpdate(peer)));
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      expect(readSidebar(peer)[0]?.docs).toEqual([]);
+
+      act(() => restoreButton(host)?.click());
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+
+      openActions(host);
+      act(() => action("Pin to sidebar")?.click());
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      expect(readSidebar(peer)[0]?.docs).toEqual([UUID]);
+    } finally {
+      peer.destroy();
+    }
+  });
+
   // The condition is the sidebar room's own state, not an observed pin: an
   // admitted room that has not received the sidebar yet reads as carrying no
   // pins at all, so archiving through it would report success having silently

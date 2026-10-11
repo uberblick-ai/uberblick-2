@@ -1,6 +1,6 @@
 // Data layout and validation: 0c739c87-e48e-4981-a316-617448c2e15d
 import type * as Y from "yjs";
-import { getMeta } from "./doc.js";
+import { decisionContentLocked, getMeta } from "./doc.js";
 import { decisionTopicArchived } from "./directory.js";
 import {
   canonicalJson, compareCodePoints, DataError, validateCollectionSchema,
@@ -208,7 +208,7 @@ export function readDocData(doc: Y.Doc): DocData | null {
 export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): { changed: boolean } {
   const meta = getMeta(doc);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });
-  if (meta.kind === "decision" && meta.status === "decided") {
+  if (decisionContentLocked(meta)) {
     throw new DataError("decision_read_only", "Decided document content is read-only", { uuid: meta.uuid, kind: meta.kind, status: meta.status });
   }
   if (!Array.isArray(operations)) throw new DataError("data_invalid_input", "Operations must be an array");

@@ -14,6 +14,7 @@ import {
 import type { ReactElement } from "react";
 import {
   appendBlock,
+  archiveDocument,
   decisionDirectoryFields,
   decisionTopicArchived,
   directoryRoom,
@@ -23,8 +24,6 @@ import {
   roomForDoc,
   settingsRoom,
   sidebarRoom,
-  tombstoneDirectoryEntry,
-  unpinDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
@@ -634,12 +633,8 @@ export function App(): ReactElement {
     [doc],
   );
 
-  /**
-   * Archive only a live directory stub, with no optimistic state. Re-read the
-   * directory and sidebar at click time, tombstone the directory and then
-   * unpin, matching shared lifecycle room order. Require a synced writable
-   * sidebar so an unseen pin cannot survive the archive.
-   */
+  // Re-read room state at activation; require a synced writable sidebar
+  // so the archive uses the current pin state.
   const onArchive = useCallback(() => {
     if (
       directory === null ||
@@ -655,9 +650,7 @@ export function App(): ReactElement {
     const entry = getDirectoryEntry(directory.ydoc, selected);
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     restoreFocusRoom.current = doc.room;
-    for (const uuid of tombstoneDirectoryEntry(directory.ydoc, selected)) {
-      unpinDoc(sidebar.ydoc, uuid);
-    }
+    archiveDocument(directory.ydoc, sidebar.ydoc, selected);
   }, [directory, doc, sidebar, selected]);
 
   /**

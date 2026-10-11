@@ -177,6 +177,11 @@ function replaceTags(meta: Y.Map<unknown>, tags: readonly string[]): void {
   }
 }
 
+/** This lock leaves comments and discovery metadata writable. */
+export function decisionContentLocked(meta: Pick<DocMeta, "kind" | "status">): boolean {
+  return meta.kind === "decision" && meta.status === "decided";
+}
+
 /**
  * Tolerant defaults make incomplete replicas readable; blank and absent
  * descriptions/summaries both read as null.
