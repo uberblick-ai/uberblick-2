@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
+import { placeCaretIn } from "./harness.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
@@ -321,7 +322,9 @@ test("all rows read like an ordinary table with secondary source and isolated li
     expect(await cellStyle(table.locator("td").first())).toEqual(await cellStyle(ordinary.locator("td").first()));
     const headerLines = await table.getByRole("columnheader", { name: "Autonomous", exact: true }).evaluate((element) => {
       const range = document.createRange();
-      range.selectNodeContents(element);
+      const label = element.querySelector("button")?.firstChild;
+      if (label === undefined || label === null) throw new Error("e2e: header label is missing");
+      range.selectNodeContents(label);
       return Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0).length;
     });
     expect(headerLines).toBe(1);
@@ -412,9 +415,9 @@ test("every header sorts through native pointer and keyboard input without movin
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table).toBeVisible();
   await expectHeaderOrder(table, "Day", "descending");
-  await editor(page).locator(":scope > p").first().click();
-  const selection = await documentSelection(page);
   for (const { label } of MAPPING.columns) {
+    await placeCaretIn(editor(page).locator(":scope > p").first());
+    const selection = await documentSelection(page);
     const button = table.getByRole("button", { name: label, exact: true });
     expect(await button.evaluate(element => element.tagName)).toBe("BUTTON");
     await activateControl(button);
@@ -427,15 +430,17 @@ test("every header sorts through native pointer and keyboard input without movin
         "Relative link", "<strong>kept as text</strong>", '{"compact":true}', "Absent", "Null", "Invalid values",
       ]);
     }
-    await editor(page).locator(":scope > p").first().click();
+    await placeCaretIn(editor(page).locator(":scope > p").first());
     await tabTo(page, button);
+    const keyboardSelection = await documentSelection(page);
     await page.keyboard.press("Enter");
     await expectHeaderOrder(table, label, "descending");
     await expect(button).toBeFocused();
+    expect(await documentSelection(page)).toEqual(keyboardSelection);
     await page.keyboard.press("Space");
     await expectHeaderOrder(table, label, "ascending");
     await expect(button).toBeFocused();
-    expect(await documentSelection(page)).toEqual(selection);
+    expect(await documentSelection(page)).toEqual(keyboardSelection);
     await expect(page.locator(".ub-chart-source")).toBeHidden();
   }
   const screenshot = info.outputPath("header-sorting.png");
@@ -542,13 +547,14 @@ test("touch header sorting starts from record order when the mapping has no sort
   const rows = table.locator("tbody tr td:first-child");
   await expect(rows).toHaveText(["Third", "First", "Second"]);
   await expect(table.locator("th[aria-sort], th [aria-hidden='true']:visible")).toHaveCount(0);
-  await editor(page).locator(":scope > p").first().tap();
+  await placeCaretIn(editor(page).locator(":scope > p").first(), { touch: true });
   const selection = await documentSelection(page);
   const button = table.getByRole("button", { name: "value", exact: true });
   await button.tap();
   await expect(rows).toHaveText(["First", "Second", "Third"]);
   await expectHeaderOrder(table, "value", "ascending");
   await expect(button).toBeFocused();
+  expect(await documentSelection(page)).toEqual(selection);
   await button.tap();
   await expect(rows).toHaveText(["Third", "Second", "First"]);
   await expectHeaderOrder(table, "value", "descending");
