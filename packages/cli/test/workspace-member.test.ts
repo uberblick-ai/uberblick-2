@@ -9,9 +9,10 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { writeHubAdmission } from "../src/config.js";
 import {
   OTHER_WORKSPACE, USERNAME, WORKSPACE, assertPublicOnly, cleanUp, credentialPath,
-  privateDeviceRows, rig, savedLogin,
+  privateDeviceRows, rig, savedLogin, seedLogin,
 } from "./auth-fixtures.js";
 import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Run, type Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterEach(cleanUp);
 afterAll(removeTempDirs);
@@ -47,8 +48,7 @@ function publicOutput(run: Run, remote: Rig): void {
 
 async function administrator(workspaces = [WORKSPACE, OTHER_WORKSPACE], deviceCredentials = false): Promise<Rig> {
   const remote = await rig(workspaces, true, false, deviceCredentials);
-  const login = await runUbAsync(["auth", "login", remote.origin], remote.box);
-  expect(login.status, login.stderr).toBe(0);
+  await seedLogin(remote);
   const database = new DatabaseSync(remote.databasePath);
   try { database.prepare("UPDATE hub_memberships SET role = 'admin' WHERE workspace_id = ?").run(WORKSPACE); }
   finally { database.close(); }
@@ -87,17 +87,17 @@ syncBuiltinESMExports();
 describe("workspace member selection and usage", () => {
   it("provides group and leaf help, and refuses unsupported arguments before any request", async () => {
     const remote = await administrator();
-    const group = await runUbAsync(["workspace", "--help"], remote.box);
+    const group = await runInProcess(["workspace", "--help"], remote.box);
     expect(group.stdout).toMatch(/^\s+member\b/m);
     for (const command of [[], ["add"], ["list"], ["role"], ["remove"]]) {
-      const run = await runUbAsync(["workspace", "member", ...command, "--help"], remote.box);
+      const run = await runInProcess(["workspace", "member", ...command, "--help"], remote.box);
       expect(run.status, run.stderr).toBe(0);
       expect(run.stdout).toContain(`ub workspace member${command.length === 0 ? "" : ` ${command[0]}`}`);
       expect(run.stderr).toBe("");
     }
     for (const args of [["unknown"], ["constructor"], ["toString"], ["__proto__"], ["add"], ["add", LOGIN, "--yes"], ["add", LOGIN, "--role", "owner"],
       ["add", ACCOUNT, "--hub", remote.origin], ["list", "extra"], ["role", LOGIN], ["role", LOGIN, "owner"], ["remove"]]) {
-      const run = await runUbAsync(["workspace", "member", ...args], remote.box);
+      const run = await runInProcess(["workspace", "member", ...args], remote.box);
       expect(run.status, run.output).toBe(2);
       expect(run.stdout).toBe("");
     }
@@ -111,7 +111,7 @@ describe("workspace member selection and usage", () => {
       [sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }), "local-only"],
     ] as const) {
       for (const args of [["list"], ["add", LOGIN], ["role", LOGIN, "admin"], ["remove", LOGIN]]) {
-        const run = await runUbAsync(["workspace", "member", ...args], box);
+        const run = await runInProcess(["workspace", "member", ...args], box);
         expect(run.status, run.output).toBe(1);
         expect(run.stderr).toContain(message);
       }
@@ -129,7 +129,7 @@ describe("workspace member selection and usage", () => {
     finally { database.close(); }
     bind(remote.box, "wss://unselected.invalid", randomUUID());
     const original = binding(remote.box);
-    const run = await runUbAsync(["workspace", "member", "list", "--json"], remote.box, {
+    const run = await runInProcess(["workspace", "member", "list", "--json"], remote.box, {
       UB_WORKSPACE_ID: `other-${OTHER_WORKSPACE}`, UB_HUB_URL: remote.origin,
     });
     expect(run.status, run.output).toBe(0);
@@ -174,7 +174,7 @@ describe("confirmed grants", () => {
 
   it("refuses non-terminal grants even when stdin could carry yes", async () => {
     const remote = await administrator();
-    const run = await runUbAsync(["workspace", "member", "add", LOGIN], remote.box);
+    const run = await runInProcess(["workspace", "member", "add", LOGIN], remote.box);
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toMatch(/terminal|interactive/i);
     expect(actions(remote, "grant-member")).toEqual([]);
@@ -185,7 +185,7 @@ describe("confirmed grants", () => {
   it.each(["admin", "member"] as const)("reports an existing %s without changing its role", async role => {
     const remote = await administrator();
     const target = member(remote, ACCOUNT, LOGIN, role);
-    const run = await runUbAsync(["workspace", "member", "add", LOGIN, "--role", role === "admin" ? "member" : "admin"], remote.box);
+    const run = await runInProcess(["workspace", "member", "add", LOGIN, "--role", role === "admin" ? "member" : "admin"], remote.box);
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toMatch(/already.*member/i);
     expect(run.stdout).toContain(role);
@@ -250,10 +250,10 @@ describe("current member matching and mutations", () => {
   it("lists login, permanent ID and role, with only public JSON on stdout", async () => {
     const remote = await administrator();
     member(remote);
-    const listed = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const listed = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(listed.status, listed.output).toBe(0);
     for (const value of [LOGIN, ACCOUNT, "member", USERNAME, "1234", "admin"]) expect(listed.stdout).toContain(value);
-    const json = await runUbAsync(["workspace", "member", "list", "--json"], remote.box);
+    const json = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
     expect(json.status, json.output).toBe(0);
     const result = JSON.parse(json.stdout);
     expect(Object.keys(result).sort()).toEqual(["hub", "members", "workspaceId"]);
@@ -272,13 +272,13 @@ describe("current member matching and mutations", () => {
     remote.hub.credentials!.issue({ principalId: target.id, deviceId: randomUUID(), workspaces: [WORKSPACE, OTHER_WORKSPACE] });
     const devices = privateDeviceRows(remote.databasePath);
     const original = binding(remote.box);
-    const changed = await runUbAsync(["workspace", "member", "role", LOGIN.toLowerCase(), "admin"], remote.box);
+    const changed = await runInProcess(["workspace", "member", "role", LOGIN.toLowerCase(), "admin"], remote.box);
     expect(changed.status, changed.output).toBe(0);
     expect(changed.stdout).toContain(LOGIN);
     expect(changed.stdout).toContain(ACCOUNT);
     expect(actions(remote, "change-role")).toEqual([{ operation: "change-role", workspaceId: WORKSPACE, principalId: target.id, role: "admin" }]);
     expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBe("admin");
-    const removed = await runUbAsync(["workspace", "member", "remove", ACCOUNT], remote.box);
+    const removed = await runInProcess(["workspace", "member", "remove", ACCOUNT], remote.box);
     expect(removed.status, removed.output).toBe(0);
     for (const value of [LOGIN, ACCOUNT]) expect(removed.stdout).toContain(value);
     expect(removed.stdout).toMatch(/every device|all devices/i);
@@ -298,14 +298,14 @@ describe("current member matching and mutations", () => {
     member(remote, "6789", "OLD-LOGIN");
     for (const selector of ["absent", "old-login"]) {
       for (const args of [["role", selector, "admin"], ["remove", selector]]) {
-        const run = await runUbAsync(["workspace", "member", ...args], remote.box);
+        const run = await runInProcess(["workspace", "member", ...args], remote.box);
         expect(run.status, run.output).toBe(1);
         expect(run.stderr).toMatch(selector === "absent" ? /no.*member|not.*member|not found/i : /ambiguous|more than one|multiple|matches 2/i);
       }
     }
     expect(actions(remote, "change-role")).toEqual([]);
     expect(actions(remote, "remove-member")).toEqual([]);
-    const byId = await runUbAsync(["workspace", "member", "role", ACCOUNT, "admin"], remote.box);
+    const byId = await runInProcess(["workspace", "member", "role", ACCOUNT, "admin"], remote.box);
     expect(byId.status, byId.output).toBe(0);
     expect(remote.hub.memberships!.roleFor(WORKSPACE, first.id)).toBe("admin");
     publicOutput(byId, remote);
@@ -316,7 +316,7 @@ describe("current member matching and mutations", () => {
     member(remote, ACCOUNT, "6789");
     member(remote, "6789", "different-login");
     for (const args of [["role", "6789", "admin"], ["remove", "6789"]]) {
-      const run = await runUbAsync(["workspace", "member", ...args], remote.box);
+      const run = await runInProcess(["workspace", "member", ...args], remote.box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toMatch(/ambiguous|more than one|multiple|matches 2/i);
       publicOutput(run, remote);
@@ -329,12 +329,12 @@ describe("current member matching and mutations", () => {
     const remote = await administrator();
     const display = "changed\nlogin\u001b[31m";
     member(remote, ACCOUNT, display);
-    const listed = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const listed = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(listed.status, listed.output).toBe(0);
     expect(listed.stdout).toContain(JSON.stringify(display));
     expect(listed.stdout.includes(display), "stored login cannot inject terminal formatting").toBe(false);
     for (const args of [["role", "1234", "member"], ["remove", "1234"]]) {
-      const run = await runUbAsync(["workspace", "member", ...args], remote.box);
+      const run = await runInProcess(["workspace", "member", ...args], remote.box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toMatch(/last.*admin|final.*admin/i);
       publicOutput(run, remote);
@@ -362,7 +362,7 @@ describe("stored device renewal and hub failures", () => {
         return { status, result };
       };
     }
-    const run = await runUbAsync(["workspace", "member", "list", "--json"], remote.box);
+    const run = await runInProcess(["workspace", "member", "list", "--json"], remote.box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout).workspaceId).toBe(WORKSPACE);
     expect(remote.requests.filter(request => request.path === "/auth/credential/renew")).toHaveLength(1);
@@ -378,7 +378,7 @@ describe("stored device renewal and hub failures", () => {
     const remote = await administrator();
     remote.controls.transform = (path, status, result) => path === "/auth/manage"
       ? { status: 401, result: { status: "sign-in-required" } } : { status, result };
-    const run = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const run = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toContain(`ub auth login ${remote.origin}`);
     expect(remote.requests.filter(request => request.path === "/auth/credential/renew")).toHaveLength(1);
@@ -390,7 +390,7 @@ describe("stored device renewal and hub failures", () => {
   it("names the login command when no usable device login exists, and starts no sign-in", async () => {
     const remote = await rig([WORKSPACE]);
     bind(remote.box, remote.origin);
-    const run = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const run = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toContain(`ub auth login ${remote.origin}`);
     expect(remote.requests).toEqual([]);
@@ -404,7 +404,7 @@ describe("stored device renewal and hub failures", () => {
     const login = savedLogin(remote.box, remote.origin);
     await writeHubLogin(unreachable, login, remote.box.env);
     bind(remote.box, unreachable);
-    const run = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const run = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toMatch(/unreachable/i);
     expect(remote.requests).toEqual([]);
@@ -422,7 +422,7 @@ describe("stored device renewal and hub failures", () => {
     remote.controls.transform = (path, upstream, result) => path === "/auth/manage"
       ? { status, result: { status: answer, reason: key, token: remote.requests.at(-1)?.body.token } }
       : { status: upstream, result };
-    const run = await runUbAsync(["workspace", "member", "list"], remote.box);
+    const run = await runInProcess(["workspace", "member", "list"], remote.box);
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toMatch(message);
     publicOutput(run, remote);
@@ -435,7 +435,7 @@ describe("stored device renewal and hub failures", () => {
     const devices = privateDeviceRows(remote.databasePath);
     const unsubscribe = remote.hub.memberships!.onRemove(() => { throw new Error("synthetic closure failure"); });
     try {
-      const run = await runUbAsync(["workspace", "member", "remove", ACCOUNT], remote.box);
+      const run = await runInProcess(["workspace", "member", "remove", ACCOUNT], remote.box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toMatch(/committed/i);
       expect(run.stderr).toMatch(/closure|connection|close/i);
@@ -465,7 +465,7 @@ describe("stored device renewal and hub failures", () => {
     expect(granted.status, granted.output).toBe(0);
     expect(binding(remote.box)).toBe(beforeAdmin);
     expect(binding(other)).toBe(beforeOther);
-    const joined = await runUbAsync(["workspace", "use", `${joinOrigin}/${WORKSPACE}`], other);
+    const joined = await runInProcess(["workspace", "use", `${joinOrigin}/${WORKSPACE}`], other);
     expect(joined.status, joined.output).toBe(0);
     expect(JSON.parse(binding(other)).workspaceId).toBe(WORKSPACE);
     const renewed = savedLogin(other, joinOrigin);

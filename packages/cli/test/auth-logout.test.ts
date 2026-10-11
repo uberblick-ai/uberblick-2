@@ -10,9 +10,11 @@ import { manageRequest } from "../src/access-management.js";
 import {
   OTHER_HUB, SIGNING_SECRET, USERNAME, WORKSPACE, assertPublicOnly, cleanUp,
   configPath, credentialPath, fixture, privateDeviceRows, readStore, rig,
-  savedLogin, serve,
+  savedLogin, seedLogin, serve,
 } from "./auth-fixtures.js";
-import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, sandbox } from "./helpers.js";
+
+import { runInProcess } from "./in-process.js";
 
 afterEach(cleanUp);
 afterAll(removeTempDirs);
@@ -23,15 +25,13 @@ function memberships(databasePath: string) {
   finally { database.close(); }
 }
 
-async function signedIn(remote: Awaited<ReturnType<typeof rig>>) {
+async function signedIn(remote: Awaited<ReturnType<typeof rig>>, storedUsername?: string) {
   const box = sandbox({
     projectBinding: { workspaceId: WORKSPACE, hubUrl: `${remote.origin.replace("http:", "ws:")}/ws` },
     userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL },
     credentials: { signingSecret: SIGNING_SECRET, hubLogins: { [OTHER_HUB]: fixture() } },
   });
-  const login = await runUbAsync(["auth", "login"], box);
-  expect(login.status, login.stderr).toBe(0);
-  return { box, login: savedLogin(box, remote.origin) };
+  return { box, login: await seedLogin(remote, box, storedUsername) };
 }
 
 describe("ub auth logout retires devices", () => {
@@ -44,7 +44,7 @@ describe("ub auth logout retires devices", () => {
     const localCopy = join(box.cwd, "workspace-copy.sqlite");
     writeFileSync(localCopy, "local workspace copy");
     const access = memberships(remote.databasePath);
-    const run = await runUbAsync(["auth", "logout"], box);
+    const run = await runInProcess(["auth", "logout"], box);
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toBe(`revoked    this computer on ${remote.origin}\nremoved    login for ${remote.origin} on this computer\n`);
     expect(run.stderr).toBe("");
@@ -65,11 +65,11 @@ describe("ub auth logout retires devices", () => {
   it("with no stored login prints that fact and contacts nothing, including when help overrides flags", async () => {
     const remote = await rig();
     const box = sandbox();
-    const run = await runUbAsync(["auth", "logout", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", remote.origin], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toBe("No login stored for this hub.\n");
     expect(run.stderr).toBe("");
-    const help = await runUbAsync(["auth", "logout", "--all-devices", "--unknown", remote.origin, "--help"], box);
+    const help = await runInProcess(["auth", "logout", "--all-devices", "--unknown", remote.origin, "--help"], box);
     expect(help.status).toBe(0);
     expect(help.stdout).toContain("--all-devices");
     expect(help.stderr).toBe("");
@@ -87,7 +87,7 @@ describe("ub auth logout retires devices", () => {
     const remote = await rig();
     const { box, login } = await signedIn(remote);
     remote.controls.onManagement = () => ({ status, result });
-    const run = await runUbAsync(["auth", "logout", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(`removed    login for ${remote.origin} on this computer\n`);
     expect(run.stderr).toMatch(/this computer.*not.*revoked/i);
@@ -103,7 +103,7 @@ describe("ub auth logout retires devices", () => {
     const other = fixture();
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET,
       hubLogins: { [origin]: fixture(), [OTHER_HUB]: other } } });
-    const run = await runUbAsync(["auth", "logout", DEAD_HUB_URL], box);
+    const run = await runInProcess(["auth", "logout", DEAD_HUB_URL], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(`removed    login for ${origin} on this computer\n`);
     expect(run.stderr).toContain(`ub auth logout --all-devices ${origin}`);
@@ -116,7 +116,7 @@ describe("ub auth logout retires devices", () => {
       response.write('{"status":"ok"');
     });
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
-    const run = await runUbAsync(["auth", "logout", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(`removed    login for ${remote.origin} on this computer\n`);
     expect(run.stderr).toMatch(/not.*revoked/i);
@@ -128,7 +128,7 @@ describe("ub auth logout retires devices", () => {
     const { box, login } = await signedIn(remote);
     remote.controls.transform = (path, status, result, body) => path === "/auth/manage" && body.operation === "revoke-device"
       ? { status: 500, result: { status: "closure-failed", applied: true } } : { status, result };
-    const run = await runUbAsync(["auth", "logout", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", remote.origin], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(`revoked    this computer on ${remote.origin}\n`);
     expect(run.stderr).toMatch(/connection|closure/i);
@@ -155,7 +155,7 @@ describe("ub auth logout retires devices", () => {
     const access = memberships(remote.databasePath);
     const binding = readFileSync(join(current.box.cwd, ".uberblick.json"));
     const store = readStore(current.box);
-    const run = await runUbAsync(["auth", "logout", "--all-devices"], current.box);
+    const run = await runInProcess(["auth", "logout", "--all-devices"], current.box);
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toBe(`revoked    3 devices of ${USERNAME} on ${remote.origin}, including this computer\nremoved    login for ${remote.origin} on this computer\nsign in again on the computers you still use: ub auth login ${remote.origin}\n`);
     expect(run.stderr).toBe("");
@@ -185,13 +185,9 @@ describe("ub auth logout retires devices", () => {
       '\\u0088\\u0089\\u008a\\u008b\\u008c\\u008d\\u008e\\u008f' +
       '\\u0090\\u0091\\u0092\\u0093\\u0094\\u0095\\u0096\\u0097' +
       '\\u0098\\u0099\\u009a\\u009b\\u009c\\u009d\\u009e\\u009f"';
-    remote.controls.transform = (path, status, result) => {
-      if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
-      return { status, result: { ...result, identity: { ...(result.identity as Record<string, unknown>), githubUsername: username } } };
-    };
-    const { box, login } = await signedIn(remote);
+    const { box, login } = await signedIn(remote, username);
     expect(login.identity.githubUsername).toBe(username);
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     assertPublicOnly(run, remote, login.credential.key);
     expect(run.status, run.stderr).toBe(0);
     expect(run.stdout).toBe(`revoked    1 devices of ${escaped} on ${remote.origin}, including this computer\n` +
@@ -203,7 +199,7 @@ describe("ub auth logout retires devices", () => {
 
   it("all-devices cannot start without a login and does not contact the hub", async () => {
     const remote = await rig();
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], sandbox());
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], sandbox());
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toMatch(/no.*login|sign.in/i);
@@ -214,7 +210,7 @@ describe("ub auth logout retires devices", () => {
     const origin = "http://127.0.0.1:1";
     const box = sandbox({ credentials: { hubLogins: { [origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "logout", origin, "--all-devices"], box);
+    const run = await runInProcess(["auth", "logout", origin, "--all-devices"], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).not.toBe("");
@@ -228,7 +224,7 @@ describe("ub auth logout retires devices", () => {
     remote.controls.onManagement = () => kind === "refused"
       ? { status: 401, result: { status: "sign-in-required" } }
       : { status: 200, result: { status: "ok", devices: [{ deviceId: "invalid", current: true }] } };
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).not.toBe("");
@@ -246,7 +242,7 @@ describe("ub auth logout retires devices", () => {
     let revocations = 0;
     remote.controls.onManagement = body => body.operation === "revoke-device" && ++revocations === 2
       ? { status: 401, result: { status: "sign-in-required" } } : undefined;
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toContain(`confirmed  1 revocations on ${remote.origin}\n`);
     expect(run.stderr).toContain(`ub auth logout --all-devices ${remote.origin}`);
@@ -256,7 +252,7 @@ describe("ub auth logout retires devices", () => {
     expect(privateDeviceRows(remote.databasePath).filter(row => row.revoked_at !== null)).toHaveLength(1);
     expect((await manageRequest(remote.origin, { operation: "list-devices" }, login)).status).toBe(200);
     remote.controls.onManagement = undefined;
-    const retry = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const retry = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(retry.status, retry.stderr).toBe(0);
     expect(retry.stdout).toContain(`revoked    2 devices of ${USERNAME}`);
     expect(remote.origin in (readStore(box).hubLogins ?? {})).toBe(false);
@@ -271,7 +267,7 @@ describe("ub auth logout retires devices", () => {
     remote.controls.transform = (path, status, result, body) => path === "/auth/manage"
       && body.operation === "revoke-device" && body.deviceId === login.credential.record.deviceId
       ? { status: 502, result: { status: "failed" } } : { status, result };
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toContain(`confirmed  1 revocations on ${remote.origin}\n`);
     expect(run.stderr).toMatch(/uncertain/i);
@@ -281,13 +277,13 @@ describe("ub auth logout retires devices", () => {
     expect(readFileSync(credentialPath(box)).equals(before), "the stored login was kept byte-for-byte").toBe(true);
     expect(privateDeviceRows(remote.databasePath).every(row => row.revoked_at !== null)).toBe(true);
     remote.controls.transform = undefined;
-    const retry = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const retry = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(retry.status).toBe(1);
     expect(retry.stdout).toBe("");
     expect(retry.stderr).toMatch(/sign.in.required|sign in again|refus/i);
     expect(readFileSync(credentialPath(box)).equals(before), "the stored login was kept byte-for-byte").toBe(true);
-    expect((await runUbAsync(["auth", "login", remote.origin], box)).status).toBe(0);
-    const recovered = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    expect((await runInProcess(["auth", "login", remote.origin], box)).status).toBe(0);
+    const recovered = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(recovered.status, recovered.stderr).toBe(0);
     expect(recovered.stdout).toContain(`revoked    1 devices of ${USERNAME}`);
   });
@@ -299,7 +295,7 @@ describe("ub auth logout retires devices", () => {
     remote.controls.transform = (path, status, result, body) => path === "/auth/manage"
       && body.operation === "revoke-device" && body.deviceId === older.login.credential.record.deviceId
       ? { status: 500, result: { status: "closure-failed", applied: true } } : { status, result };
-    const run = await runUbAsync(["auth", "logout", "--all-devices", remote.origin], box);
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(`revoked    2 devices of ${USERNAME}`);
     expect(run.stderr).toMatch(/connection|closure/i);
@@ -324,7 +320,7 @@ describe("ub auth login replaces and retires its previous device", () => {
       proofVerified = "kid" in proof && proof.kid === old.credential.record.id;
       return undefined;
     };
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status, run.stderr).toBe(0);
     expect(proofVerified).toBe(true);
     const next = savedLogin(box, remote.origin);
@@ -341,7 +337,7 @@ describe("ub auth login replaces and retires its previous device", () => {
     const remote = await rig();
     const { box, login: old } = await signedIn(remote);
     remote.controls.onManagement = () => ({ status, result: { status: status === 401 ? "sign-in-required" : "failed" } });
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status).toBe(0);
     expect(run.output).toMatch(/previous.*device.*not.*revoked|old.*device.*not.*revoked/i);
     const next = savedLogin(box, remote.origin);

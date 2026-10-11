@@ -23,7 +23,8 @@ import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
 import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
+import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const PINNED = "3e8b1d09-47af-4c62-8f10-95d3c7b6a204";
@@ -134,7 +135,7 @@ async function mcpDoctor(
   // PORT and HUB_HOST are the hub's half of the port configuration, and a
   // developer's shell may well have them: every test names them itself so the
   // listener checks answer about the fixture rather than about the machine.
-  const run = await runUbAsync(["doctor", "--json"], box, {
+  const run = await runInProcess(["doctor", "--json"], box, {
     PORT: "1",
     HUB_HOST: "127.0.0.1",
     CODEX_HOME: join(homeOf(box), ".codex"),
@@ -823,7 +824,7 @@ describe("ub doctor", () => {
 
   it("writes one JSON object with eight four-field checks and its matching exit status", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-    const run = await runUbAsync(["doctor", "--json"], box, { PORT: "1234", HUB_HOST: "127.0.0.1" });
+    const run = await runInProcess(["doctor", "--json"], box, { PORT: "1234", HUB_HOST: "127.0.0.1" });
     const report = JSON.parse(run.stdout) as DoctorReport;
     expect(report.checks.map(one => one.name)).toEqual(NAMES);
     for (const one of report.checks) expect(Object.keys(one).sort()).toEqual(["fix", "name", "reason", "status"]);
@@ -907,7 +908,7 @@ describe("ub doctor MCP setup", () => {
 
     expect(check(wired.checks, "mcp").status).toBe("pass");
     expect(check(wired.checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
-    const human = await runUbAsync(["doctor"], box, { PORT: "1" });
+    const human = await runInProcess(["doctor"], box, { PORT: "1" });
     expect(human.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
   });
 
@@ -1210,7 +1211,7 @@ describe("ub doctor MCP setup", () => {
       name: "mcp", status: "warn", reason: "could not read Codex (.codex/config.toml)",
       fix: "repair or move the file named above, then ub mcp install claude   (or codex)",
     });
-    const human = await runUbAsync(["doctor"], box, {
+    const human = await runInProcess(["doctor"], box, {
       PORT: "1", HUB_HOST: "127.0.0.1", CODEX_HOME: join(homeOf(box), ".codex"),
     });
     expect(human.stdout).toContain("warn  mcp         could not read Codex (.codex/config.toml)\n");
@@ -1275,7 +1276,7 @@ describe("ub doctor MCP setup", () => {
 
   it("renders the same verdicts for a human, with the fix under the warning", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    const run = await runUbAsync(["doctor"], box, { PORT: "1" });
+    const run = await runInProcess(["doctor"], box, { PORT: "1" });
 
     expect(run.stdout).toMatch(/ok {4}workspace/);
     expect(run.stdout).toMatch(/skip {2}login/);

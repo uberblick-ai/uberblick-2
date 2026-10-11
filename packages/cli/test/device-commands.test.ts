@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
-import { removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 const WORKSPACE = "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94";
 const SECRET = "legacy-local-secret-is-never-sent-to-remote";
@@ -41,10 +42,10 @@ describe("remote device commands", () => {
   it("joins and resumes status with a stored login, retaining the loopback secret", async () => {
     const { hub, endpoint, login, box } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const joined = await runUbAsync(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
+    const joined = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
     expect(joined.status, joined.stderr).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
-    const status = await runUbAsync(["status", "--json"], box);
+    const status = await runInProcess(["status", "--json"], box);
     expect(status.status, status.stderr).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
       account: { login: login.identity.githubUsername, provider: "github" },
@@ -53,10 +54,10 @@ describe("remote device commands", () => {
     });
     expect(hub.renewalCount).toBe(0);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
-    const text = await runUbAsync(["status"], box);
+    const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
     expect(text.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
-    const doctor = await runUbAsync(["doctor", "--json"], box);
+    const doctor = await runInProcess(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
     expect(checks.find((check: { name: string }) => check.name === "login")).toEqual({
       name: "login", status: "pass", reason: `${login.identity.githubUsername} on ${authenticationOrigin(endpoint)}`, fix: null,
@@ -72,7 +73,7 @@ describe("remote device commands", () => {
   it("initializes a remote binding only under workspace access, without generating or copying a secret", async () => {
     const { endpoint, box, login } = await rig(true);
     const before = readFileSync(file(box, "credentials.json"));
-    const initialized = await runUbAsync(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
+    const initialized = await runInProcess(["workspace", "use", `${endpoint}/${WORKSPACE}`], box);
     expect(initialized.status, initialized.stderr).toBe(0);
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).hubUrl).toBe(endpoint);
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
@@ -85,7 +86,7 @@ describe("remote device commands", () => {
     const configFile = join(box.cwd, ".uberblick.json");
     const before = readFileSync(configFile);
     for (const args of [["workspace", "use", `${endpoint}/${WORKSPACE}`]]) {
-      const refused = await runUbAsync(args, box);
+      const refused = await runInProcess(args, box);
       expect(refused.status, refused.output).toBe(1);
       expect(refused.output).toContain(kind === "no-access" ? "administrator for access" : "ub auth login");
       expect(refused.output).toContain("Nothing was written to the workspace or binding");
@@ -95,14 +96,14 @@ describe("remote device commands", () => {
     }
     bind(box, endpoint);
     for (const command of ["status", "doctor"]) {
-      const refused = await runUbAsync([command], box);
+      const refused = await runInProcess([command], box);
       expect(refused.output).toContain(kind === "no-access"
         ? `ask a workspace admin to run: ub workspace member add ${login.identity.githubUsername}`
         : `ub auth login ${authenticationOrigin(endpoint)}`);
       if (command === "status") {
         expect(refused.status).toBe(0);
         expect(refused.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
-        const json = await runUbAsync(["status", "--json"], box);
+        const json = await runInProcess(["status", "--json"], box);
         expect(JSON.parse(json.stdout)).toMatchObject({
           account: { login: login.identity.githubUsername, provider: "github" },
           hub: authenticationOrigin(endpoint),
@@ -118,7 +119,7 @@ describe("remote device commands", () => {
       } else {
         expect(refused.status, refused.output).toBe(1);
         expect(refused.stdout).not.toContain("refused remote sync");
-        const json = await runUbAsync(["doctor", "--json"], box);
+        const json = await runInProcess(["doctor", "--json"], box);
         const hubCheck = JSON.parse(json.stdout).checks.find((check: { name: string }) => check.name === "hub");
         expect(hubCheck.status).toBe("fail");
         expect(refused.stdout).toContain(`→ ${hubCheck.fix}\n`);

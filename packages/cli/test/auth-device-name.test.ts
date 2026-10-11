@@ -9,7 +9,7 @@ import {
   cleanUp, credentialPath, fixture, rig, savedLogin, serve,
 } from "./auth-fixtures.js";
 import {
-  removeTempDirs, sandbox, sleep, UB_BIN, waitUntil, type Run, type Sandbox,
+  removeTempDirs, sandbox, UB_BIN, waitUntil, type Run, type Sandbox,
 } from "./helpers.js";
 
 afterEach(cleanUp);
@@ -22,25 +22,26 @@ const started = {
   verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH", expiresIn: 30, interval: 1,
 };
 
-function loginWithHostname(box: Sandbox, origin: string, value: string | undefined, throws = false) {
+function loginWithHostname(box: Sandbox, origin: string, value: string | undefined, throws = false, acknowledgeInterrupt = false) {
   const shim = join(box.cwd, "hostname.mjs");
   // The built-in is replaced only inside this test process, with no shipped seam.
   writeFileSync(shim, `import os from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
 os.hostname = () => { ${throws ? "throw new Error('hostname unavailable');" : `return ${JSON.stringify(value)};`} };
 syncBuiltinESMExports();
+${acknowledgeInterrupt ? 'process.on("SIGINT", () => process.stderr.write("test: SIGINT received\\n"));' : ''}
 `);
   const child = spawn(process.execPath, ["--import", shim, UB_BIN, "auth", "login", origin], {
     cwd: box.cwd, env: { ...box.env, SSH_CONNECTION: "test remote session" }, timeout: 15_000,
   });
+  let stdout = ""; let stderr = "";
   const result = new Promise<Run>((resolve, reject) => {
-    let stdout = ""; let stderr = "";
     child.stdout.on("data", chunk => { stdout += String(chunk); });
     child.stderr.on("data", chunk => { stderr += String(chunk); });
     child.on("error", reject);
     child.on("close", status => resolve({ status, stdout, stderr, output: stdout + stderr }));
   });
-  return { child, result };
+  return { child, result, get stderr() { return stderr; } };
 }
 
 async function olderHub(refusal = { status: 400, result: { status: "invalid-request" } as Record<string, unknown> },
@@ -145,11 +146,11 @@ describe("CLI device hostname metadata", () => {
     let entered = false; let release: () => void = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
     const remote = await olderHub(undefined, false, async () => { entered = true; await held; });
-    const box = sandbox(); const run = loginWithHostname(box, remote.origin, "agent-server");
+    const box = sandbox(); const run = loginWithHostname(box, remote.origin, "agent-server", false, true);
     try {
       await waitUntil("named sign-in request reached the hub", () => entered, 5_000);
       run.child.kill("SIGINT");
-      await sleep(50);
+      await waitUntil("SIGINT reached the login process", () => run.stderr.includes("test: SIGINT received"));
       release();
       const result = await run.result;
       expect(result.status).toBe(1);

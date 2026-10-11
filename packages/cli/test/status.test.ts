@@ -14,7 +14,8 @@ import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { StatusReport } from "../src/status.js";
 import { readSyncStatus, renderStatus, shortStatusReport } from "../src/status.js";
 import { fixture } from "./auth-fixtures.js";
-import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
+import { runUb, DEAD_HUB_URL, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterAll(removeTempDirs);
 
@@ -329,46 +330,46 @@ describe("the last hub sync in ub status", () => {
     } finally { clock.mockRestore(); }
   });
 
-  it("keeps a stored acknowledgement time visible while the hub is unavailable", () => {
+  it("keeps a stored acknowledgement time visible while the hub is unavailable", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: "last-sync-status-test-secret" },
     });
-    const initial = runUb(["status", "--json"], box);
+    const initial = await runInProcess(["status", "--json"], box);
     expect(initial.status, initial.stderr).toBe(0);
     expect(JSON.parse(initial.stdout).lastSync).toBeNull();
     const timestamp = Math.floor((Date.now() - 3 * 3_600_000 - 30_000) / 1_000) * 1_000;
     const database = new DatabaseSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env));
     try { database.prepare("INSERT INTO meta (key, value) VALUES ('last_sync_at', ?)").run(String(timestamp)); }
     finally { database.close(); }
-    const json = runUb(["status", "--json"], box);
+    const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     expect(JSON.parse(json.stdout).lastSync).toBe(new Date(timestamp).toISOString().replace(".000Z", "Z"));
-    expect(row(runUb(["status"], box).stdout, "last sync")).toBe("last sync   3 hours ago");
+    expect(row((await runInProcess(["status"], box)).stdout, "last sync")).toBe("last sync   3 hours ago");
   });
 });
 
 describe("the real project's short report", () => {
-  it.each([false, true])("prints only the stderr hint with no binding (json=%s)", (json) => {
+  it.each([false, true])("prints only the stderr hint with no binding (json=%s)", async (json) => {
     const box = unboundSandbox();
-    const run = runUb(json ? ["status", "--json"] : ["status"], box);
+    const run = await runInProcess(json ? ["status", "--json"] : ["status"], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toBe("no .uberblick.json here or in any parent directory\n  → ub workspace create <name>, or ub workspace use <link|id>\n");
     expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
-  it("does not borrow the legacy machine default without a project binding", () => {
+  it("does not borrow the legacy machine default without a project binding", async () => {
     const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
-    const run = runUb(["status", "--json"], box);
+    const run = await runInProcess(["status", "--json"], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("no .uberblick.json here or in any parent directory\n  → ub workspace create <name>, or ub workspace use <link|id>\n");
     expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
   });
 
-  it("returns usage errors as exit 2 before opening a replica", () => {
+  it("returns usage errors as exit 2 before opening a replica", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const run = runUb(["status", "--unknown"], box);
+    const run = await runInProcess(["status", "--unknown"], box);
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
     expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
@@ -378,7 +379,7 @@ describe("the real project's short report", () => {
     "wss://user:url-secret@hub.example.test/ws",
     "wss://hub.example.test/ws?token=url-secret",
     "wss://hub.example.test/ws#url-secret",
-  ])("rejects invalid hub URL secrets without exposing them: %s", (hubUrl) => {
+  ])("rejects invalid hub URL secrets without exposing them: %s", async (hubUrl) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } });
     const run = runUb(["status", "--json"], box);
     expect(run.status).not.toBe(0);
@@ -386,19 +387,19 @@ describe("the real project's short report", () => {
     expect(run.output).not.toContain("url-secret");
   });
 
-  it("uses the same binding from nested directories without exposing selection or storage", () => {
+  it("uses the same binding from nested directories without exposing selection or storage", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const nested = join(box.cwd, "src", "nested");
     mkdirSync(nested, { recursive: true });
-    const run = runUb(["status", "--json"], { ...box, cwd: nested });
+    const run = await runInProcess(["status", "--json"], { ...box, cwd: nested });
     expect(run.status).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ workspace: { id: WORKSPACE, name: null },
       hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, problems: [],
     });
-    expect(runUb(["status"], { ...box, cwd: nested }).stdout).toBe(`workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\nproblems    none\n`);
+    expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(`workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\nproblems    none\n`);
   });
 
-  it.each([DEAD_HUB_URL, null])("reads the local name and counts reserved pending rooms only for a hub %s", (hubUrl) => {
+  it.each([DEAD_HUB_URL, null])("reads the local name and counts reserved pending rooms only for a hub %s", async (hubUrl) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl },
       credentials: { signingSecret: "pending-status-test-secret" },
     });
@@ -415,13 +416,13 @@ describe("the real project's short report", () => {
       }
       database.prepare("INSERT INTO meta (key, value) VALUES ('last_sync_at', ?)").run("1791226692000");
     } finally { database.close(); }
-    const json = runUb(["status", "--json"], box);
+    const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const reading = JSON.parse(json.stdout);
     expect(Object.keys(reading).sort()).toEqual(["account", "connection", "hub", "lastSync", "pending", "problems", "workspace"]);
     expect(reading.workspace).toEqual({ id: WORKSPACE, name: "Stored name" });
     expect(reading.pending).toEqual({ count: hubUrl === null ? 0 : 4 });
-    const text = runUb(["status"], box);
+    const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
     expect(row(text.stdout, "workspace")).toBe(`workspace   Stored name (${WORKSPACE})`);
     if (hubUrl === null) {
@@ -438,17 +439,17 @@ describe("the real project's short report", () => {
 describe("the locally stored account in ub status", () => {
   it.each(["previous-user", 'synthetic"\\user\n\u001b\u007f\u009b'])(
     "carries the stored login %j in JSON while the hub is unavailable",
-    (username) => {
+    async (username) => {
       const login = fixture([WORKSPACE]);
       login.identity.githubUsername = username;
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
         credentials: { hubLogins: { "http://127.0.0.1:1": login } },
       });
-      const json = runUb(["status", "--json"], box);
+      const json = await runInProcess(["status", "--json"], box);
       expect(json.status, json.stderr).toBe(0);
       expect(JSON.parse(json.stdout).account).toEqual({ login: username, provider: "github" });
-      const text = runUb(["status"], box);
-      const auth = runUb(["auth", "status"], box);
+      const text = await runInProcess(["status"], box);
+      const auth = await runInProcess(["auth", "status"], box);
       const displayed = row(auth.stdout, "signed in").replace(/^signed in\s+/, "");
       expect(text.stdout).toContain(`hub         http://127.0.0.1:1\naccount     @${displayed} (GitHub)\n`);
       expect(json.output + text.output).not.toContain(login.credential.key);
@@ -461,43 +462,43 @@ describe("the locally stored account in ub status", () => {
     { name: "unreadable store", files: { raw: { credentials: "{" } } },
     { name: "unreadable hub login", files: { credentials: { hubLogins: { "https://hub.example.test": {} } } } },
     { name: "refused store", files: { credentials: { hubLogins: { "https://hub.example.test": fixture() } }, credentialsMode: 0o644 } },
-  ])("reports no stored account for a $name", ({ files }) => {
+  ])("reports no stored account for a $name", async ({ files }) => {
     const endpoint = "wss://Hub.Example.Test:443/ws";
     const box = sandbox({ ...files, projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint } });
-    const json = runUb(["status", "--json"], box);
+    const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     expect(JSON.parse(json.stdout).account).toBeNull();
-    const text = runUb(["status"], box);
+    const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
     expect(text.stdout).toContain(`hub         ${ORIGIN}\naccount     not signed in to ${ORIGIN}\n`);
     expect(text.stdout).not.toContain("previous-user");
   });
 
-  it("preserves HTTP in the account origin when no device login is stored", () => {
+  it("preserves HTTP in the account origin when no device login is stored", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       userConfig: { hubAdmissions: { [DEAD_HUB_URL]: "device" } },
     });
-    const text = runUb(["status"], box);
+    const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
     expect(row(text.stdout, "account")).toBe("account     not signed in to http://127.0.0.1:1");
   });
 
-  it("reports no account needed locally even with a stored login for the fallback hub", () => {
+  it("reports no account needed locally even with a stored login for the fallback hub", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
       credentials: { hubLogins: { "http://localhost:1234": fixture([WORKSPACE]) } },
     });
-    expect(JSON.parse(runUb(["status", "--json"], box).stdout).account).toBeNull();
-    expect(row(runUb(["status"], box).stdout, "account")).toBe("account     none needed for a local workspace");
+    expect(JSON.parse((await runInProcess(["status", "--json"], box)).stdout).account).toBeNull();
+    expect(row((await runInProcess(["status"], box)).stdout, "account")).toBe("account     none needed for a local workspace");
   });
 
-  it("omits the account row for local signing-secret admission to a hub", () => {
+  it("omits the account row for local signing-secret admission to a hub", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL },
       credentials: { signingSecret: "local-status-test-secret" },
     });
-    const json = runUb(["status", "--json"], box);
+    const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     expect(JSON.parse(json.stdout).account).toBeNull();
-    const text = runUb(["status"], box);
+    const text = await runInProcess(["status"], box);
     expect(row(text.stdout, "account")).toBe("");
     expect(json.output + text.output).not.toContain("local-status-test-secret");
   });

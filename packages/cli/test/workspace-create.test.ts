@@ -6,7 +6,8 @@ import { defaultWorkspaceDatabasePath, readWorkspaceName, resolveMcpConfig, sync
 import { afterAll, expect, it } from "vitest";
 import { credentialsPath, resolveConfig } from "../src/config.js";
 import { initLockPath, seedLockPath } from "../src/init-lock.js";
-import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { runUb, removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";
 
 afterAll(removeTempDirs);
@@ -55,7 +56,7 @@ it.each([false, true])("uses an environment secret without writing credentials: 
   } : {});
   const path = credentialsPath(box.env);
   const before = onFile ? readFileSync(path) : null;
-  const created = runUb(["workspace", "create", "Environment notes"], box, { HUB_AUTH_TOKEN: SECRET });
+  const created = await runInProcess(["workspace", "create", "Environment notes"], box, { HUB_AUTH_TOKEN: SECRET });
   expect(created.status, created.output).toBe(0);
   expect(created.output).not.toContain(SECRET);
   if (onFile) {
@@ -77,7 +78,7 @@ it("uses the existing secret and leaves name and colour settings untouched", asy
   const before = readFileSync(path);
   const settings = readFileSync(config);
   const modified = statSync(path).mtimeMs;
-  const created = runUb(["workspace", "create", "Another workspace"], box);
+  const created = await runInProcess(["workspace", "create", "Another workspace"], box);
   expect(created.status, created.output).toBe(0);
   expect(readFileSync(path)).toEqual(before);
   expect(statSync(path).mtimeMs).toBe(modified);
@@ -115,7 +116,7 @@ it("still creates and seeds a workspace when an exposed credential file must be 
   const box = unboundSandbox({ credentials: { signingSecret: SECRET, hubLogins: {} }, credentialsMode: 0o644 });
   const path = credentialsPath(box.env);
   const before = readFileSync(path);
-  const created = runUb(["workspace", "create", "Offline notes"], box);
+  const created = await runInProcess(["workspace", "create", "Offline notes"], box);
   expect(created.status, created.output).toBe(0);
   expect(created.stderr).toContain("secret may have leaked");
   expect(created.stderr).toContain(`delete ${path}`);
@@ -163,7 +164,7 @@ syncBuiltinESMExports();
       rmSync(initLockPath(box.env));
       rmSync(seedLockPath(box.env));
     }
-    const completed = runUb(["workspace", "create", "Complete notes"], box);
+    const completed = await runInProcess(["workspace", "create", "Complete notes"], box);
     expect(completed.status, completed.output).toBe(0);
     expect(defaultWorkspaceDatabasePath(binding(box).workspaceId, box.env)).not.toBe(partial);
     expect(readFileSync(partial)).toEqual(partialBefore);

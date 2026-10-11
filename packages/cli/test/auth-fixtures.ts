@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { hostname } from "node:os";
+import { writeHubLogin } from "../src/auth-store.js";
 import { DatabaseSync } from "node:sqlite";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
 import { expect } from "vitest";
@@ -59,6 +61,22 @@ export function savedLogin(box: Sandbox, origin: string): Login {
   const login = readStore(box).hubLogins?.[origin];
   if (!login) throw new Error("expected selected hub login to be persisted");
   return login;
+}
+
+/** Management fixtures need a real issued credential, without repeating GitHub approval. */
+export async function seedLogin(remote: Awaited<ReturnType<typeof rig>>, box = remote.box, storedUsername?: string): Promise<Login> {
+  const identity = remote.hub.principals!.identify(String(remote.github.identity.id), remote.github.identity.login);
+  const issued = remote.hub.credentials!.issue({
+    principalId: identity.id,
+    deviceId: randomUUID(),
+    deviceName: hostname(),
+    workspaces: remote.hub.memberships!.workspacesFor(identity.id),
+  });
+  await writeHubLogin(remote.origin, {
+    identity: { ...identity, githubUsername: storedUsername ?? identity.githubUsername },
+    credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") },
+  }, box.env);
+  return savedLogin(box, remote.origin);
 }
 
 export class GithubFake {

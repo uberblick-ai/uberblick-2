@@ -7,7 +7,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import type { Server, Socket } from "node:net";
 import { userInfo } from "node:os";
 import { join } from "node:path";
@@ -18,7 +18,7 @@ import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberbl
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
-import { probeHub, probePort } from "../src/probes.js";
+import { probeHub } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
   UB_BIN,
@@ -301,7 +301,12 @@ export async function interruptWhen(
 export async function untilBound(port: number): Promise<void> {
   await waitUntil(
     `the hub \`ub open\` starts to bind port ${port}`,
-    async () => (await probePort("127.0.0.1", port)).state !== "free",
+    () => new Promise<boolean>((resolve) => {
+      // Observing startup must not bind the socket the child is trying to acquire.
+      const socket = createConnection({ host: "127.0.0.1", port });
+      socket.once("connect", () => { socket.destroy(); resolve(true); });
+      socket.once("error", () => { socket.destroy(); resolve(false); });
+    }),
   );
 }
 
