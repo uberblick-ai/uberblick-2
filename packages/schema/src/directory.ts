@@ -57,7 +57,8 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Repair from the hydrated document even when it lags the stub; tag order and
  * empty descriptions do not differ. Callers preserve ordinary tombstones,
- * repair decision caches, and supply missing createdAt and authored-write stamps.
+ * repair decision caches, and backfill createdAt. They own clocks, authorship,
+ * timestamp coarseness and write gates; cache-only repairs may omit updatedAt.
  */
 export function directoryStubDiffers(
   stub: DirectoryEntry | null,

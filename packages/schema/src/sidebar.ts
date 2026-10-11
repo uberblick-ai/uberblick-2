@@ -271,7 +271,7 @@ export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
 
 /**
  * Archiving asserts an unpin even with no visible pin, hiding unseen pins at
- * or below the observed level. A pin stamped above the raised counter can
+ * or below the observed level. A pin stamped at or above the raised counter can
  * still surface; a deliberate re-pin after observing the unpin also wins.
  */
 export function unpinDocIncludingUnseen(sidebarDoc: Y.Doc, uuid: string): void {

@@ -490,7 +490,7 @@ export interface BlockTypeAttrs {
 }
 
 /**
- * Retyping must retain id, position and full text delta, including thread marks.
+ * Only sanctioned retype: retain id, position and full text delta, including thread marks.
  * Applicable attributes carry over unless overridden. Yjs node names are
  * immutable, so insert the replacement beside the old element before deleting it.
  * Concurrent replacements use partitionById's winner; losing text is discarded.
@@ -690,7 +690,7 @@ function linkInRange(text: Y.XmlText, lo: number, hi: number): string | null {
  * Mark an ordered, clamped half-open prose range without changing text or rev.
  * Existing docLink targets are replaced; visible external links are refused.
  * Merged raw link/docLink pairs read as docLink and are repaired by retargeting.
- * Empty or non-prose ranges are refused; targets must be canonical document UUIDs.
+ * Empty or non-prose ranges are refused; document UUID targets normalize to lowercase.
  */
 export function setInlineLink(
   ydoc: Y.Doc,
