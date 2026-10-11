@@ -164,9 +164,7 @@ describe("the canonical room grammar", () => {
       ],
       ["a path with an extra segment", `${WORKSPACE}/${DOC}/extra`],
       ["an empty document segment", `${WORKSPACE}/`],
-      // One case rule for both segments (#196): the workspace segment has
-      // always been lowercase-only, and room names are case-sensitive keys, so
-      // a shouted uuid would be a second room holding one document.
+      // Both segments require lowercase UUIDs to avoid duplicate room identities.
       ["an upper-cased document uuid", `${WORKSPACE}/${DOC.toUpperCase()}`],
       ["a name that carries no workspace", DOC],
       ["a decorated workspace segment", `${DECORATED}/${DOC}`],

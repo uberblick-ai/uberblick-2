@@ -1,36 +1,6 @@
 /**
- * The directory document.
- *
- * Discovery is itself a synced doc: one Y.Doc per workspace, in the well-known
- * room `<workspaceId>/_directory` (see `rooms.ts`), holding a Y.Map of
- * uuid → {title, tags, deleted?, createdAt?, updatedAt?, description?, kind?,
- * status?} stubs, plus decision-only relationship and history display caches.
- * It travels over the same sync channel as every other document, so a fresh
- * client with empty local state learns the corpus by joining one more room.
- * There is no other discovery mechanism — never enumerate locally-observed
- * creations.
- *
- * The stub is a cache, not the truth: metadata inside the document itself is
- * authoritative, and the stub is repaired on write and on connect. Caching the
- * description and lifecycle is what lets a listing answer without opening a
- * single room — the whole point of having one.
- *
- * Entries are whole-object writes, so concurrent upserts to the same uuid
- * converge last-write-wins per key while different uuids never conflict. The
- * one exception is `updatedAt`: one max candidate per Yjs client is kept in a
- * sibling map, so a losing whole-entry write cannot discard the greater stamp.
- * Those candidates are never pruned, so state grows by one key per
- * `(uuid, Yjs client)` and resolving one entry scans the full candidate map.
- *
- * `createdAt` and `updatedAt` are epoch milliseconds read from the clock of
- * whichever replica wrote them, and they are cache-quality like the rest of the
- * stub: freshness hints good enough to sort a listing, never history and never
- * an audit trail. Concurrent `updatedAt` candidates resolve to the greater
- * finite number. A replica with a clock in the future therefore pins the stamp
- * until another authored write exceeds it; the clock merely catching up writes
- * nothing. Both fields are optional: an entry written before they existed
- * simply has none, so anything sorting on them must tolerate `undefined`
- * rather than assume a number.
+ * Discovery comes from this synced workspace room, never local create history.
+ * Stubs cache document metadata; hydrated writers repair them on write/connect.
  */
 
 import type * as Y from "yjs";
@@ -46,10 +16,13 @@ import type {
   DocumentStatus,
 } from "./types.js";
 
-/** The key of the directory Y.Map inside the directory doc. */
+/** Whole-object per-uuid writes merge independently; same-key writes use Yjs order. */
 export const DIRECTORY_DOCS_KEY = "docs";
 
-/** Max-register candidates for directory `updatedAt`, keyed by uuid + client. */
+/**
+ * Per-client max candidates survive losing whole-stub writes. Never pruned:
+ * one key per uuid/client; a single-entry resolution scans the full map.
+ */
 const DIRECTORY_UPDATED_AT_KEY = "updatedAt";
 
 interface StoredEntry {
@@ -82,17 +55,9 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * Shared web/MCP cache-repair rule: the document's metadata is authoritative.
- * A missing stub or different metadata or decision cache needs repair. Tag order is immaterial; absent and empty descriptions agree.
- * Each repair states all these fields from its replica's document, even if that
- * copy lags another replica's stub: the cache heals on observed updates rather
- * than arbitrating which copy is newer.
- *
- * Callers leave non-decision tombstones alone; decision caches still repair.
- * They also write a stub missing `createdAt`, even when its metadata agrees.
- * Every repair supplies that stamp;
- * `upsertDirectoryEntry` preserves an existing one. Authorship, clocks,
- * `updatedAt` coarseness and write gates remain the writer's responsibility.
+ * Repair from the hydrated document even when it lags the stub; tag order and
+ * empty descriptions do not differ. Callers preserve ordinary tombstones,
+ * repair decision caches, and supply missing createdAt and authored-write stamps.
  */
 export function directoryStubDiffers(
   stub: DirectoryEntry | null,
@@ -128,9 +93,7 @@ function readStamp(value: unknown): number | undefined {
 }
 
 /**
- * A stored description, or undefined when absent, blank or malformed. Blank and
- * absent are one fact here as they are in `getMeta`, so nothing has to carry an
- * empty string around to mean "none".
+ * Blank, malformed and absent descriptions share the same public absence.
  */
 function readDescription(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
@@ -158,9 +121,8 @@ function candidateKey(uuid: string, clientId: number): string {
 }
 
 /**
- * The maximum candidate recorded for one entry. A flat map avoids a race to
- * install a nested shared type on legacy entries: concurrent writers use
- * distinct client keys, so both candidates survive their first exchange.
+ * A flat map avoids racing to install a nested type; distinct client keys keep
+ * both first writes. Future clock stamps persist until an authored write exceeds them.
  */
 function recordedUpdatedAt(dirDoc: Y.Doc, uuid: string): number | undefined {
   const prefix = `${uuid}:`;
@@ -246,11 +208,8 @@ function readStored(value: unknown): StoredEntry | null {
 }
 
 /**
- * Carry the fields of an entry that is being rewritten but not restated: its
- * timestamps, description, lifecycle and decision caches.
- *
- * Every writer here replaces the whole object, so a field that is not copied
- * forward is a field that is erased.
+ * Whole-object rewrites must carry timestamps, description and lifecycle/cache
+ * fields they do not restate, or those fields are erased.
  */
 function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry {
   return {
@@ -271,24 +230,19 @@ export interface DirectoryUpsert {
   title: string;
   tags?: string[];
   /**
-   * When the document was created, epoch ms. Set once: an entry that already
-   * carries one keeps it, so passing this on every write is safe — and is how a
-   * stub written before the field existed gets backfilled.
+   * Optional replica-clock epoch ms, a display hint rather than audit history.
+   * Existing values survive repeat writes; omitted values may be backfilled.
    */
   createdAt?: number;
   /**
-   * When this replica authored a document change, epoch ms. The greater finite
-   * stamp wins; a lower, missing or malformed value cannot lower the resolved
-   * one. A writer that only means to fix another field may omit it.
+   * Optional authored-change epoch ms; clocks are display hints, not history.
+   * Lower, missing or malformed candidates cannot lower the resolved maximum.
+   * Cache-only repairs may omit it; clock catch-up alone produces no update.
    */
   updatedAt?: number;
   /**
-   * The document's description, cached here for listings. Written when given and
-   * carried forward untouched otherwise. Document repairs state it explicitly;
-   * writers changing only other fields can omit it to preserve the cache.
-   *
-   * The empty string is the one way to clear it, which is how a document whose
-   * description was removed stops advertising the old one.
+   * Omission preserves the cache; empty string clears it. Hydrated repairs
+   * state the description explicitly to propagate deliberate removal.
    */
   description?: string;
   /**
@@ -335,20 +289,9 @@ export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
 }
 
 /**
- * Create or update a directory stub. Call this on document create, rename and
- * retag.
- *
- * A tombstone is sticky: upserting an entry that is already tombstoned keeps
- * `deleted: true`, so a late-arriving rename cannot resurrect a deleted doc.
- * Lifting one is deliberate and explicit — see `restoreDirectoryEntry`.
- *
- * That stickiness is observed state, not a merge rule, and the difference
- * matters. It holds against a writer that has seen the tombstone. An upsert
- * made *concurrently* on a replica that has not seen it — an offline rename
- * racing an archive — is an ordinary whole-entry write, converges by update
- * order like any other, and can therefore bring the document back with nobody
- * calling `restoreDirectoryEntry`. `directory.test.ts` pins that outcome:
- * it is the contract, not the preference.
+ * Upserts on create/rename/retag retain observed tombstones. An offline upsert
+ * that has not seen an archive can win the whole-entry conflict and resurrect
+ * the document; stickiness is observed state, not a concurrent merge rule.
  */
 export function upsertDirectoryEntry(
   dirDoc: Y.Doc,
@@ -399,8 +342,7 @@ export function upsertDirectoryEntry(
 }
 
 /**
- * Tombstone a directory entry: sets `deleted: true` and keeps the entry, so the
- * deletion itself replicates. Entries are never removed from the map.
+ * Keep entries in the map so deletion replicates, even when it overtakes creation.
  */
 function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string): void {
   const docs = getDirectoryMap(dirDoc);
@@ -426,24 +368,9 @@ function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string)
 }
 
 /**
- * Lift a tombstone: clears `deleted` and keeps title and tags as they stand.
- *
- * This is the one sanctioned way back. `upsertDirectoryEntry` deliberately
- * cannot do it — a rename that raced a delete must not resurrect the document —
- * so restoring has to be an act of its own, never a side effect of a write that
- * meant something else.
- *
- * Nothing happens unless there is a tombstone to lift. An entry that is already
- * live is left alone rather than rewritten, so restoring twice does not publish
- * a second, identical update; and a uuid the directory has never seen stays
- * unknown, because there is nothing to bring back and inventing a live stub
- * would announce a document that does not exist. (`tombstoneDirectoryEntry`
- * does create an entry for an unseen uuid — it has to, since a delete must
- * replicate even when it overtakes the create it deletes.)
- *
- * Entries are whole-object writes, so a restore concurrent with a tombstone
- * converges on whichever update Yjs orders last — not on whichever human meant
- * it more recently.
+ * Only an observed tombstone is lifted; live/unknown entries produce no update.
+ * Preserve all cached fields. Concurrent restore/archive writes follow Yjs key
+ * order, which does not represent the recency of a person's intent.
  */
 function restoreOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
   const docs = getDirectoryMap(dirDoc);
