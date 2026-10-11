@@ -2,9 +2,9 @@
 
 Run a published hub release with Docker on Linux x86_64 or Docker Desktop on
 macOS. Apple Silicon Macs run the published `linux/amd64` images under emulation.
-The host needs no repository checkout, build tools, `ub`, GitHub account or
-registry login. One version supplies the hub image, the prebuilt web image and
-all host files. By default Caddy serves plain HTTP only on the host's loopback
+The Docker-only route needs no repository checkout, build tools, `ub`, GitHub
+account or registry login on the host. One version supplies the hub image, the
+prebuilt web image and all host files. By default Caddy serves plain HTTP only on the host's loopback
 interface at `http://localhost:8080`, answering only `localhost` and `127.0.0.1`
 Host names to prevent DNS rebinding. Other computers use HTTPS for a configured
 host name. Tailscale is the recommended optional network layer; public DNS is
@@ -14,7 +14,7 @@ also supported. Caddy serves the app and `/uberblick-config.json` and proxies
 > Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The host's web page receives no credential and shows no documents: direct browser sign-in is not available yet. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
 
 The access-control boundary and broader-access requirements are described in
-the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
+the corpus Permissions (eb9a7801-05f3-417a-81d5-07c18795ac81).
 
 ## Host prerequisites
 
@@ -46,6 +46,65 @@ Caddy as root to reach it. See [the route settings below](#choose-how-clients-re
 The macOS routes are loopback and public DNS HTTPS; the host-socket Tailscale
 recipe is Linux-only. Every other process runs in the published containers, including backup,
 restore and first-admin setup. The host needs no Node, pnpm or `sqlite3`.
+
+## Quickstart with an installed client
+
+Install the `ub` client on the hub host and meet [the host prerequisites](#host-prerequisites):
+Linux x86_64 with Docker Engine 28.0.0 or newer, or Docker Desktop on macOS
+with that Engine floor, and Docker Compose 2.24.4 or newer. Run these commands
+on that host from any directory; they need no project binding or login:
+
+```sh
+ub hub setup
+# Edit ~/uberblick-remote/.env if you need a route other than localhost.
+ub hub up
+ub hub status
+ub hub status --json
+```
+
+`setup` extracts the published release matching this client's version into
+`~/uberblick-remote`, creates a mode-0600 `.env` from its template, and starts
+nothing. It refuses a non-empty directory. Use `--release X.Y.Z` on setup or
+upgrade to choose another published release; a source-checkout client reporting
+`0.0.0` requires this flag. Every subcommand accepts `--dir <path>` for an
+existing Docker-only deployment or another deployment directory.
+
+`up` checks the configuration, pulls the release's images and starts the stack
+through that deployment's `bin/remote-compose.sh`. `status` reports the release,
+sync protocol, hub and Caddy states, and configured site origin. It checks the
+site and `/ws` from the host itself and exits 0 only when healthy; an HTTPS
+name the host cannot reach shows as not answering. `--json` prints one JSON
+object. Allow certificate acquisition to finish, then check status again.
+After starting a fresh hub, [claim it](#claim-a-fresh-hub) with `ub auth login`
+before wider exposure; see the corpus's CLI: ub auth intents and examples
+(0ad5f7da-edb2-4e53-a6eb-9d95922a3e95), “Claim a fresh hub”.
+
+```sh
+ub hub down
+ub hub up
+ub hub upgrade --release X.Y.Z
+```
+
+`down` removes containers and keeps the `hub-data`, `caddy-data` and
+`caddy-config` volumes. The next `up` reuses documents, claim state and
+certificates. `upgrade` requires a running hub; choosing the current release
+changes nothing, and an older target is refused. For a newer published release,
+it stages and checks the target and pulls its images, then runs the live
+deployment's backup script before replacing release files and recreating
+containers. It keeps `.env` and earlier backups, and checks health for up to
+90 seconds while the recreated services start and certificates are acquired.
+It reports the new backup's path and resulting health. Retain backups according to
+[the backup procedure](#backing-the-hub-up).
+If the sync protocol changes, update every client in the same sitting;
+upgrade asks for confirmation at a terminal, or accepts `--yes`.
+
+Run one operator session at a time. The release uses the single Compose project
+`uberblick-remote`; ambient `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` do not
+redirect these commands. Hosts without Docker, remote or SSH orchestration,
+service integration, and more than one deployment per Docker host are
+unsupported. To operate an SSH host, sign in there and run `ub hub` locally.
+Use [the manual switch procedure](#switch-an-existing-checkout-host-to-a-release)
+for a source-checkout deployment. `ub hub` grants no hub or workspace role.
 
 ## Stand it up from a release
 

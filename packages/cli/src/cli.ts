@@ -1,5 +1,6 @@
 import { authCommand } from "./auth.js";
 import { doctorCommand } from "./doctor.js";
+import { hubCommand } from "./hub.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
@@ -25,6 +26,7 @@ commands:
                          for each problem
   workspace [command]    create, promote, join, list or select a workspace
   auth [command]         sign in to a remote hub and manage this machine's login
+  hub [command]          set up, start, stop, check or upgrade a Docker hub on this host
   mcp [command]          register uberblick with an MCP client
 
 options:
@@ -74,6 +76,9 @@ export async function runCli(
   }
   if (command === "auth") {
     return await authCommand(rest, io);
+  }
+  if (command === "hub") {
+    return await hubCommand(rest, io);
   }
   if (command === "mcp") {
     const [subcommand, ...args] = rest;
