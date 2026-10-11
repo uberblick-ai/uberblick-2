@@ -1,8 +1,4 @@
-/**
- * The deliberately closed version-1 data vocabulary. This is not a general
- * JSON Schema dialect: unsupported keywords are errors, and enum/const values
- * are scalar. A version changes only when the accepted vocabulary changes.
- */
+// Closed data vocabulary: 0c739c87-e48e-4981-a316-617448c2e15d
 export type JSONScalar = string | number | boolean | null;
 export type JSONValue = JSONScalar | JSONObject | JSONValue[];
 export interface JSONObject { [key: string]: JSONValue }
@@ -24,11 +20,11 @@ export interface DataSchema {
   maxItems?: number;
 }
 export interface CollectionSchema {
+  /** Change the version only when the accepted vocabulary changes. */
   version: 1;
   schema: DataSchema;
 }
 
-/** Codes and details survive a caller adding collection and record context. */
 export class DataError extends Error {
   readonly code: string;
   readonly details: Record<string, unknown>;
@@ -71,11 +67,7 @@ function invalidJSON(path: string, reason: string): never {
   throw new DataError("data_invalid_input", `JSON ${path || "/"}: ${reason}`, { path });
 }
 
-/**
- * Reject values JSON or Yjs would drop, transform or refuse. Depth counts containers:
- * a root object/array has depth one, its nested containers have depth two.
- * Shared-root envelopes may use Infinity after each schema/record is checked.
- */
+/** Reject lossy JSON/Yjs values; container depth starts at one for the root. */
 export function assertJSON(value: unknown, maxDepth = MAX_DATA_DEPTH): asserts value is JSONValue {
   const ancestors = new Set<object>();
   function visit(current: unknown, path: string, depth: number): void {
@@ -146,7 +138,7 @@ export function canonicalJson(value: unknown, maxDepth = MAX_DATA_DEPTH): string
   return encode(value);
 }
 
-/** Parsing the canonical value also detaches every nested object and array. */
+/** Detach nested objects and arrays as well as the root. */
 export function cloneJson(value: unknown, maxDepth = MAX_DATA_DEPTH): JSONValue {
   return JSON.parse(canonicalJson(value, maxDepth)) as JSONValue;
 }
@@ -210,7 +202,6 @@ export function validateCollectionSchema(value: unknown): asserts value is Colle
           visit(entry, at);
           break;
         case "enum":
-          // Version 1 requires a nonempty, unique array of scalar choices.
           if (!Array.isArray(entry) || entry.length === 0 || !entry.every(scalar) ||
               new Set(entry.map((item) => JSON.stringify(item))).size !== entry.length) {
             schemaError(at, "expected a nonempty array of unique scalar values");

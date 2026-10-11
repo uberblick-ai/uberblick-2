@@ -375,10 +375,7 @@ describe("annotations", () => {
   it("keeps both replies when two replicas comment on one thread offline", () => {
     const { a, b, threadId } = threadedPair();
 
-    // Neither replica can see the other's reply. While the conversation was one
-    // plain JSON value in the annotations Y.Map, the replicas
-    // converged to whichever write came last, and the other reply vanished
-    // silently (#461).
+    // Neither replica can see the other's reply; both inserts must survive.
     addComment(a, threadId, "owner", "Yes, cut it.");
     addComment(b, threadId, "agent", "Shortened.");
     syncDocs(a, b);
@@ -413,13 +410,8 @@ describe("annotations", () => {
     }
   });
 
-  /**
-   * A thread and its conversation are deleted as one subtree, so a delete can
-   * never leave a thread standing with its comments destroyed. That outcome is
-   * what a conversation stored beside the thread produces: the delete empties
-   * the conversation, the concurrent write resurrects the thread, and the
-   * replies are gone with no error — #461's own failure by another route.
-   */
+  // Delete the thread and conversation together; a racing write cannot retain
+  // a thread whose conversation was independently emptied.
   it("removes a thread whole when a delete races a resolve or a reply", () => {
     const resolving = threadedPair();
     deleteAnnotation(resolving.a, resolving.threadId);

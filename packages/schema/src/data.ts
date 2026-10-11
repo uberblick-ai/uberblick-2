@@ -1,11 +1,4 @@
-/**
- * Optional document content in one flat Y.Map. Schemas and whole JSON records
- * are independent conflict units; transactions are local, not distributed CAS.
- * Key tuples avoid separators/escaping ambiguities. JSON property names exclude
- * __proto__ at any depth and constructor at the value root for Yjs safety.
- * Names and ids are nonempty; all JSON strings exclude lone surrogates.
- * There is no record-count limit or CRDT-history reclamation.
- */
+// Data layout and validation: 0c739c87-e48e-4981-a316-617448c2e15d
 import type * as Y from "yjs";
 import { getMeta } from "./doc.js";
 import { decisionTopicArchived } from "./directory.js";
@@ -93,6 +86,7 @@ function limit(name: keyof typeof DATA_LIMITS, attempted: number): void {
     throw limitError(name, attempted);
   }
 }
+/** Adding collection/record context preserves the original code and details. */
 function contextual(error: unknown, collection: string, recordId?: string): DataError {
   if (!(error instanceof DataError)) throw error;
   return new DataError(error.code, error.message, {
@@ -137,7 +131,7 @@ interface CollectionEntries {
   records: Map<string, JSONValue>;
 }
 
-/** Parse each storage key once; unknown entries stay in the raw area. */
+/** Unknown keys remain in the raw area even when they cannot be grouped. */
 function groupEntries(entries: Map<string, JSONValue>): {
   collections: Map<string, CollectionEntries>;
   errors: DataIssue[];
@@ -210,13 +204,7 @@ export function readDocData(doc: Y.Doc): DocData | null {
   return { collections, bytes: size, valid: errors.length === 0 && collections.every((c) => c.valid), errors };
 }
 
-/**
- * Validate the complete candidate for every touched collection before writing.
- * For each collection: set schema, replace records, delete ids, then upsert.
- * Different operations may not name the same collection. DeleteCollection is
- * exclusive. Only changed keys are written; an identical refresh emits nothing.
- * An over-limit merged area may shrink while remaining over its area budget.
- */
+/** Validate all touched collections before writing; local transactions cannot roll back. */
 export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): { changed: boolean } {
   const meta = getMeta(doc);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });
@@ -296,6 +284,7 @@ export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly 
   }
   const previousSize = areaBytes(before);
   const nextSize = areaBytes(next);
+  // Permit incremental recovery from merged aggregate excess.
   if (nextSize > DATA_LIMITS.area && nextSize >= previousSize) limit("area", nextSize);
   const writes: [string, JSONValue][] = [];
   for (const [k, value] of next) {
