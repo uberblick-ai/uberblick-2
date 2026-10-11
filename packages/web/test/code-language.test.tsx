@@ -76,7 +76,7 @@ function peerOf(local: Y.Doc): Y.Doc {
 }
 
 describe("code block language", () => {
-  it("attaches to the selected block and lists the highlighter registry with one Plain text choice", async () => {
+  it("attaches to the selected block and lists highlighted languages plus wireframe with one Plain text choice", async () => {
     const fix = await fixture("ts");
     const caption = fix.element.querySelector(".ub-code-caption");
     expect(caption?.contains(trigger())).toBe(true);
@@ -84,8 +84,8 @@ describe("code block language", () => {
     const search = await open();
     expect(document.activeElement).toBe(search);
     const labels = options().map((item) => item.textContent?.replace("✓", "").trim());
-    expect(labels).toEqual(["Plain text", ...createLowlight(common).listLanguages()
-      .filter((name) => name !== "plaintext").sort()]);
+    expect(labels).toEqual(["Plain text", ...[...createLowlight(common).listLanguages()
+      .filter((name) => name !== "plaintext"), "wireframe"].sort()]);
     expect(screen.queryByRole("option", { name: "plaintext" })).toBeNull();
     expect(screen.queryByRole("option", { name: "ts" })).toBeNull();
 
@@ -95,6 +95,35 @@ describe("code block language", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.getByText("No matching languages.")).not.toBeNull();
     expect(block(fix.editor, fix.id).node.attrs.language).toBe("ts");
+  });
+
+  it("finds wireframe from the keyboard and preserves source and selection across both view changes", async () => {
+    const fix = await fixture("javascript");
+    const before = snapshotFragment(fix.ydoc);
+    const selection = fix.editor.state.selection;
+    await act(async () => fix.editor.view.dom.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "F10", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+    const search = screen.getByRole<HTMLInputElement>("combobox", { name: "Search languages" });
+    act(() => typeInto(search, "wireframe"));
+    expect(options().map((item) => item.textContent?.trim())).toEqual(["wireframe"]);
+    await act(async () => search.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(block(fix.editor, fix.id).node.attrs.language).toBe("wireframe");
+    expect(block(fix.editor, fix.id).node.textContent).toBe(SOURCE);
+    expect(snapshotFragment(fix.ydoc)[1]).toEqual(before[1]);
+    expect(fix.editor.state.selection.anchor).toBe(selection.anchor);
+    expect(fix.editor.state.selection.head).toBe(selection.head);
+    expect(fix.element.querySelector(".ub-wireframe")).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(fix.editor.view.dom));
+
+    await open();
+    await pick("javascript");
+    expect(block(fix.editor, fix.id).node.attrs.language).toBe("javascript");
+    expect(block(fix.editor, fix.id).node.textContent).toBe(SOURCE);
+    expect(fix.element.querySelector(".ub-wireframe")).toBeNull();
+    expect(fix.element.querySelector(".hljs-keyword")?.textContent).toBe("const");
+    expect(fix.editor.state.selection.anchor).toBe(selection.anchor);
+    expect(fix.editor.state.selection.head).toBe(selection.head);
   });
 
   it.each(["ts", "not-supported"])("preserves stored %s on open and Escape, then returns focus to its block", async (language) => {

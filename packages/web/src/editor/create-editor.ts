@@ -20,6 +20,7 @@ import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { ChartBlocks } from "./chart.js";
+import { WireframeBlocks } from "./wireframe.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -92,6 +93,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // demonstration playing while it is being written.
     TerminalBlocks,
     ChartBlocks,
+    WireframeBlocks,
     // …and the document reference's: the two typed and pasted spellings, the
     // live anchor, and the address they resolve against. Behaviour again — the
     // mark itself is schema, declared once in `marks.ts`, because

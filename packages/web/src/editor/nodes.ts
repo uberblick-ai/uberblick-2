@@ -68,6 +68,7 @@ import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
+import { wireframeBlockView } from "./wireframe.js";
 
 /**
  * The stable block id, assigned by `BlockIds` (see block-ids.ts) and owned by
@@ -279,11 +280,21 @@ export const CodeBlock = Node.create({
       ["code", {}, 0],
     ];
   },
-  // Same DOM as `renderHTML` above, plus a copy button in the chrome (#103).
-  // `renderHTML` still governs serialization — getHTML, copy, paste — so the
-  // button exists only while the block is on screen.
+  // Wireframe drawing is view chrome. Serialization still emits the ordinary
+  // pre/code source, regardless of which editor view its language selects.
   addNodeView() {
-    return sourceBlockView(codeBlockChrome);
+    const ordinary = sourceBlockView(codeBlockChrome);
+    const wireframe = wireframeBlockView();
+    return (props) => {
+      const rendered = props.node.attrs.language === "wireframe";
+      const view = (rendered ? wireframe : ordinary)(props);
+      const update = view.update;
+      view.update = (node, decorations, innerDecorations) => {
+        if ((node.attrs.language === "wireframe") !== rendered) return false;
+        return update?.(node, decorations, innerDecorations) ?? false;
+      };
+      return view;
+    };
   },
   // No Enter override. Tiptap's core `keymap` extension already chains
   // newlineInCode → createParagraphNear → liftEmptyBlock → splitBlock, and

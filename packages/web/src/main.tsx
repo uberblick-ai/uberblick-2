@@ -20,6 +20,8 @@ import { App } from "./ui/App.js";
 import { NotificationToaster } from "./ui/shadcn/sonner.js";
 import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
+import "@uberblick/wireframe/styles.css";
+import "./ui/wireframe.css";
 // Tailwind styles shadcn and product UI over the tokens above. Web UI system
 // keeps editor content in plain CSS and migrates legacy surfaces when next
 // changed. Its output is layered, so the unlayered legacy `.ub-*` rules still

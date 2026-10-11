@@ -213,6 +213,9 @@ importers:
       '@uberblick/schema':
         specifier: workspace:*
         version: link:../schema
+      '@uberblick/wireframe':
+        specifier: ^0.1.0
+        version: 0.1.0
       chart.js:
         specifier: 4.5.1
         version: 4.5.1
@@ -1271,6 +1274,9 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@uberblick/wireframe@0.1.0':
+    resolution: {integrity: sha512-y6QW8/vh4doNJu8cU5jpq7a2fN8tYNUKnXgrSIAFXkFxg+86SPDlBJrS862k1xdUYlDmJqKNsCtTWR3B5sqDPQ==}
 
   '@vitejs/plugin-react@6.1.0':
     resolution: {integrity: sha512-qd2BzUBehkov86WFhg0JkEFEYyCLG9uPCe6qWTY/kRlss9OvJrOF2UbIWT7p+8IzZHkEu0DNGHc4HSv+JdDLsw==}
@@ -3238,6 +3244,8 @@ snapshots:
       csstype: 3.2.3
 
   '@types/unist@3.0.3': {}
+
+  '@uberblick/wireframe@0.1.0': {}
 
   '@vitejs/plugin-react@6.1.0(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))':
     dependencies:
