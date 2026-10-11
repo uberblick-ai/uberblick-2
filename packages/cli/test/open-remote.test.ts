@@ -1,8 +1,8 @@
 /**
  * `ub open` against an upstream hub: device admission, recovery of remote
  * sharing, durable browser and MCP edits through the shared store, presence
- * across a reconnect, and the served search and status readings. Split from
- * `open.test.ts`, whose header explains the real-world rig; the fixtures are in
+ * across a reconnect, and the served search and status readings. The
+ * `open.test.ts` header explains the real-world rig; the fixtures are in
  * `open-fixtures.ts`.
  */
 

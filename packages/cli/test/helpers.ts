@@ -206,13 +206,8 @@ function createSandbox(parent: string, files: SandboxFiles): Sandbox {
   //
   // A ceiling, never a floor: it shortens waits and lengthens nothing.
   //
-  // 400 ms, and not assumed to be safe — checked under the worst contention
-  // available. The same suites do real work against a real hub on loopback,
-  // seeding a corpus and syncing it, and that completes in tens of
-  // milliseconds; the whole suite is green with every spawned run, every
-  // in-process hub and vitest's own workers sharing a single core
-  // (`taskset -c 0`). A test that needs longer passes its own value through
-  // `extraEnv`.
+  // The 400 ms ceiling bounds ordinary loopback waits. Tests needing longer
+  // waits pass their own ceiling through `extraEnv`.
   //
   // The suites' *own* clients — the hubs they start, the replicas they verify
   // with — import `resolveMcpConfig` straight from `@uberblick/mcp-server` and

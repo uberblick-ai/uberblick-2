@@ -56,9 +56,8 @@ const ECHOED_EOF = "^D\u0008\u0008";
  * Stdin is `/dev/null` rather than the default pipe because macOS `script`
  * copies its own stdin's terminal settings onto the pty it allocates, and a
  * `spawnSync` pipe is a socket there: `tcgetattr` answers "Operation not
- * supported on socket" and the run dies before the pty exists, which is why
- * this branch reported an empty capture on every case. A character device it
- * can interrogate is enough, and the script under test never reads stdin.
+ * supported on socket" and the run dies before the pty exists. A character
+ * device it can interrogate is enough, and the script under test never reads stdin.
  */
 function onATerminal(env: NodeJS.ProcessEnv = {}): SpawnSyncReturns<string> {
   const args =

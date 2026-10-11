@@ -1,7 +1,7 @@
 /**
  * `ub open` and the hub and ports it owns: starting or reusing a hub, refusing
  * a port somebody else holds, and releasing every port and the serving role on
- * the way out. Split from `open.test.ts`, whose header explains the real-world
+ * the way out. The `open.test.ts` header explains the real-world
  * rig; the fixtures are in `open-fixtures.ts`.
  */
 
