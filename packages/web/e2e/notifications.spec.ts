@@ -127,7 +127,7 @@ test("one polite region precedes publication and outside-React calls preserve fo
   await expect(reactPublisher).toBeFocused();
 });
 
-test("transients expire after ten seconds and keyed repeats are new additions with a fresh timer", async ({ browser }) => {
+test("transients expire after six seconds and keyed repeats are new additions with a fresh timer", async ({ browser }) => {
   const page = await openFixture(browser, { clock: true });
   await publish(page, "transient", { key: "copy", severity: "success", message: "Copied" });
   await startNoticeClock(page);
@@ -147,7 +147,7 @@ test("transients expire after ten seconds and keyed repeats are new additions wi
       }
     }).observe(region, { childList: true, subtree: true });
   });
-  await page.clock.runFor(8500);
+  await page.clock.runFor(4500);
   await expect(copied).toHaveAttribute("data-removed", "false");
   await publish(page, "transient", { key: "copy", severity: "success", message: "Copied" });
   // Dismissal uses two native animation frames before its exit timer starts.
@@ -159,7 +159,7 @@ test("transients expire after ten seconds and keyed repeats are new additions wi
     const fixtureWindow = window as unknown as { originalNotice: Element | null; addedNotices: number };
     return { replaced: document.querySelector("[data-sonner-toast]") !== fixtureWindow.originalNotice, additions: fixtureWindow.addedNotices };
   })).toEqual({ replaced: true, additions: 1 });
-  await page.clock.runFor(9500);
+  await page.clock.runFor(5500);
   await expect(copied).toHaveAttribute("data-removed", "false");
   await page.clock.runFor(600);
   await expect(copied).toHaveCount(0);
@@ -192,7 +192,7 @@ for (const pause of ["hover", "keyboard", "hidden"] as const) {
         document.dispatchEvent(new Event("visibilitychange"));
       });
     }
-    await page.clock.runFor(5000);
+    await page.clock.runFor(1000);
     await expect(feedback).toHaveAttribute("data-removed", "false");
     await page.clock.runFor(1500);
     await expect(feedback).toHaveCount(0);

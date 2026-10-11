@@ -10,7 +10,7 @@ export interface Notice {
 const labels: Record<NoticeSeverity, string> = {
   success: "Success", info: "Information", warning: "Warning", error: "Error",
 };
-export const TRANSIENT_DURATION = 10_000;
+export const TRANSIENT_DURATION = 6_000;
 
 let nextId = 0;
 const freshId = (): string => `ub-notice-${++nextId}`;

@@ -65,7 +65,7 @@ describe("transient notifications", () => {
     expect(replacement.options.id).not.toBe(first.options.id);
     expect(sonner.visible.size).toBe(1);
     expect(sonner.visible.has(first.options.id!)).toBe(false);
-    expect(replacement.options.duration).toBe(10_000);
+    expect(replacement.options.duration).toBe(6_000);
     expect(replacement.options.description).toBe("Copied");
 
     // Removal of the old element must not forget the currently showing one.
@@ -76,7 +76,7 @@ describe("transient notifications", () => {
     expect(sonner.toast.dismiss).toHaveBeenLastCalledWith(replacement.options.id);
     expect(retry.options.id).not.toBe(replacement.options.id);
     expect(retry.severity).toBe("error");
-    expect(retry.options.duration).toBe(10_000);
+    expect(retry.options.duration).toBe(6_000);
     expect(sonner.visible.size).toBe(1);
   });
 
