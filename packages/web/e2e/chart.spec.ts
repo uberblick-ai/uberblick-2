@@ -576,8 +576,8 @@ test("crowded daily endpoint labels stay inside the canvas after resizing", { ta
   await expectReady(page);
   await page.evaluate(() => document.fonts.ready);
   const canvas = page.locator(".ub-chart canvas");
-  // At 312px the old build/fit reselection newly retained Jul 21 without
-  // fitting its endpoint padding. Nearby widths also exercise responsive draws.
+  // At 312px the retained endpoint tick must fit its padding.
+  // Nearby widths also exercise responsive draws.
   for (const width of [312, 317, 311]) {
     await page.locator(".ub-chart-screen").evaluate((element, nextWidth) => {
       const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;

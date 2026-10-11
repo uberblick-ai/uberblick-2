@@ -1,15 +1,6 @@
 /**
- * The MCP server, assembled.
- *
- * A factory, not a process: it opens the store, builds the replicas, registers
- * the tools and hands back something a transport can be attached to. `main.ts`
- * owns the process — signals, stdio, exit codes — which is what makes this
- * usable from tests over an in-memory transport.
- *
- * Building the server awaits nothing: the store is opened, the log is replayed,
- * and the hub connection happens in the background, where its absence changes no
- * tool's answer except `sync_status`. `connect` settles and seeds the synced tag
- * catalog before serving, using the same once-only schema transition as the web.
+ * Assemble synchronously from the local log; hub synchronization stays in the
+ * background. Transport startup settles and seeds tags before admitting calls.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -19,26 +10,17 @@ import { GuidanceBriefing, registerGuidanceResources } from "./guidance.js";
 import { registerHelpResources } from "./help-resources.js";
 import { STARTUP_ORIENTATION } from "./help-topics.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import type { MirrorStore } from "./store.js";
 import { ServerWork } from "./server-work.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { registerTools } from "./tools.js";
 import { mcpVersion } from "./version.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
- * The name to publish beside this session's caret, from what the client said
- * about itself at `initialize`.
- *
- * Precedence, and why (#304): `title` is the human-readable name of *this
- * session* — "Uberblick Coordinator Agent" — and is what a reader wants over
- * the caret; `name` is the client or executable behind it — "Codex",
- * "claude-code" — which still says who wrote. `agent` is a defensive last
- * resort: a protocol-compliant client always sends `name`.
- *
- * Blank is not an answer. A client that sends `title: ""` (or spaces) has said
- * nothing, and falling through to its name is the difference between a labelled
- * caret and a bare line over somebody's prose.
+ * Prefer the initialized session's human-readable title, then its client name.
+ * Blank fields fall through so the caret always has a label.
  */
 export function agentDisplayName(
   client: { name?: string | undefined; title?: string | undefined } | undefined,
@@ -57,15 +39,16 @@ export interface UberblickMcpServer {
 }
 
 /**
- * @param store The SQLite mirror. Defaults to one opened at
+ * @param injectedStore The SQLite mirror. Defaults to one opened at
  * `config.databasePath`; injectable so a test can drive persistence failures
  * through the real code path.
  */
 export function createMcpServer(
   config: McpConfig,
-  store: MirrorStore = new MirrorStore(config.databasePath, config.workspaceId),
+  injectedStore?: MirrorStore,
 ): UberblickMcpServer {
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config, injectedStore === undefined ? {} : { store: injectedStore });
+  const { store, replicas } = workspace;
   const briefing = new GuidanceBriefing(replicas);
   const work = new ServerWork();
 
@@ -81,11 +64,7 @@ export function createMcpServer(
     },
   );
 
-  // Awareness identity: the web UI renders this name over the agent's cursor
-  // and it becomes the default annotation author, so it must say which client
-  // is actually writing — Claude Code, Codex, or anything else that speaks MCP.
-  // The client tells us at `initialize`; we do not guess a vendor. See
-  // {@link agentDisplayName} for which of the two fields wins.
+  // Use the initialized client's identity for cursors and default comment authors.
   server.server.oninitialized = () => {
     replicas.setAgentName(agentDisplayName(server.server.getClientVersion()));
   };
@@ -133,9 +112,7 @@ export function createMcpServer(
         // SDK close aborts requests and drops replies but does not await
         // handlers. Their local writes still need the live replica and log.
         await work.drain();
-        replicas.destroy();
-        await replicas.sync.waitForDeviceWork();
-        store.close();
+        await workspace.close();
       });
       return closing;
     },

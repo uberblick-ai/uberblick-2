@@ -1,4 +1,4 @@
-/** The catalog-backed tag picker in the document identity line (#509). */
+/** The catalog-backed tag picker in the document identity line. */
 
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import { screen, within } from "@testing-library/react";

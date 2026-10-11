@@ -40,6 +40,8 @@ it("lists every concept and registered tool once, with the same Markdown through
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const { topics } = await rig.ok("get_help");
+  expect(topics.find(({ id }: { id: string }) => id === "lifecycle")?.description)
+    .toContain("when to create decision records");
   expect(topics.map(({ id }: { id: string }) => id).sort()).toEqual(
     [...concepts, ...tools.map(({ name }) => name)].sort(),
   );
@@ -174,6 +176,42 @@ it("keeps shared guarantees in the owning topics after shortening descriptions",
   expect(contracts).toContain("does NOT mean the hub has stored it");
   expect(contracts).toContain("no rollback or cross-room remote atomicity");
   expect(contracts).toContain("re-sends it on reconnect");
+});
+
+it("explains when a decision record is useful without turning examples into project policy", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  const guidance = lifecycle.split("### When to create a decision record\n")[1]?.split("\n## ")[0];
+  for (const rule of [
+    "deliberate architectural, product or UX choice", "its enduring reason",
+    "guidance future work should follow", "code or configuration alone cannot tell you",
+    "guide multiple tasks", "prevent a consequential accidental reversal",
+    "repeatedly debated or reconsidered", "A rarely consulted record can still be valuable",
+    "compatibility, security or product commitment", "they do not prove historical intent",
+    "**Do not** create a record just to describe existing code, configuration, a routine fix",
+    "a temporary workaround or implementation mechanics", "Do not turn every changed detail into policy",
+    "leaving its implementation flexible",
+    "What concrete future choice would it guide, or what consequential mistake would it prevent?",
+    "ordinary documentation, code comments, an issue or a PR", "Check existing decision topics first",
+    "Reuse the current topic", "follow the successor lifecycle",
+    "not automatically authorized for creation", "follow the project’s approval rules",
+    "they do not establish policies for your project",
+  ]) expect(guidance, rule).toContain(rule);
+
+  const examples = guidance!.split("\n").filter((line: string) => line.startsWith("| ")).slice(2);
+  expect(examples).toHaveLength(4);
+  for (const [index, choice, description] of [
+    [0, "users’ devices and maintenance budget", "The deployment target is set to this version."],
+    [1, "read and edit previously opened documents offline", "This function reads from the local database."],
+    [2, "shadcn/ui as the sole component library", "This screen imports a Button component from shadcn/ui."],
+    [3, "shared service rather than directly with each other", "A list of endpoints, classes or dependencies."],
+  ] as const) {
+    const cells = examples[index]!.split("|");
+    expect(cells[1]).toContain(choice);
+    expect(cells[2]?.trim()).toBe(description);
+  }
+  expect(examples[0]).toContain("minimum support, an explicit set or tested versions");
+  expect(examples[2]).toContain("Custom alternatives require clear justification and human approval");
 });
 
 it("advertises the server identity and instructions in initialize", async () => {

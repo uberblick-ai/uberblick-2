@@ -1,11 +1,10 @@
 /**
  * `ub auth login` against an unavailable or misbehaving hub, and the finite
- * lifetime of an attempt. Split from `auth.test.ts`; the fixtures are in
- * `auth-fixtures.ts`.
+ * lifetime of an attempt. The fixtures are in `auth-fixtures.ts`.
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil,

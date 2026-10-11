@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { credentialsPath, readHubLogins, writeHubLogin } from "../src/auth-store.js";
 import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { startDeviceSyncHub } from "./device-sync-hub.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
@@ -45,7 +45,7 @@ describe("device renewal response and recovery contracts", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, options) => {
       const body = JSON.parse(options?.body as string) as Record<string, unknown>;
       requests.push(body);
-      // The previous handler checks this exact envelope shape before version.
+      // A hub on the preceding protocol checks this two-field shape before version.
       if (Object.keys(body).length !== 2) return Response.json({ status: "invalid-request" }, { status: 400 });
       return send(input, options);
     });

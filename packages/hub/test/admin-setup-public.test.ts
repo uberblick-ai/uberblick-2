@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { adminSocketPath } from "../src/admin-setup.js";
-import { createHub, type Hub } from "../src/server.js";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
 import { removeTempDatabases, tempDatabasePath, TEST_SECRET, WORKSPACE } from "./helpers.js";
 
 const hubs: Hub[] = [];

@@ -113,9 +113,9 @@ export function CaretMenu({
       if (anchor?.current && path.includes(anchor.current)) return;
       onDismiss();
     };
-    // The owner-confirmed exception uses only native clicks: a tap clicks,
-    // while a touch scroll does not. Keys stay with PM or the gutter input,
-    // so native composing Escape is never intercepted by this card.
+    // Native click dismisses on tap without treating touch scroll as dismissal.
+    // Keep keys with ProseMirror or the gutter input so composing Escape stays
+    // native. Reconsider when a primitive preserves both interaction guarantees.
     ownerDocument.addEventListener("click", outside);
     return () => ownerDocument.removeEventListener("click", outside);
   }, [open, editor, anchor, onDismiss]);

@@ -207,9 +207,7 @@ describe("docFingerprint", () => {
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
-  // The three `meta` fields the hand-written field list never grew to include:
-  // each landed in `DocMeta` after the fingerprint was written, and each left
-  // the schema-level half of verification blind on it.
+  // Fingerprint coverage follows getMeta, including descriptive and lifecycle fields.
   it("changes when only the description changes", () => {
     const doc = source();
     const copy = replicate(doc);

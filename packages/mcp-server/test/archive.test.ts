@@ -394,10 +394,12 @@ describe("archive_doc", () => {
       failed: { purpose: "sidebar", room: `${WORKSPACE}/_sidebar` },
       room: `${WORKSPACE}/_sidebar`,
       recoveryClass: "manual",
+      message: `The update log refused the write to ${WORKSPACE}/_sidebar, so archive_doc stopped part-way. ` +
+        "Nothing was rolled back: the rooms in `completed` are durable and the rooms after the failure were never written.",
+      recovery: "The tombstone is durable, so the document is archived; only the unpin is missing, so any pin it has is " +
+        "still there and get_sidebar reports such a pin with `status: \"archived\"`. Restart the MCP server, then " +
+        "call unpin_doc with this uuid to finish it. Do NOT call archive_doc again — it is already archived.",
     });
-    // The caller is told to finish the unpin, and told not to re-archive.
-    expect(refused.payload.recovery).toContain("unpin_doc");
-    expect(refused.payload.recovery).toContain("Do NOT call archive_doc again");
   });
 
   it("claims no pin the document never had when the tombstone is refused", async () => {
@@ -418,9 +420,13 @@ describe("archive_doc", () => {
       partial: false,
       rolledBack: false,
       failed: { purpose: "directory", room: `${WORKSPACE}/_directory` },
+      recoveryClass: "manual",
+      message: `The update log refused the write to ${WORKSPACE}/_directory, so archive_doc stopped part-way. ` +
+        "Nothing was rolled back: the rooms in `completed` are durable and the rooms after the failure were never written.",
+      recovery: "Nothing survived: the refused write is the tombstone itself, so the document is still listed and its pin " +
+        "state is unchanged. Restart the MCP server — the failure is sticky and every tool refuses until then — " +
+        "then call archive_doc again.",
     });
-    expect(refused.payload.recovery).toContain("its pin state is unchanged");
-    expect(refused.payload.recovery).toContain("archive_doc again");
   });
 
   it("refuses a uuid the workspace has never heard of", async () => {
@@ -464,8 +470,11 @@ describe("an archived document is read-only", () => {
         // would have used.
         applied: false,
         synced: false,
+        message: `Document ${doc.uuid} is archived — restore_doc to edit`,
+        recoveryClass: "manual",
+        recovery: "Archived documents are read-only. Call restore_doc for this uuid — the only mutation an archived document " +
+          "accepts — and then make this call again.",
       });
-      expect(refused.payload.message).toContain("restore_doc");
     }
 
     // Refused, not merely reported as refused.

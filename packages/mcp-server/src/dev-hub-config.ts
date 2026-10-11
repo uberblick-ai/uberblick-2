@@ -1,5 +1,5 @@
 /** Checkout-only preload; the released hub starts main.ts without this module. */
-import { stderrLogger } from "./log.js";
+import { stderrLogger } from "@uberblick/hub";
 import { requireBinding, resolveConfig } from "./project-config.js";
 
 try {

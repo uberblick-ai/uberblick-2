@@ -1,13 +1,11 @@
 /**
- * Project-trimmed shadcn Sidebar: controlled Provider, left offcanvas panel,
- * its mobile Sheet, animated desktop gap, header/content/footer and menu.
- * Source (MIT; public/LICENSE-shadcn.txt):
+ * Trimmed shadcn Sidebar keeps controlled offcanvas, mobile Sheet and desktop
+ * gap. Retain localStorage preference and paired-control focus handoff;
+ * upstream cookie and Cmd+B would conflict with them and editor bold. Mobile
+ * state stays separate and unsaved. Omit unused
+ * icon/rail/tooltip/Slot/variant helpers. MIT source:
  * https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/sidebar.tsx
- *
- * The app retains its localStorage preference and paired-control focus handoff.
- * Upstream's cookie and Cmd+B shortcut would change those contracts (Cmd+B is
- * editor bold). Mobile state is separate and unsaved, as in upstream.
- * No icon mode, rail, tooltip, Slot, variant helper or additional dependencies.
+ * See public/LICENSE-shadcn.txt.
  */
 import { createContext, useContext } from "react";
 import type { ComponentProps, ReactElement } from "react";

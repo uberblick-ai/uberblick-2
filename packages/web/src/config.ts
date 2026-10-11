@@ -1,17 +1,6 @@
 /**
- * Client configuration.
- *
- * The hub endpoint, the workspaces this client offers *and* the token-signing key
- * it mints tokens with are resolved at *runtime*, from a JSON document the same
- * origin serves at {@link HUB_CONFIG_PATH}. A bundle reaches users who cannot
- * rebuild it — `ub` serves the web UI — so a value baked at our build time
- * would pin every one of those bundles to one hub, one workspace and one
- * key. Everything else here is still injected by Vite `define` (see
- * vite.config.ts).
- *
- * The path and the shape are contract, not implementation detail: this module,
- * the Caddy config, the dev server's own plugin (`dev-config-document.ts`) and
- * `ub open` (#97) all have to agree on them. The document is
+ * Runtime configuration is served by the same origin at HUB_CONFIG_PATH.
+ * Keep its path and keys aligned with Caddy, dev-config-document.ts and ub open:
  *
  *     {"hubUrl": "wss://host/ws", "workspaces": ["uberblick-<uuid>", "<uuid>"],
  *      "hubAuthToken": "<token-signing key>",
@@ -20,48 +9,32 @@
  *      "servedWorkspaces": {"<uuid>": {"browserKey": "<workspace key>",
  *        "remoteHubUrl": "wss://team-host/ws"}}}
  *
- * The local-serving keys are present only when `ub open` is the serving process:
- * `hubUrl` then names its loopback websocket, `remoteHubUrl` names the hub its
- * replica half points at, and `rebound: true` says the machine's configured
- * binding has changed since this `ub open` started and it must be restarted.
- * This client reads the pair as one local-serving diagnostic: #759 presents a
- * true `rebound`, while #744 will use the same upstream fact for search mode.
- * `hubUrl` must be a bare `ws://` or
- * `wss://` address: no userinfo, no query, no fragment. `workspaces` is the
- * menu, in order, and its first entry is what `/` — the one address that names
- * no workspace — redirects to. It may also be written as one comma-separated
- * string, because the environments that serve this document substitute plain
- * strings and cannot build a JSON array (see the Caddyfile).
- * A document that plainly names any of the keys more than once is refused,
- * because `JSON.parse` would otherwise keep the *last* occurrence — what a
- * value injected through such a substitution produces. That check is
- * best-effort defence in depth; what guarantees it cannot happen is the deploy
- * wrapper refusing a value that could close a JSON string in the first place.
+ * ub open supplies its loopback hubUrl, upstream remoteHubUrl and rebound flag;
+ * rebound means the startup binding changed and the serving process needs a
+ * restart. servedWorkspaces uses bare UUIDs and stable independent browser keys
+ * admitting only that workspace's rooms and API, never the upstream hub.
+ * A null upstream means local-only; the top-level fields describe startup.
+ * Unbound serving supplies no workspace or key. Only ub open supplies the
+ * default presence name, from git user.name or the OS username; other routes
+ * retain random tab names.
  *
- * Remote hosts serve no signing secret or device credential. Direct remote
- * browser sign-in is unavailable; use ub auth login and ub open on a computer.
- * A loopback development server still supplies its local signing secret.
- * Bound ub open supplies stable, independent keys for the workspaces it serves,
- * admitting only each key's workspace rooms and API, never the upstream hub.
- * Its servedWorkspaces map uses bare UUIDs; a null remoteHubUrl means an
- * explicitly local workspace. The legacy fields describe the startup binding.
- * Unbound ub open supplies no workspace or key.
- * Only ub open supplies defaultPresenceName, from git user.name or the OS
- * username. Other serving routes omit it and retain random tab names.
+ * Endpoints must be ws/wss URLs without userinfo, query or fragment. workspaces
+ * is an ordered array or comma-separated string; its first entry answers `/`.
+ * Plain duplicate keys refuse the document. This best-effort check supplements
+ * the deploy wrapper's refusal of substitutions that could close a JSON string.
  *
- * Configuration invariant: no hardcoded hub addresses anywhere except the in-code
- * fallback default. There are still exactly two, both fallbacks behind the
- * served document: the one vite.config.ts substitutes when HUB_URL is unset in
- * the build environment, and FALLBACK_HUB_URL below, which applies when this
- * module is loaded outside a Vite build and nothing was injected.
- * {@link resolveClientConfig} reports which of the three it used. The key
- * has no such fallback: a document that does not carry one leaves this client
- * unable to authenticate, and {@link resolveClientConfig} does not memoise that
- * answer. Hub release images disable both endpoint and workspace fallbacks;
- * only their served document can supply a deployment value.
+ * Remote hosts supply no signing secret or device credential; browser access
+ * requires ub auth login and ub open. Loopback development supplies its local
+ * signing secret. A bundle must never contain a key. Missing keys disable
+ * authentication and are not memoised, so later connects retry the document.
+ *
+ * Hub addresses are hardcoded only in two fallbacks: the development resolver's
+ * build default and FALLBACK_HUB_URL for loading without a Vite define.
+ * The served document takes precedence; diagnostics retain the source.
+ * Hub release bundles disable endpoint and workspace fallbacks entirely.
  */
 
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId, validateWorkspaceName } from "@uberblick/schema";
 
 // Injected as string literals at build time. Declared, never imported.
@@ -73,14 +46,7 @@ declare const __WORKSPACES__: string;
 /** Fallback used only when this module is loaded outside a Vite build. */
 const FALLBACK_HUB_URL = "ws://localhost:1234";
 
-/**
- * Where the client looks for its runtime configuration, on its own origin.
- *
- * Any static server can satisfy this: it is one file of JSON. Serve it with
- * `Cache-Control: no-store` — a cached copy keeps an already retargeted
- * deployment dialling the old hub, which is the failure this mechanism exists
- * to remove.
- */
+/** Same-origin JSON; serve no-store so retargeting cannot reuse an old hub. */
 export const HUB_CONFIG_PATH = "/uberblick-config.json";
 
 /** Which of the three sources supplied a value actually in use. */
@@ -93,37 +59,16 @@ export interface ClientConfig {
   hubUrl: string;
   hubUrlSource: ConfigSource;
   /**
-   * The workspaces on the switcher's menu, in order — the first is what `/`
-   * redirects to. Empty when nothing configured any.
-   *
-   * Entries are kept exactly as configured, decoration and all: the slug is
-   * display, and `ui/route.ts` owns what a workspace id is. A define-supplied
-   * entry is deliberately *not* validated here — a build carrying the legacy
-   * `main` has to reach `parseRoute`, which is what tells its developer the
-   * configured value is not a workspace id rather than that there is none
-   * (#182). A document-supplied one is validated, because a typo in a deployed
-   * config file is not somewhere anyone can go.
+   * Ordered configured spellings; the first answers `/`, empty means no menu.
+   * Preserve decorations for display. Validate document entries here, but leave
+   * define entries to parseRoute so invalid builds reach the invalid-ID screen.
    */
   workspaces: readonly string[];
   /** No `"fallback"`: there is no in-code workspace, only a build without one. */
   workspacesSource: "document" | "define";
-  /**
-   * The document's token-signing key: the workspace browser key for `ub open`,
-   * or the local signing secret for a loopback development server.
-   * Empty when the document supplied none.
-   *
-   * No source field and no built-in alternative: this is the one value with
-   * nothing to fall back *to*, so "where did it come from" has one answer and
-   * "is there one at all" is the whole question. Empty is a state the UI names
-   * rather than a state it hides — see `RoomStatus.tokenMissing`.
-   */
+  /** Document-only browser key or loopback signing secret; empty exposes tokenMissing. */
   hubAuthToken: string;
-  /**
-   * The frozen workspace/upstream pair served by `ub open`, or null when this
-   * page talks directly to a hub. The pair comes from the same configuration
-   * document, so a fallback workspace can never be presented as the one this
-   * `ub open` process serves.
-   */
+  /** Same-document workspace/upstream pair; never attribute a fallback workspace to ub open. */
   localServing: LocalServing | null;
   /** Exact local-serving admission map; absent for legacy/dev documents. */
   servedWorkspaces?: Readonly<Record<string, ServedWorkspace>>;
@@ -142,15 +87,7 @@ export interface LocalServing {
   rebound: boolean;
 }
 
-/**
- * The hub this session dialled, as a reader may be *shown* it (#362).
- *
- * Two facts, because "synced" without "with what" is not a status: one machine
- * legitimately runs several hubs — a dev island and a promoted remote — and two
- * tabs of the same workspace can each be perfectly synced to a different world.
- * The source travels with the address because falling back to compiled values
- * is exactly how a tab lands on the wrong one.
- */
+/** Keep the dialled endpoint's source so diagnostics identify compiled fallbacks. */
 export interface HubEndpoint {
   /** The address, or null when the configured value is not one — see {@link endpointLabel}. */
   url: string | null;
@@ -158,23 +95,10 @@ export interface HubEndpoint {
 }
 
 /**
- * The endpoint of `value`, and nothing else: scheme, host, path.
- *
- * Rebuilt from the parsed parts rather than trimmed, so no userinfo, query or
- * fragment can survive into anything that renders it. `usableEndpoint` already
- * refuses all three in the *served* document, but the build-time defines are
- * not validated at all — a `HUB_URL` of `ws://user:pass@host` would otherwise
- * reach the screen the moment a surface started naming the endpoint.
- *
- * Null rather than a best effort when the value does not parse *or* is not an
- * address this client could dial: a string this cannot take apart is one it
- * cannot promise anything about, and the socket built from it has failed
- * anyway. The scheme check is the same one `usableEndpoint` makes, and it is
- * load-bearing here rather than cosmetic — `new URL` leaves an opaque scheme's
- * payload in `pathname` with an empty host, so a `mailto:agent:s3cret@host`
- * would otherwise be re-emitted verbatim. A lone `/` path is dropped because
- * that is what `new URL` adds to a bare host, and the two spellings are one
- * address.
+ * Display only ws/wss scheme, host and path: build defines may contain secrets.
+ * Reconstruct parts to strip userinfo, query and fragment; opaque schemes could
+ * otherwise leak their payload through pathname. Invalid addresses return null.
+ * Omit the parser-added lone `/` so equivalent bare hosts have one label.
  */
 export function endpointLabel(value: string): string | null {
   let parsed: URL;
@@ -188,15 +112,7 @@ export function endpointLabel(value: string): string | null {
   return `${parsed.protocol}//${parsed.host}${path}`;
 }
 
-/**
- * How an endpoint's source reads to someone asking which hub they are on.
- *
- * One wording in one place: the sync panel states it and the document status
- * reading carries it on hover. Every non-document answer names
- * {@link HUB_CONFIG_PATH} rather
- * than merely omitting it — "the served document did not decide this" is the
- * half that diagnoses a tab on the wrong hub.
- */
+/** Non-document labels name the unused config path to explain fallback routing. */
 export function endpointSourceLabel(source: ConfigSource): string {
   switch (source) {
     case "document":
@@ -208,13 +124,7 @@ export function endpointSourceLabel(source: ConfigSource): string {
   }
 }
 
-/**
- * What to use when the document cannot supply an endpoint.
- *
- * Keyed off whether a `define` was injected at all rather than off the value,
- * so the reported source stays truthful when a build's `HUB_URL` happens to
- * equal the in-code fallback — which is the common case, not a corner one.
- */
+/** Test define presence, not equality with the fallback, to report its source truthfully. */
 const RUNTIME_CONFIG_ONLY = typeof __RUNTIME_CONFIG_ONLY__ === "boolean" && __RUNTIME_CONFIG_ONLY__;
 const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
   RUNTIME_CONFIG_ONLY
@@ -224,18 +134,8 @@ const BUILT_IN_HUB_URL: Pick<ClientConfig, "hubUrl" | "hubUrlSource"> =
     : { hubUrl: FALLBACK_HUB_URL, hubUrlSource: "fallback" };
 
 /**
- * Development/client builds carry `WORKSPACE_ID` first — it is the one that has
- * always answered `/` — then `WORKSPACES`, the menu.
- *
- * One ordered list, because the served document is one ordered list and the
- * client must not hold two different ideas of what a workspace list is. Both
- * defines are fallbacks behind that document, on every path: the dev server
- * serves one too (#426), so they are the answer only where none arrives at all.
- *
- * Repeats are dropped, because naming the default workspace in `WORKSPACES` as
- * well is the ordinary configuration and the count in the diagnostic has to
- * match the menu. Two *spellings* of one workspace are a uuid comparison, which
- * `workspaceList` owns.
+ * WORKSPACE_ID precedes the menu; both are fallbacks behind the served document.
+ * Remove repeated spellings here; workspaceList deduplicates by parsed UUID.
  */
 const BUILT_IN_WORKSPACES: readonly string[] = RUNTIME_CONFIG_ONLY ? [] : [
   ...new Set(
@@ -252,21 +152,12 @@ const BUILT_IN: ClientConfig = {
   ...BUILT_IN_HUB_URL,
   workspaces: BUILT_IN_WORKSPACES,
   workspacesSource: "define",
-  // Nothing to fall back to: no build injects a signing key any more (#426), so a
-  // client whose document did not arrive has none.
+  // Signing keys come only from the runtime document.
   hubAuthToken: "",
   localServing: null,
 };
 
-/**
- * Whether `value` is an address this client may dial, and nothing more.
- *
- * A non-empty string is not enough. An `https://` or malformed value would be
- * reported as `source: "document"` and then throw inside socket construction
- * rather than falling back, and userinfo or a query string is how a credential
- * gets into a URL — which this document must never carry, and which would then
- * be transmitted and printed in every diagnostic that named the endpoint.
- */
+/** Refuse malformed/non-ws endpoints and credential-bearing URLs before dialing or logging. */
 function usableEndpoint(
   value: string,
   key: "hubUrl" | "remoteHubUrl" = "hubUrl",
@@ -288,25 +179,13 @@ function usableEndpoint(
   ) {
     return { rejected: `${key} carries credentials (userinfo, query or fragment)` };
   }
-  // The parsed form, not the raw string: `new URL` accepts surrounding
-  // whitespace that the websocket constructor would then choke on.
+  // Normalize whitespace the URL parser accepts but the socket may reject.
   return { url: parsed.href };
 }
 
 /**
- * The workspaces the document lists, or why it supplied none.
- *
- * Two spellings, one meaning: a JSON array of ids, or one comma-separated
- * string. The string form exists because the deployment that serves this
- * document is a Caddy `respond` with an environment variable substituted into
- * it, and an operator's `.env` holds `a,b` — the same spelling `WORKSPACES`
- * already has in mise `[env]`. Refusing it would have put JSON quoting rules
- * into a dotenv file.
- *
- * An entry that is not a workspace id is dropped and counted, never offered: a
- * menu item that navigates to the invalid-link screen reads as a broken
- * workspace. `dropped` is a count and nothing more — it reaches one diagnostic,
- * and this document is the one place a value must never be echoed.
+ * Accept arrays or comma-separated strings for Caddy's environment substitution.
+ * Drop invalid IDs and report only their count; never echo configured values.
  */
 function usableWorkspaces(
   value: unknown,
@@ -325,10 +204,7 @@ function usableWorkspaces(
       continue;
     }
     const id = entry.trim();
-    // An empty entry is a formatting artefact of the string spelling (`a,,b`,
-    // or an unset variable substituting to nothing), not a typo anybody needs
-    // to be told about. Every other unusable entry is counted, whatever its
-    // type: a list whose entries are half numbers has to say so.
+    // Empty string entries are formatting; count all other invalid entries.
     if (id === "") continue;
     try {
       parseWorkspaceId(id);
@@ -399,26 +275,11 @@ function usableWorkspaceName(value: unknown): string | null {
 }
 
 /**
- * What the document says, or the reason none of it could be used.
- *
- * A document-level failure is deliberately *one* outcome covering a non-200, a
- * non-JSON body and JSON that is not an object. Under the SPA fallback (#68),
- * `try_files … /index.html` answers an absent document with 200 and the app's
- * own HTML, so "missing" and "wrong shape" are the same observation in
- * production — splitting them would mean a branch only the dev server ever
- * takes.
- *
- * Its two keys then fail *independently*: a deployment that serves an endpoint
- * but no workspaces is an ordinary deployment — a hub is required, a workspace
- * list is not — and it must keep its endpoint. Extra keys are ignored rather
- * than rejected: a document that grows another key must not strand an already
- * deployed bundle.
- *
- * No reason ever quotes the response. A misrouted request can return anything —
- * an upstream error page, another service's secret — and a diagnostic that
- * echoed it would copy that into the browser console and every log that
- * collects one. The rejected values are withheld for the same reason: the ones
- * most worth naming are exactly the ones that might carry a credential.
+ * Non-200, non-JSON and non-object responses share one document-level refusal:
+ * SPA fallbacks can answer missing configuration with the app's HTML and 200.
+ * Endpoint and workspace fields fail independently; ignore extra keys so an
+ * extended document cannot strand existing bundles. Never quote response bodies
+ * or rejected values in diagnostics: either could contain a credential.
  */
 function readDocument(
   status: number,
@@ -432,40 +293,19 @@ function readDocument(
   try {
     parsed = JSON.parse(body);
   } catch {
-    // Overwhelmingly the SPA fallback handing back index.html, which the
-    // content type says without quoting a byte of it.
+    // Report content type without exposing an HTML fallback's body.
     const said = contentType === "" ? "no content type" : contentType;
     return { rejected: `it is not JSON (content type: ${said})` };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { rejected: "it is not a JSON object" };
   }
-  // Best-effort, and deliberately not more than that.
-  //
-  // The deployed document is a template with values substituted into it (see
-  // the Caddyfile), so a value carrying a quote could close its string and
-  // append `,"hubUrl":"wss://elsewhere"` — which `JSON.parse` would then keep,
-  // last occurrence winning. The *guarantee* against that is `bin/remote-compose.sh`
-  // refusing any document substitution outside a safe alphabet:
-  // no quote and no backslash ever reaches the body, so no escape can be
-  // written into it.
-  //
-  // This check is defence in depth for the plainly spelled case, and it reads
-  // raw JSON *spelling*: an escaped key (`"hub\u0055rl"`) decodes to a second
-  // `hubUrl` and passes it. That is not a hole worth a tokenizer — anyone who
-  // can write escapes into the served document can set `hubUrl` outright, and a
-  // document an attacker controls is outside this model.
-  //
-  // Two anchors keep it from firing on a *value* rather than on a key, which
-  // since #426 would mean refusing a whole document — the credential in it
-  // included — over the text of an opaque key. `\s*:` so a value that merely
-  // contains `"hubUrl"` is not taken for a key, and a leading `[^\\]` so one
-  // spelling out `,"hubUrl":` is not either: the body parsed as JSON above, so
-  // a quote inside a string is written `\"`, while a real key's opening quote
-  // can only follow `{` or `,`.
+  // Best-effort duplicate-key defense for plain spellings. Escaped keys can
+  // pass; bin/remote-compose.sh supplies the guarantee by rejecting substitutions
+  // with quotes or backslashes. Attacker-controlled documents are outside it.
+  // Match a key's unescaped opening quote and colon, never opaque string values.
   const document = parsed as Record<string, unknown>;
-  // Each served workspace owns one upstream too. Count these expected nested
-  // keys before the same best-effort duplicate check used for legacy documents.
+  // Nested workspace upstreams are expected occurrences, not duplicate keys.
   const nestedUpstreams = document.servedWorkspaces !== null && typeof document.servedWorkspaces === "object"
     ? Object.values(document.servedWorkspaces).filter((entry) => entry !== null && typeof entry === "object" && Object.hasOwn(entry, "remoteHubUrl")).length
     : 0;
@@ -505,11 +345,7 @@ function readDocument(
         ? usableEndpoint(url)
         : { rejected: "it has no string hubUrl" },
     workspaces,
-    // A non-string is refused rather than coerced, and without a reason: an
-    // unusable key leaves the client in exactly the state an absent one
-    // does, and this is the one value whose shape must never reach a
-    // diagnostic. What a reader is told is the state, not the document — see
-    // `RoomStatus.tokenMissing`.
+    // Refuse non-string keys without coercion or diagnostics; expose tokenMissing only.
     hubAuthToken: typeof secret === "string" ? secret.trim() : "",
     localServing:
       remoteHubUrl === null || "rejected" in remoteHubUrl
@@ -523,24 +359,12 @@ function readDocument(
   };
 }
 
-/**
- * How long the read may take before the built-in values are used instead.
- *
- * Not a nicety. Room acquisition waits on this read, and a request that hangs
- * — a proxy holding the connection open, a captive portal — never rejects on
- * its own, so without a deadline the app would sit with no rooms at all. A few
- * seconds is long enough for a same-origin file and short enough to be a blink.
- */
+/** Room acquisition waits on this read; bound hangs in both headers and body. */
 export const HUB_CONFIG_TIMEOUT_MS = 3_000;
 
 /**
- * Read the client configuration: the served document, else the build-time
- * defines, else the in-code fallback.
- *
- * Never rejects, and always settles. Development/client builds retain their
- * fallback; hub release bundles settle with no endpoint when the document
- * cannot supply one. The `rejected` reason, which {@link resolveClientConfig}
- * logs, makes that missing configuration visible.
+ * Always settle: document, then defines, then in-code fallback. Release bundles
+ * have no endpoint fallback; retain the rejection reason for diagnostics.
  */
 export async function readClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
@@ -552,15 +376,11 @@ export async function readClientConfig(
   let body: string;
   try {
     const response = await fetchImpl(HUB_CONFIG_PATH, {
-      // Belt to the server's braces: the endpoint a tab dials must be the one
-      // deployed now, never one a cache kept from a previous deployment.
+      // Bypass caches after deployment retargeting.
       cache: "no-store",
-      // Keeps a history-API fallback that honours `Accept` (Vite's dev server
-      // does) answering 404 rather than HTML. Caddy's `try_files` does not, so
-      // `readDocument` still has to survive HTML.
+      // Vite can answer 404 for JSON; Caddy may still return fallback HTML.
       headers: { Accept: "application/json" },
-      // Covers reading the body too, not just the headers: aborting the signal
-      // rejects an in-flight `text()`, which is the other place this can hang.
+      // The deadline also aborts a stalled response body.
       signal: deadline,
     });
     status = response.status;
@@ -620,20 +440,9 @@ let resolved: ClientConfig | null = null;
 let pending: Promise<ClientConfig> | null = null;
 
 /**
- * Resolve the configuration, once per session, and say where it came from.
- *
- * Memoised rather than merely idempotent: the entry module starts the read as
- * early as it can, and the hook that gates room acquisition on it joins that
- * same read instead of issuing a second one.
- *
- * **Except when no signing key arrived.** With the key served rather than
- * compiled in (#426), a document that missed its deadline — a proxy holding the
- * request open, a host still starting — used to leave a tab that could never
- * authenticate for as long as it stayed open, because the miss was remembered.
- * So that one answer is not kept: the endpoint and the workspaces settle as
- * they always did, and the next caller re-reads the document under the same
- * deadline. `rooms.ts` calls this before every connect attempt, which is what
- * turns "not memoised" into "tries again".
+ * Share one configuration read across startup and room acquisition. Do not
+ * memoise an answer without a signing key: every connect retries under the
+ * same deadline, allowing a late-starting server or timed-out request to recover.
  */
 export function resolveClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
@@ -641,10 +450,7 @@ export function resolveClientConfig(
   pending ??= readClientConfig(fetchImpl).then(({ rejected, ...config }) => {
     resolved = config;
     if (config.hubAuthToken === "" && !Object.values(config.servedWorkspaces ?? {}).some((entry) => entry.browserKey !== "")) pending = null;
-    // One line, always: the sources in force, and — when there was one — why
-    // the document was not used. A hub that is merely misconfigured otherwise
-    // looks exactly like a hub that is down, and a switcher with nothing on it
-    // looks exactly like a deployment that was never given a workspace.
+    // Name sources and refusal together so missing config differs from hub failure.
     const say = rejected === undefined ? console.info : console.warn;
     const used =
       config.hubUrlSource === "document" || config.workspacesSource === "document";
@@ -661,13 +467,7 @@ export function resolveClientConfig(
   return pending;
 }
 
-/**
- * The resolved hub endpoint, for the one caller that dials it.
- *
- * A function, not a `const`: the value is not known until a `fetch` completes,
- * and `rooms.ts` builds the shared websocket from a React effect, which
- * `useHubEndpoint` holds back until {@link resolveClientConfig} has settled.
- */
+/** Room acquisition waits for the fetch; the endpoint cannot be a startup constant. */
 export function hubUrl(): string {
   return settled().hubUrl;
 }
@@ -678,13 +478,8 @@ export function defaultPresenceName(): string | null {
 }
 
 /**
- * The token-signing key in force, for the one caller that mints tokens with it.
- * It is a local workspace browser key under `ub open`, or an upstream signing
- * secret when this page connects directly to a loopback development hub.
- *
- * Gated exactly like {@link hubUrl}, and for the same reason: it is not known
- * until a `fetch` completes. Empty means the served document carried none —
- * which is a state, not an error, and the caller is what says so.
+ * Runtime-only workspace browser key or direct loopback signing secret.
+ * Read after configuration settles; empty is the caller's tokenMissing state.
  */
 export function hubAuthToken(workspace?: string): string {
   const config = settled();
@@ -708,13 +503,7 @@ function settled(): ClientConfig {
   return resolved;
 }
 
-/**
- * The endpoint as the UI may say it, with where it came from (#362).
- *
- * Deliberately not `hubUrl()`: that one is dialled, this one is displayed, and
- * the displayed form is stripped to the address alone. Gated the same way — the
- * surfaces that call it render "—" until `useHubEndpoint` reports ready.
- */
+/** Display the sanitized endpoint and source only after useHubEndpoint reports ready. */
 export function hubEndpoint(): HubEndpoint {
   const config = settled();
   return { url: endpointLabel(config.hubUrl), source: config.hubUrlSource };
@@ -739,19 +528,12 @@ export function servedWorkspaceNames(): ReadonlyMap<string, string | null> | nul
   return workspaces === undefined ? null : new Map(Object.entries(workspaces).map(([uuid, entry]) => [uuid, entry.name]));
 }
 
-/**
- * The workspaces in force — the switcher's menu, first entry answering `/`.
- *
- * Empty before the read settles, which is the same answer as "none configured"
- * and wants the same behaviour: no redirect out of `/`, no menu. The read gates
- * the first *connect*, not the render, so `App` does render before it settles;
- * `useHubEndpoint` is what re-renders it with the answer.
- */
+/** Empty until config settles: no redirect or menu; useHubEndpoint triggers the update. */
 export function configuredWorkspaces(): readonly string[] {
   return resolved?.workspaces ?? [];
 }
 
-/** Direct remote browser sign-in is unavailable until that client flow ships. */
+/** Direct remote browser sign-in is unavailable. */
 export function browserSignInRequired(): boolean {
   const config = settled();
   // A released Docker proxy can be published on host loopback while its hub

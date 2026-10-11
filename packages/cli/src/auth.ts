@@ -1,8 +1,8 @@
-/** Remote sign-in stores a device credential; live sync still uses its existing auth. */
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { hostname } from "node:os";
-import { isGithubUsername, sanitizeDeviceName } from "@uberblick/hub";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   type StoredHubLogin,
@@ -17,10 +17,10 @@ import { budget } from "./budget.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
-import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
-import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/hub/protocol";
+import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { manageRequest, ManagementResponseError } from "./access-management.js";
-export { authenticationOrigin } from "@uberblick/hub/remote-url";
+export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 
 export const AUTH_HELP = `usage: ub auth [command]
 

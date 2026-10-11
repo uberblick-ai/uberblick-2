@@ -19,16 +19,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hocuspocus/server": "4.6.0",
     "@uberblick/hub": "workspace:*",
     "@uberblick/mcp-server": "workspace:*",
     "@uberblick/schema": "workspace:*",
-    "smol-toml": "1.9.0"
+    "smol-toml": "1.9.0",
+    "y-protocols": "catalog:",
+    "yjs": "catalog:"
   },
   "devDependencies": {
     "@hocuspocus/provider": "4.6.0",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@types/node": "^26.2.0",
-    "yjs": "catalog:",
     "esbuild": "0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^5.9.3",

@@ -1,5 +1,3 @@
-/** Whether this running CLI came from a versioned install payload. */
-
 import { readFileSync } from "node:fs";
 
 export function isInstallPayload(): boolean {

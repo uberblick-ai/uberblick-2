@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RemotePresence } from "../src/ui/doc-chrome.js";
@@ -197,7 +197,7 @@ describe("a hub that refuses this page", () => {
 
 describe("an app served without a token", () => {
   it("names the missing token rather than blaming the hub", () => {
-    // Since #426 the secret arrives in the served configuration document, so a
+    // The secret arrives in the served configuration document, so a
     // deployment can be complete in every other way and still hand out an app
     // that cannot authenticate. The reader is told which half is missing: no
     // token was ever sent, so "the hub refused us" would be false, and the

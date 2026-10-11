@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
 
 const WORKSPACE = "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94";

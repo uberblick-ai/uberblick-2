@@ -78,17 +78,11 @@ describe("the init lock", () => {
   });
 
   it("waits out a live holder however short the test ceiling is", async () => {
-    // The one deadline `budget.ts`'s ceiling must never reach (#524). Routing
-    // this wait through it made `ub open` give up on a lock a test was still
-    // legitimately holding, and the spawned case that caught it only fails
-    // about half the time, because it needs the waiter to arrive early enough
-    // in the holder's 500 ms. Here every margin is the test's own: both maps a
-    // regression could read carry `CEILING_MS`, and the holder outlives it by
-    // 200 ms while staying far under `init-lock.ts`'s own 2 s wait. Reading
-    // the suite ceiling out of the sandbox instead would couple the hold to
-    // `helpers.ts`: raise that value past ~1 800 and this case fails wearing
-    // #524's own lock-timeout message, pointing the next reader at a defect
-    // that is not there.
+    // The test ceiling must not shorten a legitimate init-lock wait. Both
+    // environment maps carry `CEILING_MS`; the holder outlives it by 200 ms
+    // while staying far under the lock's own 2 s wait. Keep this ceiling
+    // independent of `helpers.ts`, whose larger waits could exhaust the lock
+    // deadline and produce a false failure.
     const CEILING_MS = 50;
     vi.stubEnv("UB_TEST_MAX_WAIT_MS", String(CEILING_MS));
     try {

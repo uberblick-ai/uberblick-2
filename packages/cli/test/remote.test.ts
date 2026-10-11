@@ -28,15 +28,10 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
-import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import {
   bridgeConfig,
@@ -90,9 +85,8 @@ const LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS = 115_000;
 const LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS = 195_000;
 
 /**
- * The slowest observed seed took roughly 25 s. This stays another ten seconds
- * above that seed plus the recovery bound, so a command or harness diagnostic
- * wins before Vitest's generic timeout.
+ * Allow 35 s for corpus seeding and scheduling beyond the recovery bound, so
+ * a command or harness diagnostic wins before Vitest's generic timeout.
  */
 const LARGE_CORPUS_TEST_TIMEOUT_MS = 230_000;
 
@@ -368,7 +362,7 @@ function storedSecret(box: Sandbox): unknown {
 }
 
 describe("workspace link configuration", () => {
-  // One normalizer for `ub workspace use` and `ub workspace create` alike (#436): the host
+  // One normalizer for `ub workspace use` and `ub workspace create` alike: the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
   // they meant — including a plain hub, which has no path at all.
@@ -880,8 +874,8 @@ describe("ub workspace use <link>", () => {
     const fromWeb = await webDoc(remote, "Shared note", OTHER_SECRET);
     const other = await webDoc(remote, "Second note", OTHER_SECRET);
 
-    // Nothing here: no `ub workspace create`, no workspace, no endpoint, no credential —
-    // the second machine as the owner decided it should work.
+    // No project binding, workspace or endpoint; credential material is
+    // supplied separately.
     const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
 
@@ -1281,9 +1275,6 @@ describe("ub workspace use <link>", () => {
   });
 
   // Opt-in (UB_SLOW_TESTS=1): ~30 s of scale proof, not of behaviour.
-  // Loaded-host proof, 2026-09-06: this exact case passed in 16.45 s with
-  // eight foreground `yes` workers (the #803 probe shape), and the cleanup
-  // trap left `pgrep -c -x yes` at zero.
   it.runIf(process.env.UB_SLOW_TESTS === "1")(
     "joins 5,000 local documents and persists the verified binding",
     async () => {
@@ -1371,8 +1362,7 @@ describe("ub workspace use <link>", () => {
   it.each([
     // No path at all: nothing was named, not even wrongly.
     ["ws://127.0.0.1:9999", "names no workspace"],
-    // The endpoint as it was documented before this command took an id — the
-    // paste most likely to happen, and `ws` is not a workspace id.
+    // A hub endpoint alone supplies no workspace id; `ws` is not one.
     ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
     const box = unboundSandbox();
@@ -1474,9 +1464,7 @@ describe("ub workspace use <link>", () => {
     expect(run.stderr).toContain("update this client");
     expect(run.stderr).toContain("Nothing was written");
     expect(run.stderr).not.toContain("did not answer");
-    // A different credential cannot fix a version skew, so `join` must not
-    // suggest one: that is `credentialCouldFix` answering false for the new
-    // status, read here through the sentence it gates.
+    // A different credential cannot fix a version skew; do not suggest one.
     expect(run.stderr).not.toContain("--secret-file");
     // Zero writes on this side; nothing on the remote either, because `join`
     // reads it as a fresh client and never got past the refusal.
@@ -1502,9 +1490,8 @@ describe("ub workspace use <link>", () => {
     expect(run.output).not.toMatch(TOKEN_SHAPE);
     // This run is exactly the probe `join` makes before it can ask for a
     // secret — no TTY here, so the prompt is skipped — and the refusal above is
-    // the whole of what it is allowed to say. The probe's own reading reaching
-    // stderr is what put an ERROR in front of the prompt on an interactive join
-    // that then succeeded (#447).
+    // the whole of what it is allowed to say. The probe must not print an
+    // authentication error before an interactive join can prompt and succeed.
     expect(run.stderr).not.toContain("hub rejected the token");
   });
 
