@@ -449,8 +449,7 @@ describe("the failure contract", () => {
       ).payload,
     );
 
-    // No data tool is introduced in this slice. Exercise the shared operation
-    // errors through the same adapter a later dedicated tool will use.
+    // Exercise shared data-operation errors through the tool failure adapter.
     const dataDoc = rig.instance.replicas.replica(doc.uuid).doc;
     const directory = rig.instance.replicas.directory().doc;
     const dataSchema = {
