@@ -115,7 +115,7 @@ agents:
 
   pr-reviewer:
     retrospectives: 1016
-    runtime: "claude:claude-opus-5-5:xhigh"
+    runtime: ["codex:gpt-6.1-sol:xhigh", "claude:claude-opus-5-5:xhigh"]
     kind: pr
     trigger: needs-review
     different-runtime-from: implementer
@@ -126,7 +126,9 @@ agents:
       changes: {add: [needs-changes]}
       needs-human: {add: [needs-human]}
     agent-timeout-minutes: 120
-    runtime-args: *claude-scoped
+    runtime-args:
+      codex: *codex-scoped
+      claude: *claude-scoped
 
   integrator:
     retrospectives: 1017
