@@ -202,17 +202,31 @@ for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('cl
 })();
 (() => {
   const pre = document.getElementById('term'), btn = document.getElementById('replay');
-  const full = pre.innerHTML; let run = 0;
+  // The lines as node lists, so the replay appends nodes and never builds markup from text.
+  const lines = [[]];
+  for (const node of pre.childNodes) {
+    if (node.nodeType !== Node.TEXT_NODE) { lines[lines.length - 1].push(node.cloneNode(true)); continue; }
+    const parts = node.data.split('\n');
+    for (let i = 0; i < parts.length; i++) { if (i) lines.push([]); if (parts[i]) lines[lines.length - 1].push(document.createTextNode(parts[i])); }
+  }
+  let run = 0;
   btn.addEventListener('click', () => {
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const id = ++run, lines = full.split('\n'); pre.innerHTML = ''; let li = 0;
-    (function next() {
+    const id = ++run; pre.replaceChildren(); let li = 0;
+    const newline = () => { if (li < lines.length) pre.append('\n'); };
+    const next = () => {
       if (id !== run || li >= lines.length) return;
-      const line = lines[li++]; const tmp = document.createElement('div'); tmp.innerHTML = line;
-      if (!line.includes('class="p"')) { pre.innerHTML += `${line}\n`; setTimeout(next, 260); return; }
-      const rest = tmp.textContent.slice(1); pre.innerHTML += '<span class="p">$</span>'; let k = 0;
-      (function type() { if (id !== run) return; if (k < rest.length) { pre.innerHTML += rest[k++].replace('<', '&lt;'); setTimeout(type, 22 + Math.random() * 30); } else { pre.innerHTML += '\n'; setTimeout(next, 320); } })();
-    })();
+      const line = lines[li++]; const prompt = line[0] instanceof Element && line[0].classList.contains('p');
+      if (!prompt) { for (const n of line) pre.append(n.cloneNode(true)); newline(); setTimeout(next, 260); return; }
+      pre.append(line[0].cloneNode(true));
+      const rest = line.slice(1).map(n => n.textContent).join(''); const typed = document.createTextNode(''); pre.append(typed); let k = 0;
+      const type = () => {
+        if (id !== run) return;
+        if (k < rest.length) { typed.data += rest[k++]; setTimeout(type, 22 + Math.random() * 30); } else { newline(); setTimeout(next, 320); }
+      };
+      type();
+    };
+    next();
   });
 })();
 </script>
