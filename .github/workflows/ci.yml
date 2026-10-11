@@ -1,8 +1,8 @@
 name: CI
 
 # The merge gate (CONTRIBUTING.md, "CI"): the main ruleset requires the checks
-# `lint, typecheck and tests` and `macOS tests` from GitHub Actions; browser e2e
-# is advisory. On main it records whether main itself is clean, so a failure
+# `lint, typecheck and tests`, `macOS tests` and `browser e2e` from GitHub
+# Actions. On main it records whether main itself is clean, so a failure
 # seen while validating a branch can be checked against main's latest run
 # instead of rerunning the base. A pull request's run uses its own recipe, so a
 # change here is a change to the merge rules. Standard runners cost no Actions

@@ -8,9 +8,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 
 - Resolve and record the PR's immutable `headRefOid`.
 - **CI, every tier.** The PR's `CI` workflow runs on every push. Its required
-  checks, `lint, typecheck and tests` and `macOS tests`, must have concluded
-  `success` at `headRefOid` (`gh pr checks <n>`). The ruleset accepts them
-  only from GitHub Actions. Wait for a pending check; for a failure, read
+  checks, `lint, typecheck and tests`, `macOS tests` and `browser e2e`, must
+  have concluded `success` at `headRefOid` (`gh pr checks <n>`). Read main's
+  active `signoff` ruleset (`gh api repos/uberblick-ai/uberblick-2/rulesets`,
+  then `gh api repos/uberblick-ai/uberblick-2/rulesets/<id>`) and verify it
+  requires all three contexts from GitHub Actions (`integration_id: 15368`).
+  A missing context blocks agent merge: escalate to a maintainer; no run
+  changes repository settings. Wait for a pending check; for a failure, read
   `gh run view <id> --log-failed`. A lint, typecheck, test or spec failure
   that main's `CI` run does not show the same way (the base comparison below)
   is a branch failure: finish `changes` naming it. When it does show the same
@@ -32,10 +36,10 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   section states the full boundary. Use the head's SHA-tagged image for the
   failure-path probes the policy requires at stateful boundaries, then remove
   it when the PR is settled; the merged-tree gate below uses the same task.
-- CI also runs browser e2e at the head as the advisory `browser e2e` check.
-  It uses the candidate's own e2e recipe, so for a browser-observable outcome
-  read its output rather than trusting the conclusion. A
-  failure may be called environmental only after the same failing spec is run
+- The required `browser e2e` check runs at the head using the candidate's
+  own e2e recipe, so for a browser-observable outcome read its output rather
+  than trusting the conclusion. A failure may be called environmental only
+  after the same failing spec is run
   against the base, or when it failed the same way (same test, browser project
   and error) in the latest completed `CI` run on `main` at or before the base
   (`gh run list --workflow ci.yml --branch main --status completed`, then
