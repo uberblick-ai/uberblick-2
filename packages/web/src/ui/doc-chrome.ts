@@ -156,6 +156,28 @@ export function readPresence(
   return found;
 }
 
+/** Session identity belongs only to agents; other peers keep connection identity. */
+export function presenceKey(peer: RemotePresence): string {
+  return peer.kind === "agent" && peer.session !== null && peer.session !== ""
+    ? `session:${peer.session}`
+    : String(peer.clientId);
+}
+
+/** The title draws one agent session, live while any of its connections is live. */
+export function groupAgentPresence(
+  presence: readonly RemotePresence[],
+): RemotePresence[] {
+  const groups = new Map<string, RemotePresence>();
+  for (const peer of presence) {
+    const key = presenceKey(peer);
+    const previous = groups.get(key);
+    if (previous === undefined || (previous.departed && !peer.departed)) {
+      groups.set(key, peer);
+    }
+  }
+  return [...groups.values()];
+}
+
 /**
  * Whether two readings would draw the same chip.
  *

@@ -69,7 +69,16 @@ type AwarenessState = Record<string, unknown> & {
   user?: { name?: unknown };
   cursor?: unknown;
   client?: unknown;
+  session?: unknown;
 };
+
+function agentSession(state: AwarenessState): string | undefined {
+  return state.client === AGENT_CLIENT &&
+    typeof state.session === "string" &&
+    state.session !== ""
+    ? state.session
+    : undefined;
+}
 
 /**
  * Whether this state is an agent caret worth holding onto: the agent marker, a
@@ -123,8 +132,12 @@ export function withDepartedAgentCursors(
   }
 
   const listeners = new Set<Listener>();
-  /** The last attributed cursor seen from each live agent session. */
-  const lastSeen = new Map<number, AwarenessState>();
+  /** Last live agent states also identify cursorless reconnect departures. */
+  const lastSeen = new Map<
+    number,
+    { state: AwarenessState; cursor: string | undefined; cursorOrder: number }
+  >();
+  let nextCursorOrder = 0;
   /** Departed sessions still being drawn, and the timer that ends each. */
   const retained = new Map<
     number,
@@ -135,11 +148,12 @@ export function withDepartedAgentCursors(
     for (const listener of [...listeners]) listener(change);
   };
 
-  const forget = (clientId: number): void => {
+  const forget = (clientId: number): boolean => {
     const held = retained.get(clientId);
-    if (held === undefined) return;
+    if (held === undefined) return false;
     clearTimeout(held.timer);
     retained.delete(clientId);
+    return true;
   };
 
   /**
@@ -149,31 +163,86 @@ export function withDepartedAgentCursors(
    * when this editor opened is in no `added` list, and that is the ordinary
    * case — a reader opening a document an agent is writing.
    */
-  const remember = (): void => {
+  const remember = (removed: Set<number>): void => {
     const states = awareness.getStates() as Map<number, AwarenessState>;
     for (const [clientId, state] of states) {
-      // A live state always wins: this peer is here, and whatever it is
-      // pointing at now is the truth — a retained caret must never overwrite
-      // it, nor come back once the peer has spoken again.
-      forget(clientId);
-      if (isAttributedAgentCursor(state)) lastSeen.set(clientId, state);
-      else lastSeen.delete(clientId);
+      const previous = lastSeen.get(clientId);
+      const session = agentSession(state);
+      const cursor = JSON.stringify(state.cursor);
+      const newCaret =
+        isAttributedAgentCursor(state) &&
+        (previous === undefined ||
+          !isAttributedAgentCursor(previous.state) ||
+          previous.cursor !== cursor ||
+          agentSession(previous.state) !== session);
+      if (forget(clientId)) removed.add(clientId);
+      // Re-reading an unchanged concurrent caret must not erase a later
+      // departure; only a newly observed live caret supersedes it.
+      if (session !== undefined && newCaret) {
+        for (const [heldId, held] of retained) {
+          if (agentSession(held.state) === session && forget(heldId)) {
+            removed.add(heldId);
+          }
+        }
+      }
+      if (state.client === AGENT_CLIENT) {
+        lastSeen.set(clientId, {
+          state,
+          cursor,
+          cursorOrder: newCaret ? ++nextCursorOrder : previous?.cursorOrder ?? 0,
+        });
+      } else lastSeen.delete(clientId);
     }
   };
 
   const onChange = (change: Change): void => {
-    remember();
+    const removed = new Set(change.removed);
+    remember(removed);
     for (const clientId of change.removed) {
-      const departed = lastSeen.get(clientId);
+      const seen = lastSeen.get(clientId);
       lastSeen.delete(clientId);
-      if (departed === undefined) continue;
+      if (seen === undefined) continue;
+      const departed = seen.state;
+      const session = agentSession(departed);
+      if (
+        session !== undefined &&
+        isAttributedAgentCursor(departed) &&
+        [...lastSeen].some(
+          ([liveId, live]) =>
+            awareness.getStates().has(liveId) &&
+            agentSession(live.state) === session &&
+            isAttributedAgentCursor(live.state) &&
+            live.cursorOrder > seen.cursorOrder,
+        )
+      ) {
+        continue;
+      }
+      const previous =
+        session === undefined
+          ? undefined
+          : [...retained].find(([, held]) => agentSession(held.state) === session);
+      let retainedId = clientId;
+      let state = departed;
+      if (!isAttributedAgentCursor(departed)) {
+        if (previous === undefined) continue;
+        // A reconnect may leave without writing. Its last departure still
+        // starts the grace for the session's earlier named caret.
+        [retainedId] = previous;
+        state = previous[1].state;
+      }
+      if (previous !== undefined) {
+        const [previousId] = previous;
+        forget(previousId);
+        if (previousId !== retainedId) removed.add(previousId);
+      }
+      forget(retainedId);
       const timer = setTimeout(() => {
-        retained.delete(clientId);
-        announce({ added: [], updated: [], removed: [clientId] });
+        retained.delete(retainedId);
+        announce({ added: [], updated: [], removed: [retainedId] });
       }, graceMs);
-      retained.set(clientId, { state: departed, timer });
+      retained.set(retainedId, { state, timer });
     }
-    announce(change);
+    announce({ ...change, removed: [...removed] });
   };
 
   return {
@@ -201,7 +270,7 @@ export function withDepartedAgentCursors(
       // rebind cannot reset the title's lifetime; leaving the document takes
       // both readers away and clears every retained state and timer.
       if (listeners.size === 0) {
-        remember();
+        remember(new Set());
         awareness.on("change", onChange);
       }
       listeners.add(listener);
@@ -216,6 +285,7 @@ export function withDepartedAgentCursors(
       awareness.off("change", onChange);
       for (const clientId of [...retained.keys()]) forget(clientId);
       lastSeen.clear();
+      nextCursorOrder = 0;
     },
   } as unknown as AgentCursorAwareness;
 }

@@ -16,6 +16,7 @@ import { InvalidWorkspaceIdError } from "@uberblick/schema";
 import {
   DEFAULT_HUB_URL,
   defaultDatabasePath,
+  resolveAgentSession,
   resolveMcpConfig,
 } from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
@@ -32,13 +33,14 @@ function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
 
 /** Run `src/main.ts` to completion and collect what it said and returned. */
 function runServer(
-  overrides: Record<string, string>,
+  overrides: NodeJS.ProcessEnv,
 ): Promise<{ code: number | null; stderr: string }> {
   const { command, args } = mainTsProcess();
   const child = spawn(command, args, {
     cwd: PACKAGE_ROOT,
     env: { PATH: process.env.PATH ?? "", ...overrides },
     stdio: ["ignore", "ignore", "pipe"],
+    timeout: 10_000,
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -51,6 +53,24 @@ function runServer(
 }
 
 describe("resolveMcpConfig", () => {
+  it("keeps non-serve callers independent of UB_AGENT_SESSION", () => {
+    for (const value of ["same-session", "invalid/session"]) {
+      const first = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
+      const second = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
+      expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
+      expect(first.sessionId).not.toBe(second.sessionId);
+    }
+  });
+
+  it("keeps the same caller-chosen identity and colour across reconnects", () => {
+    const session = "Caller.Run_1570-1";
+    const first = resolveMcpConfig(env(), resolveAgentSession(session));
+    const second = resolveMcpConfig(env(), resolveAgentSession(session));
+    expect(first.sessionId).toBe(session);
+    expect(second.sessionId).toBe(session);
+    expect(second.color).toBe(first.color);
+  });
+
   it.each(["wss://hub.example/ws", "ws://0.0.0.0:1234", "ws://[::]:1234", "ws://127.attacker.example:1234"])("requires stored login and suppresses the secret for %s", hubUrl => {
     const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
     expect(config.authSecret).toBeNull();
@@ -169,7 +189,32 @@ describe("resolveMcpConfig", () => {
   });
 });
 
+describe("serve's agent session input", () => {
+  it.each(["x", "A".repeat(64), "Caller.Run_1570-1"])("accepts %s exactly", (session) => {
+    expect(resolveAgentSession(session)).toBe(session);
+  });
+
+  it.each([undefined, "", " \t\n"])("uses a fresh process identity for blank %s", (session) => {
+    expect(resolveAgentSession(session)).toBeUndefined();
+    const first = resolveMcpConfig(env(), resolveAgentSession(session));
+    const second = resolveMcpConfig(env(), resolveAgentSession(session));
+    expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
+    expect(first.sessionId).not.toBe(second.sessionId);
+  });
+
+  it.each(["a".repeat(65), "a/b", "two words", " padded", "padded ", "é", "a\nb", "a\n"])("refuses nonblank %s instead of replacing it", (session) => {
+    expect(() => resolveAgentSession(session)).toThrow(/UB_AGENT_SESSION/);
+  });
+});
+
 describe("the server process", () => {
+  it("refuses an invalid agent session before serving", async () => {
+    const run = await runServer(env({ UB_AGENT_SESSION: "invalid/session" }));
+    expect(run.code).toBe(1);
+    expect(run.stderr).toMatch(/UB_AGENT_SESSION/);
+    expect(run.stderr).not.toContain("serving");
+  });
+
   it("exits non-zero and names `ub workspace create` when WORKSPACE_ID is unset", async () => {
     // The whole interface is the environment an MCP client hands the process,
     // so "it refuses" has to be true of the process, not only of the function.

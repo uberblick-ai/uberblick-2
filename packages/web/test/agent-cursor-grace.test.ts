@@ -33,6 +33,7 @@ const AGENT_NAME = "Uberblick Coordinator Agent";
 
 let viewer: Awareness;
 let agent: Awareness;
+let additionalPeers: Awareness[];
 
 /**
  * A session publishes a cursor, and the viewer's room receives it.
@@ -41,11 +42,16 @@ let agent: Awareness;
  * agent marker is what production publishes, and `undefined` is the session
  * that claims to be nothing — a tab on a bundle from before the marker.
  */
-function publishCursor(head: number, client: string | undefined): void {
+function publishCursor(
+  head: number,
+  client: string | undefined,
+  session?: string,
+): void {
   agent.setLocalState({
     user: { name: AGENT_NAME, color: "#a33" },
     cursor: { anchor: head, head },
     ...(client === undefined ? {} : { client }),
+    ...(session === undefined ? {} : { session }),
   });
   applyAwarenessUpdate(
     viewer,
@@ -55,8 +61,24 @@ function publishCursor(head: number, client: string | undefined): void {
 }
 
 /** The production case: an MCP session, publishing the agent marker. */
-function publishAgentCursor(head: number): void {
-  publishCursor(head, AGENT_CLIENT);
+function publishAgentCursor(head: number, session?: string): void {
+  publishCursor(head, AGENT_CLIENT, session);
+}
+
+function publishSessionPeer(peer: Awareness, session: string, head?: number): void {
+  peer.setLocalState({
+    user: { name: AGENT_NAME, color: "#a33" },
+    client: AGENT_CLIENT,
+    session,
+    ...(head === undefined ? {} : { cursor: { anchor: head, head } }),
+  });
+  applyAwarenessUpdate(viewer, encodeAwarenessUpdate(peer, [peer.clientID]), "test");
+}
+
+function newPeer(): Awareness {
+  const peer = new Awareness(new Y.Doc());
+  additionalPeers.push(peer);
+  return peer;
 }
 
 /** The session exits: the room drops its state, as the hub's does. */
@@ -72,11 +94,16 @@ beforeEach(() => {
   vi.useFakeTimers();
   viewer = new Awareness(new Y.Doc());
   agent = new Awareness(new Y.Doc());
+  additionalPeers = [];
 });
 
 afterEach(() => {
   viewer.destroy();
   agent.destroy();
+  for (const peer of additionalPeers) {
+    peer.destroy();
+    peer.doc.destroy();
+  }
   vi.useRealTimers();
 });
 
@@ -246,15 +273,20 @@ it("does not restore a cursor withdrawn before the agent departs", () => {
   expect(readPresence(viewer.doc, view, view.isDeparted)).toEqual([]);
 });
 
-it("keeps distinct same-named agent sessions on their own departure lifetimes", () => {
+it.each([
+  [undefined, undefined],
+  ["", ""],
+  ["first-session", "second-session"],
+])("keeps same-named agents with separate session identities %s and %s on their own departure lifetimes", (firstSession, secondSession) => {
   const second = new Awareness(new Y.Doc());
   try {
     const view = agentCursorAwareness(viewer);
     view.on("change", () => {});
-    publishAgentCursor(3);
+    publishAgentCursor(3, firstSession);
     second.setLocalState({
       user: { name: AGENT_NAME, color: "#33a" },
       client: AGENT_CLIENT,
+      ...(secondSession === undefined ? {} : { session: secondSession }),
       cursor: { anchor: 9, head: 9 },
     });
     applyAwarenessUpdate(viewer, encodeAwarenessUpdate(second, [second.clientID]), "test");
@@ -274,4 +306,155 @@ it("keeps distinct same-named agent sessions on their own departure lifetimes", 
     second.destroy();
     second.doc.destroy();
   }
+});
+
+it("replaces a session's departed caret with its reconnected live caret and restarts grace on departure", () => {
+  const view = agentCursorAwareness(viewer);
+  const changes: { removed: number[] }[] = [];
+  view.on("change", (change: { removed: number[] }) => changes.push(change));
+  publishAgentCursor(3, "run-1");
+  agentLeaves();
+  vi.advanceTimersByTime(5_000);
+
+  const reconnected = newPeer();
+  publishSessionPeer(reconnected, "run-1", 9);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(view.getStates().get(reconnected.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+  expect(view.isDeparted(reconnected.clientID)).toBe(false);
+  expect(changes.at(-1)?.removed).toContain(agent.clientID);
+
+  removeAwarenessStates(viewer, [reconnected.clientID], "test");
+  expect(view.isDeparted(reconnected.clientID)).toBe(true);
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 5_000);
+  expect(view.getStates().get(reconnected.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+  vi.advanceTimersByTime(5_000);
+  expect(view.getStates().has(reconnected.clientID)).toBe(false);
+  expect(changes.at(-1)?.removed).toEqual([reconnected.clientID]);
+});
+
+it("keeps the previous caret through a cursorless reconnect and runs grace from its last departure", () => {
+  const view = agentCursorAwareness(viewer);
+  const changes: { removed: number[] }[] = [];
+  const listener = (change: { removed: number[] }) => changes.push(change);
+  view.on("change", listener);
+  publishAgentCursor(3, "run-1");
+  agentLeaves();
+  vi.advanceTimersByTime(10_000);
+
+  const reconnected = newPeer();
+  publishSessionPeer(reconnected, "run-1");
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(view.isDeparted(agent.clientID)).toBe(true);
+  expect(view.isDeparted(reconnected.clientID)).toBe(false);
+  vi.advanceTimersByTime(10_000);
+  removeAwarenessStates(viewer, [reconnected.clientID], "test");
+  const departureChanges = changes.length;
+
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1);
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(changes).toHaveLength(departureChanges);
+  vi.advanceTimersByTime(1);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(changes.at(-1)?.removed).toEqual([agent.clientID]);
+  view.off("change", listener);
+});
+
+it("keeps concurrent live carets independent and only retains a session's latest departure", () => {
+  const view = agentCursorAwareness(viewer);
+  const changes: { removed: number[] }[] = [];
+  view.on("change", (change: { removed: number[] }) => changes.push(change));
+  publishAgentCursor(3, "run-1");
+  const concurrent = newPeer();
+  publishSessionPeer(concurrent, "run-1", 9);
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(view.getStates().get(concurrent.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+
+  publishAgentCursor(5, "run-1");
+  agentLeaves();
+  expect(view.isDeparted(agent.clientID)).toBe(true);
+  // An unrelated awareness change re-reads the older concurrent live caret.
+  viewer.setLocalState({ user: { name: "Self" }, client: "web" });
+  expect(caretIn(view)).toEqual({ anchor: 5, head: 5 });
+  concurrent.setLocalStateField("user", { name: "Renamed Agent", color: "#a33" });
+  applyAwarenessUpdate(viewer, encodeAwarenessUpdate(concurrent, [concurrent.clientID]), "test");
+  expect(caretIn(view)).toEqual({ anchor: 5, head: 5 });
+  vi.advanceTimersByTime(5_000);
+  removeAwarenessStates(viewer, [concurrent.clientID], "test");
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(view.getStates().get(concurrent.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+  expect(view.isDeparted(concurrent.clientID)).toBe(true);
+  expect(changes.at(-1)?.removed).toEqual(expect.arrayContaining([agent.clientID, concurrent.clientID]));
+
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 5_000);
+  expect(view.getStates().has(concurrent.clientID)).toBe(true);
+  vi.advanceTimersByTime(5_000);
+  expect(view.getStates().has(concurrent.clientID)).toBe(false);
+});
+
+it("lets a concurrent live caret update supersede the session's retained departure", () => {
+  const view = agentCursorAwareness(viewer);
+  const changes: { removed: number[] }[] = [];
+  view.on("change", (change: { removed: number[] }) => changes.push(change));
+  publishAgentCursor(3, "run-1");
+  const concurrent = newPeer();
+  publishSessionPeer(concurrent, "run-1", 9);
+  publishAgentCursor(5, "run-1");
+  agentLeaves();
+  publishSessionPeer(concurrent, "run-1", 15);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(view.getStates().get(concurrent.clientID)?.cursor).toEqual({ anchor: 15, head: 15 });
+  expect(changes.at(-1)?.removed).toContain(agent.clientID);
+});
+
+it("does not restore an older departed caret while a newer same-session caret is live", () => {
+  const view = agentCursorAwareness(viewer);
+  view.on("change", () => {});
+  publishAgentCursor(3, "run-1");
+  const concurrent = newPeer();
+  publishSessionPeer(concurrent, "run-1", 9);
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(view.getStates().get(concurrent.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+
+  agentLeaves();
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(view.isDeparted(agent.clientID)).toBe(false);
+  expect(view.getStates().get(concurrent.clientID)?.cursor).toEqual({ anchor: 9, head: 9 });
+  removeAwarenessStates(viewer, [concurrent.clientID], "test");
+  expect(view.isDeparted(concurrent.clientID)).toBe(true);
+  expect(view.getStates().has(agent.clientID)).toBe(false);
+});
+
+it("does not restore a withdrawn newer caret on a same-session connection's departure", () => {
+  const view = agentCursorAwareness(viewer);
+  view.on("change", () => {});
+  publishAgentCursor(3, "run-1");
+  const concurrent = newPeer();
+  publishSessionPeer(concurrent, "run-1", 9);
+  concurrent.setLocalStateField("cursor", null);
+  applyAwarenessUpdate(viewer, encodeAwarenessUpdate(concurrent, [concurrent.clientID]), "test");
+  agentLeaves();
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  removeAwarenessStates(viewer, [concurrent.clientID], "test");
+  expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(view.getStates().has(concurrent.clientID)).toBe(false);
+});
+
+it("cancels replacement departure timers when the final reader leaves", () => {
+  const view = agentCursorAwareness(viewer);
+  const listener = vi.fn();
+  view.on("change", listener);
+  publishAgentCursor(3, "run-1");
+  agentLeaves();
+  vi.advanceTimersByTime(5_000);
+  const reconnected = newPeer();
+  publishSessionPeer(reconnected, "run-1", 9);
+  removeAwarenessStates(viewer, [reconnected.clientID], "test");
+  view.off("change", listener);
+  listener.mockClear();
+
+  vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS);
+  expect(listener).not.toHaveBeenCalled();
+  expect(view.isDeparted(agent.clientID)).toBe(false);
+  expect(view.isDeparted(reconnected.clientID)).toBe(false);
+  expect(view.getStates().has(reconnected.clientID)).toBe(false);
 });

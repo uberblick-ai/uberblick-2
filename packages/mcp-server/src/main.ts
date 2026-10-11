@@ -12,13 +12,13 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { resolveMcpConfig } from "./config.js";
+import { resolveAgentSession, resolveMcpConfig } from "./config.js";
 import { log } from "./log.js";
 import { createMcpServer } from "./server.js";
 import { closeWithDeadline } from "./shutdown.js";
 
 async function main(): Promise<void> {
-  const config = resolveMcpConfig();
+  const config = resolveMcpConfig(process.env, resolveAgentSession(process.env.UB_AGENT_SESSION));
   const instance = createMcpServer(config);
 
   let shuttingDown = false;
