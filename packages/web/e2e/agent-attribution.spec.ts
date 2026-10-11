@@ -22,6 +22,7 @@ import { contrast } from "../test/colour.js";
 import { createDoc, docTitle, openDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
+import type { McpSession } from "./mcp-agent.js";
 
 // The readable-period proof must fit inside the production grace.
 const READABLE_MS = 25_000;
@@ -72,21 +73,25 @@ async function writeAndLeave(
 ): Promise<void> {
   const session = agent().open(clientInfo);
   try {
-    const doc = await session.call<DocPayload>("get_doc", { uuid });
-    const block = doc.blocks[0];
-    if (block === undefined) throw new Error("e2e: the document has no blocks");
-    await session.call("edit_block", {
-      uuid,
-      block_id: block.id,
-      old_text: block.text,
-      new_text: newText,
-      rev: block.rev,
-    });
+    await writeBlock(session, uuid, newText);
   } finally {
     // In a `finally`, because a session that failed half way through is still
     // a running server process — and the closing is the very thing under test.
     await session.close();
   }
+}
+
+async function writeBlock(session: McpSession, uuid: string, newText: string): Promise<void> {
+  const doc = await session.call<DocPayload>("get_doc", { uuid });
+  const block = doc.blocks[0];
+  if (block === undefined) throw new Error("e2e: the document has no blocks");
+  await session.call("edit_block", {
+    uuid,
+    block_id: block.id,
+    old_text: block.text,
+    new_text: newText,
+    rev: block.rev,
+  });
 }
 
 for (const settings of [
@@ -229,5 +234,110 @@ for (const settings of [
       await expect(peer).toHaveCount(0);
       expect(socketCloses).toBe(0);
     }
+  });
+
+  test(`reconnected agent sessions keep one title avatar and their latest departed caret — ${settings.name}`, async ({ browser }) => {
+    const page = await openApp(browser, "/", {
+      readySelector: ".ub-pane",
+      contextOptions: {
+        colorScheme: settings.colorScheme,
+        hasTouch: settings.touch,
+        viewport: settings.viewport,
+      },
+      beforeNavigate: async (loading) => {
+        await loading.clock.install();
+      },
+    });
+    if (settings.touch) {
+      await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+    }
+    const uuid = await createDoc(page, docTitle("session-attribution"));
+    await placeCaret(page);
+    await page.keyboard.type("session attribution", { delay: 15 });
+    await page.clock.pauseAt(new Date(Date.now() + 1_000));
+
+    const peers = page.locator(".ub-peers > .ub-peer-control[data-peer-id]");
+    const cursor = page.locator(".ub-editor .ProseMirror-yjs-cursor");
+    const firstId = "reconnect-run";
+    const otherId = "separate-run";
+    const firstPeer = peers.and(page.getByRole("button", {
+      name: /^Codex · agent · reconnect-run(?: ·|$)/,
+    }));
+    const first = agent().open({ name: "Codex" }, firstId);
+    expect(await first.call<{ session: string }>("sync_status", {})).toMatchObject({ session: firstId });
+    await writeBlock(first, uuid, "first connection");
+    await expect(firstPeer).toHaveCount(1);
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(1);
+
+    // The same display name remains a different session, with its own caret.
+    const other = agent().open({ name: "Codex" }, otherId);
+    await writeBlock(other, uuid, "a different same-named session");
+    await expect(peers).toHaveCount(2);
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(2);
+    const originalOrder = await peers.evaluateAll((controls) => controls.map((control) => control.getAttribute("data-peer-id")));
+    await firstPeer.evaluate((control: HTMLElement) => { control.dataset.reconnectProbe = "original-control"; });
+    await firstPeer.focus();
+    await expect(firstPeer).toBeFocused();
+    await first.close();
+    await expect(firstPeer).toHaveAccessibleName("Codex · agent · reconnect-run · left");
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(2);
+    await page.clock.runFor(10_000);
+
+    // Reading republishes presence without a caret, so the previous departure
+    // remains visible while the session's one avatar becomes live again.
+    const reconnect = agent().open({ name: "Codex" }, firstId);
+    await reconnect.call("get_doc", { uuid });
+    await expect(firstPeer).toHaveAccessibleName("Codex · agent · reconnect-run");
+    await expect(firstPeer.locator(".ub-avatar-departed")).toHaveCount(0);
+    await expect(peers).toHaveCount(2);
+    await expect(firstPeer).toHaveAttribute("data-reconnect-probe", "original-control");
+    await expect(firstPeer).toBeFocused();
+    await expect.poll(() => peers.evaluateAll((controls) => controls.map((control) => control.getAttribute("data-peer-id")))).toEqual(originalOrder);
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(2);
+
+    await writeBlock(reconnect, uuid, "newer connection replaces the departed caret");
+    await expect(firstPeer).toHaveAccessibleName("Codex · agent · reconnect-run · editing block 1");
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(2);
+
+    // Concurrent connections keep separate live carets under their one avatar.
+    const concurrent = agent().open({ name: "Codex" }, firstId);
+    await writeBlock(concurrent, uuid, "two live connections in one session");
+    await expect(peers).toHaveCount(2);
+    await expect.poll(async () => {
+      await page.clock.runFor(1);
+      return cursor.count();
+    }).toBe(3);
+    await reconnect.close();
+    // A grouped avatar stays live, so its unchanged label cannot signal that
+    // the close reached awareness. Drain cursor work until that change arrives.
+    await expect.poll(async () => {
+      await page.clock.runFor(1);
+      return cursor.count();
+    }).toBe(2);
+    await expect(firstPeer).not.toHaveAccessibleName(/left$/);
+    await concurrent.close();
+    await expect(firstPeer).toHaveAccessibleName("Codex · agent · reconnect-run · left");
+    await expect(firstPeer.locator(".ub-avatar-departed")).toBeVisible();
+    await other.close();
+    await expect(peers).toHaveCount(2);
+    await expect(peers.and(page.getByRole("button", {
+      name: "Codex · agent · separate-run · left", exact: true,
+    }))).toHaveCount(1);
+    await page.clock.runFor(1);
+    await expect(cursor).toHaveCount(2);
+
+    // Expiry follows the latest departure, beyond the first connection's
+    // original deadline, and both same-named sessions remain independently drawn.
+    await page.clock.runFor(AGENT_CURSOR_GRACE_MS - 2);
+    await expect(cursor).toHaveCount(2);
+    await expect(peers).toHaveCount(2);
+    await page.clock.runFor(2);
+    await expect(cursor).toHaveCount(0);
+    await expect(peers).toHaveCount(0);
   });
 }

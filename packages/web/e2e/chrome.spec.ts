@@ -1168,7 +1168,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     await new Promise<void>((resolve) => provider.on("synced", resolve));
     provider.setAwarenessField("user", { name, color });
     provider.setAwarenessField("client", kind === "agent" ? "agent" : "web");
-    if (kind === "agent") provider.setAwarenessField("session", `agent-${uuid}`);
+    if (kind === "agent") provider.setAwarenessField("session", `agent-${randomUUID()}`);
     return { provider, doc };
   };
 

@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { RemotePresence } from "./doc-chrome.js";
-import { presenceLabel } from "./doc-chrome.js";
+import { presenceKey, presenceLabel } from "./doc-chrome.js";
 import { PeerAvatar } from "./PeerAvatar.js";
 import {
   Popover,
@@ -19,13 +19,9 @@ const PEER_CONTROL_CLASS = "ub-peer-control relative box-border size-[28px] flex
 // focus use a higher stack level than any circle's resting order.
 const PEER_STACK_CLASSES = ["z-3", "z-2", "z-1"];
 
-function peerKey(clientId: number): string {
-  return String(clientId);
-}
-
 /**
- * Cap the roster at three controls plus overflow. Keep client-ID order so
- * mutable names or caret fields cannot shuffle unrelated controls.
+ * Cap the roster at three controls plus overflow. The title reader preserves
+ * session order across connection changes.
  */
 export function PeerCluster({
   presence,
@@ -43,7 +39,7 @@ export function PeerCluster({
   const cluster = useRef<HTMLSpanElement | null>(null);
   const overflow = useRef<HTMLDivElement | null>(null);
   const overflowTrigger = useRef<HTMLButtonElement | null>(null);
-  const focusedPeer = useRef<number | null>(null);
+  const focusedPeer = useRef<string | null>(null);
   const focusWasInside = useRef(false);
   const interactedOutside = useRef(false);
 
@@ -51,7 +47,7 @@ export function PeerCluster({
     cluster.current?.contains(document.activeElement) === true ||
     overflow.current?.contains(document.activeElement) === true;
 
-  const focusFallback = (clientId: number | null): void => {
+  const focusFallback = (key: string | null): void => {
     const root = cluster.current;
     if (root === null) return;
     const controls = [
@@ -59,9 +55,9 @@ export function PeerCluster({
       ...(overflow.current?.querySelectorAll<HTMLButtonElement>("[data-peer-id]") ?? []),
     ];
     const samePeer =
-      clientId === null
+      key === null
         ? undefined
-        : controls.find((control) => control.dataset.peerId === peerKey(clientId));
+        : controls.find((control) => control.dataset.peerId === key);
     const fallback =
       samePeer ??
       overflowTrigger.current ??
@@ -114,16 +110,16 @@ export function PeerCluster({
           {visible.map((session, index) => {
             const label = presenceLabel(session);
             return (
-              <Tooltip key={session.clientId}>
+              <Tooltip key={presenceKey(session)}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
                     className={`${PEER_CONTROL_CLASS} border-0 bg-(--background) text-(--foreground) [font:inherit] ${PEER_STACK_CLASSES[index]}`}
-                    data-peer-id={peerKey(session.clientId)}
+                    data-peer-id={presenceKey(session)}
                     aria-label={label}
                     onFocus={() => {
                       focusWasInside.current = true;
-                      focusedPeer.current = session.clientId;
+                      focusedPeer.current = presenceKey(session);
                     }}
                     onBlur={leaveCluster}
                     onClick={() => activate(session)}
@@ -178,14 +174,14 @@ export function PeerCluster({
           >
             {remaining.map((session) => (
               <button
-                key={session.clientId}
+                key={presenceKey(session)}
                 type="button"
                 className="ub-peer-overflow-row flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-(--radius-sm) border-0 bg-transparent p-[0.35rem] text-left text-inherit [font:inherit] hover:bg-(--card-accent) focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-(--ring) focus-visible:outline-offset-2"
-                data-peer-id={peerKey(session.clientId)}
+                data-peer-id={presenceKey(session)}
                 aria-label={presenceLabel(session)}
                 onFocus={() => {
                   focusWasInside.current = true;
-                  focusedPeer.current = session.clientId;
+                  focusedPeer.current = presenceKey(session);
                 }}
                 onBlur={leaveCluster}
                 onClick={() => activate(session, true)}

@@ -34,7 +34,7 @@ export interface McpConfig {
   authEnv?: NodeJS.ProcessEnv;
   /** SQLite file holding the update log, snapshots and the derived index. */
   databasePath: string;
-  /** This process's agent session id. Becomes the token's `sub`. */
+  /** The agent session this process belongs to. Becomes the token's `sub`. */
   sessionId: string;
   /** Awareness colour for this session. */
   color: string;
@@ -93,6 +93,17 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
+/** Only the stdio entry consumes the caller's agent session identity. */
+export function resolveAgentSession(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  if (value.length > 64 || /[^A-Za-z0-9._-]/.test(value)) {
+    throw new Error("UB_AGENT_SESSION must be 1–64 characters from A–Z, a–z, 0–9, '.', '_' or '-'.");
+  }
+  return value;
+}
+
 /** Direct server entry is internal; public `ub mcp serve` resolves the binding. */
 function missingWorkspace(): string {
   return "WORKSPACE_ID is not set for the internal MCP server. Use `ub mcp serve` with a .uberblick.json binding or UB_WORKSPACE_ID; add UB_HUB_URL (a hub address, or local) if this machine has no record for that workspace. Run `ub workspace create <name>` for local setup or `ub workspace use <link|id>` to use an existing workspace.";
@@ -101,6 +112,7 @@ function missingWorkspace(): string {
 /** Internal startup reads environment only; public startup resolves the binding. */
 export function resolveMcpConfig(
   env: NodeJS.ProcessEnv = process.env,
+  agentSession?: string,
 ): McpConfig {
   const configured = trimmed(env.WORKSPACE_ID);
   if (configured === null) {
@@ -108,7 +120,7 @@ export function resolveMcpConfig(
   }
   // Require explicit identity; a guessed workspace could open the wrong corpus.
   const workspaceId = parseWorkspaceId(configured).uuid;
-  const sessionId = `agent-${randomUUID()}`;
+  const sessionId = agentSession ?? `agent-${randomUUID()}`;
   const hubUrl = trimmed(env.HUB_URL) ?? DEFAULT_HUB_URL;
   const remote = usesDeviceLogin(hubUrl, env);
 

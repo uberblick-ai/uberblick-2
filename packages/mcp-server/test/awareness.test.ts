@@ -27,6 +27,7 @@ const rigs: Rig[] = [];
 
 interface RigOptions {
   cursorTtlMs?: number;
+  sessionId?: string;
   /** An existing log to boot over, so a second server holds another's rooms. */
   databasePath?: string;
   /** What the MCP client calls itself at `initialize`. */
@@ -34,12 +35,15 @@ interface RigOptions {
 }
 
 async function rigWith(options: RigOptions = {}): Promise<Rig> {
-  const { cursorTtlMs, databasePath, clientInfo } = options;
+  const { cursorTtlMs, sessionId, databasePath, clientInfo } = options;
   const rig = await startServer(
-    testConfig({
-      ...(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
-      ...(databasePath === undefined ? {} : { databasePath }),
-    }),
+    {
+      ...testConfig({
+        ...(cursorTtlMs === undefined ? {} : { cursorTtlMs }),
+        ...(databasePath === undefined ? {} : { databasePath }),
+      }),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    },
     undefined,
     clientInfo,
   );
@@ -390,7 +394,7 @@ describe("agent awareness", () => {
    */
   describe("the marker and the session id are part of the presence", () => {
     it("rides beside `user` wherever presence is published", async () => {
-      const rig = await rigWith();
+      const rig = await rigWith({ sessionId: "Caller.Run_1570-1" });
       const doc = await rig.ok("create_doc", {
         title: "Marked",
         description: "A test document.",
@@ -401,17 +405,17 @@ describe("agent awareness", () => {
       expect(awarenessOf(rig, doc.uuid).state).toMatchObject({
         user: { name: rig.clientName, color: rig.config.color },
         client: AGENT_CLIENT,
-        session: rig.config.sessionId,
+        session: "Caller.Run_1570-1",
       });
       // The id is the one `sync_status` reports, so a hover in the web client
       // and a tool's own answer name the same session.
-      expect((await rig.ok("sync_status")).session).toBe(rig.config.sessionId);
+      expect((await rig.ok("sync_status")).session).toBe("Caller.Run_1570-1");
 
       // And the workspace room, where presence starts at attach — this is what
       // the user menu's "MCP connections" count reads.
       expect(publishedState(rig, DIRECTORY_SUFFIX)).toMatchObject({
         client: AGENT_CLIENT,
-        session: rig.config.sessionId,
+        session: "Caller.Run_1570-1",
       });
     });
 

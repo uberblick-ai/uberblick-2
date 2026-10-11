@@ -69,6 +69,7 @@ export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
 const RESOLVED_VARIABLES = [
   "UB_WORKSPACE_ID",
   "UB_HUB_URL",
+  "UB_AGENT_SESSION",
   "WORKSPACE_ID",
   "HUB_URL",
   "HUB_AUTH_TOKEN",

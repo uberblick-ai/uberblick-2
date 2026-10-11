@@ -36,7 +36,7 @@ import { agentCursorAwareness } from "../editor/collaboration.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
-import { observeDocRev, readPresence, samePresence } from "./doc-chrome.js";
+import { groupAgentPresence, observeDocRev, presenceKey, readPresence, samePresence } from "./doc-chrome.js";
 import type { RemotePresence } from "./doc-chrome.js";
 import { observeOutline } from "./outline.js";
 import type { OutlineEntry } from "./outline.js";
@@ -432,7 +432,24 @@ function observeTitlePresence(
   const awareness = connection.provider.awareness ?? null;
   if (awareness === null) return () => {};
   const view = agentCursorAwareness(awareness);
-  return observeRoomPresence(connection, view, emit, view.isDeparted);
+  const order = new Map<string, number>();
+  return observeRoomPresence(connection, view, (presence) => {
+    const grouped = groupAgentPresence(presence);
+    const keys = new Set(grouped.map(presenceKey));
+    for (const key of order.keys()) {
+      if (!keys.has(key)) order.delete(key);
+    }
+    for (const peer of grouped) {
+      const key = presenceKey(peer);
+      if (!order.has(key)) order.set(key, peer.clientId);
+    }
+    // Keep a session's first position until its live and retained states vanish.
+    grouped.sort((a, b) =>
+      (order.get(presenceKey(a)) ?? a.clientId) -
+      (order.get(presenceKey(b)) ?? b.clientId)
+    );
+    emit(grouped);
+  }, view.isDeparted);
 }
 
 function observeRoomPresence(

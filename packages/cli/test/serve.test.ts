@@ -143,6 +143,44 @@ function clientStdin(path: string): { childEnd: number; writer: number } {
 const WORKSPACE = "1e9b7a30-52c4-4d6f-8a13-c7b204e5f981";
 
 describe("ub mcp serve", () => {
+  it("keeps the exact caller-chosen session across separate serve processes", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const sessionId = "Caller.Run_1570-1";
+    for (let reconnect = 0; reconnect < 2; reconnect += 1) {
+      const session = await connect(box, { UB_AGENT_SESSION: sessionId });
+      try {
+        const result = await session.client.callTool({ name: "sync_status", arguments: {} });
+        const content = result.content as { text: string }[];
+        expect(JSON.parse(content[0]!.text).session).toBe(sessionId);
+      } finally { await session.close(); }
+    }
+  });
+
+  it.each([undefined, "", " \t"])("mints a fresh process session for blank UB_AGENT_SESSION=%s", async (value) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const sessions: string[] = [];
+    for (let reconnect = 0; reconnect < 2; reconnect += 1) {
+      const session = await connect(box, { UB_AGENT_SESSION: value });
+      try {
+        const result = await session.client.callTool({ name: "sync_status", arguments: {} });
+        const content = result.content as { text: string }[];
+        sessions.push(JSON.parse(content[0]!.text).session);
+      } finally { await session.close(); }
+    }
+    expect(sessions[0]).toMatch(/^agent-[0-9a-f-]{36}$/);
+    expect(sessions[1]).toMatch(/^agent-[0-9a-f-]{36}$/);
+    expect(sessions[0]).not.toBe(sessions[1]);
+  });
+
+  it.each(["a/b", "a".repeat(65), "padded ", "é"])("refuses UB_AGENT_SESSION=%s with no protocol output", (value) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const run = runUb(["mcp", "serve"], box, { UB_AGENT_SESSION: value });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain("UB_AGENT_SESSION");
+    expect(existsSync(box.dataHome)).toBe(false);
+  });
+
   it.each([null, DEAD_HUB_URL])("remembers a first project binding with hub %s", async (hubUrl) => {
     const box = sandbox({
       projectBinding: { workspaceId: `serve-${WORKSPACE}`, hubUrl },
