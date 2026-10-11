@@ -61,20 +61,35 @@ async function authoredText(element: Locator): Promise<string> {
   });
 }
 
-/** Native range setup leaves the following input and focus handling to the browser. */
+/** Keep the native caret inside authored text, before cursor widgets and trailing breaks. */
 async function caretEnd(element: Locator): Promise<void> {
   await element.evaluate((node) => {
     const view = node.closest<HTMLElement>(".ProseMirror");
     if (view === null) throw new Error("e2e: source has no editor");
     view.focus();
+    const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+      acceptNode: (text) => text.parentElement?.closest(".ProseMirror-yjs-cursor") === null
+        ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
+    });
+    let last: Node | null = null;
+    while (texts.nextNode()) last = texts.currentNode;
+    if (last === null) throw new Error("e2e: caret target has no authored text");
     const range = document.createRange();
-    range.selectNodeContents(node);
-    range.collapse(false);
+    range.setStart(last, last.textContent?.length ?? 0);
+    range.collapse(true);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
   });
-  await expect.poll(() => element.evaluate((node) => node.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
+  // Flush selectionchange into ProseMirror before its delayed focus sync or input.
+  await element.page().keyboard.press("Shift");
+  await expect.poll(() => element.evaluate((node) => {
+    const selection = document.getSelection();
+    const focus = selection?.focusNode;
+    return selection?.isCollapsed === true && focus?.nodeType === Node.TEXT_NODE && node.contains(focus)
+      && focus.parentElement?.closest(".ProseMirror-yjs-cursor") === null
+      && selection.focusOffset === focus.textContent?.length;
+  })).toBe(true);
   await element.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
@@ -194,6 +209,8 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
   await caretEnd(source(page));
   const suffix = " changed";
   await page.keyboard.type(suffix, { delay: 5 });
+  expect(await authoredText(source(page))).toBe(SOURCE + suffix);
+  await expect.poll(async () => (await codeBlock(session, uuid)).text).toBe(SOURCE + suffix);
   for (const client of [page, peer]) {
     await expect(preview(client).locator(".wf-button").last()).toHaveText(`Delete${suffix}`);
     const recorded = await paints(client);
@@ -202,8 +219,11 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
     expect(recorded.every((entry) => entry.at - entry.sourceAt >= 150)).toBe(true);
   }
   await openSource(peer).click();
+  await expect(source(peer).locator(".ProseMirror-yjs-cursor + .ProseMirror-separator")).toHaveCount(1);
   await caretEnd(source(peer));
   await peer.keyboard.type(" peer", { delay: 5 });
+  expect(await authoredText(source(peer))).toBe(`${SOURCE}${suffix} peer`);
+  await expect.poll(async () => (await codeBlock(session, uuid)).text).toBe(`${SOURCE}${suffix} peer`);
   await expect(preview(page).locator(".wf-button").last()).toHaveText("Delete changed peer");
   await expect(preview(peer).locator(".wf-button").last()).toHaveText("Delete changed peer");
   await editSource(session, uuid, SOURCE.replace("Delete draft?", "Agent-updated draft?"));
