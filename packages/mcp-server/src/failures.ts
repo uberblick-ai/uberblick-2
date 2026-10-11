@@ -6,6 +6,7 @@ import {
   DataError,
   InvalidDocumentLifecycleError,
   InvalidTableError,
+  InvalidCardError,
   InvalidTableMappingError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
@@ -187,6 +188,14 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Supply exactly one GFM table, with a header and matching delimiter row, then call again. Alignment markers are accepted but not stored; inline markdown writes cell formatting and escaped punctuation stays literal.",
   },
+  invalid_card: {
+    recoveryClass: "manual",
+    guidance: "Supply card content without its :::card and ::: delimiter lines: label, title and footer keys at most once, a nonempty title, then a blank line and optional prose body. Remove unknown keys and non-key header lines. Nothing was written.",
+  },
+  annotation_card: {
+    recoveryClass: "manual",
+    guidance: "Open a card comment on selected text in the web editor, then use annotate with its thread_id to reply, resolve or reopen it. Nothing was written.",
+  },
   table_mapping_required: {
     recoveryClass: "manual",
     guidance:
@@ -253,7 +262,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(code, mermaid, terminal and chart hold source text; table links belong to cells and have no block-level ranges) or `overlap` (the range " +
+      "(code, mermaid, terminal and chart hold source text; table and card links belong to their parts and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Repeating a lookup cannot deliver a missing directory entry; hub sync may.
@@ -493,6 +502,9 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
   }
   if (error instanceof InvalidTableError) {
     return stamped(tool, { error: "invalid_table", message: error.message });
+  }
+  if (error instanceof InvalidCardError) {
+    return stamped(tool, { error: "invalid_card", message: error.message });
   }
   if (error instanceof AnnotationCellError) {
     return stamped(tool, {

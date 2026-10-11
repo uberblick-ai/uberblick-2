@@ -9,6 +9,7 @@ export const BLOCK_TYPES = [
   "table",
   "terminal",
   "chart",
+  "card",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -21,7 +22,7 @@ export function isBlockType(value: string): value is BlockType {
 
 /**
  * Prose admits inline marks and Markdown syntax; source blocks admit only comment.
- * Tables admit inline marks per cell, with no block-level link ranges or offsets.
+ * Tables and cards admit marks per cell or part, with no block-level offsets.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",
@@ -101,8 +102,8 @@ export interface Block {
   id: string;
   type: BlockType;
   /**
-   * Prose is plain text, marks excluded. A table is canonical GFM projected
-   * from its cell text and inline marks. Prose marks use `getBlockInline`.
+   * Prose is plain text, marks excluded. Tables and cards are canonical Markdown
+   * projections from cell or part text and inline marks.
    */
   text: string;
   /**
@@ -131,7 +132,7 @@ export interface BlockInput {
   indent?: number;
   /**
    * Overrides text for prose only; callers setting both must keep them consistent.
-   * Source blocks ignore it. Tables use cell Markdown from their GFM text instead.
+   * Source blocks ignore it. Tables and cards use Markdown from their text instead.
    */
   inline?: InlineRun[];
 }
@@ -291,8 +292,10 @@ export function isCommentMark(value: unknown): value is CommentMark {
   return typeof threadId === "string" && threadId !== "";
 }
 
-/** A resolved range inside a block's text, or one projected table cell's text. */
+/** A resolved range inside block, table-cell or card-part text. */
 export interface AnnotationRange {
+  /** Card prose part; absent for prose and table ranges. */
+  part?: "label" | "title" | "body" | "footer";
   /** Table-cell coordinates in the GFM projection; absent for prose ranges. */
   row?: number;
   column?: number;

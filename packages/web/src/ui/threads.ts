@@ -7,6 +7,8 @@
 import * as Y from "yjs";
 import {
   COMMENT_MARK,
+  CARD_PARTS,
+  cardPartTexts,
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
@@ -20,6 +22,7 @@ import type {
   AnnotationComment,
   Block,
   BlockType,
+  CardPart,
   CommentMark,
 } from "@uberblick/schema";
 import { formatTimestamp } from "./timestamps.js";
@@ -49,6 +52,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   table: "Table",
   terminal: "Terminal demo",
   chart: "Line chart",
+  card: "Card",
 };
 
 /** Use one-based kind and position labels in both composer and cards. */
@@ -146,6 +150,7 @@ interface Anchor {
   end: number;
   row?: number;
   column?: number;
+  part?: CardPart;
   text: string;
 }
 
@@ -173,7 +178,7 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
     const blockId = child.getAttribute("id") ?? "";
     if (blockId === "" || claimed.has(blockId)) continue;
     claimed.add(blockId);
-    const read = (texts: Y.XmlText[], cell: { row: number; column: number } | undefined): void => {
+    const read = (texts: Y.XmlText[], coordinates: { row: number; column: number } | { part: CardPart } | undefined): void => {
       const plain = texts.map(plainXmlText).join("");
       // Adjacent ops carrying the same thread are one run, even across texts
       // left by concurrent first writes into a cell paragraph.
@@ -182,7 +187,7 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
       let end = 0;
       const close = (): void => {
         if (openId !== null && !found.has(openId)) {
-          found.set(openId, { blockId, start, end, ...cell, text: plain });
+          found.set(openId, { blockId, start, end, ...coordinates, text: plain });
         }
         openId = null;
       };
@@ -213,6 +218,8 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
       for (const [row, cells] of tableRows(child).entries()) {
         for (const [column, cell] of cells.entries()) read(tableCellTexts(cell), { row, column });
       }
+    } else if (child.nodeName === "card") {
+      for (const part of CARD_PARTS) read(cardPartTexts(child, part), { part });
     } else {
       const text = child.firstChild;
       if (text instanceof Y.XmlText) read([text], undefined);
@@ -278,7 +285,8 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
     const index = order.get(anchor?.blockId ?? view.blockId) ?? Number.MAX_SAFE_INTEGER;
     // Use -1 for orphan offsets so UUID order cannot tie them with a live
     // anchor at offset zero.
-    return [index, anchor?.row ?? -1, anchor?.column ?? -1, anchor?.start ?? -1];
+    const partOrder = anchor?.part === undefined ? anchor?.row ?? -1 : CARD_PARTS.indexOf(anchor.part);
+    return [index, partOrder, anchor?.column ?? -1, anchor?.start ?? -1];
   };
   return views.sort((a, b) => {
     const [blockA, rowA, columnA, startA] = position(a);

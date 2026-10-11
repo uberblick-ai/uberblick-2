@@ -17,6 +17,32 @@ export class InvalidTableError extends Error {
   }
 }
 
+/** A card write does not match the closed header and required title grammar. */
+export class InvalidCardError extends Error {
+  constructor(reason = "A nonempty title is required") {
+    super(`Invalid card: ${reason}`);
+    this.name = "InvalidCardError";
+  }
+}
+
+/** Block-level offsets cannot address one of a card's separate prose parts. */
+export class CardAnnotationError extends Error {
+  readonly blockId: string;
+  constructor(blockId: string) {
+    super("New comment threads on cards require a part and are available in the web editor");
+    this.name = "CardAnnotationError";
+    this.blockId = blockId;
+  }
+}
+
+/** Cards have no sanctioned conversion to or from another block type. */
+export class CardConversionError extends Error {
+  constructor() {
+    super("Cards cannot be converted to or from another block type; insert a new block instead");
+    this.name = "CardConversionError";
+  }
+}
+
 /** Structural or batched table edits need the caller's surviving identities. */
 export class TableMappingRequiredError extends Error {
   constructor() {

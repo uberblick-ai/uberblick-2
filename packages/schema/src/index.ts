@@ -84,7 +84,14 @@ export {
 } from "./table.js";
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
-export { exportMarkdown, importMarkdown } from "./markdown.js";
+export {
+  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardInline, cardPartElement,
+  cardPartTexts, cardText, cardTextParts, isSupportedCard, parseCardInput,
+  seedNewCardParts, writeCardText,
+} from "./card.js";
+export type { CardInline, CardPart, CardText } from "./card.js";
+
+export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {
   ExportMarkdownOptions,
   ImportedBlock,
@@ -181,6 +188,8 @@ export {
   AnnotationCellError,
   AnnotationRangeError,
   BlockNotFoundError,
+  CardAnnotationError,
+  CardConversionError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -196,6 +205,7 @@ export {
   OldTextMismatchError,
   StaleBlockError,
   InvalidTableError,
+  InvalidCardError,
   InvalidTableMappingError,
   TableMappingRequiredError,
   TableAnnotationError,

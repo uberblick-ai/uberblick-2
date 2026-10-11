@@ -77,7 +77,7 @@ const INLINE_RUNS =
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
   "run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; " +
-  "tables also ignore it and take exactly one GFM table through `text`.\n\n" +
+  "tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
@@ -135,7 +135,7 @@ export const inlineArg = z
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+    "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
   ),
   level: z
     .number()

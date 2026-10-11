@@ -127,14 +127,14 @@ function canonical(value: unknown): unknown {
   return out;
 }
 
-/** The table subtree, including cell marks and anchors, without Yjs item ids. */
-function tableContent(element: Y.XmlElement | null): unknown {
+/** A structured prose subtree, including marks and anchors, without Yjs item ids. */
+function structuredContent(element: Y.XmlElement | null): unknown {
   if (element === null) return null;
   return {
     name: element.nodeName,
     attributes: canonical(element.getAttributes()),
     children: element.toArray().map((child) => {
-      if (child instanceof Y.XmlElement) return tableContent(child);
+      if (child instanceof Y.XmlElement) return structuredContent(child);
       return canonical(child instanceof Y.XmlText ? child.toDelta() : child.toJSON());
     }),
   };
@@ -171,10 +171,10 @@ export function docFingerprint(doc: Y.Doc): string {
         start: run.start,
         end: run.end,
       })),
-      ...(block.type === "table" ? {
+      ...(block.type === "table" || block.type === "card" ? {
         // GFM/rev can lose edge whitespace and marks. Stored cell deltas retain
         // those characters, formatting and comment-anchor deletions for verification.
-        cells: tableContent(findBlockElement(doc, block.id)),
+        cells: structuredContent(findBlockElement(doc, block.id)),
       } : {}),
     })),
     annotations: Object.keys(annotations)

@@ -885,6 +885,47 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
+.ub-card {
+  margin: 12px 0;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--card);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.ub-card + .ub-card { margin-top: 12px; }
+.ub-card .ub-paragraph { margin: 0; color: inherit; white-space: pre-wrap; }
+.ub-card-label, .ub-card-footer {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.ub-card-label { letter-spacing: 0.08em; }
+.ub-card-title { margin-top: 6px; color: var(--foreground); font-size: 18px; font-weight: 600; }
+.ub-card-body { margin-top: 12px; color: var(--prose-text); }
+.ub-card-footer { margin-top: 12px; letter-spacing: 0.06em; }
+.ub-card-footer a { text-transform: none; }
+.ub-card [data-empty="true"] { position: relative; }
+.ub-card [data-empty="true"]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  pointer-events: none;
+  color: var(--muted-foreground);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+.ub-card [data-empty="true"]:not(.ub-card-title) { display: none; }
+.ub-card:has(> .ub-card-label[data-empty="true"]) > .ub-card-title { margin-top: 0; }
+.ProseMirror-focused .ub-card[data-card-focused="true"] {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.ProseMirror-focused .ub-card[data-card-focused="true"] [data-empty="true"] { display: block; }
+.ProseMirror-focused .ub-card[data-card-focused="true"] > .ub-card-title { margin-top: 6px; }
+
 /* Lists are flat sibling blocks: suppress native markers and draw each
    item's ::before from data-list and data-indent. Ordered markers read
    data-number, supplied by editor/list-keys.ts from the schema's export

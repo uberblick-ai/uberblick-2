@@ -24,9 +24,12 @@ import {
   sidebarRoom,
   tableCellText,
   tableRows,
+  cardPartTexts,
+  cardPartElement,
+  CARD_PARTS,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { Block, DocMeta, InlineRun } from "@uberblick/schema";
+import type { Block, CardPart, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
@@ -78,7 +81,12 @@ export class PersistenceError extends Error {
   }
 }
 
-/** A block's text, or a table's last cell text for an agent's end-of-write caret. */
+/** Optional empty parts collapse, so the agent caret belongs to visible prose. */
+function cardCursorPart(card: Y.XmlElement): CardPart {
+  return [...CARD_PARTS].reverse().find(part => cardPartTexts(card, part).some(text => text.length > 0)) ?? "title";
+}
+
+/** A block's editable text for an agent's end-of-write caret. */
 export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
   for (const child of getBlocksFragment(doc).toArray()) {
     if (!(child instanceof Y.XmlElement)) continue;
@@ -87,6 +95,7 @@ export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
       const cell = tableRows(child).at(-1)?.at(-1);
       return cell === undefined ? null : tableCellText(cell);
     }
+    if (child.nodeName === "card") return cardPartTexts(child, cardCursorPart(child))[0] ?? null;
     return child.firstChild instanceof Y.XmlText ? child.firstChild : null;
   }
   return null;
@@ -588,10 +597,10 @@ export class Replicas {
         description: meta.description ?? "",
         links: [
           ...meta.links,
-          ...blocks.flatMap(({ block, inline, table }) =>
-            table === undefined
+          ...blocks.flatMap(({ block, inline, table, card }) =>
+            table === undefined && card === undefined
               ? docLinkRanges(block, inline).map((range) => range.docId)
-              : table.flat().flatMap((cell) => cell.flatMap((run) =>
+              : (table?.flat() ?? Object.values(card ?? {})).flatMap((cell) => cell.flatMap((run) =>
                 run.marks.docLink === undefined ? [] : [run.marks.docLink],
               )),
           ),
@@ -1014,6 +1023,8 @@ export class Replicas {
       const element = findBlockElement(replica.doc, blockId);
       const paragraph = element?.nodeName === "table"
         ? tableRows(element).at(-1)?.at(-1)?.firstChild
+        : element?.nodeName === "card"
+        ? cardPartElement(element, cardCursorPart(element))?.firstChild
         : null;
       if (paragraph instanceof Y.XmlElement) text = paragraph;
     }

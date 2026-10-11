@@ -4,6 +4,8 @@ import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
 import { inlinePlainText } from "./marks.js";
 import { writeGfmTable } from "./table.js";
+import { CARD_PARTS, writeCardText } from "./card.js";
+import type { CardText } from "./card.js";
 import { getMeta } from "./doc.js";
 import { getDocDataEntries } from "./data.js";
 import { blockRev } from "./rev.js";
@@ -18,8 +20,10 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
   // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
   // Use plain table text so formatting alone cannot invalidate approval.
-  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table }) =>
-    table !== undefined && table.length > 0
+  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card }) =>
+    card !== undefined
+      ? writeCardText(Object.fromEntries(CARD_PARTS.map((part) => [part, inlinePlainText(card[part])])) as CardText)
+      : table !== undefined && table.length > 0
       ? writeGfmTable(table.map((row) => row.map(inlinePlainText)))
       : block.text,
   )];

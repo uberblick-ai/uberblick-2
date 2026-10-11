@@ -11,6 +11,9 @@ import {
   isProseBlockType,
   parseTableCell,
   parseTableInput,
+  parseCardInput,
+  parseInline,
+  CARD_PARTS,
   readDirectoryTags,
   readDocumentTags,
   resolveAnnotationRange,
@@ -281,6 +284,19 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
   };
 
+  /** Existing targets in a part survive even when this replica no longer knows them. */
+  const validateCardTargets = (source: string, previous?: string): void => {
+    const card = parseCardInput(source);
+    const oldCard = previous === undefined ? undefined : parseCardInput(previous, false);
+    for (const part of CARD_PARTS) {
+      if (card[part] === oldCard?.[part]) continue;
+      const oldTargets = new Set(parseInline(oldCard?.[part] ?? "").map(run => run.marks.docLink));
+      for (const run of parseInline(card[part])) {
+        if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
+      }
+    }
+  };
+
   /**
    * Resolve `inline` only for prose; source blocks ignore it, and tables read
    * their cell marks from GFM. Validate all seeds before create_doc opens a room.
@@ -290,6 +306,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   ): BlockInput => {
     // A bad later seed must not leave earlier blocks or metadata behind.
     if (block.type === "table") validateTableTargets(block.text ?? "");
+    if (block.type === "card") validateCardTargets(block.text ?? "");
     return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
@@ -414,6 +431,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     decisionReadJson,
     annotationJson,
     validateTableTargets,
+    validateCardTargets,
     contentDurability,
     titleFor,
     linkTitle,

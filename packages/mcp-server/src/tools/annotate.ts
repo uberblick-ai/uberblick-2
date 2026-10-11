@@ -1,4 +1,4 @@
-import { addComment, createAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, createAnnotation, getBlock, setAnnotationResolved } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -74,6 +74,9 @@ export const annotateOperation = documentOperation("annotate", inputSchema, (con
   }
 
   // ANNOTATE_MODES requires these range fields; TypeScript cannot infer the branch.
+  if (getBlock(replica.doc, block_id as string)?.type === "card") {
+    throw new ToolError("annotation_card", "Open new card comment threads in the web editor; MCP supports replies to existing card threads.", { blockId: block_id });
+  }
   if ((row === undefined) !== (column === undefined)) {
     throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
   }

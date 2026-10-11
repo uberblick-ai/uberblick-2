@@ -20,6 +20,7 @@ import {
 import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
 import { parseGfmTable, writeGfmTable } from "./table.js";
+import { escapeContainerLines, parseCardInput, writeCardText } from "./card.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
@@ -545,8 +546,10 @@ function renderBlock(
     case "table":
       // Unnormalized tables have no structured marked cells to render.
       return block.text;
+    case "card":
+      return `:::card\n${block.text}\n:::`;
     case "paragraph":
-      return renderInline(inline);
+      return escapeContainerLines(renderInline(inline));
   }
 }
 
@@ -633,7 +636,7 @@ export function exportMarkdown(
         .join(" | ");
       const line = renderAnnotationComment(
         annotation.id,
-        `${range.row === undefined ? "" : `row=${range.row} column=${range.column} `}range=${range.start}-${range.end}`,
+        `${range.part === undefined ? "" : `part=${range.part} `}${range.row === undefined ? "" : `row=${range.row} column=${range.column} `}range=${range.start}-${range.end}`,
         annotation.resolved === true,
         body,
       );
@@ -1039,7 +1042,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]".includes(next) || (table && "<>&!".includes(next)))) {
+      if (next !== undefined && ("\\`*_~[]:".includes(next) || (table && "<>&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1338,11 +1341,20 @@ function startsBlock(line: string): boolean {
     HEADING_LINE.test(trimmed) ||
     FENCE_LINE.test(trimmed) ||
     COMMENT_LINE.test(trimmed)
+    || line === ":::card"
   );
 }
 
 /** How wide a tab is, counted to the next stop rather than as four columns. */
 const TAB_WIDTH = 4;
+
+/** A line-exact container reader; headers and body are interpreted by its owner. */
+function readContainer(lines: readonly string[], start: number): { source: string; last: number; closed: boolean } {
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index] === ":::") return { source: lines.slice(start + 1, index).join("\n"), last: index, closed: true };
+  }
+  return { source: lines.slice(start + 1).join("\n"), last: lines.length - 1, closed: false };
+}
 
 /**
  * Advance tabs to the next stop, not by four columns: fixed expansion would
@@ -1403,6 +1415,23 @@ export function importMarkdown(markdown: string): ImportedDoc {
     if (trimmed === "") {
       // Blank lines end paragraphs, but a loose list remains the same list.
       flush();
+      continue;
+    }
+
+    if (line === ":::card") {
+      flush();
+      openItems = [];
+      const container = readContainer(lines, i);
+      try {
+        if (!container.closed) throw new Error("Unclosed card");
+        blocks.push({ type: "card", text: writeCardText(parseCardInput(container.source)) });
+      } catch {
+        // Invalid containers are literal prose, including syntax that would
+        // otherwise start headings, code blocks or comments and lose source.
+        const text = lines.slice(i, container.last + 1).join("\n");
+        blocks.push({ type: "paragraph", text, inline: [{ text, marks: {} }] });
+      }
+      i = container.last;
       continue;
     }
 

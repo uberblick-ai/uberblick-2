@@ -12,6 +12,7 @@
  */
 
 import { tableFromRows } from "./table.js";
+import { cardTitleOffset, emptyCard } from "./card.js";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
@@ -89,6 +90,15 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     trigger: "> ",
     keywords: ["blockquote", "cite", "quotation"],
     type: "quote",
+    attrs: {},
+  },
+  {
+    id: "card",
+    label: "Card",
+    group: "Text",
+    trigger: null,
+    keywords: ["label", "title", "body", "footer"],
+    type: "card",
     attrs: {},
   },
   {
@@ -344,11 +354,18 @@ export function convertBlockAtTrigger(
     if (emptied === null) return false;
     tr.replaceWith(found.pos, found.pos + emptied.nodeSize,
       tableFromRows(editor.state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], live.blockId));
+  } else if (entry.type === "card") {
+    const emptied = tr.doc.nodeAt(found.pos);
+    if (emptied === null) return false;
+    tr.replaceWith(found.pos, found.pos + emptied.nodeSize, emptyCard(editor.state.schema, live.blockId));
   } else {
     retypeBlockInTransaction(tr, found.pos, entry.type, entry.attrs);
     if (entry.initialText !== undefined) tr.insertText(entry.initialText, contentStart);
   }
-  tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart)));
+  const converted = tr.doc.nodeAt(found.pos);
+  if (converted === null) return false;
+  const caret = entry.type === "card" ? found.pos + cardTitleOffset(converted) : contentStart;
+  tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
 
   editor.view.dispatch(tr);
   editor.view.focus();
@@ -373,6 +390,7 @@ export function insertBlockBelow(
   if (nodeType === undefined) return false;
   const fresh = entry.type === "table"
     ? tableFromRows(state.schema, [["", "", ""], ["", "", ""], ["", "", ""]], null)
+    : entry.type === "card" ? emptyCard(state.schema, null)
     : nodeType.createAndFill(attrsForNewBlock(entry),
       entry.initialText === undefined ? undefined : state.schema.text(entry.initialText));
   if (fresh === null) return false;
@@ -380,7 +398,7 @@ export function insertBlockBelow(
   endUndoCapture(state);
   const at = blockPos + block.nodeSize;
   const tr = state.tr.insert(at, fresh);
-  tr.setSelection(TextSelection.near(tr.doc.resolve(at + 1)));
+  tr.setSelection(TextSelection.near(tr.doc.resolve(at + (entry.type === "card" ? cardTitleOffset(fresh) : 1))));
 
   editor.view.dispatch(tr);
   editor.view.focus();
