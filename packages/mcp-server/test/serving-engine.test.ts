@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendBlock, getBlocks, initDoc, roomForDoc } from "@uberblick/schema";
 import * as Y from "yjs";
 import {
@@ -21,6 +21,8 @@ import {
   ServingReplicaHeldError,
   type ServingReplicaHolder,
 } from "../src/serving-role.js";
+import { MirrorStore } from "../src/store.js";
+import * as tagCatalog from "../src/tag-catalog.js";
 import {
   hubUrl,
   peerClient,
@@ -236,6 +238,87 @@ describe("serving MCP engine", () => {
       serving: true,
     });
     engines.push(replacement);
+  });
+
+  it("holds its serving role through device work and releases it before closing the injected store", async () => {
+    const config = testConfig();
+    const store = new MirrorStore(config.databasePath, WORKSPACE);
+    const engine = await createMcpEngine(config, { store, serving: true });
+    engines.push(engine);
+    let entered!: () => void;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    const waitForDeviceWork = engine.replicas.sync.waitForDeviceWork.bind(engine.replicas.sync);
+    const deviceWork = vi.spyOn(engine.replicas.sync, "waitForDeviceWork").mockImplementation(async () => {
+      entered();
+      await released;
+      await waitForDeviceWork();
+    });
+    let roleAvailableAtStoreClose = false;
+    const closeStore = store.close.bind(store);
+    const storeClose = vi.spyOn(store, "close").mockImplementation(() => {
+      try {
+        const replacement = acquireServingReplicaRole(store.databasePath, {
+          pid: process.pid,
+          sessionId: "store-close replacement",
+        });
+        roleAvailableAtStoreClose = true;
+        replacement.close();
+      } catch {
+        roleAvailableAtStoreClose = false;
+      }
+      closeStore();
+    });
+    const closing = engine.close();
+    try {
+      await waiting;
+      expect(() => {
+        const premature = acquireServingReplicaRole(store.databasePath, {
+          pid: process.pid,
+          sessionId: "device-work contender",
+        });
+        premature.close();
+      }).toThrow(ServingReplicaHeldError);
+      expect(storeClose).not.toHaveBeenCalled();
+      release();
+      await closing;
+      expect(roleAvailableAtStoreClose).toBe(true);
+      expect(storeClose).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+      await closing;
+      deviceWork.mockRestore();
+      storeClose.mockRestore();
+      store.close();
+    }
+  });
+
+  it("closes the injected store and releases its role when initial catalog work rejects", async () => {
+    const config = testConfig();
+    const store = new MirrorStore(config.databasePath, WORKSPACE);
+    const storeClose = vi.spyOn(store, "close");
+    const seed = vi.spyOn(tagCatalog, "seedTagCatalogOnce").mockRejectedValue(new Error("catalog initialization failed"));
+    let unexpectedEngine: UberblickMcpEngine | undefined;
+    const opening = createMcpEngine(config, { store, serving: true }).then((engine) => {
+      unexpectedEngine = engine;
+      return engine;
+    });
+    try {
+      await expect(opening).rejects.toThrow("catalog initialization failed");
+      expect(storeClose).toHaveBeenCalledTimes(1);
+      expect(() => store.dataVersion()).toThrow();
+      const replacement = acquireServingReplicaRole(config.databasePath, {
+        pid: process.pid,
+        sessionId: "replacement after failed seed",
+      });
+      replacement.close();
+    } finally {
+      await unexpectedEngine?.close();
+      seed.mockRestore();
+      storeClose.mockRestore();
+      store.close();
+    }
   });
 
   it("admits exactly one simultaneous process and makes every loser name that winner", async () => {

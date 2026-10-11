@@ -20,8 +20,8 @@ import { isGithubUsername } from "@uberblick/hub";
 import { hubDatabasePath } from "@uberblick/hub/config";
 import { readDeviceLogin } from "@uberblick/hub/device-login";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";
-import { collectSyncStatus, createMcpServer, formatHubFailure, readWorkspaceName } from "@uberblick/mcp-server";
-import type { McpConfig, SyncStatus, UberblickMcpServer } from "@uberblick/mcp-server";
+import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readWorkspaceName } from "@uberblick/mcp-server";
+import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
@@ -118,9 +118,9 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 /** The live replica reading used by `ub status`. Always releases it. */
 export async function readSyncStatus(
   config: McpConfig,
-  inspect?: (replicas: UberblickMcpServer["replicas"]) => void,
+  inspect?: (replicas: WorkspaceReplicaSet["replicas"]) => void,
 ): Promise<SyncStatus> {
-  const instance = createMcpServer(config);
+  const instance = openWorkspaceReplicas(config);
   try {
     const status = await collectSyncStatus(instance.replicas);
     inspect?.(instance.replicas);
@@ -136,7 +136,7 @@ export async function readSyncStatus(
  * before this replica has applied the store cut. Keep the cut and markers in
  * one snapshot, using the server's public diagnostic primitives.
  */
-export function workspaceCaughtUp(replicas: UberblickMcpServer["replicas"]): boolean {
+export function workspaceCaughtUp(replicas: WorkspaceReplicaSet["replicas"]): boolean {
   const attached = replicas.attachedReplicas();
   const snapshot = replicas.store.syncSnapshot(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),

@@ -10,13 +10,10 @@
 
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import {
-  acquireServingReplicaRole,
-  type ServingReplicaRole,
-} from "./serving-role.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import type { MirrorStore } from "./store.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 const DEFAULT_REFRESH_INTERVAL_MS = 25;
 
@@ -77,26 +74,16 @@ export async function createMcpEngine(
     );
   }
 
-  const store =
-    options.store ?? new MirrorStore(config.databasePath, config.workspaceId);
-  let servingRole: ServingReplicaRole | null = null;
-  let replicas: Replicas | null = null;
+  const workspace = openWorkspaceReplicas(config, {
+    ...(options.store === undefined ? {} : { store: options.store }),
+    serving: options.serving === true,
+    publishOwnPresence: options.serving !== true,
+  });
+  const { store, replicas } = workspace;
   try {
-    if (options.serving === true) {
-      servingRole = acquireServingReplicaRole(store.databasePath, {
-        pid: process.pid,
-        sessionId: config.sessionId,
-      });
-    }
-    replicas = new Replicas(config, store, {
-      publishOwnPresence: options.serving !== true,
-    });
     await seedTagCatalogOnce(replicas);
   } catch (error) {
-    replicas?.destroy();
-    await replicas?.sync.waitForDeviceWork();
-    servingRole?.close();
-    store.close();
+    await workspace.close();
     throw error;
   }
 
@@ -207,10 +194,7 @@ export async function createMcpEngine(
         closed = true;
         stopLoop();
         listeners.clear();
-        replicas.destroy();
-        await replicas.sync.waitForDeviceWork();
-        servingRole?.close();
-        store.close();
+        await workspace.close();
       });
       return closePromise;
     },

@@ -229,7 +229,7 @@ describe("the versioned install payload", () => {
     expect(failed.stderr).toContain("Error: unable to open database file");
     for (const [path, statement] of [
       ["packages/mcp-server/src/store.ts", "this.db = new DatabaseSync(databasePath)"],
-      ["packages/mcp-server/src/server.ts", "store: MirrorStore = new MirrorStore("],
+      ["packages/mcp-server/src/workspace-replicas.ts", "options.store ?? new MirrorStore(config.databasePath, config.workspaceId);"],
       ["packages/mcp-server/src/main.ts", "const instance = createMcpServer(config)"],
       ["packages/mcp-server/src/main.ts", "main().catch("],
     ] as const) {

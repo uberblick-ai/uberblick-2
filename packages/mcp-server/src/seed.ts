@@ -15,7 +15,7 @@
  * shaped around:
  *
  * 1. **It writes through the same path the MCP tools do.** A {@link Replicas}
- *    set over the {@link MirrorStore}, so every update lands in the
+ *    set over the mirror store, so every update lands in the
  *    authoritative update log synchronously and reaches the hub the same way
  *    any tool's write does. Nothing here touches the derived index tables.
  * 2. **Identity comes from the file.** The frontmatter `uuid` is what makes a
@@ -71,8 +71,8 @@ import {
 import type { BlockInput, ImportedBlock, ImportedDoc } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
  * A parsed seed file: an {@link ImportedDoc} that is guaranteed to have identity
@@ -481,8 +481,8 @@ export async function importSeedDir(
   config: McpConfig,
   starter: StarterSeed | null = null,
 ): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config);
+  const { replicas } = workspace;
   try {
     const docs = readSeedDocs(dir);
     if (starter !== null) {
@@ -510,8 +510,6 @@ export async function importSeedDir(
       starter === null ? false : await seedSidebar(replicas, starter);
     return { results, hub: replicas.sync.state().status, sidebar: seeded };
   } finally {
-    replicas.destroy();
-    await replicas.sync.waitForDeviceWork();
-    store.close();
+    await workspace.close();
   }
 }

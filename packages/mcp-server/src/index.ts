@@ -4,10 +4,7 @@
  * Resolved directly from TypeScript source (see package.json exports); the
  * process entry point is ./main.ts, run with tsx.
  *
- * The package's interface is small on purpose: build a config from the
- * environment, build a server from the config, attach a transport. The
- * replicas, the store and the sync layer are reachable through the returned
- * server for tests and diagnostics, not as separate entry points.
+ * Servers, engines and one-shot diagnostics share the workspace replica factory.
  */
 
 export {
@@ -17,6 +14,8 @@ export {
   usesDeviceLogin,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
+export { openWorkspaceReplicas } from "./workspace-replicas.js";
+export type { WorkspaceReplicaOptions, WorkspaceReplicaSet } from "./workspace-replicas.js";
 export { createMcpEngine } from "./engine.js";
 export type {
   EngineHealth,
