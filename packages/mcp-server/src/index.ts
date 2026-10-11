@@ -1,9 +1,5 @@
 /**
- * @uberblick/mcp-server package entry.
- *
- * Resolved directly from TypeScript source (see package.json exports); the
- * process entry point is ./main.ts, run with tsx.
- *
+ * Export factories from TypeScript source; ./main.ts owns process startup.
  * Servers, engines and one-shot diagnostics share the workspace replica factory.
  */
 

@@ -2,10 +2,8 @@
  * Fresh-room writes cannot get ahead of the token admission gate.
  *
  * These are real MCP calls over the in-memory MCP transport and a real shared
- * Hocuspocus socket to an in-process hub. The defect lived between those two
- * layers: the provider listened to a room as soon as it was constructed, so an
- * attach-then-write burst named hundreds of unauthenticated rooms before the
- * token gate had admitted them.
+ * Hocuspocus socket to an in-process hub. An attach-then-write burst must not
+ * publish unauthenticated rooms before the token gate admits them.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -1,5 +1,5 @@
 /** Unauthenticated public identity lookup, never an authorization source. */
-import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
 
 type AccountTarget = { githubUsername: string } | { githubAccountId: string };
 type AccountLookup =

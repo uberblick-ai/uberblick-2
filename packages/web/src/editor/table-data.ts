@@ -1,3 +1,4 @@
+// Decision: 4b565a90-d152-4a51-ad63-cdb05606ec5f
 /** Detached projections retain every valid record for a native read-only table. */
 import { compareCodePoints, isExternalHref } from "@uberblick/schema";
 import type { DataRecord, DocData } from "@uberblick/schema";

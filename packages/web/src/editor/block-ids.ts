@@ -1,23 +1,9 @@
 /**
- * Stable block ids, assigned from the editor side.
- *
- * The schema package assigns an id to every block it creates. The editor
- * creates blocks too — pressing Enter splits a paragraph, and ProseMirror's
- * `split` copies the original node's attributes onto **both** halves. Without
- * this plugin the second half would carry a duplicate id, and duplicate ids
- * break every id-addressed operation in the system (`editBlock`, annotation
- * anchoring, `rev` checks) because `findBlockElement` resolves the first match.
- *
- * So: on every transaction, walk the top-level blocks and assign a fresh UUID
- * to any block whose id is missing or already seen earlier in the document.
- * First occurrence keeps the id; later duplicates get new ones. That makes an
- * Enter-split deterministic — the first half stays the block it was, the second
- * half is a new block.
- *
- * The repair stays in the undo stack. Marking it `addToHistory: false` made
- * y-prosemirror stamp the whole Yjs transaction — the user's split included —
- * as uncaptured, so the split could not be undone (#23). The plugin is
- * idempotent, so a repair that gets undone is simply made again.
+ * Assign missing and duplicate ids in document order: the first occurrence
+ * keeps its identity, later copies get fresh UUIDs. Splits copy attributes and
+ * would otherwise break id-addressed edits, annotations and revision checks.
+ * Keep repair in undo history: addToHistory:false marks the entire Yjs split
+ * transaction uncaptured. Idempotent repair can run again after undo.
  */
 
 import { Extension } from "@tiptap/core";

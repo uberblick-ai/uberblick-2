@@ -18,14 +18,8 @@ const indexArg = z
   .describe("Position, clamped into range. Omitted means last.");
 
 /**
- * `sidebar_group`'s three shapes, stated once for the boundary and for
- * `tools/list`.
- *
- * `action` already said which one a call means; what it did not say is that the
- * other actions' fields are then wrong rather than spare. A `rename` carrying
- * an `index` used to move nothing and say nothing — the handler simply read the
- * fields its branch wanted — so a caller that meant to move a group and typed
- * the wrong action was told it had succeeded.
+ * One table validates and advertises each action; fields belonging to another
+ * action must refuse rather than silently disappear.
  */
 const SIDEBAR_GROUP_MODES: readonly ToolMode[] = [
   {
@@ -126,10 +120,7 @@ export const sidebarGroupOperation = sidebarOperation("sidebar_group", sidebarGr
   }
   let renamed = target.name;
   if (action === "rename") {
-    // `rename` without a `name` never reaches here: the input boundary
-    // refuses it — see {@link SIDEBAR_GROUP_MODES}. TypeScript reads the
-    // field as optional because the object declares it once for all three
-    // actions, which is what this assertion stands in for.
+    // SIDEBAR_GROUP_MODES requires name here; the shared TypeScript shape is optional.
     renamed = name as string;
     renameGroup(sidebar.doc, target.id, renamed);
   } else if (action === "delete") {

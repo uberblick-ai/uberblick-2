@@ -138,10 +138,8 @@ describe("mintToken / verifyToken", () => {
       "a.b.c",
       "!!!.!!!",
       Buffer.from('{"sub":"s"}').toString("base64url"),
-      // One spelling only. `atob` is forgiving about all three of these and
-      // would decode each to the bytes of the token above — which is what
-      // would let a replay cache (#242) keyed on the token string be walked
-      // straight past.
+      // One spelling only: forgiving atob aliases would bypass a replay cache
+      // keyed on the token string.
       `${payload.slice(0, 8)} ${payload.slice(8)}.${signature}`,
       `${payload}.${Buffer.from(signature, "base64url").toString("base64")}`,
       `${payload}.${signature}=`,
@@ -151,8 +149,7 @@ describe("mintToken / verifyToken", () => {
   });
 
   it("refuses a v1 token — no typ, no exp — however well it is signed", async () => {
-    // The exact payload this hub minted before claims v2. There is no
-    // compatibility branch, and nobody may add one back.
+    // Missing typ/exp is unsupported even with a valid signature; keep the refusal.
     const v1 = await forge({
       sub: "s",
       workspace: WORKSPACE,
@@ -179,9 +176,9 @@ describe("mintToken / verifyToken", () => {
     expect(await verifyToken(key, await forge(minted))).not.toBeNull();
 
     for (const claims of [
-      { ...minted, typ: undefined }, // v1: no type at all
+      { ...minted, typ: undefined }, // Missing type
       { ...minted, typ: "admin" }, // admin authority never rides a room token
-      { ...minted, exp: undefined }, // v1: never expires
+      { ...minted, exp: undefined }, // Missing expiry
       { ...minted, sub: "" },
       { ...minted, workspace: "" },
       // The hub compares the claim against the workspace segment it parses out

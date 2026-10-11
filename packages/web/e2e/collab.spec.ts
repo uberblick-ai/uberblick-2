@@ -266,7 +266,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // the label only through y-prosemirror's cursor builder.
   await expect(label).toHaveCSS("background-color", color);
 
-  // And when A picks a different presence colour (#74), B's copy of A's cursor
+  // And when A picks a different presence colour, B's copy of A's cursor
   // follows it live — the choice is an awareness republish, not something that
   // waits for a reconnect. The colour is read back off A's selected swatch, so this
   // asserts the two ends agree rather than pinning a hex.
@@ -294,7 +294,7 @@ test("a peer joining leaves the status row's height and the prose where they wer
 }) => {
   // The cluster is the row's tallest child, and a peer arriving is the most
   // ordinary event in a collaborative document: if the row grows to fit the
-  // first circle, every block below it drops by that much (#832). #793's
+  // first circle, every block below it drops by that much. The component
   // proof covers the row's optional *text*; only a real second client puts a
   // 28px control in it.
   const title = docTitle("row-height");

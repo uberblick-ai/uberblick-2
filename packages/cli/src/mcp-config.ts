@@ -1,50 +1,21 @@
-/**
- * What each MCP client's configuration file looks like, and how to tell whether
- * one already registers uberblick.
- *
- * Two clients, two formats. Claude Code keeps a JSON object under `mcpServers`;
- * Codex keeps a TOML table called `[mcp_servers.<name>]`.
- * The paths and shapes here were checked against each vendor's own
- * documentation and against what each vendor's CLI actually writes.
- *
- * **Nothing here writes a config file.** `ub mcp install` either runs the
- * vendor's own CLI or prints a snippet for somebody to paste. Install asks
- * {@link presence} whether our entry is there and matches what it would register.
- * Doctor reads only the binding variables through {@link doctorEntry}, using
- * JSON or TOML parsing and shared entry validation. Install parses TOML with
- * the same options before comparing the entry. No config is edited, so no
- * byte-preserving splicer is needed.
- *
- * **Nothing echoes a value back.** {@link presence} answers with one of four
- * words and never with anything it read. A config file is exactly where
- * somebody keeps an API token, and a diagnostic that quotes one onto a terminal
- * has leaked it — so a file this cannot read is `unusable`, named by path and
- * described no further: not the parser's complaint, not a line of it.
- */
-
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 
-/** The name uberblick registers itself under, in every client. */
 export const SERVER_NAME = "uberblick";
 
-/** The clients `ub mcp install` knows how to wire up. */
 export const TARGETS = ["claude", "codex"] as const;
 export type TargetName = (typeof TARGETS)[number];
 
 export type Scope = "project" | "user";
 
-/** A server as a client registers it: a name, and the program it spawns. */
 export interface Entry {
-  /** The key it is registered under — {@link SERVER_NAME} for install. */
   name: string;
   command: string;
   args: string[];
 }
 
-/** The complete entry install registers, independent of workspace selection. */
 export const DEFAULT_ENTRY: Entry = {
   name: SERVER_NAME,
   command: "ub",
@@ -59,12 +30,8 @@ export interface TargetFile {
 }
 
 /**
- * Where a target keeps the configuration for one scope.
- *
- * Project scope is relative to the caller's project directory and `--user` to the
- * home directory, except for Codex, which lets `CODEX_HOME` move its whole
- * configuration directory — and honouring that is what lets `ub` and `codex mcp
- * add` agree about which file they are both talking about, in either scope.
+ * Honour user-scope CODEX_HOME so presence reads the file Codex will write.
+ * Project scope uses the same directory install passes to Codex explicitly.
  */
 export function targetFile(
   target: TargetName,
@@ -76,8 +43,7 @@ export function targetFile(
   if (target === "claude") {
     return scope === "project"
       ? { path: join(cwd, ".mcp.json"), format: "json" }
-      : // User scope is the top level of `~/.claude.json`, alongside the
-        // per-project `projects` map that holds *local*-scope servers.
+      : // User entries share this file with the per-project local-scope map.
         { path: join(home, ".claude.json"), format: "json" };
   }
   const configured = env.CODEX_HOME?.trim();
@@ -94,48 +60,30 @@ export function targetFile(
       };
 }
 
-/**
- * The Codex configuration directory a project scope means.
- *
- * `codex mcp add` writes whatever `CODEX_HOME` names, and this is the value
- * `install.ts` gives it — so the file this module reads and the file the vendor
- * writes are the same file by construction.
- */
+/** Keep project reads aligned with the CODEX_HOME install passes to Codex. */
 export function codexHome(cwd: string): string {
   return join(cwd, ".codex");
 }
 
-/** What a client's config already holds under one entry's name. */
 export type Presence =
   /** Nothing there: no file, or a file that registers nothing of ours. */
   | "absent"
-  /** Exactly the entry this would register. */
+  /** Semantically the plain entry, including vendor-written empty defaults. */
   | "ours"
   /** Something else under our name; not ours to replace. */
   | "foreign"
-  /**
-   * The file is there and this cannot read it. Distinct from `absent` because
-   * the two lead somewhere different: absent means go ahead, unusable means a
-   * file exists whose contents nobody here knows — reported by path, never
-   * delegated to a vendor CLI that would write over it.
-   */
+  /** Never delegate a write over an existing file whose contents are unreadable. */
   | "unusable";
 
 /**
- * Whether `file` already registers `entry`, and whether it is ours.
- *
- * The whole read side of `ub mcp install`. A file that is not there is
- * `absent`; a file that is there and will not open or
- * will not parse is `unusable`, which is a different answer for a different
- * reason: the caller may not treat a file it cannot read as an empty one.
+ * Return only a verdict: source values and parser messages may contain tokens.
+ * Only ENOENT permits treating a file as absent; other read failures refuse it.
  */
 export function presence(file: TargetFile, entry: Entry): Presence {
   let text: string;
   try {
     text = readFileSync(file.path, "utf8");
   } catch (error) {
-    // Not there is nobody's install; anything else — a directory, a mode that
-    // refuses us — is a file that exists and has not been read.
     return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unusable";
   }
   if (file.format === "toml") {
@@ -145,8 +93,7 @@ export function presence(file: TargetFile, entry: Entry): Presence {
       if (!doctorTable(doc.mcp_servers)) return "unusable";
       if (!Object.hasOwn(doc.mcp_servers, entry.name)) return "absent";
       const held = doc.mcp_servers[entry.name];
-      // Codex registers only command, args and env. Dates are scalar values,
-      // and JSON's optional stdio type is not part of the TOML entry we write.
+      // A TOML date is not a table; JSON's optional type is not a Codex field.
       if (!doctorTable(held) || Object.hasOwn(held, "type")) return "foreign";
       if (held.env !== undefined && !doctorTable(held.env)) return "foreign";
       return jsonMatches(held, entry) ? "ours" : "foreign";
@@ -243,28 +190,19 @@ export function claudeDoctorEntries(
   return { local, user: doctorJsonEntry(doc) };
 }
 
-/** Parse Codex's config once, then apply the same entry/pin rules as JSON. */
+// Decision: 42a229be-a9b9-4c56-9b68-11f26cb145da.
 function doctorTomlEntry(text: string): DoctorEntry {
   try {
-    // Valid unrelated 64-bit integers must not make a config unreadable.
     const doc = parseToml(text, { integersAsBigInt: "asNeeded" });
     return doctorJsonEntry({ mcpServers: doc.mcp_servers });
   } catch {
-    // Parser errors quote source lines that may contain credentials.
     return { status: "unusable" };
   }
 }
 
 /**
- * Keys a stdio entry may carry and still count as the one `ub` installs.
- *
- * `claude mcp add` writes `type: "stdio"` and an empty `env`, and a hand-pasted
- * snippet writes neither, so equality has to be about what the client will *do*
- * rather than about the bytes — otherwise installing with the vendor CLI and
- * then running `ub mcp install` again would report a conflict with itself. Any
- * key outside this set (`cwd`, a URL transport, anything a future client adds)
- * means the entry is not understood, and an entry that is not understood is
- * never silently declared "already installed".
+ * Vendor-written stdio type and empty env are equivalent to omitted defaults.
+ * Reject unknown fields, including cwd and URL transports, as foreign entries.
  */
 const KNOWN_JSON_KEYS = new Set(["type", "command", "args", "env"]);
 
@@ -277,10 +215,7 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
   if (Object.keys(held).some((key) => !KNOWN_JSON_KEYS.has(key))) return false;
   if (held.type !== undefined && held.type !== "stdio") return false;
   const args = held.args ?? [];
-  // Absent and empty are the same plain entry, spelled two ways. Any environment
-  // variable makes this somebody else's configuration. A non-object — `null`,
-  // an array, a string, a number — is not an environment at all, and an entry
-  // this does not understand is never declared "already installed".
+  // Only an absent or empty object env matches; pins and malformed env are foreign.
   if (held.env !== undefined && !isObject(held.env)) return false;
   return (
     held.command === entry.command &&
@@ -292,21 +227,12 @@ function jsonMatches(held: unknown, entry: Entry): boolean {
 }
 
 /**
- * A TOML basic string.
- *
- * `JSON.stringify` is the whole implementation because a JSON string *is* a TOML
- * basic string: TOML's escape set — `\b \t \n \f \r \" \\ \uXXXX` — contains
- * every escape JSON emits, including the `\u00XX` form JSON uses for the control
- * characters TOML also forbids raw.
+ * JSON string escapes are valid TOML basic-string escapes, including controls.
  */
 function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
-/**
- * The block to paste into a Codex config, equivalent to what `codex mcp add`
- * writes for the same server.
- */
 function tomlBlock(entry: Entry): string {
   const args = entry.args.map(tomlString).join(", ");
   return (
@@ -323,7 +249,6 @@ function serverObject(entry: Entry): Record<string, unknown> {
   };
 }
 
-/** What `ub mcp install` prints: a snippet valid for the named target. */
 export function snippet(format: Format, entry: Entry): string {
   return format === "json"
     ? `${JSON.stringify({ mcpServers: { [entry.name]: serverObject(entry) } }, null, 2)}\n`

@@ -1,11 +1,11 @@
 /**
- * `ub open` — one test per acceptance criterion of #97.
+ * `ub open` lifecycle and serving contracts.
  *
  * The world is real here, as it is in the `ub doctor` suite: a real hub on an
  * ephemeral port for "a hub is already answering", a real foreign listener for
  * "the port is taken", real HTTP requests against the served bundle, and a real
  * SIGINT to end the foreground. Nothing here calls {@link runUb}: `spawnSync`
- * blocks this process's event loop (#154), so a `ub open` child probing a hub
+ * blocks this process's event loop, so a `ub open` child probing a hub
  * *this* process is serving would find it unreachable and every assertion would
  * be about the blockage rather than about the command.
  *
@@ -21,9 +21,9 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/hub";
-import { writeHubLogin } from "@uberblick/hub/auth-store";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
@@ -143,10 +143,9 @@ describe("ub open", () => {
     const webPort = await freePort();
     const app = await open(box, ["--port", String(webPort)], env);
 
-    // Byte-exact: the path and the shape are #91's contract, and the web
-    // client's fallback is silent enough that a wrong document looks like an
-    // offline hub rather than a misconfiguration. Its independent key admits
-    // the page only to the local server, never to the upstream hub.
+    // Byte-exact: a wrong document path or shape silently looks like an
+    // offline hub to the web client. Its independent key admits the page only
+    // to the local server, never to the upstream hub.
     const document = await get(`${app.url}uberblick-config.json`);
     expect(await document.text()).toBe(
       servingDocumentOf(app.url, remote, WORKSPACE, localBrowserKey(WORKSPACE, box.env)),
@@ -236,7 +235,7 @@ describe("ub open", () => {
     }
   });
 
-  // --- #758: serving freezes the startup binding and reports rebound ----------
+  // --- serving freezes the startup binding and reports rebound ----------------
 
   it("freezes the serving binding and marks a later machine rebind", async () => {
     const { box, env } = configured();
@@ -401,7 +400,7 @@ describe("ub open", () => {
       remoteHubUrl: "wss://hub.example.ts.net/ws",
     });
 
-    // The fallback is still there for deep links (#68) — which is exactly why
+    // The fallback serves deep links — which is exactly why
     // the document has to be matched before it.
     const deepLink = await get(`${app.url}${WORKSPACE}/6bd9d0b1-6d0e-4e5a-9c93-0a5c9f5a7e11`);
     expect(deepLink.status).toBe(200);
@@ -488,7 +487,7 @@ describe("ub open", () => {
     const { box, env, bundle } = configured();
     stamp(bundle, null);
 
-    // The stale bundle actually observed: built before the stamp existed.
+    // An unversioned bundle cannot prove protocol compatibility.
     const unstamped = await openFails(box, [], env);
     expect(unstamped.status).toBe(1);
     expect(unstamped.output).toContain("no sync protocol stamp");

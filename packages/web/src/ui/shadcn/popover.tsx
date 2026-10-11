@@ -1,13 +1,7 @@
 /**
- * shadcn/ui popover, vendored (#27).
- *
- * Vendored means the source lives here and is ours to read and change — that is
- * how shadcn ships, and it is why adopting it costs three Radix packages rather
- * than a component framework. Trimmed against the upstream copy in two ways:
- * the enter/exit animation utilities are gone (they come from `tw-animate-css`,
- * a dependency for a fade), and the class strings read the product's own tokens
- * — see `../tailwind.css` for why radius and shadow are spelled
- * `rounded-(--radius)` rather than `rounded-lg`.
+ * Trimmed shadcn popover uses product tokens and omits upstream animation
+ * utilities and their fade dependency. Read radius and shadow directly
+ * through tailwind.css to avoid token cycles.
  */
 
 import * as PopoverPrimitive from "@radix-ui/react-popover";

@@ -1,11 +1,11 @@
 /**
- * Two workspaces, one hub, two corpora that never meet (#151).
+ * Two workspaces, one hub, two corpora that never meet.
  *
  * The separation is not a feature this package implements — it falls out of the
  * room key carrying the workspace (`<workspaceId>/<docUuid>`) and of the
  * database being named after it. That is exactly why it is worth a test: a
  * mechanism nobody wrote is a mechanism nobody notices breaking. A default
- * workspace slipping back in, a room key built from something other than the
+ * workspace, a room key built from something other than the
  * config, a shared database file — each would silently *union* two corpora,
  * because the directory is a Y.Map keyed by document uuid and disjoint keys
  * merge without conflict, without error and without a way back.

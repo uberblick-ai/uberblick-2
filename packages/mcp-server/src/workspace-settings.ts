@@ -5,11 +5,8 @@ import type { McpConfig } from "./config.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
- * Store a newly created workspace's name durably in this machine's replica.
- *
- * The caller owns the UUID claim. This write is independent of starter seeding
- * and needs no hub: the ordinary replica observer commits it to the update log
- * synchronously, marking the settings room pending for the next syncing client.
+ * The caller owns the UUID claim. Persist independently of starter seeding or
+ * hub availability; the observer logs synchronously and marks settings pending.
  */
 export function storeWorkspaceName(config: McpConfig, name: string): void {
   const validated = validateWorkspaceName(name);

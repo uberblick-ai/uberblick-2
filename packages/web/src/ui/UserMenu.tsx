@@ -1,14 +1,7 @@
 /**
- * The standard sidebar account control and this tab's preferences panel.
- * The account comes from the local serving process; presence remains a
- * separate collaboration identity inside the panel.
- *
- * A popover rather than a menu, deliberately. A menu is a list of commands you
- * pick one of and leave; this is a small panel of controls and readouts you
- * come back out of unchanged, with controls and a connection count. The
- * workspace switcher above it *is* a list of commands, and is a
- * menu (see `WorkspaceSwitcher`). Both surfaces compose the existing local
- * shadcn components and keep Radix's keyboard, focus and dismissal behavior.
+ * Keep served account and collaboration identity separate. Preferences
+ * compose a Radix popover because they are persistent controls and readouts,
+ * while workspace destinations compose a menu of commands.
  */
 
 import { useEffect, useId, useState } from "react";
@@ -47,8 +40,8 @@ export function UserMenu({
    */
   identity: AwarenessUser;
   /**
-   * MCP sessions in the workspace right now — `useAgentSessions` is where
-   * "which of these is an agent" is decided.
+   * Count live workspace MCP sessions through useAgentSessions' positive
+   * marker test.
    */
   agentSessions: number;
   /** Safe account reading for the hub this page is served from. */

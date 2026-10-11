@@ -72,6 +72,25 @@ A requirement's \`decisions\` are a derived, oldest-topic-first log resolved ent
 
 \`list_docs({})\` omits decision records. Use \`list_docs({kind: "decision"})\` for one row per topic; a status or tag filter also asks for exact matching topics. Each row presents its record in force, otherwise a pending record, otherwise the first record. \`include_superseded: true\` returns individual records. A topic with conflicting maximal decided records has nothing in force; get_doc returns every predecessor, direct successor and the resolution rather than choosing one replacement.
 
+### When to create a decision record
+
+A decision record preserves a deliberate architectural, product or UX choice, its enduring reason, and the guidance future work should follow. It adds something that reading the code or configuration alone cannot tell you.
+
+**Do** propose a record when the choice will guide multiple tasks, prevent a consequential accidental reversal, or settle a topic repeatedly debated or reconsidered. A rarely consulted record can still be valuable if it protects an important compatibility, security or product commitment. Issues, reviews and Git history can reveal repeated uncertainty; they do not prove historical intent.
+
+**Do not** create a record just to describe existing code, configuration, a routine fix, a temporary workaround or implementation mechanics. Do not turn every changed detail into policy. Keep the meaningful choice precise while leaving its implementation flexible.
+
+| Useful decision | Description that does not justify a record |
+| --- | --- |
+| Support these iOS versions because of our users’ devices and maintenance budget; reconsider when those conditions change. Specify whether this means minimum support, an explicit set or tested versions. | The deployment target is set to this version. |
+| Users can read and edit previously opened documents offline, so interrupted connectivity does not interrupt their work. | This function reads from the local database. |
+| Use shadcn/ui as the sole component library and prefer its standard components to custom implementations, to keep the UI consistent and reduce maintenance. Custom alternatives require clear justification and human approval. | This screen imports a Button component from shadcn/ui. |
+| Clients synchronize through a shared service rather than directly with each other, for stated operational and connectivity reasons. | A list of endpoints, classes or dependencies. |
+
+Before proposing a record, ask: **What concrete future choice would it guide, or what consequential mistake would it prevent?** If neither has a credible answer, keep the explanation in ordinary documentation, code comments, an issue or a PR.
+
+Check existing decision topics first. Reuse the current topic; when changing its answer, follow the successor lifecycle. A useful candidate is not automatically authorized for creation: follow the project’s approval rules. These examples illustrate how to judge a candidate; they do not establish policies for your project.
+
 ## Content locks
 
 Both content locks leave document-room access and structured-data reads available.
@@ -234,7 +253,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "lifecycle",
     title: "Decision records and lifecycle",
-    description: "Requirements, decision topics, supersession, status, authority, content locks, archive and restoration.",
+    description: "Requirements, decision topics, when to create decision records, supersession, status, authority, content locks, archive and restoration.",
     text: lifecycle,
   },
   {

@@ -36,14 +36,8 @@ function firstStatus(kind: DocumentKind): DocumentStatus {
 }
 
 /**
- * Where a new document goes in the sidebar — optional, and the whole of it.
- *
- * Placement implies pinning, so there is no `pinned` boolean and no `state`
- * enum: a contradictory pair like `{pinned: false, group: …}` is not a state
- * this input can express. Both objects are `.strict()`, so a caller reaching
- * for either is told rather than having it silently dropped — and the group is
- * an object with an id rather than a bare name, because creating a group is
- * pin_doc's job and must not happen as a side effect of creating a document.
+ * Placement implies pinning and names an existing group ID. Document creation
+ * must not create groups or accept contradictory pin/state fields.
  */
 const sidebarPlacementArg = z
   .object({
@@ -89,9 +83,7 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
-// `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
-// key sits, so the nested placement object is strict too — see
-// {@link sidebarPlacementArg}. The top level is strict like every tool's.
+// Refuse unknown keys at the root and throughout nested placement objects.
 export const inputSchema = strictInput(
   {
     title: titleArg,
@@ -183,21 +175,16 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     );
   }
 
-  // Before allocating a document uuid: an invalid tag selection is an
-  // all-or-nothing refusal, not the first stage of a partial create.
+  // Refuse invalid tags before allocating an identity or writing any room.
   const tagIds = resolveTagSelectors(replicas, tags ?? []);
 
-  // Resolved before a uuid exists, because this is the one part of the call
-  // that can still be all-or-nothing: an unknown group must fail having
-  // created nothing. Everything after it is three independently persisted
-  // rooms, reported one by one.
+  // Refuse unknown groups before independently persisted room stages begin.
   const group =
     sidebar === undefined
       ? null
       : requireGroup(replicas, sidebar.group.id);
 
-  // Same reason, same place: an inline reference to a target this replica
-  // does not know refuses the whole call before there is a document.
+  // Resolve all seed targets before creating a document.
   const inputs = (blocks ?? []).map(blockInputFor);
 
   if (lifecycle?.kind === "decision") {
@@ -214,13 +201,11 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
 
   const uuid = randomUUID();
   const replica = replicas.replica(uuid);
-  // The one write that opens its room directly instead of through
-  // `requireWritableDoc`, and it is working in the document like any other.
+  // Creation bypasses requireWritableDoc, so announce document activity here.
   replicas.touch(replica);
   const directory = replicas.directory();
   const sidebarReplica = replicas.sidebar();
 
-  /** Which of this call's rooms a failed append names. */
   const purposeOf = (room: string): string => {
     if (room === replica.room) return "document";
     if (room === directory.room) return "directory";
@@ -237,12 +222,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   );
 
   stage("document", replica, () => {
-    // One transaction, so the document's room is ONE append: without it the
-    // metadata and each initial block are separate updates, and a refusal
-    // on the third block would leave the first two — and the directory stub
-    // the observer repaired from them — durable, under an error that says
-    // nothing survived. The stage boundary this call reports is only true
-    // if the write underneath it is atomic in the log.
+    // Keep metadata and seeds in one logged update; a later seed append must
+    // not fail after earlier blocks survived under a "nothing survived" refusal.
     replica.doc.transact(() => {
       initDoc(replica.doc, {
         uuid,
@@ -254,9 +235,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
           : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
       });
-      // The same schema-owned catalog boundary set_metadata uses. Validation
-      // already ran before identity allocation; this writes the canonical
-      // assignment representation inside the document's one update.
+      // Store validated canonical tags inside the document's single update.
       assignDocumentTags(replica.doc, tagCatalog(), tagIds);
       if (lifecycle !== null) {
         setKind(replica.doc, lifecycle.kind);
@@ -273,9 +252,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     });
   });
 
-  // Observing the document's own update repairs the stub, but a brand-new
-  // document must be discoverable because create_doc said so, not because
-  // a side effect happened to fire.
+  // Guarantee discoverability even if the document observer did not publish a stub.
   stage("directory", directory, () => {
     if (getDirectoryEntry(directory.doc, uuid) !== null) return;
     const now = Date.now();
@@ -294,8 +271,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   let placement: SidebarPlacement | null = null;
   if (group !== null && sidebar !== undefined) {
     stage("sidebar", sidebarReplica, () => {
-      // The same pin operation pin_doc runs — see placeInGroup. A brand-new
-      // uuid is pinned rather than moved, so it can only appear once.
+      // Share pin_doc's placement primitive so the new UUID appears only once.
       try {
         const { position } = placeInGroup(
           replicas,
@@ -305,11 +281,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
         );
         placement = { group: { id: group.id, name: group.name }, position };
       } catch (error) {
-        // A concurrent sidebar_group delete, landing between the lookup at
-        // the top of this call and this write. pin_doc answers that with
-        // its own `group_not_found` and nothing else to say; here the
-        // document and its stub are already durable, so the caller has to
-        // hear that before it retries a create it does not need.
+        // A concurrent group deletion leaves the document and stub durable;
+        // report partial success so the caller does not create a duplicate.
         if (
           !(error instanceof ToolError) ||
           error.code !== "group_not_found"

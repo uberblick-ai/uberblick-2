@@ -17,13 +17,13 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import * as Y from "yjs";
-import type { HubConfig } from "../src/config.js";
+import type { TeamHubConfig as HubConfig } from "../src/team-config.js";
 import { silentLogger } from "../src/log.js";
-import type { Hub } from "../src/server.js";
-import { createHub } from "../src/server.js";
-import type { TokenScope } from "../src/token.js";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
+import type { TeamHub as Hub } from "../src/team.js";
+import { createTeamHub as createHub } from "../src/team.js";
+import type { TokenScope } from "@uberblick/schema/token";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 
 /** The hub's HMAC secret in tests. Never a valid token itself. */
 export const TEST_SECRET = "test-hmac-secret-for-the-hub";
@@ -174,7 +174,7 @@ export interface ClientOptions {
   messageReconnectTimeout?: number;
   /**
    * The protocol version this client claims, or `null` to send the token bare —
-   * a client from before the envelope, which is what the flag day refuses.
+   * bare tokens must fail the protocol check before token inspection.
    *
    * Defaults to this build's, because a real client always wraps: a test that
    * hands this rig a garbage or forged *token* is asking what the hub makes of

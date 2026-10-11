@@ -2,15 +2,8 @@ import { ToolError } from "../failures.js";
 import type { Replica, Replicas } from "../replica.js";
 
 /**
- * The one answer a multi-room write that stopped part-way gives, whichever way
- * it stopped: what is durable, what is not, that nothing was rolled back, and
- * what to do. One shape, because a caller that learns to read a refused append
- * must not have to learn a second one — for a `create_doc` whose group
- * disappeared underneath it, or for an `archive_doc` whose unpin the log
- * refused.
- *
- * `applied`, `partial` and `synced` come from the shared stamp in
- * ../failures.ts; only what the call knows on top of them is here.
+ * Add room details to failures.ts's mutation stamp for any stopped multi-room
+ * write, including a disappeared group or refused unpin. Nothing is rolled back.
  */
 export function stoppedPartWay(detail: {
   code: string;
@@ -24,16 +17,12 @@ export function stoppedPartWay(detail: {
 }): ToolError {
   return new ToolError(detail.code, detail.message, {
     uuid: detail.uuid,
-    // Some of this call's work is durable whenever a room completed before the
-    // one that failed — `completed` is which, and there is no rollback that
-    // could make it false.
     partial: detail.completed.length > 0,
     recoveryClass: "manual",
     rolledBack: false,
     completed: detail.completed.map((entry) => ({ ...entry, applied: true })),
     failed: detail.failed,
-    // The room every other failure of this kind names, kept so a caller that
-    // reads one field reads the same field here.
+    // Retain the ordinary failure's room field alongside multi-room details.
     room: detail.failed.room,
     recovery: detail.recovery,
     ...(detail.extra ?? {}),
@@ -41,30 +30,10 @@ export function stoppedPartWay(detail: {
 }
 
 /**
- * Stage a write across several rooms: write one, then check the log took it
- * before touching the next.
- *
- * A refused append is recorded rather than thrown (see ../replica.ts), so without
- * this check the next room would be written on top of a failure and the caller
- * would hear one room name for a call that had touched three. Stopping here is
- * what makes `completed` true.
- *
- * The failed room is the one the log named, not the stage that noticed: writing
- * a document publishes its directory stub through the observer, so the
- * directory is where a document write can fail. The recorded failure is the
- * first refused append, so a room written before it — this stage's own, when
- * the two names differ — did reach the log.
- *
- * The boundary: a second room failing inside this same call (another document
- * syncing while it ran) is the one case where the sticky failure names a room
- * this stage did not write, so the stage's own append is reported durable
- * without having been re-checked. The caller's `other` recovery is why that is
- * survivable — it tells the caller to re-verify with `list_docs` and
- * `get_sidebar` rather than trust `completed`.
- *
- * `purposeOf` names the room a failure reports; `recoveryFor` turns the stage
- * that was running and the room that failed into the sentence the caller acts
- * on, because what a partial write costs is the calling tool's own knowledge.
+ * Append refusals are recorded, not thrown: check after each room before
+ * writing the next. Report the log's first failed room, which may be a directory
+ * observer's room rather than the stage's target. Callers supply room purposes
+ * and recovery for the stage and failed room.
  */
 export function roomStages(
   replicas: Replicas,
@@ -91,6 +60,9 @@ export function roomStages(
     }
     const failedAt = purposeOf(failure.room);
     if (failure.room !== target.room) {
+      // A different failed room follows this target's append. For an unrelated
+      // sync failure, the target is not rechecked: "other" recovery must tell
+      // callers to verify completed rooms with list_docs and get_sidebar.
       completed.push({ purpose, room: target.room });
     }
     throw stoppedPartWay({

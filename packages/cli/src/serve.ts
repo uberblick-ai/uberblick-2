@@ -1,19 +1,3 @@
-/**
- * `ub mcp serve` — the stdio entry point every MCP client is pointed at.
- *
- * It resolves configuration and runs the MCP server as a child process with that
- * environment. Two things fall out of that split, and both are the point:
- *
- * - The server's interface stays "an environment and a stdio pair". It gains no
- *   flags and no config file, so its documented contract is untouched, and the
- *   process an MCP client ends up talking to is exactly the process it used to
- *   spawn itself — same signals, same stdin-close shutdown, same exit codes.
- * - No client config has to change again when internals move. `ub mcp serve` is
- *   the stable line; where the server lives is our problem, not the client's.
- *
- * The spawn itself is `runChild`, which owns signal forwarding and exit codes.
- */
-
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
@@ -22,22 +6,18 @@ import { isInstallPayload } from "./installation.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
 
 /**
- * tsx's loader, so the child can run the server's TypeScript source — the same
- * thing `node --import tsx` loads, resolved from this package rather than from
- * the caller's working directory.
+ * Resolve the source loader from this package, not the caller's directory.
  */
 function tsxLoader(): string {
   return import.meta.resolve("tsx");
 }
 
-/** The MCP server's process entry point, beside the package entry it exports. */
 function mcpServerMain(): string {
   return fileURLToPath(
     new URL("./main.ts", import.meta.resolve("@uberblick/mcp-server")),
   );
 }
 
-/** The precompiled MCP entry shipped beside the installed CLI bundle. */
 function installedMcpServerMain(): string {
   return fileURLToPath(new URL("./mcp.mjs", import.meta.url));
 }
@@ -70,5 +50,6 @@ export async function serveCommand(
   }
 
   await rememberWorkspaceBinding(binding);
+  // The server takes only environment and stdio; runChild preserves signals and exit status.
   return await runChild(process.execPath, args, resolved.env);
 }

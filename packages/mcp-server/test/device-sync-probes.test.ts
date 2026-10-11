@@ -1,6 +1,6 @@
 /** Bounded CLI probes use the same credential recovery as serving engines. */
 import { afterEach, describe, expect, it } from "vitest";
-import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
+import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import type { McpConfig } from "../src/config.js";
 import { inspectRemote, syncWorkspace } from "../src/remote.js";

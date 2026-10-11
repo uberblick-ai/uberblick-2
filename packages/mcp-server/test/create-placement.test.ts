@@ -2,8 +2,7 @@
  * `create_doc`'s optional sidebar placement: one call, up to three rooms, and
  * no claim the rooms cannot back.
  *
- * The contract this suite defends is the honest one the issue chose over
- * transactional machinery that does not exist: placement is expressed once, in
+ * The rooms persist independently: placement is expressed once, in
  * an input that cannot say two contradictory things; an unknown group fails
  * having created nothing; and a create that gets part-way says which rooms are
  * durable, which one refused, that nothing was rolled back, and what to do

@@ -1,59 +1,21 @@
-/* Tailwind v4 for shadcn and product UI.
- *
- * Web UI system's Styling rule uses utilities and shadcn variants for all UI
- * except editor content, which ProseMirror renders and keeps in `styles.css`.
- * Legacy surfaces migrate when next changed, deleting their product rules in
- * the same change. Local shadcn components (`ui/shadcn/`) own shared styling;
- * Radix primitives provide the interaction behavior where it is needed.
- *
- * Three things make that coexistence safe, and each is load-bearing:
- *
- * 1. **No preflight.** The layers are imported one by one below, deliberately
- *    skipping `tailwindcss/preflight.css`. Preflight zeroes heading and
- *    paragraph margins, strips list markers and resets buttons — globally. On
- *    this app that is not a reset, it is a redesign of the editor and the
- *    sidebar. The handful of preflight rules the vendored components actually
- *    rely on are restored at the bottom of this file, scoped to those
- *    components by their `data-slot` attributes.
- *
- * 2. **Everything Tailwind emits is layered; `styles.css` is not.** Unlayered
- *    declarations outrank layered ones no matter what order the files load in,
- *    so no Tailwind default can reach an existing `.ub-*` rule — including
- *    Tailwind's own `--font-sans`, which loses to the Geist stack in
- *    `styles.css` by the same rule.
- *
- * 3. **One source of truth for colour.** The `@theme inline` block below maps
- *    shadcn's canonical token names onto the custom properties that already
- *    exist in `styles.css` (they were kept shadcn-canonical in #34 for exactly
- *    this). It *defines* nothing: every value on the right-hand side is a
- *    `var()` at an existing token. Light and dark therefore come for free —
- *    each of those properties is a `light-dark()` naming both of its values,
- *    picked between by `color-scheme` (the system's preference, or the
- *    appearance choice `styles.css` stamps as `data-theme`), and the components
- *    re-resolve with them.
- *
- * Not everything can go through `@theme`, and the exceptions are deliberate:
- *
- * - **Radius and shadow are read directly.** `styles.css` already owns
- *   properties named `--radius-sm` and `--shadow-*`, and those are exactly
- *   Tailwind's own theme namespaces — a theme entry pointing a name at itself
- *   is a cycle. So the components spell them `rounded-(--radius-sm)` and
- *   `shadow-(--shadow-float)`: the same tokens, read one step more directly.
- * - **Type is inherited, not bridged.** `--font-sans` collides the same way,
- *   and does not need bridging: `:root` sets `font-family` to the Geist stack,
- *   a portalled surface is a child of `<body>`, and inheritance does the rest.
- *   Native form controls need the base layer below to inherit type.
+/*
+ * Skip global preflight: it would reset editor margins, list markers and
+ * native controls. Layer all Tailwind output so unlayered product rules win.
+ * Delete a surface's unlayered product rules when migrating it to utilities.
+ * Map canonical shadcn colors to existing light-dark() tokens. Read radius
+ * and shadow directly to avoid self-referential namespace cycles; inherit
+ * root type and scope form-control resets to data-slot.
  */
 
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 
-/* `source(none)` above turns automatic detection off, and this is then the
-   whole source list — `@source` *adds* to detection rather than replacing it,
-   so without it Tailwind sweeps the package and mines class names out of
-   English prose (`src/editor` alone was producing `.list-item`, `.italic` and
-   `.collapse`). Scan the wrappers and product components migrated to utilities. */
+/*
+ * source(none) disables automatic scanning; @source only adds paths. Keep the
+ * explicit component list so editor prose cannot generate unintended utility
+ * classes.
+ */
 @source "./shadcn";
 @source "./CommentForm.tsx";
 @source "./CommentComposer.tsx";
@@ -76,10 +38,11 @@
 @source "./PeerCluster.tsx";
 @source "./SyncPanel.tsx";
 
-/* The bridge. Left side: what shadcn's markup asks for. Right side: what this
-   product already is. No colour is defined here. The sidebar mappings serve
-   the vendored menus; other UI checks their ground and uses product tokens
-   directly where those mappings do not fit. */
+/*
+ * Bridge names to existing product tokens without defining colors. Sidebar-
+ * based wrappers need their own ground; overrides must check the actual
+ * consumer surface.
+ */
 @theme inline {
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -91,10 +54,10 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  /* The workspace switcher, user panel, Contents, Document actions and tag
-     picker use these vendored surfaces on sidebar tokens. The collaborator
-     overflow popover also uses the wrapper; its product class paints on card
-     tokens. Other consumers check their own ground when overriding defaults. */
+  /*
+   * These wrapper defaults paint on sidebar; collaborator overflow overrides
+   * them with card tokens. Other overrides must check their own ground.
+   */
   --color-popover: var(--sidebar);
   --color-popover-foreground: var(--sidebar-foreground);
   --color-primary: var(--primary);
@@ -102,49 +65,47 @@
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  /* Menu labels sit on `--sidebar`, where the product's `--muted-foreground`
-     lacked sufficient contrast (#515), so this maps to the sidebar token.
-     Product UI on other grounds must check contrast before using this name. */
+  /*
+   * Muted menu labels require sidebar-muted-foreground for contrast on
+   * sidebar. Other grounds must check contrast before reusing this name.
+   */
   --color-muted-foreground: var(--sidebar-muted-foreground);
-  /* Follows the popover onto the sidebar for the same reason, and here it is
-     load-bearing rather than tidy: `--accent` and `--sidebar` are the same value
-     in dark, so a menu item highlighted with `--accent` over a sidebar ground
-     would be invisible to pointer and keyboard alike. Other UI must account
-     for this sidebar mapping when choosing a hover or selection ground. */
+  /*
+   * Global accent equals sidebar ground in dark. Use sidebar-accent so
+   * pointer and keyboard highlights remain visible; other surfaces must
+   * account for this mapping.
+   */
   --color-accent: var(--sidebar-accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  /* And the strokes, for the same reason again: the menu's own edge and its
-     separator are drawn *on* `--sidebar`, where `--border` is OKLab ΔE 0.021
-     against the ground — half the 0.040 `--sidebar-border` gives the column's
-     outer edge (#515). UI outside the sidebar can read its product border
-     token directly rather than inheriting this mapping. */
+  /*
+   * Menu edges and separators use sidebar-border: OKLab ΔE 0.040 against
+   * sidebar, rather than the global border's 0.021. Other surfaces can read
+   * their own border token.
+   */
   --color-border: var(--sidebar-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Not a shadcn name. The amber is the product's accent, and chrome that
-     wants it should not have to reach past the theme for it. */
+  /* Decision: 3b99506a-1ccd-453b-b01d-0eadef56f12f. */
+  /* Expose the product brand token through the utility theme. */
   --color-brand: var(--brand);
 }
 
 @layer base {
-  /* The only preflight this app takes, and only where the vendored components
-     are. `data-slot` is on every shadcn v4 element, so this reaches them and
-     nothing else: a portalled menu is a sibling of `.ub-app`, not a child, and
-     no `.ub-*` rule can style it.
-     `font: inherit` gives native form controls their ancestor's type,
-     including the shared fields and the vendored triggers. */
+  /*
+   * Scope box-sizing and inherited form-control type to data-slot. Portals
+   * are outside ub-app; global preflight would also change editor content.
+   */
   [data-slot] {
     box-sizing: border-box;
     font: inherit;
   }
 
-  /* And the button reset, for the same reason: a trigger or a close control
-     that nobody handed a product class to should be the label, not the
-     operating system's grey lozenge. Layered, so `.ub-tool` and every other
-     `.ub-*` button style still wins — which is what makes `asChild` on an
-     existing control work. */
+  /*
+   * Reset only vendored native buttons. Keep the reset layered so existing
+   * unlayered product button styles still win with asChild composition.
+   */
   button[data-slot] {
     border: 0;
     background: none;

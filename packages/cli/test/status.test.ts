@@ -1,6 +1,6 @@
 /** The public status report answers whether this project's work reaches the hub. */
 
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as mcpServer from "@uberblick/mcp-server";
 import { defaultDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";

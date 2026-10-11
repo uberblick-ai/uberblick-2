@@ -1,8 +1,8 @@
 // @vitest-environment node
 /** The routed workspace selects both its public upstream and its own signing key. */
 import { afterEach, expect, it, vi } from "vitest";
-import { importRootSecret, verifyToken } from "@uberblick/hub/token";
-import { readAuthEnvelope } from "@uberblick/hub/protocol";
+import { importRootSecret, verifyToken } from "@uberblick/schema/token";
+import { readAuthEnvelope } from "@uberblick/schema/protocol";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { settingsRoom } from "@uberblick/schema";
 

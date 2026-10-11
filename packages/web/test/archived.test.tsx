@@ -1,5 +1,5 @@
 /**
- * Archived documents in the web UI (#146).
+ * Archived documents in the web UI.
  *
  * One story, because the feature is one claim told three ways: **the directory
  * stub is the only source of archived-ness, and the pane follows it live.**
@@ -61,7 +61,7 @@ const OTHER = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
 /**
  * What every stubbed room reports: connected, admitted and synchronized. The
  * transport is mocked away, so this is the state the app is meant to be read
- * against — and archiving now asks the sidebar room for it (#957), because an
+ * against — and archiving asks the sidebar room for it, because an
  * admitted room that has not received the sidebar yet reads as carrying no pins
  * at all, and unpinning nothing would look exactly like success.
  */
@@ -178,7 +178,7 @@ afterEach(() => {
 /**
  * Render, and let the hub endpoint settle before anything is asserted.
  *
- * `await act(async …)`, not `act(…)`: since #155 the app reads its endpoint
+ * `await act(async …)`, not `act(…)`: the app reads its endpoint
  * from a served document and `useHubEndpoint` holds every room acquisition back
  * until that read resolves. A synchronous render therefore commits the shell
  * with no rooms and no pane at all — every assertion here would be about an
@@ -343,7 +343,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
     expect(within(host).queryByRole("button", { name: "Document actions" })).toBeNull();
     expect(document.activeElement).toBe(restoreButton(host));
-    // The archive took the pin with it (#957): a document that has left every
+    // Archiving removes the pin: a document that has left every
     // other listing is not an entry point, so it leaves the sidebar too.
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
 
@@ -367,6 +367,45 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(document.activeElement?.textContent).toBe("Cancel");
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(document.activeElement).toBe(restoreButton(host));
+  });
+
+  it("hides a pin received after archive, without repinning on restore", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const ydoc = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    initDoc(ydoc, { uuid: UUID, title: "Retired protocol" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired protocol" });
+    const group = createGroup(sidebar, "Reading");
+    const peer = new Y.Doc();
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      pinDoc(peer, group, UUID);
+      expect(readSidebar(peer)[0]?.docs).toEqual([UUID]);
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+
+      const host = await openApp(`/${WORKSPACE}/${UUID}`);
+      openActions(host);
+      act(() => action("Archive document")?.click());
+      act(() => screen.getByRole("button", { name: "Archive document" }).click());
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
+
+      act(() => Y.applyUpdate(sidebar, Y.encodeStateAsUpdate(peer)));
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      expect(readSidebar(peer)[0]?.docs).toEqual([]);
+
+      act(() => restoreButton(host)?.click());
+      expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+
+      openActions(host);
+      act(() => action("Pin to sidebar")?.click());
+      expect(readSidebar(sidebar)[0]?.docs).toEqual([UUID]);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(sidebar));
+      expect(readSidebar(peer)[0]?.docs).toEqual([UUID]);
+    } finally {
+      peer.destroy();
+    }
   });
 
   // The condition is the sidebar room's own state, not an observed pin: an

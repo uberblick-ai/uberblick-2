@@ -2,8 +2,7 @@
  * The Hocuspocus seams the hub relies on, characterized against the installed
  * 4.6.0.
  *
- * Keeping the dependency is a decision (#394), and its price is this file: the
- * hub's auth boundary and its connection lifecycle depend on behaviour the
+ * The hub's auth boundary and its connection lifecycle depend on behaviour the
  * library's types do not state and its changelog would not call a breaking
  * change. `hocuspocus-pins.test.ts` stops the version moving by accident; these
  * tests are what a *deliberate* bump has to answer, one failure per assumption
@@ -13,7 +12,7 @@
  * and asserts what was observed — never a mock of it, which would only pin this
  * file's idea of the library. Every barrier a test waits on is an event, never
  * an elapsed duration: a sleep long enough to be reliable today is the flake
- * that fails a merge gate on a loaded machine tomorrow (#359). Where the event
+ * that fails a merge gate on a loaded machine tomorrow. Where the event
  * a test needs is a frame *arriving* — which fires no hook, because the frame
  * is still queued — it wraps the library's own `handleMessage` entry point as a
  * pass-through counter (`frameBarrier` below); the real handler still handles
@@ -308,8 +307,7 @@ function frameBarrierForNextClient(
 /**
  * Await an event barrier under a label. `waitUntil` (`helpers.ts:258-270`) does
  * this for a predicate; the barriers here are promises, and a bare `await` on
- * one can fail only as the suite timeout — the failure that left this file's
- * own flake unreadable until its awaits were hand-instrumented (#944). The
+ * one otherwise fails only as an unlabeled suite timeout. The
  * deadline is not the barrier: the test still advances on the event, and the
  * timer only decides what the failure says.
  */

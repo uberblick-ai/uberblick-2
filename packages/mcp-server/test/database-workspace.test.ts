@@ -1,17 +1,16 @@
 /**
- * One database, one workspace (#199).
+ * One database, one workspace.
  *
  * The derived index has no workspace column and the update log's room keys are
  * opaque, so the file is the whole boundary between two corpora — and
  * `UBERBLICK_DB` overrides the per-workspace default path silently. Two servers
  * pinned to different workspaces at one file would union their corpora in
- * `search` and `backlinks` while the room prefix still kept the *documents*
+ * `search` and `backlinks` while the room prefix keeps the *documents*
  * apart, which is a leak nobody would see as one.
  *
  * So the file records the workspace it holds, and the second server to open it
- * with a different one refuses to start. A database written before that row
- * existed has exactly one workspace it can belong to, so it is adopted once
- * rather than stranded.
+ * with a different one refuses to start. An unclaimed database containing
+ * exactly one workspace is adopted once rather than stranded.
  */
 
 import { createHash } from "node:crypto";

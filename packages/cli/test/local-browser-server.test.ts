@@ -23,10 +23,10 @@ import {
   STORE_BUSY_REASON,
   STORE_REFUSED_REASON,
 } from "../src/local-browser-server.js";
-import type { HubLogRecord } from "../src/log.js";
-import type { Hub } from "../src/server.js";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "../src/protocol.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
+import type { HubLogRecord } from "@uberblick/hub";
+import type { Hub } from "@uberblick/hub";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEXT_KEY,
@@ -38,7 +38,7 @@ import {
   token as hubToken,
   waitUntil,
   type TestClient,
-} from "./helpers.js";
+} from "../../hub/test/helpers.js";
 
 const TEST_BROWSER_KEY = "independent-local-browser-test-key";
 const OTHER_BROWSER_KEY = "other-independent-local-browser-test-key";
