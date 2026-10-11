@@ -376,7 +376,7 @@ let portCursor = Math.floor(Math.random() * TEST_PORTS.perWorker);
  * Not `listen(0)`: a port read back from that and released is in the kernel's
  * ephemeral range, which every in-process hub and client socket draws from
  * too. On a busy host one of them can take it before the `ub` under test binds
- * it, and `ub open` rightly refuses an occupied port (#1216). Only explicit
+ * it, and `ub open` rightly refuses an occupied port. Only explicit
  * picks land below that range. Each worker walks its own slice, rotated by an
  * offset drawn once per run, so one suite's workers never pick alike. A random
  * starting step per file scatters picks between suites sharing the host.

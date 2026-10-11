@@ -1,5 +1,3 @@
-/** Workspace inspection and explicit project selection; never a machine default. */
-
 import { createWorkspaceCommand } from "./workspace-create.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
@@ -38,20 +36,12 @@ options:
   -h, --help             show this help; after a command, that command's help
 `;
 
-/** As much of a uuid as someone can have typed so far. */
 const UUID_PREFIX = /^[0-9a-f][0-9a-f-]*$/;
 
-/** A uuid is 36 characters; anything longer is not a prefix of one. */
+/** A full UUID or longer input cannot be a UUID prefix. */
 const UUID_LENGTH = 36;
 
-/**
- * Where `<uuid>.sqlite` files live.
- *
- * Asked of the module that owns the layout rather than restated here: it is
- * `$XDG_DATA_HOME/uberblick` on an XDG machine and
- * `~/Library/Application Support/Uberblick/data/workspaces` on a Mac, and this
- * command has no business knowing which.
- */
+/** Delegate platform layout to the storage owner. */
 function databaseDirectory(env: NodeJS.ProcessEnv): string {
   return resolveStorage({ env }).workspaceDir;
 }
@@ -75,16 +65,12 @@ interface InForce {
   warnings: string[];
 }
 
-/**
- * The workspace configuration resolves to — the same value and the same origin
- * `ub workspace status` reports, without opening the database to get it.
- */
+/** Match workspace status's selection and source without opening the database. */
 function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
   const resolved = resolveConfig(options);
   const configured = resolved.env.WORKSPACE_ID ?? null;
   return {
     configured,
-    // resolveConfig already refused anything that is not a workspace id.
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
     hubUrl: resolved.binding?.hubUrl ?? null,
@@ -92,11 +78,6 @@ function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
   };
 }
 
-/**
- * Every workspace this machine knows: one with a database, plus the configured
- * one — which may have neither a database nor a document yet, and is still the
- * workspace you are in.
- */
 export function listWorkspaces(
   options: { env?: NodeJS.ProcessEnv } = {},
 ): { entries: WorkspaceEntry[]; warnings: string[] } {
@@ -109,11 +90,7 @@ export function listWorkspaces(
   try {
     names = readdirSync(directory);
   } catch (error) {
-    // A missing data directory means no databases, which is a fresh machine.
-    // Anything else — a permission, an I/O error — means the answer would be
-    // *short*, and a short list is not a harmless one: `use` resolves prefixes
-    // against it, so a swallowed error becomes "no workspace starts with that"
-    // for a workspace that is sitting right there.
+    // Only absence means an empty inventory; other errors would corrupt prefix lookup.
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw new Error(`cannot list ${directory}: ${describeFsError(error)}`);
     }
@@ -146,9 +123,6 @@ function warn(io: Io, warnings: readonly string[]): void {
   }
 }
 
-// --- ub workspace list -----------------------------------------------------
-
-/** Exported so the help below can be checked against the parser it describes. */
 export const WORKSPACE_LIST_OPTIONS = {
   json: { type: "boolean", default: false },
 } as const;
@@ -224,16 +198,9 @@ function listCommand(argv: string[], io: Io): number {
   return 0;
 }
 
-// --- ub workspace use ------------------------------------------------------
-
 /**
- * What `<id>` names.
- *
- * A full id — bare or decorated — is parsed independently of machine knowledge.
- * `use` checks its record afterward. Anything else has to resolve against what
- * `list` knows, and the two ways that fails are told apart
- * on purpose: "that is not a uuid" sends you to check what you pasted, "nothing
- * here starts with that" sends you to `ub workspace list`.
+ * Parse full IDs without an inventory; `use` checks their records afterward.
+ * Distinguish invalid syntax from a valid prefix missing from this machine.
  */
 export function resolveWorkspaceId(
   raw: string,
@@ -361,8 +328,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     const ids = new Set([...listWorkspaces().entries.map(entry => entry.uuid), ...recordedWorkspaceIds()]);
     entries = [...ids].map(uuid => ({ uuid }));
   } catch (error) {
-    // Refused rather than resolved against a short list: a prefix that quietly
-    // stopped matching would bind this directory to the wrong workspace.
+    // An incomplete inventory could make a prefix bind to the wrong workspace.
     io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
@@ -425,9 +391,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     io.out(text);
   }
 
-  // Written, and possibly overruled: a higher layer means this file changed
-  // nothing anyone will observe, and printing the binding without saying so
-  // would be the lie `ub status` then contradicts.
+  // Warn when a higher layer overrules the binding just written.
   const after = inForce();
   if (after.configured !== id || resolveProjectBinding().binding?.hubUrl !== hub) {
     io.err(
@@ -444,11 +408,7 @@ export async function workspaceCommand(
   argv: string[],
   io: Io = processIo,
 ): Promise<number> {
-  // The subcommand first, so `ub workspace use --help` reaches the help of the
-  // leaf it names rather than being answered by the group. A group's own
-  // argument is that one word, so only that word can ask for help — an unknown
-  // command is still an unknown command, `--help` after it or not, which is what
-  // the top level does too.
+  // Dispatch first so help reaches the leaf; an unknown leaf remains an error.
   const [sub, ...rest] = argv;
   if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);

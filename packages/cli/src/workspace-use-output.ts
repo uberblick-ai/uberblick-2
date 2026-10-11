@@ -1,4 +1,3 @@
-/** The two forms of use report the same complete project selection. */
 import { defaultDatabasePath, readWorkspaceName } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { ProjectBinding } from "./project-binding.js";

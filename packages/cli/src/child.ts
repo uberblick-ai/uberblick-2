@@ -1,27 +1,9 @@
-/**
- * Running another program under `ub`'s resolved configuration.
- *
- * `ub mcp serve` runs the MCP server with one spawn, one signal policy and one
- * set of exit-code rules, here.
- *
- * stdio is inherited, so the child's streams are this process's streams: for
- * `ub mcp serve` that is what keeps the JSON-RPC transport between the client
- * and the server, which is also why every diagnostic on this path is written to
- * stderr.
- */
-
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 
 /**
- * The signals a client, a shell or a task runner sends a long-running process,
- * forwarded to the child so it shuts down its replicas and its connections.
- *
- * The two beyond SIGINT and SIGTERM are here because a signal we do not forward
- * kills only this process and orphans the child, which keeps the inherited stdio
- * open: the caller's pipe stays alive talking to a process nobody supervises.
- * SIGHUP is what a vanished terminal sends and nothing else; SIGQUIT is what
- * Ctrl-\ and a supervisor escalating past SIGTERM send.
+ * Forward terminal loss (SIGHUP) and Ctrl-\ (SIGQUIT) as well as normal stop
+ * signals. Otherwise the orphaned child keeps its inherited pipes open.
  */
 const FORWARDED: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"];
 
@@ -32,15 +14,8 @@ function signalExitCode(signal: NodeJS.Signals): number {
 }
 
 /**
- * Die of the signal the child died of, so that whoever is waiting on `ub`
- * cannot tell it apart from a direct spawn of the child: a supervisor reading
- * `WIFSIGNALED` sees the signal, not a plain exit with 128+n, which is what a
- * process that merely *chose* that code looks like.
- *
- * The caller drops our forwarding handler first — with it still installed we
- * would only forward the signal to a child that has already exited. Returns
- * false when the signal cannot be raised at all (an unknown name on this
- * platform), and the caller falls back to the number.
+ * Re-raise after removing forwarding handlers so supervisors see WIFSIGNALED,
+ * not a normal numeric exit. Unsupported signals fall back to the shell code.
  */
 function reraise(signal: NodeJS.Signals): boolean {
   try {
@@ -51,7 +26,7 @@ function reraise(signal: NodeJS.Signals): boolean {
   }
 }
 
-/** Run a command with this environment and become its exit status. */
+/** Inherited stdio preserves MCP framing; diagnostics on this path use stderr. */
 export function runChild(
   command: string,
   args: readonly string[],
@@ -83,8 +58,7 @@ export function runChild(
         return;
       }
       if (reraise(signal)) {
-        // The raise is delivered by the event loop, so stay alive long enough
-        // to receive it; the resolve is only reached if it never arrives.
+        // Keep the loop alive for signal delivery; resolve only if it never arrives.
         setTimeout(() => resolve(signalExitCode(signal)), 200);
         return;
       }

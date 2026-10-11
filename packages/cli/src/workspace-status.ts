@@ -1,4 +1,3 @@
-/** The explicit check of which workspace an agent started here will use. */
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { authenticationOrigin } from "@uberblick/hub/remote-url";

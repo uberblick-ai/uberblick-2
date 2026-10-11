@@ -252,7 +252,7 @@ describe("ub open: hub, ports and serving role", () => {
     // open` spawns that command and carries on without awaiting it, so the
     // recording lands whenever the machine gets to it: wait for the recording
     // rather than for a duration, or load fails this case instead of delaying
-    // it (#531). The recorder appends, and `>>` creates the file before
+    // it. The recorder appends, and `>>` creates the file before
     // `printf` fills it — so a finished line, not an existing file, is the
     // recording.
     const recording = (): string =>
@@ -413,7 +413,7 @@ describe("ub open: hub, ports and serving role", () => {
     expect(foreign.output).toContain("another process");
 
     // A holder that never answers is nobody in particular, and the refusal for
-    // it must not send the user to stop what may be their own `ub open` (#600).
+    // it must not send the user to stop what may be their own `ub open`.
     const silentPort = await freePort();
     await silentListener(silentPort);
     const silent = await openFails(box, ["--port", String(silentPort)], env);

@@ -1,28 +1,3 @@
-/**
- * `ub mcp install <client>` — register uberblick with an MCP client.
- *
- * Every entry is a plain `ub mcp serve`, following the project's binding when
- * the client starts it. Install needs no workspace selection. Credentials stay
- * in the private user store; they never enter the MCP configuration.
- *
- * **This command does not edit config files.** Claude Code ships `claude mcp
- * add` and Codex ships `codex mcp add`, so those are run, and the vendor writes
- * its own file. A client `ub` has never heard of gets the snippet to paste and
- * its own MCP configuration as the destination, because there is no
- * path to invent for a client nobody has described. Editing somebody else's
- * JSON or TOML in place bought one thing, an untouched file, at the price of a
- * parser per format; delegating and printing buy the same thing outright.
- *
- * **What it refuses.** Before running a vendor CLI it reads the target file for
- * one answer only (`presence`): an entry that is already ours is a no-op, an
- * entry that is somebody else's is left alone and the snippet is printed
- * instead, a file that is there and cannot be read is refused by path — nothing
- * is delegated to a vendor CLI over a file whose contents nobody here knows —
- * and anything else is added. There is no `--force`, no backup and no
- * rewrite — the file this command does not write is the file it cannot damage.
- * Nothing here prompts, so the whole command runs unattended.
- */
-
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -43,10 +18,6 @@ import {
 
 interface Flags {
   target: TargetName | null;
-  /**
-   * A client this command does not know, named anyway. Only reachable with
-   * `--print`, which is the answer for one: it gets the generic stdio snippet.
-   */
   unlisted: string | null;
   scope: Scope;
   print: boolean;
@@ -110,14 +81,11 @@ function parseFlags(argv: string[]): Flags | null {
   return {
     target: known ? (named as TargetName) : null,
     unlisted: known ? null : named,
-    // Project scope is the default because it is the one that travels with the
-    // work; the report always names the absolute file, so it is never a guess.
     scope: values.user === true ? "user" : "project",
     print: values.print === true,
   };
 }
 
-/** The command as somebody would type it, for the report. */
 function commandLine(entry: Entry): string {
   return [entry.command, ...entry.args].join(" ");
 }
@@ -128,7 +96,7 @@ interface ProjectContext {
   selected: boolean;
 }
 
-/** Target and report use the same binding validation, ignoring this shell's overrides. */
+/** Use identical binding validation for target and report, excluding shell overrides. */
 function projectContext(cwd: string): ProjectContext {
   let path = join(cwd, PROJECT_CONFIG_FILE);
   let selected = false;
@@ -136,13 +104,11 @@ function projectContext(cwd: string): ProjectContext {
     path = findProjectConfig(cwd) ?? path;
     selected = resolveProjectBinding({ cwd, env: {} }).binding !== null;
   } catch {
-    // A missing or invalid binding does not prevent registration. Do not repeat
-    // its contents or a parser diagnostic: only workspace selection is needed.
+    // Binding contents and parser diagnostics may contain private values.
   }
   return { root: selected ? dirname(path) : cwd, path, selected };
 }
 
-/** Describe the entry's future selection. User scope follows each project's binding. */
 function workspaceReport(project: ProjectContext | null, io: Io): string {
   if (project === null) {
     return field("workspace", "follows the nearest .uberblick.json of each project");
@@ -158,8 +124,6 @@ function field(name: string, value: string): string {
   return `${name.padEnd(12)}${value}\n`;
 }
 
-// --- the vendor CLIs --------------------------------------------------------
-
 interface Vendor {
   program: string;
   args: string[];
@@ -167,7 +131,6 @@ interface Vendor {
   env: NodeJS.ProcessEnv;
 }
 
-/** The vendor's own installer for this target and scope. */
 function vendorCli(
   target: TargetName,
   scope: Scope,
@@ -199,14 +162,11 @@ function vendorCli(
       "--",
       ...command,
     ],
-    // `codex mcp add` has no scope flag; the scope *is* which configuration
-    // directory it is pointed at, and `targetFile` resolves the same one — so
-    // both agree on the file by construction rather than by coincidence.
+    // Codex has no scope flag; share targetFile's project directory via CODEX_HOME.
     env: scope === "project" ? { CODEX_HOME: codexHome(cwd) } : {},
   };
 }
 
-/** A variable `ub` resolves its own configuration from — see `config.ts`. */
 function isOurs(name: string): boolean {
   return (
     name.startsWith("HUB_") ||
@@ -219,14 +179,8 @@ function isOurs(name: string): boolean {
 }
 
 /**
- * The environment a vendor CLI is handed: this process's, minus uberblick's own.
- *
- * `ub` is habitually run with a signing secret and an endpoint exported — that
- * is what `fnox exec` does — and a child inherits whatever it is given. No
- * vendor CLI has any use for either, and a client that logs its environment, or
- * records it into a session file, would be carrying this machine's credential
- * into somebody else's format. The only thing added is the vendor's own
- * {@link Vendor.env}, which is `CODEX_HOME` saying which file codex writes.
+ * Strip Uberblick configuration and credentials before invoking a vendor that
+ * may record its environment. Add only the vendor's target-directory override.
  */
 function vendorEnv(vendor: Vendor): NodeJS.ProcessEnv {
   const inherited: NodeJS.ProcessEnv = {};
@@ -238,20 +192,12 @@ function vendorEnv(vendor: Vendor): NodeJS.ProcessEnv {
 
 type VendorRun =
   | { kind: "ok" }
-  /** The program is not installed — the caller prints the snippet instead. */
   | { kind: "absent" }
   | { kind: "failed"; because: string };
 
 /**
- * Run a vendor's installer, and learn nothing from it but whether it worked.
- *
- * Its output is discarded rather than captured, because a client's own
- * diagnostics quote the config it just read — `claude mcp add` naming a
- * conflicting server, a loader complaining about a value it could not parse —
- * and relaying that would hand back exactly what this command refuses to print.
- * The same rule as everywhere else here: when in doubt, omit. What is left is
- * enough to act on — which program ran and how it exited — and the caller says
- * how to see the rest, which is to run the vendor's command yourself.
+ * Run unattended and discard vendor output: diagnostics can quote private
+ * config values. Report only the program and its exit result.
  */
 function runVendor(vendor: Vendor, cwd: string): VendorRun {
   const result = spawnSync(vendor.program, vendor.args, {
@@ -276,8 +222,6 @@ function runVendor(vendor: Vendor, cwd: string): VendorRun {
         : `it exited ${result.status}`,
   };
 }
-
-// --- the command ------------------------------------------------------------
 
 /** Print the entry and its destination without claiming registration. */
 function printSnippet(
@@ -313,9 +257,7 @@ export async function installCommand(
 
   const entry = DEFAULT_ENTRY;
 
-  // A client this command does not know is exactly what `--print` is for, and
-  // it is answered before anything looks at the filesystem: there is no file of
-  // ours to look at.
+  // Unknown clients have no known config path; answer before filesystem reads.
   if (flags.target === null) {
     io.err(
       `ub mcp install: ${JSON.stringify(flags.unlisted)} is not a client \`ub\` ` +
@@ -349,10 +291,7 @@ export async function installCommand(
     return 0;
   }
   if (installed === "unusable") {
-    // Not "absent, so go ahead": delegating would point a vendor CLI at a file
-    // this could not read, and `claude mcp add` rewrites the file it loads.
-    // Reported by path with nothing of it quoted — a file that will not parse
-    // is still a config file, which is where people keep tokens.
+    // An unreadable config is not empty; never delegate a write over it.
     io.err(
       `ub mcp install: ${file.path} is there and could not be read, so nothing ` +
         "was run against it and nothing was written. This is what uberblick " +
@@ -363,8 +302,6 @@ export async function installCommand(
     return 1;
   }
   if (installed === "foreign") {
-    // Every differing entry, including a manually configured environment,
-    // belongs to the caller and must be preserved.
     io.err(
       `ub mcp install: ${file.path} already registers "${entry.name}" as ` +
         "something other than this, so it was left alone. Nothing was " +
@@ -375,12 +312,8 @@ export async function installCommand(
     return 1;
   }
 
-  // `codex mcp add` refuses outright when the directory `CODEX_HOME` names is
-  // not there, and for project scope that directory is the checkout's own — so it
-  // is created. `mkdirSync` answers with the path it made and with `undefined`
-  // when there was nothing to make, which is the only honest way to know whose
-  // directory this is: a `.codex` the checkout already had is somebody's state,
-  // empty or not, and is never removed.
+  // Codex requires CODEX_HOME to exist. Only a directory this mkdir created is
+  // ours to remove on failure; a pre-existing empty directory is caller state.
   const codexProject = flags.target === "codex" && flags.scope === "project";
   const made =
     codexProject && mkdirSync(codexHome(root), { recursive: true }) !== undefined;
@@ -412,15 +345,12 @@ export async function installCommand(
     io.out(report);
     return 0;
   } finally {
-    // Every ending but a registration — the vendor missing, the vendor
-    // refusing, a throw — leaves the checkout as this run found it. `rmdirSync`
-    // refuses a directory with anything in it, which is the check that codex
-    // did not write a config there after all.
+    // Remove only our empty failed-install directory; rmdir preserves vendor writes.
     if (made && !registered) {
       try {
         rmdirSync(codexHome(root));
       } catch {
-        // Something is in it. Leaving it is the whole intent.
+        // Preserve anything the vendor wrote despite reporting failure.
       }
     }
   }

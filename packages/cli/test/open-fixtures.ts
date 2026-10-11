@@ -38,7 +38,7 @@ export { freePort } from "./helpers.js";
 export const WORKSPACE = "b4d1f0a7-3c62-4e91-8f05-7ad2c9e61b38";
 export const SECRET = "open-test-signing-secret-9d31fa";
 
-/** What a `ub workspace use` mid-run leaves behind, for the #449 tests. */
+/** What a `ub workspace use` mid-run leaves behind. */
 export const REBOUND_WORKSPACE = "c7e2b105-9a48-4d6f-b3e1-5f0c8a71d264";
 export const REBOUND_SECRET = "open-test-rotated-secret-4b7c21";
 export const FIRST_REMOTE = "wss://first.example.ts.net/ws";
@@ -76,8 +76,7 @@ export async function cleanUp(): Promise<void> {
  *
  * That process writes while these tests provoke it, so a connection with
  * SQLite's default zero busy timeout throws `database is locked` on a loaded
- * host instead of waiting the write out — an intermittent false red on the
- * whole review gate (#901). The wait matches the store's own
+ * host instead of waiting the write out. The wait matches the store's own
  * `BUSY_TIMEOUT_MS` (`packages/mcp-server/src/store.ts`).
  */
 export function openStore(databasePath: string): DatabaseSync {
@@ -143,7 +142,7 @@ export function stamp(dir: string, version: number | null): void {
 
 /**
  * A bundle the way `ub open` finds one: a directory with an index.html in it —
- * and, since #452, a stamp saying it speaks the protocol this command does.
+ * and a stamp saying it speaks the protocol this command does.
  * Everything below serves rather than refuses because of that one line.
  */
 export function fixtureBundle(box: Sandbox): string {

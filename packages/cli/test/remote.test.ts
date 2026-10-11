@@ -368,7 +368,7 @@ function storedSecret(box: Sandbox): unknown {
 }
 
 describe("workspace link configuration", () => {
-  // One normalizer for `ub workspace use` and `ub workspace create` alike (#436): the host
+  // One normalizer for `ub workspace use` and `ub workspace create` alike: the host
   // `tailscale status` prints and the address a browser hands back both name
   // the deployment's endpoint, and an endpoint somebody typed in full is what
   // they meant — including a plain hub, which has no path at all.
@@ -880,8 +880,8 @@ describe("ub workspace use <link>", () => {
     const fromWeb = await webDoc(remote, "Shared note", OTHER_SECRET);
     const other = await webDoc(remote, "Second note", OTHER_SECRET);
 
-    // Nothing here: no `ub workspace create`, no workspace, no endpoint, no credential —
-    // the second machine as the owner decided it should work.
+    // No project binding, workspace or endpoint; credential material is
+    // supplied separately.
     const box = unboundSandbox({ credentials: { signingSecret: OTHER_SECRET } });
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
 
@@ -1281,9 +1281,6 @@ describe("ub workspace use <link>", () => {
   });
 
   // Opt-in (UB_SLOW_TESTS=1): ~30 s of scale proof, not of behaviour.
-  // Loaded-host proof, 2026-09-06: this exact case passed in 16.45 s with
-  // eight foreground `yes` workers (the #803 probe shape), and the cleanup
-  // trap left `pgrep -c -x yes` at zero.
   it.runIf(process.env.UB_SLOW_TESTS === "1")(
     "joins 5,000 local documents and persists the verified binding",
     async () => {
@@ -1371,8 +1368,7 @@ describe("ub workspace use <link>", () => {
   it.each([
     // No path at all: nothing was named, not even wrongly.
     ["ws://127.0.0.1:9999", "names no workspace"],
-    // The endpoint as it was documented before this command took an id — the
-    // paste most likely to happen, and `ws` is not a workspace id.
+    // A hub endpoint alone supplies no workspace id; `ws` is not one.
     ["ws://127.0.0.1:9999/ws", "is not a workspace id"],
   ])("refuses %s and writes nothing", async (target, because) => {
     const box = unboundSandbox();
@@ -1502,9 +1498,8 @@ describe("ub workspace use <link>", () => {
     expect(run.output).not.toMatch(TOKEN_SHAPE);
     // This run is exactly the probe `join` makes before it can ask for a
     // secret — no TTY here, so the prompt is skipped — and the refusal above is
-    // the whole of what it is allowed to say. The probe's own reading reaching
-    // stderr is what put an ERROR in front of the prompt on an interactive join
-    // that then succeeded (#447).
+    // the whole of what it is allowed to say. The probe must not print an
+    // authentication error before an interactive join can prompt and succeed.
     expect(run.stderr).not.toContain("hub rejected the token");
   });
 

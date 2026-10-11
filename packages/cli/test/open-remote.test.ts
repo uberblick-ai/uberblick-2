@@ -55,7 +55,7 @@ import {
 afterEach(cleanUp);
 
 /**
- * #752's budget: an MCP write reaches a served tab within 250 ms at p95.
+ * An MCP write reaches a served tab within 250 ms at p95.
  *
  * A round is 20 samples. Transient stalls on a host shared with other suites can
  * spoil a round without the product being slow, so a missed round is retaken,
