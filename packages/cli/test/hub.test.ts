@@ -1,11 +1,12 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { type HubHost, hubCommand, hubProcessHost } from "../src/hub.js";
 import type { Io } from "../src/io.js";
 
 const roots: string[] = [];
+afterEach(() => vi.useRealTimers());
 afterAll(() => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
@@ -229,12 +230,32 @@ describe("ub hub setup", () => {
     expect(state.events.some((event) => ["create", "cp", "up"].includes(event.operation))).toBe(false);
   });
 
-  it.each(["docker", "daemon", "release-pull", "extract", "identity"] as const)("leaves no partial deployment when %s fails", async (failure) => {
+  it.each(["docker", "daemon", "release-pull", "extract", "identity", "config"] as const)("leaves no partial deployment when %s fails", async (failure) => {
     const state = scenario({ failure });
     const before = snapshot(state.root);
     expect((await invoke(["setup"], state)).code).toBe(1);
     expect(snapshot(state.root)).toEqual(before);
     expect(existsSync(state.directory)).toBe(false);
+  });
+
+  it.each(["release-pull", "extract", "identity", "config"] as const)("leaves a pre-created directory empty when %s fails", async (failure) => {
+    const state = scenario({ failure });
+    mkdirSync(state.directory);
+    expect((await invoke(["setup"], state)).code).toBe(1);
+    expect(readdirSync(state.directory)).toEqual([]);
+  });
+
+  it.each(["setup", "upgrade"])("%s works in a writable deployment beneath a non-writable parent", async (command) => {
+    const state = scenario(command === "upgrade" ? { deployed: "0.1.0" } : {});
+    if (command === "setup") mkdirSync(state.directory);
+    chmodSync(state.root, 0o555);
+    try {
+      expect((await invoke([command], state)).code).toBe(0);
+      const extraction = state.events.find((event) => event.operation === "cp");
+      expect(extraction?.args.at(-1)?.startsWith(`${state.directory}/`)).toBe(true);
+      expect(readdirSync(state.directory).some((name) => name.startsWith(".ub-hub-release-"))).toBe(false);
+      expect(JSON.parse(readFileSync(join(state.directory, "release.json"), "utf8")).version).toBe("0.2.0");
+    } finally { chmodSync(state.root, 0o755); }
   });
 
   it("rejects image references that disagree with the requested release", async () => {
@@ -327,6 +348,25 @@ describe("ub hub status", () => {
 });
 
 describe("ub hub upgrade", () => {
+  it("stages and replaces within a symlinked deployment while preserving settings and backups", async () => {
+    const state = scenario({ deployed: "0.1.0" });
+    const settings = readFileSync(join(state.directory, ".env"));
+    const storage = join(state.root, "storage");
+    mkdirSync(storage);
+    const deployed = join(storage, "deployment");
+    renameSync(state.directory, deployed);
+    symlinkSync(deployed, state.directory, "dir");
+    expect((await invoke(["upgrade"], state)).code).toBe(0);
+    const extraction = state.events.find((event) => event.operation === "cp");
+    expect(extraction?.args.at(-1)?.startsWith(`${state.directory}/`)).toBe(true);
+    expect(readFileSync(join(deployed, ".env"))).toEqual(settings);
+    expect(readFileSync(join(deployed, "earlier-backup.sqlite"), "utf8")).toBe("earlier complete backup");
+    for (const name of readdirSync(state.release, { recursive: true, encoding: "utf8" })) {
+      if (statSync(join(state.release, name)).isFile()) expect(readFileSync(join(deployed, name))).toEqual(readFileSync(join(state.release, name)));
+    }
+    expect(readdirSync(deployed).some((name) => name.startsWith(".ub-hub-release-"))).toBe(false);
+  });
+
   it("stages and pulls before a live backup, then replaces files and recreates with existing settings and backups", async () => {
     const state = scenario({ deployed: "0.1.0" });
     const settings = readFileSync(join(state.directory, ".env"));
@@ -428,12 +468,35 @@ describe("ub hub upgrade", () => {
     expect(io.stderr).toContain("REMOTE.md");
   });
 
-  it("reports resulting unhealthy deployment with its backup and recovery after replacement", async () => {
+  it("waits for the recreated hub to answer instead of reporting a successful upgrade as failed", async () => {
+    vi.useFakeTimers();
+    const state = scenario({ deployed: "0.1.0" });
+    state.host.probe.mockResolvedValueOnce({ site: null, websocket: null })
+      .mockResolvedValueOnce({ site: 200, websocket: 502 });
+    const result = invoke(["upgrade"], state);
+    await vi.runAllTimersAsync();
+    const { code, io } = await result;
+    expect(code).toBe(0);
+    expect(state.host.probe).toHaveBeenCalledTimes(3);
+    expect(io.stdout).toContain("health     healthy");
+    expect(io.stderr).toContain("Waiting up to 90 seconds");
+    expect(io.stderr).not.toContain("restore procedure");
+    expect(state.events.filter((event) => event.operation === "backup")).toHaveLength(1);
+    expect(state.events.filter((event) => event.operation === "up")).toHaveLength(1);
+  });
+
+  it("reports a deployment still unhealthy after the bounded wait with its backup and recovery", async () => {
+    vi.useFakeTimers();
     const state = scenario({ deployed: "0.1.0", unhealthy: true });
-    const { code, io } = await invoke(["upgrade"], state);
+    const started = Date.now();
+    const result = invoke(["upgrade"], state);
+    await vi.runAllTimersAsync();
+    const { code, io } = await result;
     expect(code).toBe(1);
+    expect(Date.now() - started).toBe(90_000);
     const backup = state.events.find((event) => event.operation === "backup")?.args[1] as string;
     expect(io.stderr).toMatch(/[Hh]ealth check/);
+    expect(io.stderr).toContain("did not become healthy within 90 seconds");
     expect(io.stderr).toContain(backup);
     expect(io.stderr).toContain("ub hub up");
     expect(io.stderr).toContain("REMOTE.md");

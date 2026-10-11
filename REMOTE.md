@@ -91,8 +91,9 @@ certificates. `upgrade` requires a running hub; choosing the current release
 changes nothing, and an older target is refused. For a newer published release,
 it stages and checks the target and pulls its images, then runs the live
 deployment's backup script before replacing release files and recreating
-containers. It keeps `.env` and earlier backups, and reports the new backup's
-path and resulting health. Retain backups according to
+containers. It keeps `.env` and earlier backups, and checks health for up to
+90 seconds while the recreated services start and certificates are acquired.
+It reports the new backup's path and resulting health. Retain backups according to
 [the backup procedure](#backing-the-hub-up).
 If the sync protocol changes, update every client in the same sitting;
 upgrade asks for confirmation at a terminal, or accepts `--yes`.

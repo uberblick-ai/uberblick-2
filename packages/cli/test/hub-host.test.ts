@@ -63,6 +63,19 @@ else if (args[0] === "info") {
           { type: "volume", source: "caddy-config", target: "/config" },
         ] },
       }, volumes: Object.fromEntries(["hub-data", "caddy-data", "caddy-config"].map((source) => [source, { name: project + "_" + source }])) }));
+    } else if (args.includes("ps")) {
+      console.error("service state warning");
+      console.log(JSON.stringify(["hub", "caddy"].map((Service) => ({ Service, State: "running" }))));
+    } else if (args.includes("pull") && process.env.UB_TEST_PULL_GATE) {
+      console.log("pull progress");
+      console.error("pull warning");
+      await new Promise((done) => {
+        const poll = setInterval(() => {
+          if (existsSync(process.env.UB_TEST_PULL_GATE)) { clearInterval(poll); clearTimeout(deadline); done(); }
+        }, 10);
+        const deadline = setTimeout(() => { clearInterval(poll); process.exit(1); }, 5000);
+      });
+      writeFileSync(process.env.UB_TEST_PULL_GATE + ".exited", "complete");
     } else if (args.includes("up")) {
       for (const volume of ["hub-data", "caddy-data", "caddy-config"]) {
         const directory = join(process.env.UB_TEST_VOLUMES, project + "_" + volume);
@@ -137,6 +150,48 @@ function recorder(): Io & { stdout: string; stderr: string } {
 }
 
 describe("hub commands through the real deployment wrapper", () => {
+  it("streams child logs before the child exits while retaining JSON stdout", async () => {
+    const fix = fixture();
+    const gate = join(fix.directory, "pull-gate");
+    const host = hubProcessHost({ ...fix.env, UB_TEST_PULL_GATE: gate });
+    host.probe = async () => ({ site: 200, websocket: 101 });
+    const io = recorder();
+    const err = io.err;
+    let liveOutput = false;
+    io.err = (text) => {
+      err(text);
+      if (io.stderr.includes("pull progress\n") && io.stderr.includes("pull warning\n") && !existsSync(gate)) {
+        liveOutput = !existsSync(`${gate}.exited`);
+        writeFileSync(gate, "release child");
+      }
+    };
+    expect(await hubCommand(["up", "--dir", fix.directory], io, host), io.stderr).toBe(0);
+    expect(liveOutput).toBe(true);
+    expect(existsSync(`${gate}.exited`)).toBe(true);
+    expect(io.stdout).not.toContain("pull ");
+    expect(io.stderr.match(/pull progress/g)).toHaveLength(1);
+    expect(io.stderr.match(/pull warning/g)).toHaveLength(1);
+    io.stdout = "";
+    io.stderr = "";
+    expect(await hubCommand(["status", "--json", "--dir", fix.directory], io, host), io.stderr).toBe(0);
+    expect(JSON.parse(io.stdout)).toMatchObject({ healthy: true, version: "0.4.1" });
+    expect(io.stdout.trim().split("\n")).toHaveLength(1);
+    expect(io.stderr).toBe("service state warning\n");
+  });
+
+  it("preserves missing-command and interrupted-child diagnostics when streaming", async () => {
+    const fix = fixture();
+    const host = hubProcessHost();
+    const io = recorder();
+    const missing = await host.run(join(fix.directory, "missing-command"), [], undefined, { err: (text) => io.err(text) });
+    expect(missing).toEqual({ status: null, stdout: "", stderr: "" });
+    expect(io.stderr).toContain("ENOENT");
+    io.stderr = "";
+    const interrupted = await host.run(process.execPath, ["-e", "process.kill(process.pid, 'SIGTERM')"], undefined, { err: (text) => io.err(text) });
+    expect(interrupted).toEqual({ status: null, stdout: "", stderr: "" });
+    expect(io.stderr).toBe("Interrupted by SIGTERM.\n");
+  });
+
   it.each([
     ["", ["docker-compose.yml"], null],
     ["WEB_HOST=hub.example.com\n", ["docker-compose.yml", "remote.https.yml"], "hub.example.com"],

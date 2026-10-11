@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { takeHelp } from "./help.js";
@@ -52,7 +52,8 @@ export const HUB_OPTIONS = {
 export interface HubHost {
   version: string;
   home: string;
-  run(command: string, args: readonly string[], cwd?: string): Promise<CommandResult>;
+  // Selected output streams are delivered live instead of returned.
+  run(command: string, args: readonly string[], cwd?: string, output?: Partial<Io>): Promise<CommandResult>;
   probe(origin: string): Promise<{ site: number | null; websocket: number | null }>;
   confirm(question: string): Promise<boolean>;
 }
@@ -68,13 +69,15 @@ export function hubProcessHost(environment: NodeJS.ProcessEnv = process.env): Hu
   return {
     version: cliVersion(),
     home: homedir(),
-    run(command, args, cwd) {
+    run(command, args, cwd, output) {
       return new Promise((done) => {
         const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
-        child.stdout.on("data", (data) => { stdout += data; });
-        child.stderr.on("data", (data) => { stderr += data; });
+        const out = (text: string): void => { if (output?.out) output.out(text); else stdout += text; };
+        const err = (text: string): void => { if (output?.err) output.err(text); else stderr += text; };
+        child.stdout.setEncoding("utf8").on("data", out);
+        child.stderr.setEncoding("utf8").on("data", err);
         const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
         const handlers = signals.map((signal) => {
           const forward = (): void => { child.kill(signal); };
@@ -85,7 +88,9 @@ export function hubProcessHost(environment: NodeJS.ProcessEnv = process.env): Hu
         child.on("error", (failure) => { error = failure; });
         child.on("close", (status, signal) => {
           for (const { signal, forward } of handlers) process.off(signal, forward);
-          done({ status: error ? null : status, stdout, stderr: error ? error.message : stderr + (signal ? `Interrupted by ${signal}.\n` : "") });
+          if (error) err(`${error.message}\n`);
+          if (signal) err(`Interrupted by ${signal}.\n`);
+          done({ status: error ? null : status, stdout, stderr });
         });
       });
     },
@@ -145,7 +150,7 @@ class StepFailure extends Error {
 }
 
 async function checked(host: HubHost, io: Io, step: string, command: string, args: readonly string[], cwd?: string, logs = false): Promise<string> {
-  const result = await host.run(command, args, cwd);
+  const result = await host.run(command, args, cwd, { err: (text) => io.err(text), ...(logs ? { out: (text: string) => io.err(text) } : {}) });
   if (result.stderr) io.err(result.stderr);
   if (logs && result.stdout) io.err(result.stdout);
   if (result.status !== 0) throw new StepFailure(step, result.status === null ? `${command} could not be run` : `${command} exited ${result.status}`);
@@ -153,7 +158,8 @@ async function checked(host: HubHost, io: Io, step: string, command: string, arg
 }
 
 async function dockerReady(host: HubHost, io: Io): Promise<void> {
-  const version = await host.run("docker", ["--version"]);
+  const version = await host.run("docker", ["--version"], undefined, { err: (text) => io.err(text) });
+  if (version.stderr) io.err(version.stderr);
   if (version.status !== 0) throw new Error("Docker is missing or cannot be run. Install Docker Engine 28.0.0+ and Compose 2.24.4+ on Linux x86_64, or start Docker Desktop on macOS. Nothing has changed.");
   try { await checked(host, io, "Docker daemon check", "docker", ["info"]); }
   catch { throw new Error("Docker daemon is unreachable. Start Docker Engine 28.0.0+ or Docker Desktop and allow this user to reach its socket; Compose 2.24.4+ is required. Nothing has changed."); }
@@ -244,9 +250,9 @@ function printStatus(io: Io, result: HubStatus): void {
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 function upCommand(directory: string): string { return `ub hub up --dir ${shellArgument(directory)}`; }
 
-function assertEmpty(directory: string): void {
+function assertEmpty(directory: string, staging?: string): void {
   if (!existsSync(directory)) return;
-  if (!lstatSync(directory).isDirectory() || readdirSync(directory).length > 0) {
+  if (!lstatSync(directory).isDirectory() || readdirSync(directory).some((name) => join(directory, name) !== staging)) {
     throw new Error(`${directory} already holds files. Nothing has changed. For an existing deployment run ${upCommand(directory)} or ub hub upgrade --dir ${shellArgument(directory)}.`);
   }
 }
@@ -263,8 +269,7 @@ function validateFiles(directory: string, top = true): void {
 }
 
 async function stage(host: HubHost, io: Io, directory: string, target: string): Promise<{ directory: string; release: Release }> {
-  mkdirSync(dirname(directory), { recursive: true });
-  const staging = mkdtempSync(join(dirname(directory), ".ub-hub-release-"));
+  const staging = mkdtempSync(join(directory, ".ub-hub-release-"));
   let container: string | null = null;
   try {
     const image = `ghcr.io/uberblick-ai/hub:${target}`;
@@ -291,14 +296,27 @@ async function stage(host: HubHost, io: Io, directory: string, target: string): 
 async function setup(host: HubHost, io: Io, directory: string, target: string): Promise<void> {
   assertEmpty(directory);
   await dockerReady(host, io);
-  const staged = await stage(host, io, directory, target);
+  const created = !existsSync(directory);
+  mkdirSync(directory, { recursive: true });
+  let staged: Awaited<ReturnType<typeof stage>> | undefined;
+  const published: string[] = [];
   try {
+    staged = await stage(host, io, directory, target);
     copyFileSync(join(staged.directory, "remote.env.example"), join(staged.directory, ".env"));
     chmodSync(join(staged.directory, ".env"), 0o600);
     await configuration(host, io, staged.directory, staged.release);
-    assertEmpty(directory);
-    renameSync(staged.directory, directory);
-  } finally { rmSync(staged.directory, { recursive: true, force: true }); }
+    assertEmpty(directory, staged.directory);
+    for (const name of readdirSync(staged.directory)) {
+      renameSync(join(staged.directory, name), join(directory, name));
+      published.push(name);
+    }
+  } catch (error) {
+    for (const name of published) rmSync(join(directory, name), { recursive: true, force: true });
+    throw error;
+  } finally {
+    if (staged) rmSync(staged.directory, { recursive: true, force: true });
+    if (created && readdirSync(directory).length === 0) rmdirSync(directory);
+  }
   io.out(`directory  ${directory}\nrelease    ${target}\nnext       ${upCommand(directory)}\n`);
 }
 
@@ -358,10 +376,16 @@ async function upgrade(host: HubHost, io: Io, directory: string, target: string,
       }
     } catch (error) { throw new StepFailure("release file replacement", message(error)); }
     await compose(host, io, directory, "container recreation", ["up", "--detach", "--force-recreate"], true);
-    const health = await status(host, io, directory);
+    const deadline = Date.now() + 90_000;
+    let health = await status(host, io, directory);
+    if (!health.healthy) io.err("Waiting up to 90 seconds for the recreated deployment to become healthy…\n");
+    while (!health.healthy && Date.now() < deadline) {
+      await new Promise((done) => setTimeout(done, Math.min(1000, deadline - Date.now())));
+      health = await status(host, io, directory);
+    }
     io.out(`upgraded   ${live.version} → ${target}\nbackup     ${backup}\n`);
     printStatus(io, health);
-    if (!health.healthy) throw new StepFailure("resulting health check", "the deployment is unhealthy; HTTPS certificate acquisition can take up to 90 seconds");
+    if (!health.healthy) throw new StepFailure("resulting health check", "the deployment did not become healthy within 90 seconds");
     return 0;
   } catch (error) {
     if (replacing) throw new Error(`${message(error)}. Backup: ${backup}. Fix the cause, then run ${upCommand(directory)}, or follow REMOTE.md's restore procedure. No automatic rollback was attempted.`);
