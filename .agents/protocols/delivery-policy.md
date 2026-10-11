@@ -22,13 +22,21 @@ decides it (link that source); it is cheap to reverse and binds nothing
 downstream (naming, refactors, internal helpers or test structure); it is a bug
 fix restoring intended behavior; or it describes current behavior rather than
 a choice (update the owning Regular Document). Keep task-local reasoning in
-the issue, PR or code comment. When in doubt, mention the choice in the PR
-without a new record; a reviewer or person can promote it later.
+the issue or PR; code comments hold nearby constraints under
+[AGENTS.md's comment rule](../../AGENTS.md#find-the-right-authority).
+When in doubt, mention the choice in the PR without a new record; a reviewer
+or person can promote it later.
 
 An agent creates a topic's first record `decided` as its stance, except that a
 topic reserved to a human under [human-decisions.md](human-decisions.md) or the
-merge policy below starts `open` with the agent's recommendation. Local protocols
-own this authority. Discover relevant live decision records and lifecycle guidance
+merge policy below starts `open` with the agent's recommendation. A new
+implementation stance that the same PR's code must cite also starts `open`, so
+review can correct it and the code can carry its topic UUID before merge. The
+integrator moves that first record to `decided` after merge without `answer`,
+recording an agent stance; a topic reserved to a person stays `open` until
+their answer. This timing route changes neither the decision threshold nor
+required maintainer approval of record creation, including candidate lists.
+Local protocols own this authority. Discover relevant live decision records and lifecycle guidance
 by purpose under [AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP
 schemas for stance, answer, rejection and topic-resolution calls and refusals.
 Missing required guidance does not grant authority; stop the dependent decision.
