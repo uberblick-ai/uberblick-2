@@ -1,0 +1,76 @@
+<head>
+<title>Which tool fits your team? · Uberblick</title>
+<meta name="description" content="Notion, Confluence, Google Docs, Obsidian, Jupyter and Markdown in the repo, compared with Uberblick: what each does better, where Uberblick is better, and when switching is worth it.">
+<link rel="stylesheet" href="/css/compare.css">
+</head>
+<div class="wrap">
+<header class="top"><a class="brand" href="/">uberblick<i></i></a><nav aria-label="Site"><a href="/">Uberblick</a><a href="/#usecases">Use cases</a><a href="/compare" aria-current="page">Compare</a><a href="/#docs">Docs</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav><a class="gh" href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></header>
+
+<section class="hero sub">
+  <p class="crumb">Uberblick / Compare</p>
+  <h1>Which tool fits your team?</h1>
+  <p class="lede">Uberblick is a narrow tool: the plans, decisions and numbers behind one codebase, for a small or mid-sized team of people and coding agents. Here is what the alternatives do better, what Uberblick does better, and when switching is worth it.</p>
+</section>
+
+<div class="col">
+<section class="q" id="credit"><h2>What each tool does better than Uberblick.</h2>
+<p>These are not consolation prizes. Each is the reason that tool exists, and Uberblick does not compete on it.</p>
+<div class="credits">
+  <article><h3>Notion</h3><p>The best general-purpose workspace there is: pages, databases with views, templates for every job, granular sharing, a mobile app, and an AI layer across all of it. Teams can run a whole company in it. Its API and MCP connector let agents read and write pages too.</p></article>
+  <article><h3>Confluence</h3><p>Enterprise permissions, spaces, audit history and the Jira integration. If your issues are in Jira and your organisation has hundreds of people, Confluence is where the documentation belongs.</p></article>
+  <article><h3>Google Docs</h3><p>Real-time co-writing that just works, suggestion mode, comments that people outside your team can answer from an email, and the Workspace suite around it. For prose written with non-engineers, nothing is simpler.</p></article>
+  <article><h3>Obsidian</h3><p>Plain Markdown files you own, instant search over thousands of notes, the graph, canvas, and a plugin ecosystem larger than most products' feature lists. It is the best personal knowledge tool, and sync and publish are available when you want them.</p></article>
+  <article><h3>Jupyter</h3><p>Code and its output in one document, rerunnable, with kernels for Python, R, Julia and more. It is the lingua franca of data work, and tools like nbconvert and JupyterLab make it a complete environment.</p></article>
+  <article><h3>Markdown in the repo</h3><p>No service, no account, no sync problem. Docs change in the same pull request as the code, with the same review. Every agent and every editor can read and write it today.</p></article>
+</div>
+</section>
+
+<section class="q" id="better"><h2>Where Uberblick is better.</h2>
+<div class="credits">
+  <article><h3>Agents are editors, not integrations</h3><p>MCP is the front door. An agent reads the sidebar, searches, edits one block, comments on a range and answers your comment with the same tools you use in the browser. No API glue, no export step, no "AI feature" bolted on.</p></article>
+  <article><h3>Decisions are records</h3><p>A decision has an answer, a reason and the issues it affects, and a new record supersedes the old one on the same topic. An agent asks <code>find_decisions</code> for the issue it is working on before it changes anything. In a wiki, the decision is a paragraph somebody may find.</p></article>
+  <article><h3>The numbers live in the document</h3><p>Records are stored in the page; tables and charts read them. When an agent updates the records, the chart updates. No screenshot of a dashboard, no link to a notebook that has since changed.</p></article>
+  <article><h3>Local first, always offline</h3><p>Every computer has a full replica. The editor and the MCP server work without a network, and the hub you run syncs when there is one. Nothing leaves your machines unless you decide it should.</p></article>
+  <article><h3>One workspace per codebase</h3><p>The project directory's <code>.uberblick.json</code> chooses the workspace, for people and agents alike. An agent started in a project cannot write into the wrong corpus, because it never chooses one.</p></article>
+  <article><h3>Comments where the text is</h3><p>Threads sit beside the passage they are about, for people and agents alike. A review happens in the document, not in a chat that scrolls away.</p></article>
+</div>
+</section>
+
+<section class="q" id="worth"><h2>When it's worth it.</h2>
+<p>Worth the switch when most of these are true:</p>
+<ul>
+  <li>Coding agents work in your codebase, and you want them to read the plan and the decisions before they build, not just the issue.</li>
+  <li>The team is a few people to a few dozen, and the documents are about the product and the engineering behind it.</li>
+  <li>You want the documents on your own machines, and running one Docker container for the hub is acceptable.</li>
+  <li>The repo's Markdown folder has gone stale, or a Notion space has drifted away from what the code does.</li>
+</ul>
+<p>Not worth it, today, when:</p>
+<ul>
+  <li>The content is company-wide or non-engineering. Keep Notion or Confluence.</li>
+  <li>You need a hosted service, a mobile app, Windows, or enterprise permissions. Uberblick is at 0.4, on Homebrew for Apple Silicon macOS and Linux x86_64, and you host it yourself.</li>
+  <li>Markdown in the repo still works for you. It is a fine place to be; come back when it stops working.</li>
+</ul>
+</section>
+
+<section class="q" id="matrix"><h2>Side by side.</h2>
+<p>"Agents" means how a coding agent reads and writes the documents.</p>
+</section>
+</div>
+<div class="matrix wide"><table>
+  <thead><tr><th>&nbsp;</th><th>Notion</th><th>Confluence</th><th>Google Docs</th><th>Obsidian</th><th>Jupyter</th><th>Repo Markdown</th><th class="us">Uberblick</th></tr></thead>
+  <tbody>
+    <tr><th scope="row">Built for</th><td>Any team, any content</td><td>Large organisations on Atlassian</td><td>Co-writing prose</td><td>One person's knowledge</td><td>Reproducible analysis</td><td>Engineers, in the repo</td><td class="us">Product and engineering teams with agents</td></tr>
+    <tr><th scope="row">Where it lives</th><td>Notion's cloud</td><td>Atlassian cloud or your data centre</td><td>Google's cloud</td><td>Files on your disk</td><td>Files on your disk or a hosted kernel</td><td>Git</td><td class="us">A replica on each computer, synced by a hub you run</td></tr>
+    <tr><th scope="row">Offline</th><td>Limited</td><td>No</td><td>With the browser extension</td><td>Yes</td><td>Yes</td><td>Yes</td><td class="us">Yes, always</td></tr>
+    <tr><th scope="row">Co-editing</th><td>Real time</td><td>Real time</td><td>Real time, with suggestions</td><td>Single user; sync as add-on</td><td>Per file; real time in JupyterLab</td><td>Through pull requests</td><td class="us">Real time, with comments beside the text</td></tr>
+    <tr><th scope="row">Agents</th><td>API, MCP connector</td><td>API, MCP connector</td><td>API</td><td>Edit the files directly</td><td>Run the cells; edit the files</td><td>Edit the files; commit</td><td class="us">MCP first: search, read, edit one block, comment, update data</td></tr>
+    <tr><th scope="row">Data in documents</th><td>Databases, views</td><td>Tables, macros</td><td>Tables, linked Sheets charts</td><td>Plugins</td><td>Anything computable</td><td>Static tables</td><td class="us">Records in the document; tables and charts read them</td></tr>
+    <tr><th scope="row">Decisions</th><td>A page or database you design</td><td>A decision template</td><td>A doc</td><td>A note</td><td>Not its job</td><td>An ADR file</td><td class="us">A record with an answer, a reason and the issues it affects</td></tr>
+    <tr><th scope="row">Permissions</th><td>Per page and workspace</td><td>Enterprise grade</td><td>Per document</td><td>Filesystem</td><td>Filesystem or JupyterHub</td><td>Repository access</td><td class="us">Workspace membership on the hub</td></tr>
+    <tr><th scope="row">Cost model</th><td>Per seat</td><td>Per seat</td><td>Per seat</td><td>Free; paid sync</td><td>Free, open source</td><td>Free</td><td class="us">Free, open source; you host</td></tr>
+  </tbody>
+</table></div>
+<div class="col"><p class="small">Facts about other tools reflect their public documentation at the time of writing. Tell us where we are wrong and we will fix it.</p></div>
+
+<footer class="end"><span>Uberblick is open source under the MIT license.</span><nav><a href="https://github.com/uberblick-ai/uberblick-2">GitHub</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav></footer>
+</div>
