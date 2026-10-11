@@ -194,7 +194,7 @@ describe("agent awareness", () => {
   });
 
   // Who wrote is half of what a caret says, and the web editor renders whatever
-  // is in `user.name` verbatim (#304). These pin the resolution and the wiring;
+  // is in `user.name` verbatim. These pin the resolution and the wiring;
   // the wiring is what a `??` chain would get subtly wrong, because an empty
   // title is a value.
   it("names the caret after the session title, the client, then `agent`", () => {
@@ -283,11 +283,11 @@ describe("agent awareness", () => {
 
     // The identity goes with the caret, never before it: presence in a document
     // means "this session is working here", and the write that drew this caret
-    // is the touch the presence clock is counting from too (#493). Both timers
+    // is the touch the presence clock is counting from too. Both timers
     // run for the same TTL, so the only thing keeping the presence alive at
     // least as long as the caret is that `publishCursor` arms the cursor's timer
     // *before* it re-arms presence — an anonymous caret is the one order that
-    // must not happen (#304), and nothing else in this suite fails if that
+    // must not happen, and nothing else in this suite fails if that
     // ordering is inverted.
     expect(published.length).toBeGreaterThan(0);
     const anonymous = published.filter(
@@ -297,13 +297,12 @@ describe("agent awareness", () => {
   });
 
   /**
-   * Presence in a document says "this session is working here" (#493).
+   * Presence in a document says "this session is working here".
    *
    * The server attaches a replica for every live document in the directory, so
-   * publishing on attach made one agent a peer bubble in every document at
-   * once. These pin the two halves of the fix on a *second* server booted from
-   * the first one's log — the shape that produced the bug, since that is how a
-   * server comes to hold rooms nobody asked it about.
+   * publishing on attach would put one agent in every document at once. Boot a
+   * second server from the first one's log to hold rooms nobody asked it about,
+   * then check that only actual work publishes document presence.
    */
   describe("document presence follows the work, not the connection", () => {
     /** A server that boots holding every document another one wrote. */
@@ -386,7 +385,7 @@ describe("agent awareness", () => {
   });
 
   /**
-   * The positive marker and the session id (#494).
+   * The positive marker and the session id.
    *
    * They are what the web classifies and labels a session by, so what matters
    * is not that they are published but that they are published *with* the

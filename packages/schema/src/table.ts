@@ -1,4 +1,3 @@
-/** Structured TableKit nodes, with GFM as the agent-facing text projection. */
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
@@ -6,49 +5,32 @@ import { applyInlineRuns, assertInlineWritable, attributesOf, inlinePlainText, r
 import { parseInline, renderInline } from "./markdown.js";
 import type { InlineMarkSet, InlineRun } from "./types.js";
 
-/** A column's alignment, from its delimiter cell. `null` is the default. */
+/** `null` leaves alignment at the renderer's default. */
 export type ColumnAlign = "left" | "center" | "right" | null;
 
-/** GFM table source, parsed into what a renderer needs. */
 export interface GfmTable {
   header: string[];
   align: ColumnAlign[];
-  /** Body rows, each padded to the header's column count — GFM's own rule. */
+  /** Body rows are padded or truncated to the header's column count. */
   rows: string[][];
 }
 
 /**
- * A delimiter cell: hyphens, with a colon at either end for alignment.
- *
- * One hyphen is enough, because GFM says so — the spec's own table example is
- * `:-: | -----------:`, a centred column and a right-aligned one. What tells a
- * delimiter row apart from prose is not the length of its runs but that every
- * cell is one of these *and* the row carries a structural pipe; see
- * {@link parseGfmTable}.
+ * GFM permits one hyphen and optional alignment colons.
+ * The row still needs a structural pipe to distinguish it from prose.
  */
 const DELIMITER_CELL = /^:?-+:?$/;
 
-/** A row split on its structural pipes, and how many of those there were. */
 interface Row {
   cells: string[];
-  /**
-   * Unescaped pipes in the line. Zero means the line carries no table structure
-   * at all: any pipe in it is somebody's prose, and its one "cell" is the line.
-   */
+  /** Count only unescaped separators; zero means the line has no table structure. */
   pipes: number;
 }
 
 /**
- * One row's cells. Pipes separate; a backslash escapes one into the cell text;
- * a pipe at either end of the line is decoration rather than an empty cell.
- *
- * Backslashes escape in pairs, and the **parity of the run** is what decides
- * the pipe after it: `\|` is a pipe inside a cell, while `\\|` is a literal
- * backslash followed by a real separator. Reading only the character in front
- * of the pipe gets that backwards and joins two cells into one.
- *
- * Only pipe escapes and adjacent backslash pairs are resolved. Other escapes
- * stay literal: this reader does not interpret a cell's inline markdown.
+ * Odd backslash runs escape the following pipe; even runs leave it structural.
+ * Resolve only pipe escapes and adjacent backslash pairs, leaving other escapes
+ * and inline Markdown literal. Structural edge pipes decorate rather than add cells.
  */
 function scanRow(line: string): Row {
   const trimmed = line.trim();
@@ -63,8 +45,7 @@ function scanRow(line: string): Row {
       let run = 0;
       while (trimmed[i + run] === "\\") run += 1;
       const escapesPipe = run % 2 === 1 && trimmed[i + run] === "|";
-      // Decode pairs only next to a pipe. This lets the canonical writer
-      // represent *any* number of literal backslashes before a literal pipe.
+      // Decode pairs only beside pipes so the writer can round-trip any backslash count.
       current += "\\".repeat(trimmed[i + run] === "|" ? Math.floor(run / 2) : run);
       if (escapesPipe) current += "|";
       i += escapesPipe ? run : run - 1;
@@ -81,8 +62,7 @@ function scanRow(line: string): Row {
     current += char;
   }
   cells.push(current);
-  // Decoration is a *structural* pipe at either end, which is why the ends are
-  // read off the scan rather than off the string.
+  // Only scanned structural pipes can decorate the edges.
   if (firstPipe === 0) cells.shift();
   if (lastPipe === trimmed.length - 1) cells.pop();
   return { cells: cells.map((cell) => cell.trim()), pipes };
@@ -115,7 +95,6 @@ function startsNonTableBlock(line: string): boolean {
 /** The same inline formatting vocabulary as prose, plus annotation anchors. */
 export const TABLE_CELL_MARKS = ["bold", "italic", "strike", "inlineCode", "link", "docLink", "comment"] as const;
 
-/** Read one pipe-decoded cell using the prose inline markdown reader. */
 export function parseTableCell(source: string): InlineRun[] {
   return parseInline(source, true);
 }
@@ -197,9 +176,8 @@ export function buildTableCell(text: string, header: boolean): Y.XmlElement {
   attrs.setAttribute("rowspan", 1);
   // ProseMirror's colwidth default is null. y-prosemirror omits null attrs.
   const paragraph = new Y.XmlElement("paragraph");
-  // Even an empty cell needs a shared text before its first writers arrive.
-  // Independently inserting texts on the first keystroke loses later writes
-  // when y-prosemirror consolidates the adjacent types.
+  // Seed empty cells before their first writers; consolidation of concurrently
+  // inserted texts can lose later writes.
   paragraph.insert(0, [new Y.XmlText(text)]);
   cell.insert(0, [paragraph]);
   return cell;
@@ -229,8 +207,7 @@ export function seedNewTableCells(transaction: Y.Transaction): void {
       const paragraph = cell.firstChild;
       if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
       const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
-      // Never seed a previously received empty cell on several replicas: that
-      // would reproduce the first-write race. Its creator owns this insertion.
+      // Only the creator seeds the cell; received empty cells would race again.
       if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
     }
   }
@@ -253,9 +230,8 @@ function changedMarks(before: InlineMarkSet, after: InlineMarkSet): Record<strin
 }
 
 /**
- * Splice only changed characters and mark keys. Compare the old GFM projection
- * rather than normalizing stored runs: unexpressible marks, comments and trimmed
- * cell-edge whitespace survive wherever the caller made no change.
+ * Diff only changed characters and mark keys in the old projection, preserving
+ * unexpressible marks, comments and trimmed edge whitespace elsewhere.
  */
 export function spliceTableCell(cell: Y.XmlElement, before: string, after: string): void {
   let text = tableCellText(cell);
@@ -271,8 +247,7 @@ export function spliceTableCell(cell: Y.XmlElement, before: string, after: strin
   const newValue = inlinePlainText(newRuns);
   const oldMarks = characterMarks(oldRuns);
   const newMarks = characterMarks(newRuns);
-  // scanRow trims only whitespace outside inline syntax. The rest of the
-  // rendered text is unchanged; keep those unprojected edge characters alive.
+  // Keep edge whitespace omitted by scanRow outside the projected edit range.
   let offset = plainXmlText(text).indexOf(oldValue);
   if (offset < 0) throw new InvalidTableError();
   let oldOffset = 0;
@@ -361,9 +336,8 @@ function tableMapping(oldValues: string[][], newValues: string[][], supplied: Ta
 }
 
 /**
- * Edit only the rows and columns whose identities the caller names. Plain GFM
- * cannot distinguish a renamed survivor from a replacement with equal values.
- * Parsed cells decide what changed, preserving stored whitespace and marks.
+ * Caller mappings preserve row/column identity that equal GFM values cannot convey.
+ * Compare parsed cells so unchanged whitespace and marks survive.
  */
 export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping): void {
   if (!isSupportedTable(element)) throw new InvalidTableError();
@@ -379,8 +353,7 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
     if (rowElement === undefined) throw new InvalidTableMappingError("mapped row is absent from stored table");
     return { oldIndex, rowElement, cells: oldCells[oldIndex] ?? [] };
   });
-  // Validate projected offsets before any structural edits. Even a malformed
-  // old projection must refuse without leaving a partially changed table.
+  // Validate offsets before structural edits so malformed projections leave no partial write.
   for (const [row, mapped] of mappedRows.entries()) {
     if (mapped === null) continue;
     for (const [column, oldColumn] of columnMap.entries()) {
@@ -433,8 +406,8 @@ export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: G
       }
       actualColumn += 1;
     }
-    // Selecting only virtual padding must retain the supported nonempty row
-    // grammar. Materialize one cell, without repairing the remaining padding.
+    // Virtual-only selections need one real cell to retain the nonempty row grammar;
+    // leave the remaining padding virtual.
     if (actualColumn === 0) rowElement.insert(0, [buildTableCell("", row === 0)]);
   }
 }
@@ -449,12 +422,8 @@ function alignOf(delimiter: string): ColumnAlign {
 }
 
 /**
- * Parse GFM table source, or `null` when the text is not a table.
- *
- * A table is a header row, a delimiter row with the same number of cells, and
- * any number of body rows. That is the same test the markdown reader applies to
- * decide whether two lines *start* a table, so what imports as a table and what
- * renders as a table can never disagree.
+ * Share table-start recognition with the Markdown reader: a header and equally
+ * wide delimiter row precede zero or more body rows.
  */
 export function parseGfmTable(source: string): GfmTable | null {
   const lines = source.replace(/\r\n?/g, "\n").replace(/\s+$/, "").split("\n");
@@ -462,19 +431,14 @@ export function parseGfmTable(source: string): GfmTable | null {
 
   const header = scanRow(lines[0] ?? "");
   const delimiters = scanRow(lines[1] ?? "");
-  // A structural pipe in each row, and structural is the load-bearing word: a
-  // `\|` is a pipe in somebody's prose. Counting one would read `a \| b` over
-  // `---` — which is a setext heading — as a one-column table, and swallow the
-  // paragraph into it.
+  // Escaped pipes do not make a table; otherwise setext headings become table rows.
   if (header.pipes === 0 || delimiters.pipes === 0) return null;
   if (header.cells.length === 0) return null;
   if (delimiters.cells.length !== header.cells.length) return null;
   if (!delimiters.cells.every((cell) => DELIMITER_CELL.test(cell))) return null;
 
   const body = lines.slice(2);
-  // A blank line ends a table, so one *inside* the source means this is not one
-  // table: taking the lines after it as rows would render a following paragraph
-  // as a row of a table it was never part of. Trailing blanks are already gone.
+  // Internal blank lines split blocks; trailing blanks have already been removed.
   if (body.some((line) => line.trim() === "")) return null;
 
   const rows = body.map((line) => {

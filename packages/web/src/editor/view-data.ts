@@ -1,3 +1,4 @@
+// Decision: 4b565a90-d152-4a51-ad63-cdb05606ec5f
 /** Shared read-only binding rules for document-owned data views. */
 import { DATA_LIMITS, validateCollectionSchema } from "@uberblick/schema";
 import type { DataCollection, DataSchema, DocData, JSONObject } from "@uberblick/schema";

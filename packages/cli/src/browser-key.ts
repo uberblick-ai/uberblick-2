@@ -1,8 +1,3 @@
-/**
- * The browser's loopback key is independent of every upstream credential.
- * Keep it per workspace so a page's cached signing key survives `ub open`
- * restarts, including a restart that gains or loses hub authentication.
- */
 import { randomBytes } from "node:crypto";
 import {
   closeSync,
@@ -14,7 +9,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { resolveStorage } from "@uberblick/hub/storage";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { describeFsError, publishStaged, writeTempBeside } from "./safe-write.js";
 
@@ -65,10 +60,10 @@ function readKey(path: string): string | null {
 }
 
 /**
- * Load or exclusively publish the served workspace's owner-only browser key.
- * An existing key is never rewritten or regenerated: changing it would strand
- * pages kept open across a restart. Complete publication lets simultaneous
- * first launches adopt the same winner without exposing an empty file.
+ * Keep an owner-only key per workspace, independent of upstream credentials,
+ * so cached browser keys survive restarts and changes in hub authentication.
+ * Never regenerate an existing key. Publish complete bytes exclusively so
+ * simultaneous first launches adopt one winner without exposing an empty file.
  */
 export function localBrowserKey(
   workspaceId: string,

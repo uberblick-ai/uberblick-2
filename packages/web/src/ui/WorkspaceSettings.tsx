@@ -192,15 +192,9 @@ function TagSettings({
   const [error, setError] = useState<string | null>(null);
   const groups = useRef<HTMLDivElement | null>(null);
   /**
-   * The lifecycle action this client just activated, and where its entry stood.
-   *
-   * Retiring or restoring moves the entry to the other list, so the button that
-   * had focus unmounts, and focus on a detached element is focus on `<body>` —
-   * the keyboard reader is silently returned to the top of the page, mid-
-   * curation. The target cannot be picked here, because it does not exist until
-   * the write has re-rendered both lists, so the *position* is remembered and
-   * resolved in the layout effect below. Only a local action sets it: a peer's
-   * catalog change re-renders through the same path and must not move focus.
+   * Remember position only for a local lifecycle gesture: moving catalog
+   * entries unmounts their focused button. Resolve a surviving focus target
+   * after both lists commit; remote catalog changes must not move focus.
    */
   const [refocus, setRefocus] = useState<{
     from: "active" | "retired";

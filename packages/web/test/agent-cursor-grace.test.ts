@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * How long a departed agent's caret stays on screen (#407).
+ * How long a departed agent's caret stays on screen.
  *
  * The lifetime lives in one constant and one view, so it is driven here on fake
  * timers rather than through an editor and a hub: a real 30-second wait would
@@ -40,7 +40,7 @@ let additionalPeers: Awareness[];
  *
  * `client` is the whole question the grace asks, so it is a parameter: the
  * agent marker is what production publishes, and `undefined` is the session
- * that claims to be nothing — a tab on a bundle from before the marker.
+ * that claims to be nothing — including a tab whose bundle lacks the marker.
  */
 function publishCursor(
   head: number,
@@ -124,8 +124,7 @@ it("holds a departed agent's caret for the grace the editor wires, then drops it
     color: "#a33",
   });
 
-  // Still there at 29 s — the five seconds this used to be would have expired
-  // twenty-four seconds ago.
+  // Still there at 29 s: the retention must cover nearly the whole grace period.
   vi.advanceTimersByTime(29_000);
   expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
 
@@ -161,8 +160,7 @@ it("lets a returning session replace its own retained caret at once", () => {
   vi.advanceTimersByTime(1_000);
 
   // The agent is back and writing somewhere else. The live state is what the
-  // caret is drawn from — the same object the room holds, not a copy of where
-  // it used to be.
+  // caret is drawn from — the same object the room holds, not the retained copy.
   publishAgentCursor(9);
   expect(view.getStates().get(agent.clientID)).toBe(
     viewer.getStates().get(agent.clientID),

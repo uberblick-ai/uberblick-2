@@ -1,5 +1,3 @@
-/** The CLI's version, read from its own package.json — one place to bump. */
-
 import { readFileSync } from "node:fs";
 
 export function cliVersion(): string {

@@ -468,6 +468,54 @@ test("MCP updates and remote mapping edits redraw through ub open, preserve data
   expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
 });
 
+test("a record limit follows the latest x values with a neutral count and unchanged source", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...MAPPING, limit: 2, y: [{ field: "latency", label: "Latency", unit: "ms" }] };
+  const uuid = await chartDoc(session, "Limited live line chart", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { day: "2026-01-03", latency: 130 } },
+    { id: "middle", value: { day: "2026-01-02", latency: 120 } },
+    { id: "z", value: { day: "2026-01-01", latency: 110 } },
+    { id: "bad-date", value: { day: "2026-02-31", latency: 140 } },
+  ] }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: (loading) => installProbe(loading, uuid),
+    contextOptions: { locale: "en-US" },
+  });
+  await expectReady(page);
+  const canvas = page.getByRole("img", { name: "API latency", exact: true });
+  const notice = page.locator(".ub-chart-notice");
+  const diagnostics = page.locator(".ub-chart-diagnostics");
+  await expect(canvas).toHaveAccessibleDescription(/2 plotted records\. First Day: Jan 2, 2026\. Last: Jan 3, 2026\./);
+  await expectObservationGeometry(page, [
+    { value: Date.UTC(2026, 0, 2), label: "Jan 2" }, { value: Date.UTC(2026, 0, 3), label: "Jan 3" },
+  ], /^Jan \d+$/, true);
+  await expect(notice).toHaveText("Showing the latest 2 of 3 records");
+  await expect(notice).not.toHaveAttribute("aria-live", /.*/);
+  await expect(notice).not.toHaveAttribute("role", /alert|status/);
+  await expect(notice).toHaveCSS("color", await page.locator(".ub-chart-open").evaluate((element) => getComputedStyle(element).color));
+  await expect(diagnostics).toHaveText("1 records not plotted (1 wrong-type or invalid x).");
+
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "0-newest", value: { day: "2026-01-04", latency: 150 } },
+  ] }] });
+  await expect(canvas).toHaveAccessibleDescription(/2 plotted records\. First Day: Jan 3, 2026\. Last: Jan 4, 2026\./);
+  await expect(canvas).toHaveAccessibleDescription(/Latency: 150 ms/);
+  await expectObservationGeometry(page, [
+    { value: Date.UTC(2026, 0, 3), label: "Jan 3" }, { value: Date.UTC(2026, 0, 4), label: "Jan 4" },
+  ], /^Jan \d+$/, true);
+  await expect(notice).toHaveText("Showing the latest 2 of 4 records");
+  await expect(diagnostics).toHaveText("1 records not plotted (1 wrong-type or invalid x).");
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, limit: 4 }));
+  await expect(canvas).toHaveAccessibleDescription(/4 plotted records/);
+  await expect(notice).toBeHidden();
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, limit: 0 }));
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
+  await expect(notice).toBeHidden();
+});
+
 test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
   test.skip(info.project.name === "webkit-iphone", "Explicit desktop and iPad contexts own this paired proof.");
   test.setTimeout(120_000);
@@ -528,8 +576,8 @@ test("crowded daily endpoint labels stay inside the canvas after resizing", { ta
   await expectReady(page);
   await page.evaluate(() => document.fonts.ready);
   const canvas = page.locator(".ub-chart canvas");
-  // At 312px the old build/fit reselection newly retained Jul 21 without
-  // fitting its endpoint padding. Nearby widths also exercise responsive draws.
+  // At 312px the retained endpoint tick must fit its padding.
+  // Nearby widths also exercise responsive draws.
   for (const width of [312, 317, 311]) {
     await page.locator(".ub-chart-screen").evaluate((element, nextWidth) => {
       const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;

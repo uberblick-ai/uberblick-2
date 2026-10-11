@@ -1,22 +1,7 @@
 /**
- * The Threads rail: comment threads as the reader sees them, derived from the
- * open document.
- *
- * Nothing is stored for the rail. A thread is a Y.Map in the `annotations`
- * Y.Map, holding its conversation, and its range is a `comment` mark on some
- * block's Y.XmlText, so the rail is those two reads joined — which is why a
- * thread another client creates needs no extra plumbing to appear.
- *
- * The join is what makes the orphaned state detectable. A thread is orphaned
- * when its id appears in no block's marks: every annotated character was
- * deleted, so the conversation has no anchor left. The schema package never
- * cascade-deletes the thread (see annotations.ts), and neither does this — an
- * orphaned thread is rendered dimmed, with its text intact, and is the one card
- * that has nothing to scroll to.
- *
- * Marks are looked for in *every* block, not just the one the thread itself
- * names, because a block split moves half a marked range into a new block. The
- * first anchor in document order is the one the card quotes.
+ * Derive the rail from annotations and surviving marks across every block.
+ * Splits can move a range out of its recorded block; quote its first anchor
+ * in document order.
  */
 
 import * as Y from "yjs";
@@ -48,14 +33,9 @@ const FLASH_MS = 1200;
 const FLASH_CLASS = "ub-comment-flash";
 
 /**
- * Thread ids that may be written into a stylesheet verbatim. The schema package
- * generates uuids — 36 characters — so this fits every id the system itself
- * makes with room to spare; anything else came from a client that made one up.
- *
- * Bounded, because "harmless characters" is only half the question: an id that
- * is a megabyte of hyphens injects a megabyte of selector per resolved thread,
- * on every render of the rail. The shape a uuid cannot exceed is the shape this
- * rule accepts.
+ * Allow only bounded UUID-compatible characters in stylesheet selectors.
+ * Arbitrarily long safe-looking IDs would generate oversized CSS on every
+ * rail render.
  */
 const SAFE_THREAD_ID = /^[0-9A-Za-z-]{1,64}$/;
 
@@ -71,12 +51,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   chart: "Line chart",
 };
 
-/**
- * How a block is named to a reader: by its kind and its place in the document,
- * counted from one. The composer names the block it is about to annotate the
- * same way a card names the block it is anchored in, because they are the same
- * sentence at two moments.
- */
+/** Use one-based kind and position labels in both composer and cards. */
 export function blockRefLabel(type: BlockType, index: number, source = ""): string {
   let label = BLOCK_LABELS[type];
   if (type === "chart") {
@@ -91,10 +66,8 @@ export function blockRefLabel(type: BlockType, index: number, source = ""): stri
 }
 
 /**
- * A comment plus the key the rail renders it under. A stored comment carries no
- * id — a row is an author, text and a timestamp — so a comment's identity is
- * its position in the thread's converged order, and the key is derived here
- * rather than in the view.
+ * Stored comments have no ID; derive React keys from their converged thread
+ * order.
  */
 export interface ThreadComment extends AnnotationComment {
   key: string;
@@ -120,29 +93,20 @@ export interface ThreadView {
 }
 
 /**
- * The thread the reader is looking at, as the app shell holds it.
- *
- * `click` is a counter, not decoration. Selecting a thread scrolls its card into
- * view, and a reader who clicks the same highlight twice — because the rail has
- * scrolled away since — means it the second time. An id alone is a state value
- * React recognises as unchanged, so nothing would move.
+ * Increment click even for the same thread so repeated activation scrolls a
+ * displaced card back into view.
  */
 export interface ThreadFocus {
   id: string;
   click: number;
   /**
-   * The selection came from the keyboard, so DOM focus follows it to the card.
-   *
-   * A pointer click must not: the reader's caret is in the prose where they put
-   * it, and yanking focus into the rail would take it away from them. A reader
-   * who arrived by Tab and Enter has nothing to lose and everything to gain —
-   * without this, the highlight is a control that leads nowhere.
+   * Keyboard activation moves DOM focus to the card; pointer activation
+   * preserves the prose caret.
    */
   viaKeyboard: boolean;
   /**
-   * This selection activated an anchor that was resolved at that moment, so
-   * the rail reveals its collapsed conversation. A card click leaves this
-   * false: resolved cards keep their own expand/collapse gesture.
+   * A resolved-anchor activation reveals its collapsed conversation; card
+   * clicks keep their own toggle gesture.
    */
   revealResolved: boolean;
 }
@@ -197,19 +161,9 @@ function threadIdOf(attributes: unknown): string | null {
 }
 
 /**
- * Where each thread's mark actually sits, from ONE walk of the blocks fragment.
- * The first run in document order wins, so a thread split across two blocks is
- * quoted from its head.
- *
- * One walk and not `listAnnotationRanges` per block: that API re-locates the
- * block by scanning the fragment on every call, so calling it once per block is
- * quadratic in the block count — and this runs on every keystroke.
- *
- * The fragment is read directly, which means honouring the one rule that walk
- * carries: the first element to claim an id is the visible block and any later
- * element repeating that id is shadowed (see `partitionById` in schema's
- * blocks.ts). An element with no id has claimed no block identity, so no thread
- * can name it and nothing here can quote it.
+ * Walk the fragment once per reading, avoiding per-block quadratic annotation
+ * lookups. First marked run wins. Respect first-ID visibility and skip
+ * shadowed duplicates or unidentified elements.
  */
 function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
   const found = new Map<string, Anchor>();
@@ -275,10 +229,7 @@ function excerptOf(anchor: Anchor | null): string {
     : quoted;
 }
 
-/**
- * The block reference on a card. Position, not id: a reader locating a deleted
- * range needs "Paragraph 3", and a uuid tells them nothing.
- */
+/** Name deleted ranges by readable block position rather than UUID. */
 function blockRefFor(
   byId: Map<string, Block>,
   order: Map<string, number>,
@@ -291,18 +242,9 @@ function blockRefFor(
 }
 
 /**
- * Every thread in the document, in reading order: by the block its range sits
- * in, then by where in that block. Reading order and not thread-id order — a
- * rail sorted by uuid is a rail you cannot follow down the page.
- *
- * An orphan is placed by the block its record names, at the head of it: the
- * offset its range used to have is recorded nowhere, and the alternative —
- * dropping orphans to the bottom of the rail — would move a card away from
- * the passage the conversation is about.
- *
- * A document with no threads costs nothing: this runs on every keystroke through
- * the fragment observer, and most documents have no annotations at all, so the
- * empty map is checked before a single block is read.
+ * Sort by anchor block and offset. Orphans retain their recorded block and
+ * sort at its head; completely missing blocks sort last. Check for no threads
+ * before walking blocks on every keystroke.
  */
 export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
   if (getAnnotationsMap(ydoc).size === 0) return [];
@@ -334,9 +276,8 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
     const anchor = anchors.get(view.id);
     // A thread whose block is gone entirely sorts last, not first.
     const index = order.get(anchor?.blockId ?? view.blockId) ?? Number.MAX_SAFE_INTEGER;
-    // -1, not 0: an orphan has no offset, and sharing 0 with an anchored thread
-    // at the very start of the block would tie the two and let a uuid decide
-    // which comes first — stable, but with no pattern a reader could follow.
+    // Use -1 for orphan offsets so UUID order cannot tie them with a live
+    // anchor at offset zero.
     return [index, anchor?.row ?? -1, anchor?.column ?? -1, anchor?.start ?? -1];
   };
   return views.sort((a, b) => {
@@ -351,23 +292,9 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
 }
 
 /**
- * Call `onChange` with a fresh rail whenever it could have changed. Returns the
- * unsubscribe.
- *
- * Two subscriptions, because the rail joins two places: the annotations map and
- * the blocks fragment. Both are observed deeply, and for the same reason — the
- * change that matters is one level down. On the fragment it is a *format*
- * change, a mark being deleted with its text, which a shallow observer would
- * never report as a thread orphaning; on the annotations map it is a reply,
- * which is an insert into the thread's own nested comments array and so never
- * touches the map's own keys. Without the deep observer a reply arriving from
- * another replica would sit in the document unrendered until something else
- * moved.
- *
- * The two are coalesced onto a microtask, so a single transaction that touches
- * both — creating a thread writes the map *and* the mark — recomputes the rail
- * once instead of twice. The first read is synchronous: a mounting rail should
- * not paint empty for a tick.
+ * Observe annotations and blocks deeply: replies modify nested arrays and
+ * deleted marks modify nested text. Coalesce shared transactions into one
+ * microtask; seed synchronously so mounting never flashes empty.
  */
 export function observeThreads(
   ydoc: Y.Doc,
@@ -402,9 +329,8 @@ export function threadCardId(threadId: string): string {
 }
 
 /**
- * The thread a click landed in, or null. The editor renders a `comment` mark as
- * a span carrying `data-comment-thread` (see editor/nodes.ts), so a click
- * anywhere inside the highlight resolves through the nearest such ancestor.
+ * Resolve delegated highlight clicks through the nearest data-comment-thread
+ * ancestor.
  */
 export function threadIdFromTarget(target: EventTarget | null): string | null {
   if (!(target instanceof Element)) return null;
@@ -416,13 +342,8 @@ export function threadIdFromTarget(target: EventTarget | null): string | null {
 }
 
 /**
- * The thread a key press activated, or null — the keyboard's `threadIdFromTarget`.
- *
- * Enter and Space are what `role="button"` promises, and the target is the
- * decision: a key press with the *caret* in an annotated range targets the
- * contenteditable host, which no highlight is an ancestor of, so typing inside a
- * comment is untouched. Only a highlight the reader has actually focused — by
- * Tab — reads as an activation.
+ * Enter/Space activates only a focused highlight. Caret typing targets
+ * contenteditable, outside highlight ancestry, and must remain untouched.
  */
 export function threadIdFromActivation(event: KeyboardEvent): string | null {
   if (event.key !== "Enter" && event.key !== " ") return null;
@@ -430,21 +351,14 @@ export function threadIdFromActivation(event: KeyboardEvent): string | null {
 }
 
 /**
- * The timer that will clear each flashing span's class. Keyed by the element so a
- * second click cancels the first click's timer instead of letting it strip the
- * class out from under the new flash — and weakly, because ProseMirror is free to
- * replace the span at any redraw.
+ * Key flash timers weakly by span; repeated clicks cancel the old timer,
+ * while ProseMirror may replace the element at any redraw.
  */
 const flashTimers = new WeakMap<Element, ReturnType<typeof setTimeout>>();
 
 /**
- * Scroll a thread's highlight into view and flash it. A no-op when the thread is
- * orphaned — there is no anchor to scroll to, which is exactly why the card says
- * which block the range lived in instead.
- *
- * Each click restarts the flash rather than joining one already running: the
- * class comes off, the layout is forced, the class goes back on. Without the
- * restart a click near the end of a flash gets almost no animation at all.
+ * Orphans have no highlight to scroll to. Restart each live flash by removing
+ * the class and forcing layout before reapplying it.
  */
 export function flashThreadHighlight(threadId: string): void {
   const spans = document.querySelectorAll<HTMLElement>(
@@ -470,27 +384,10 @@ export function flashThreadHighlight(threadId: string): void {
 }
 
 /**
- * The rule that fades a resolved thread's highlight back into the prose.
- *
- * A stylesheet and not a class on the span, because the span is ProseMirror's:
- * it is rebuilt whenever the text inside it changes, and a class this app wrote
- * would vanish on the next keystroke and come back only at the next annotation
- * change. A selector matching `data-comment-thread` — rendered by the live
- * comment mark view (`editor/comment-anchors.ts`) and by the schema's static
- * form (`editor/nodes.ts`) — survives every redraw, and resolving a thread is
- * rare enough that regenerating one rule costs nothing.
- *
- * The declarations are the resolved *state* of `.ub-comment` in styles.css: the
- * amber ground goes and the underline thins to a dotted neutral rule. Faded,
- * not gone — the range is still annotated, and a reader must still be able to
- * find the conversation from the prose.
- *
- * A thread id is data — it is a key in a Y.Map any client can write — so it is
- * checked against {@link SAFE_THREAD_ID}, in shape *and* in length, rather than
- * escaped. Escaping a CSS string means getting backslashes, quotes *and* the
- * line terminators that end a string early all right, and a rule this small is
- * not worth that. An id the check refuses simply gets no fade rule: its
- * highlight stays amber, which is loud and harmless.
+ * Derive resolved selectors instead of DOM classes: ProseMirror rebuilds
+ * spans on text edits. Keep the annotated range reachable with a dotted
+ * neutral underline. Refuse IDs outside SAFE_THREAD_ID shape or length;
+ * rejected IDs keep their harmless amber highlight.
  */
 export function resolvedHighlightCss(threadIds: readonly string[]): string {
   const safe = threadIds.filter((id) => SAFE_THREAD_ID.test(id));
@@ -507,12 +404,8 @@ export function scrollThreadCardIntoView(threadId: string): void {
 }
 
 /**
- * Move DOM focus to a thread's card — the far end of the keyboard path.
- *
- * The card's body is the one `<button>` in it (see ThreadsPane), which is
- * already the rail's single tab stop per thread, so landing there hands the
- * reader the conversation *and* the Reply and Resolve controls beside it in
- * tab order.
+ * Focus the card body button so the conversation and adjacent Reply/Resolve
+ * actions remain in native Tab order.
  */
 export function focusThreadCard(threadId: string): void {
   document

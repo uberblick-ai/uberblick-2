@@ -1,5 +1,5 @@
 /**
- * Syntax colouring in the browser (#922).
+ * Syntax colouring in the browser.
  *
  * The jsdom contract test owns document invariants and grammar routing. This
  * proof owns token ink, native focus and key events, and touch operation of

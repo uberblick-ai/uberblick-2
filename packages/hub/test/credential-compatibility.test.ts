@@ -9,9 +9,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
 import type { GithubSignIn, SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { createHub, createRoomAuthenticator, type Hub, type HubContext } from "../src/server.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintRequestProof, mintToken } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { createRoomAuthenticator, type HubContext } from "../src/server.js";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintRequestProof, mintToken } from "@uberblick/schema/token";
 import {
   createClient,
   removeTempDatabases,

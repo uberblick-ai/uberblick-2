@@ -1,15 +1,7 @@
 /**
- * The one text field comments are written in — a new thread's first comment in
- * the composer, a reply in the rail.
- *
- * Enter submits and Shift+Enter breaks the line: a comment is a message, not a
- * document, and the keyboard should say so. Escape closes, because a card that
- * appeared over the prose has to be dismissible without reaching for the mouse.
- *
- * Mentions are a plain-text convention and nothing else. A chip types `@name`
- * into the comment; no delivery, no registry, no autocomplete — the only names
- * anyone can know are the peers publishing awareness right now, and those are
- * the only chips offered.
+ * Enter submits, Shift+Enter inserts a newline and Escape dismisses. Peer
+ * chips append plain-text @name from current awareness only; they provide no
+ * delivery, registry or autocomplete.
  */
 
 import { useRef, useState } from "react";
@@ -43,10 +35,8 @@ export function CommentForm({
   /** Remounted reply forms let the pane focus only a new Reply gesture. */
   autoFocus?: boolean;
   /**
-   * Called with the trimmed text; never with an empty string. Returns whether
-   * the write went through — a refused comment keeps the text in the field,
-   * because the writer is about to try it somewhere else and typing it twice is
-   * the wrong way to learn that.
+   * Submit trimmed nonempty text. A refused write returns false and preserves
+   * the draft.
    */
   onSubmit: (text: string) => boolean;
   onCancel: () => void;

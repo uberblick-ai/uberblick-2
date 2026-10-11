@@ -29,8 +29,8 @@ import {
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
-} from "../src/protocol.js";
-import { MAX_TOKEN_LENGTH } from "../src/token.js";
+} from "@uberblick/schema/protocol";
+import { MAX_TOKEN_LENGTH } from "@uberblick/schema/token";
 import {
   createClient,
   forgeToken,
@@ -172,7 +172,7 @@ describe("the version exchange", () => {
   it("refuses another version, and a bare token, with the same exact reason", async () => {
     const newer = client(await token("read-write"), SYNC_PROTOCOL_VERSION + 1);
     const older = client(await token("read-write"), SYNC_PROTOCOL_VERSION - 1);
-    // What every client that has not been updated looks like on the flag day.
+    // A bare token has no protocol envelope and must receive the mismatch reason.
     const bare = client(await token("read-write"), null);
 
     const reason = protocolMismatchReason(SYNC_PROTOCOL_VERSION);

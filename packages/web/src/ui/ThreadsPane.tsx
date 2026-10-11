@@ -1,39 +1,10 @@
 /**
- * The Threads rail: every comment thread in the open document, and the two
- * things a reader can do about one — reply to it, or resolve it.
- *
- * A card's body is one `<button>` and nothing but phrasing content inside it —
- * a blockquote or a paragraph there would be invalid inside a button, and one
- * button per card keeps the rail a single tab stop per thread with Enter
- * activating it. The actions sit *beside* that button rather than inside it,
- * because a button may not contain a button. The quote marks around the excerpt
- * are CSS, not text.
- *
- * Clicking a card flashes the highlight in the prose; clicking a highlight
- * focuses the card. Both directions are the same `ThreadFocus`, held by the app
- * shell, because the two ends live in different panes.
- *
- * Resolved threads leave the count and move below it, collapsed and labelled.
- * They are never dropped: a conversation someone has already had is the reason
- * the text reads the way it does now.
- *
- * Both writes go through the schema package's annotation API — `addComment` and
- * `setAnnotationResolved` — in one transaction each, so a reply and a resolve
- * reach a second client exactly the way an agent's do.
- *
- * A card on screen is always a render old, and the document is shared: the
- * thread it names can be resolved or deleted by anyone between the render and
- * the click. So a reply re-reads the thread at submit and refuses if it is gone
- * or settled, rather than appending to a conversation that is over. A refusal
- * keeps the writer's text — that is `CommentForm`'s contract for returning
- * false — and says why on the card rather than inside the form, because the
- * form is on its way out: resolving a thread takes the reply form with it (see
- * the effect below), so a message in the form's own error slot would be removed
- * in the same flush that wrote it.
- *
- * That message is then reconciled against the document like everything else on
- * a card. It described the thread at one moment, and the same client that
- * settled the thread can reopen it a second later — from anywhere.
+ * Each card has one body button with phrasing content; actions sit beside it
+ * to avoid nested buttons. Quote marks are CSS. Share focus with editor
+ * highlights. Keep resolved threads collapsed below the open count. Schema
+ * writes recheck the live thread; a refused reply keeps its draft and reason
+ * outside the retiring form, and that reason disappears when the thread
+ * reopens.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -101,10 +72,7 @@ function ThreadCard({
   draft: { text: string; onChange: (text: string) => void };
   /** The conversation is readable, but nothing on the card writes. */
   readOnly: boolean;
-  /**
-   * Why the last reply to this thread was refused, if it was — and null on a
-   * card that reads as open, because that is what the refusal is about.
-   */
+  /** Keep the refused-reply reason only while the card reads as settled. */
   refusal: string | null;
   onSelect: () => void;
   onReply: (text: string) => boolean;
@@ -160,12 +128,12 @@ function ThreadCard({
           </span>
         )}
       </button>
-      {/* Outside the `collapsed` branch below: a reply refused because someone
-          else resolved the thread arrives on a card that is collapsing in the
-          same flush, and the reason has to outlive that. */}
+      {/*
+          * Keep refusal outside the collapsing branch so a concurrent resolve cannot
+          * hide it with the form.
+       */}
       {refusal !== null && <p className="ub-comment-error">{refusal}</p>}
-      {/* An archived document's threads are history: every comment stays
-          readable, and there is nothing here that would write to it. */}
+      {/* Archived conversations remain readable without write controls. */}
       {!collapsed &&
         !readOnly &&
         (replying ? (
@@ -211,19 +179,14 @@ export function ThreadsPane({
 }: {
   connection: RoomConnection | null;
   /**
-   * Every thread in the open document, in reading order. Observed by the app
-   * shell rather than here: the pane-edge handle and the drawer's own open/closed
-   * state are read off the same list, and three observers over one Y.Doc would
-   * recompute the same rail three times on every keystroke.
+   * Share the shell's ordered thread list with the pane-edge count and drawer
+   * gate instead of recomputing it in three observers.
    */
   threads: readonly ThreadView[];
   focused: ThreadFocus | null;
   /** The awareness name this client publishes — the author of its replies. */
   author: string;
-  /**
-   * Read the threads, write nothing — what an archived document allows. The
-   * rail keeps every card, and drops Reply, Resolve and Reopen.
-   */
+  /** Archives retain every card while withholding Reply, Resolve and Reopen. */
   readOnly?: boolean;
   onFocus: (threadId: string) => void;
   narrow?: boolean;
@@ -249,30 +212,20 @@ export function ThreadsPane({
     setReplyText("");
   };
   const now = useTimestampClock();
-  /**
-   * The one resolved thread the reader has opened back up. One at a time: the
-   * resolved list is an archive, and expanding a card there is a glance, not a
-   * mode the rail should stay in.
-   */
+  /** Only one resolved card may be expanded at a time. */
   const [expanded, setExpanded] = useState<string | null>(null);
   /**
-   * The one refused reply, and the thread it was refused on. Set where a reply
-   * is turned away and cleared only by the watch below — the state it describes
-   * belongs to the document, so nothing here is entitled to clear it by hand.
+   * Pair the refused reply with its thread and clear it only when the
+   * observed document state no longer justifies it.
    */
   const [refusal, setRefusal] = useState<{ id: string; message: string } | null>(
     null,
   );
   const handledSelection = useRef<ThreadFocus | null>(null);
 
-  // A highlight click focuses a card that may be scrolled out of the rail. Keyed
-  // on the whole focus and not its id, so clicking the same highlight again
-  // scrolls the rail back to its card — see `ThreadFocus`.
-  //
-  // A keyboard activation also takes DOM focus with it, which is the far end of
-  // the path a Tab and an Enter started in the prose (#101). In an effect and
-  // not at the key press, because the rail may be a drawer that this very
-  // selection opened: the card is focusable once React has committed it.
+  // Key scrolling on the whole focus value so repeated highlight activation
+  // works. Move keyboard focus after commit because selecting may mount the
+  // drawer and card.
   useEffect(() => {
     // A resize or a dismissal can rerun this effect, but neither repeats the
     // last highlight's request to move focus out of the prose.
@@ -296,15 +249,9 @@ export function ThreadsPane({
     if (focused.viaKeyboard) focusThreadCard(focused.id);
   }, [focused, expanded, narrow, open, threads]);
 
-  // A pending reply outlives the conversation it belonged to unless it is let
-  // go: hiding the form while a thread reads as resolved is not the same as
-  // forgetting it, and a thread someone else resolves and then reopens would
-  // bring the form back with nobody having asked.
-  //
-  // Read-only is the same hazard with a different cause: archiving a document
-  // hides the form without forgetting it, and the restore would bring it back
-  // without another Reply gesture. Whoever archived it ended the conversation
-  // for now; the reply is let go with it.
+  // Clear reply intent when the thread resolves or the document becomes read-
+  // only; reopening or restoring must not resurrect a form without another
+  // Reply gesture.
   useEffect(() => {
     if (replyTo === null) return;
     if (readOnly) {
@@ -315,17 +262,9 @@ export function ThreadsPane({
     if (thread === undefined || thread.resolved) setReplyTo(null);
   }, [threads, replyTo, readOnly]);
 
-  // A refusal describes a thread at one moment, and that thread is shared:
-  // whoever settled it can reopen it, and an id that is gone can come back on a
-  // new thread. "Reopen it to reply" standing over an open thread is worse than
-  // silence, so the message lives exactly as long as the state that justified
-  // it — a remote reopen takes it away with nobody here clicking anything.
-  //
-  // The rail answers first: it is what the message is displayed beside, and its
-  // recompute on every document change is what runs this again. The document is
-  // the tiebreaker for the one window where the rail is a flush behind — the
-  // refusal is written in the same task the resolve arrives in, which is the
-  // whole reason it exists.
+  // Keep refusal only while its thread remains settled. Use the rail first
+  // and the live document during the same-task observer lag, so a remote
+  // reopen never leaves a stale refusal.
   useEffect(() => {
     if (refusal === null || connection === null) return;
     const settled = threads.some(
@@ -348,16 +287,13 @@ export function ThreadsPane({
       now={now}
       focused={thread.id === focused?.id}
       collapsed={thread.resolved && expanded !== thread.id}
-      // A resolved thread never shows the form, however `replyTo` got here: it
-      // may name a thread someone else resolved a moment ago, and expanding
-      // that card must not offer a reply nobody asked for.
+      // A resolved thread never shows a retained reply form, even when
+      // expanded.
       replying={replyTo === thread.id && !thread.resolved}
       draft={{ text: replyText, onChange: setReplyText }}
       readOnly={readOnly}
-      // Same guard as `replying` above, for the same reason: the message is
-      // about a settled thread, so a card that reads as open must not show it —
-      // not even for the one committed frame between a reopen reaching the rail
-      // and the effect below letting the message go.
+      // Suppress settled-thread refusal during the first reopened render,
+      // before the clearing effect runs.
       refusal={
         thread.resolved && refusal?.id === thread.id ? refusal.message : null
       }
@@ -377,9 +313,8 @@ export function ThreadsPane({
       onReplyClose={cancelReply}
       onReply={(text) => {
         if (!connection.status.writable) return false;
-        // Read the thread as the document has it *now*, not as this card was
-        // rendered: between the two, another client may have resolved it or
-        // deleted it, and neither should quietly take a reply.
+        // Re-read the live thread at submit; a remote resolve or deletion
+        // must refuse the reply.
         if (getAnnotation(ydoc, thread.id)?.resolved === true) {
           setRefusal({
             id: thread.id,
@@ -388,9 +323,8 @@ export function ThreadsPane({
           });
           return false;
         }
-        // `addComment` looks the thread up itself and returns null when it is
-        // not there, so it — not the read above — is the last word on whether
-        // anything was written.
+        // addComment performs the final lookup and returns null if the thread
+        // disappeared.
         if (addComment(ydoc, thread.id, author, text) === null) {
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
@@ -409,8 +343,7 @@ export function ThreadsPane({
 
   const content = (
     <section className="ub-threads" aria-label="Threads">
-      {/* The count is the open threads: a rail that keeps counting settled
-          conversations stops telling you anything about the document. */}
+      {/* Count open threads only; resolved conversations are retained below. */}
       <p className="ub-rail-head mt-0 mr-0 mb-[0.4rem] ml-0 text-[0.7rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
         Threads <span className="ub-muted">{unresolved.length}</span>
       </p>

@@ -1,5 +1,5 @@
 /**
- * One fold for one title, wherever the title is typed at (#965).
+ * One fold for one title, wherever the title is typed at.
  *
  * The claim under test is an *equivalence*, so it is asserted against both real
  * matchers rather than against the helper they share: every case below runs the
@@ -10,8 +10,8 @@
  * surface would still pass a test of the helper; it cannot pass this one.
  *
  * The corpus is chosen so that each row is the *reason* for a rule: `École` and
- * `İSTANBUL` are the two matches #956 lost and this restores, `किताब` is the
- * spacing mark the owner's fold deliberately keeps, and `Straße` and `ISPARTA`
+ * `İSTANBUL` exercise removable marks, `किताब` is the
+ * spacing mark the fold deliberately keeps, and `Straße` and `ISPARTA`
  * are the two folds that stay out — full case folding and a Turkish locale's
  * dotless `ı`.
  */
@@ -94,7 +94,7 @@ describe("the Documents filter and the @ picker match one title one way", () => 
    * the picker answers is the list's answer too.
    */
   const cases: Array<[string, string[]]> = [
-    // The two matches #956 lost, and the direction the store's index already
+    // The two removable-mark matches, and the direction the store's index
     // folds: a non-spacing mark is not part of what was typed.
     ["ecole", ["École"]],
     ["istanbul", ["İSTANBUL", "İstanbul harbour"]],
@@ -135,10 +135,8 @@ describe("the Documents filter and the @ picker match one title one way", () => 
   });
 
   it("folds the query and the title through one function, not two copies", () => {
-    // The equivalence above is a property of the surfaces; this is why it
-    // cannot drift. `İ` decomposes to `I` plus a combining dot the fold drops,
-    // and `toLowerCase` is locale-independent by specification — the two things
-    // a second, hand-rolled copy of the rule has historically got wrong.
+    // One shared fold keeps both surfaces aligned: `İ` decomposes to `I` plus
+    // a combining dot the fold drops, and `toLowerCase` is locale-independent.
     expect(foldForTitleMatch("İSTANBUL")).toBe("istanbul");
     expect(foldForTitleMatch("École")).toBe("ecole");
     expect(foldForTitleMatch("I")).toBe("i");

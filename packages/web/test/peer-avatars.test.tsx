@@ -1,9 +1,8 @@
 /**
- * The peer strip's avatars (#494).
+ * The peer strip's avatars.
  *
  * The strip is the constrained surface: a circle is all a reader sees, so
- * everything a name used to carry has to be in the hover and in the
- * accessibility tree instead.
+ * the session name and details must be in the hover and accessibility tree.
  *
  * Three things are worth a test and the rest is not. The *label* is a pure
  * function of a reading, so it is asserted as one. One live case is the

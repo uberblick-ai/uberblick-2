@@ -1,3 +1,4 @@
+// Decision: 4b565a90-d152-4a51-ad63-cdb05606ec5f
 /** One observer, validated snapshot and animation frame for a document's views. */
 import { DATA_KEY, readDocData } from "@uberblick/schema";
 import type { DocData } from "@uberblick/schema";

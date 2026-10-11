@@ -1,4 +1,5 @@
 /** Quiet table affordances compose framework gestures and live shared edits. */
+// Decision: 211465cd-c58b-44ad-b711-88b5eae825b0.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";

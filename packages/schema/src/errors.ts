@@ -1,10 +1,3 @@
-/**
- * Typed failures for block-scoped operations.
- *
- * These are part of the MCP tool contract: `edit_block` fails safely and tells
- * a caller whether its revision is stale or its asserted text is wrong.
- */
-
 /** Thrown when a block id does not resolve to a live block in the document. */
 export class BlockNotFoundError extends Error {
   readonly blockId: string;
@@ -72,9 +65,7 @@ export class AnnotationCellError extends Error {
 export interface StaleBlockDetails {
   blockId: string;
   /**
-   * The text the caller expected to find, as passed to `editBlock` — absent
-   * when the caller asserted only a `rev`, which is the whole of what
-   * `setInlineLink` has to go on.
+   * Asserted text, absent for rev-only writes such as setInlineLink.
    */
   expectedText?: string | undefined;
   /** The rev the caller asserted, when it passed one. */
@@ -86,19 +77,10 @@ export interface StaleBlockDetails {
 }
 
 /**
- * Thrown by `editBlock` when an asserted `rev` is stale, or when `oldText`
- * mismatches without a rev that could distinguish a bad argument from a stale
- * read; and by `setInlineLink`, whose only assertion is the `rev`.
- *
- * `currentText` and `currentRev` carry the live state so the caller can
- * re-read, re-diff and retry without a second round trip.
- *
- * Scope of the guarantee, stated plainly: this is a check against the local
- * replica at the moment of the call. There is no cross-replica
- * compare-and-swap — a remote edit that has not yet reached this replica cannot
- * be detected, and the window widens the longer a replica stays offline. What
- * the check buys is that an edit never silently overwrites a change this
- * replica has already seen.
+ * Stale rev, or mismatched oldText without a rev to distinguish a bad argument.
+ * Current text/rev allow retry without another read. The check prevents
+ * overwriting changes already seen locally; it is no cross-replica CAS and
+ * cannot detect unseen remote edits, including while this replica is offline.
  */
 export class StaleBlockError extends Error {
   readonly blockId: string;
@@ -133,10 +115,8 @@ export interface OldTextMismatchDetails {
 }
 
 /**
- * Thrown by `editBlock` when the caller asserted the current `rev`, but its
- * `oldText` does not match that revision's plain text. This is an argument
- * mismatch, not a stale read: the current text and rev are attached so the
- * caller can correct the argument and re-diff without another read.
+ * Current rev with wrong oldText is an argument mismatch. Current text/rev
+ * allow correcting the argument and retrying without another read.
  */
 export class OldTextMismatchError extends Error {
   readonly blockId: string;
@@ -161,15 +141,8 @@ export class OldTextMismatchError extends Error {
 export type AnnotationRangeErrorReason = "empty" | "overlap";
 
 /**
- * Thrown when an annotation range cannot be anchored as a `comment` mark.
- *
- * `"empty"`: a zero-length range carries no characters, so there is nothing to
- * mark and the thread would be born orphaned.
- *
- * `"overlap"`: the range already carries another thread's `comment` mark. A Yjs
- * formatting key holds exactly one value per character (and a ProseMirror mark
- * type likewise applies once per position), so a second thread would silently
- * steal characters from the first instead of nesting.
+ * Empty spans have no anchor; overlaps would replace another thread's anchor,
+ * since Yjs and ProseMirror permit one comment mark per character.
  */
 export class AnnotationRangeError extends Error {
   readonly reason: AnnotationRangeErrorReason;
@@ -195,16 +168,9 @@ export class AnnotationRangeError extends Error {
 }
 
 /**
- * Thrown when a write would put a mark where the block type cannot hold it.
- *
- * A re-type into `code` or `mermaid` is one case: those blocks are
- * source text and carry only `comment`, so re-typing formatted prose into one
- * has no honest outcome. Stripping the marks would contradict `setBlockType`'s
- * whole promise (it preserves the delta), and keeping them would write a
- * document the web editor refuses to bind. So the re-type is refused *before* it
- * mutates anything, and `marks` names what is in the way — a caller that means
- * it can clear the formatting first and re-type after. Table-to-flat and
- * flat-to-table conversions also refuse any marks rather than dropping them.
+ * Refuse before mutation when preserving marks would violate the destination
+ * type or editor binding. Source blocks allow only comment; table/flat
+ * conversions refuse all marks. Callers can clear named marks before retrying.
  */
 export class MarksNotAllowedError extends Error {
   readonly blockId: string;
@@ -226,13 +192,8 @@ export class MarksNotAllowedError extends Error {
 }
 
 /**
- * Thrown when a `link` mark's target is not an external `http(s)` URL.
- *
- * A `link` is external only — an inline reference to another document is the
- * `docLink` mark, and a bare uuid in an href is never reinterpreted as one —
- * and this is the model-level door, not a UI nicety: refusing here is what
- * keeps a `javascript:` target out of the CRDT, and therefore out of every
- * renderer downstream of it.
+ * Only http(s) link targets reach the CRDT and its renderers. UUID hrefs are
+ * never reinterpreted as docLink; document references use that separate mark.
  */
 export class InvalidLinkHrefError extends Error {
   readonly href: string;
@@ -249,14 +210,8 @@ export class InvalidLinkHrefError extends Error {
 }
 
 /**
- * Thrown when a `docLink` mark's target is not a document uuid.
- *
- * The mirror of {@link InvalidLinkHrefError}, and the same door: a docLink
- * names a document by uuid, so a URL, a path, a title or a reserved room name
- * (`_directory` and its siblings are not documents) is refused before it
- * reaches the CRDT. An upper-cased uuid is not refused — it is canonicalized
- * down, because two spellings of one id would be two documents to everything
- * that compares them.
+ * Refuse URL, path, title and reserved-room targets before CRDT insertion.
+ * Uppercase UUIDs are canonicalized to lowercase so one id has one spelling.
  */
 export class InvalidDocLinkTargetError extends Error {
   readonly docId: string;
@@ -272,14 +227,8 @@ export class InvalidDocLinkTargetError extends Error {
 }
 
 /**
- * Thrown when one range of text would carry both `link` and `docLink`.
- *
- * They are one affordance over two target spaces, and a range that is both has
- * no honest rendering. Writing refuses; reading cannot, because two Yjs keys
- * have no cross-key exclusion and a merge of two replicas that formatted the
- * same range differently can leave both behind. So a reader resolves in
- * `docLink`'s favour instead of breaking (see `marks.ts`), and this error keeps
- * writers from creating the situation on purpose.
+ * Writers refuse link/docLink pairs. Yjs merges can still produce both keys;
+ * readers resolve them as docLink (see marks.ts).
  */
 export class ConflictingLinkMarksError extends Error {
   readonly href: string;
@@ -297,12 +246,8 @@ export class ConflictingLinkMarksError extends Error {
 }
 
 /**
- * Thrown when a sanctioned metadata write would store an illegal kind/status
- * pair.
- *
- * Both values are retained as `unknown` because the error also reports foreign
- * or stale values already present in the Y.Map. The refusal always happens
- * before either key is written.
+ * Refuse illegal kind/status before either write. Retain unknown values so
+ * malformed foreign or stale metadata can also be reported.
  */
 export class InvalidDocumentLifecycleError extends Error {
   readonly kind: unknown;
@@ -409,19 +354,9 @@ function renderUnknown(value: unknown): string {
 export type InlineLinkRangeErrorReason = "empty" | "not-prose";
 
 /**
- * Thrown when a `docLink` cannot be written over a range of a block's text —
- * see `setInlineLink`, the one write that marks text that is already there.
- *
- * `"empty"`: the clamped range carries no characters, so the link would have no
- * label and nothing to anchor to. The same rule {@link AnnotationRangeError}
- * has, for the same reason.
- *
- * `"not-prose"`: source blocks and tables do not admit document links.
- * Table-cell offsets are distinct from the block's GFM projection.
- *
- * A range already carrying an external `link` is refused with
- * {@link ConflictingLinkMarksError} instead — that error names both targets,
- * and it is the boundary the invariant already lives at.
+ * Empty clamped ranges have no label/anchor; source blocks and tables admit no
+ * block-level docLink range. Cell offsets differ from GFM projection offsets.
+ * External-link conflicts use ConflictingLinkMarksError to name both targets.
  */
 export class InlineLinkRangeError extends Error {
   readonly reason: InlineLinkRangeErrorReason;
@@ -459,11 +394,8 @@ export class InvalidRoomError extends Error {
 }
 
 /**
- * Thrown when a value is not a workspace id.
- *
- * `label` names the source — `WORKSPACE_ID`, a config key, a URL segment — so
- * the message points at the thing to fix. The rejected value is never included:
- * see `parseWorkspaceId`.
+ * Report the invalid workspace id's source label, never its rejected value;
+ * see parseWorkspaceId.
  */
 export class InvalidWorkspaceIdError extends Error {
   /** Where the value came from, as named by the caller. */

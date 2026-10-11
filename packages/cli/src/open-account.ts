@@ -1,7 +1,6 @@
-/** Public account display for the frozen workspace served by `ub open`. */
-import { isGithubUsername } from "@uberblick/hub";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
-import { manageRequest, sanitizeManagementReply } from "@uberblick/hub/management-client";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import type { AccessBinding } from "./open-access.js";
 
@@ -31,8 +30,7 @@ export async function requestAccount(
     if (unavailable !== null) return unavailable;
     const login = current.login;
     if (!isGithubUsername(login.identity.githubUsername)) return { state: "unavailable" };
-    // The existing read-only own-role request verifies this credential and
-    // access to this served workspace, without renewing or changing the login.
+    // Verify access to this served workspace without renewing or changing the login.
     const action = { operation: "own-role", workspaceId: binding.workspaceId } as const;
     const reply = sanitizeManagementReply(action, await manageRequest(current.origin, action, login, {
       signal: AbortSignal.any([signal, AbortSignal.timeout(4_000)]),

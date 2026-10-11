@@ -1,55 +1,3 @@
-/**
- * Inline marks, on the wire.
- *
- * The six inline marks — `bold`, `italic`, `strike`, `inlineCode`, `link`,
- * `docLink` — ride
- * the exact mechanism the annotation anchor already proved: Yjs text formatting
- * attributes on the block's single Y.XmlText (or each table cell's text). Nothing new is stored, and the
- * concurrency properties come for free — a mark is part of the text's own CRDT
- * state, so it survives splits, re-types (`setBlockType` replays the delta) and
- * concurrent edits, which a pair of stored positions would not.
- *
- * Three rules make the format work, and all three are load-bearing:
- *
- * 1. **Keys are the bare mark names; values are ProseMirror-shaped attributes.**
- *    `{}` for the four attribute-less marks, `{ href }` for `link`,
- *    `{ docId }` for `docLink`.
- *    y-prosemirror turns a text attribute into a mark named for its key with the
- *    value as that mark's attrs, so the editor needs no translation layer in
- *    either direction — the same reason `comment` stores `{ threadId }`.
- * 2. **Prose marks are not part of a block's `rev`.** Prose revs hash plain text
- *    and block attributes (see `rev.ts`), so prose edits never mention marks.
- *    Tables expose inline markdown instead: their cell marks are part of both
- *    the GFM text and its rev, and edits can change those marks.
- * 3. **The set is closed.** Anything else in a text's attributes is foreign
- *    content, and the web client refuses to bind rather than let y-prosemirror
- *    destroy it. `code` and `mermaid` blocks are source text and carry no inline
- *    marks at all — only `comment`.
- *
- * Writing and reading are deliberately asymmetric, the way the rest of the
- * package is:
- *
- *   - **Writing refuses.** A `link` target that is not an external `http(s)` URL
- *     throws {@link InvalidLinkHrefError}, a `docLink` target that is not a
- *     document uuid throws {@link InvalidDocLinkTargetError}, and a range that
- *     would carry both marks throws {@link ConflictingLinkMarksError} — none of
- *     them reaching the CRDT. This is
- *     the model-level door for that invariant; the import parser and the editor's
- *     input/paste rules are conveniences in front of it, not the enforcement.
- *   - **Reading degrades.** A flag written as something other than `true` or an
- *     attribute object, or a `link` with no usable `href`, reads as "not marked".
- *     A reader must never break on a writer that knows more — and the loudness
- *     lives where it can act: the web client's palette gate refuses to bind a
- *     text carrying a mark it cannot faithfully render, including a `link` whose
- *     href is not external, so nothing reaches a renderer unchecked.
- *   - **Reading also resolves**, in the one place it must. Two Yjs keys have no
- *     cross-key exclusion, so a merge of two replicas that formatted one range
- *     differently really can land both link marks on it. Refusing to read that
- *     would mean legitimate concurrent edits damaging text, so a range carrying
- *     both reads as a `docLink` — one rule, in {@link inlineLinkTarget}, that
- *     every consumer shares.
- */
-
 import type * as Y from "yjs";
 import {
   ConflictingLinkMarksError,
@@ -63,50 +11,33 @@ import type { InlineMarkSet, InlineRun } from "./types.js";
 const FLAGS = ["bold", "italic", "strike", "inlineCode"] as const;
 
 /**
- * The one definition of a legal `link` target, shared by every door: this
- * module, the markdown reader, the editor's input and paste rules and the
- * palette gate. A `link` is external, so nothing but an `http(s)` URL is one —
- * a bare uuid included, which is a {@link isDocId} target and is never
- * reinterpreted as a link.
+ * Link targets are external http(s) URLs; UUIDs belong to docLink. Writers,
+ * import and the editor gate share this check to keep the two spaces disjoint.
  */
 export function isExternalHref(href: unknown): href is string {
   return typeof href === "string" && /^https?:\/\/\S+$/i.test(href);
 }
 
 /**
- * The same, for a `docLink`: a document uuid in its stored spelling, which is
- * the lowercase one. A writer's upper-cased id is canonicalized down at the
- * write boundary, so anything already in a document either reads as a docLink
- * here or is not one.
+ * Stored docLink targets must already use lowercase canonical UUID spelling;
+ * writers canonicalize before storing them.
  */
 export function isDocId(docId: unknown): docId is string {
   return canonicalDocumentUuid(docId) === docId;
 }
 
 /**
- * The one link target a run carries — the `docLink`, or the `link`, or nothing.
- *
- * This is the docLink-wins read rule, in the one place every consumer reads it
- * from: `marksOf` below, the run comparisons, and the markdown writer, which
- * spells both marks `[label](target)` and tells them apart by the target's own
- * shape. The two target spaces are disjoint (an `http(s)` URL is never a uuid),
- * so the string alone identifies both the target and which mark it came from.
+ * Concurrent formatting can merge both link keys; every reader gives docLink
+ * precedence. The target's disjoint URL/UUID shape also identifies its mark.
  */
 export function inlineLinkTarget(marks: InlineMarkSet): string | undefined {
   return marks.docLink ?? marks.link;
 }
 
 /**
- * Whether a delta attribute's value means its mark is *on*, for every mark this
- * package knows — the six inline ones and the annotation anchor.
- *
- * This is the definition of "readable", and it is deliberately the only one:
- * every consumer has to agree with it or the document means two things at once.
- * The editor's palette gate asks this question too, and refuses to bind a text
- * whose answer is no, because y-prosemirror does *not* ask — `schema.mark` builds
- * a mark from any attrs object it is handed, so a `{bold: false}` that reads as
- * unmarked here would bind as bold there and be rewritten as real bold on the
- * next keystroke. Silent, and a divergence rather than a loss, which is worse.
+ * Unknown or malformed attributes read as unmarked. The editor gate must use
+ * this same closed vocabulary and refuse unrenderable text: y-prosemirror
+ * accepts attrs such as false that would otherwise bind differently here.
  */
 export function readsAsMark(name: string, value: unknown): boolean {
   if (name === COMMENT_MARK) return isCommentMark(value);
@@ -133,11 +64,8 @@ export function readsAsMark(name: string, value: unknown): boolean {
 }
 
 /**
- * The inline marks in one delta op's attributes. Unknown keys are ignored, and so
- * is a known key whose value {@link readsAsMark} rejects.
- *
- * A range carrying both link marks — which only a merge can produce — reads as
- * the `docLink` alone, so no consumer downstream ever sees the pair.
+ * Ignore unknown or unreadable keys and collapse merged link conflicts to
+ * docLink before exposing runs to consumers.
  */
 function marksOf(attributes: unknown): InlineMarkSet {
   if (typeof attributes !== "object" || attributes === null) return {};
@@ -154,7 +82,6 @@ function marksOf(attributes: unknown): InlineMarkSet {
   return marks;
 }
 
-/** Whether two runs carry the same marks, so they can be merged. */
 export function sameInlineMarks(a: InlineMarkSet, b: InlineMarkSet): boolean {
   return (
     a.bold === b.bold &&
@@ -165,7 +92,6 @@ export function sameInlineMarks(a: InlineMarkSet, b: InlineMarkSet): boolean {
   );
 }
 
-/** Whether a run carries any inline mark at all. */
 export function hasInlineMarks(marks: InlineMarkSet): boolean {
   return (
     marks.bold === true ||
@@ -195,10 +121,8 @@ export function pushInlineRun(
 }
 
 /**
- * A Y.XmlText as maximal runs of equally-marked text. One delta scan.
- *
- * Embeds (non-string inserts, which this package never writes) contribute
- * nothing: they have no text, so there is no run to report.
+ * One delta scan returns maximal marked runs; non-string embeds have no text
+ * and contribute no run.
  */
 export function readInlineRuns(text: Y.XmlText | null): InlineRun[] {
   if (text === null) return [];
@@ -213,20 +137,16 @@ export function readInlineRuns(text: Y.XmlText | null): InlineRun[] {
   return runs;
 }
 
-/** The plain text of a run list — what `rev` hashes and `editBlock` edits. */
+/** Prose revisions and edits use plain text; table revisions include cell marks. */
 export function inlinePlainText(runs: readonly InlineRun[]): string {
   return runs.map((run) => run.text).join("");
 }
 
 /**
- * One run's marks as Yjs formatting attributes, or null when it has none.
- *
- * @throws InvalidLinkHrefError when a `link` target is not an external URL.
- * @throws InvalidDocLinkTargetError when a `docLink` target is not a document
- * uuid; one that is is written in its canonical lowercase spelling.
- * @throws ConflictingLinkMarksError when a run carries both link marks. This is
- * the boundary the invariants are enforced at, so no caller — `appendBlock`, an
- * MCP tool, the seed importer — can put another scheme into the document.
+ * Bare mark keys and ProseMirror attrs ({}, {href}, {docId}) bind directly to
+ * y-prosemirror. Formatting lives on each block/cell's Y.XmlText, so CRDT edits,
+ * splits and delta-preserving retypes keep marks attached to their text.
+ * Invalid URLs/UUIDs and simultaneous link marks throw before reaching Yjs.
  */
 export function attributesOf(marks: InlineMarkSet): Record<string, unknown> | null {
   const attributes: Record<string, unknown> = {};
@@ -249,36 +169,17 @@ export function attributesOf(marks: InlineMarkSet): Record<string, unknown> | nu
 }
 
 /**
- * Throw if any run carries a mark this package refuses to write, without
- * touching the document.
- *
- * A caller checks *before* it starts writing: a Yjs transaction does not roll
- * back when a callback throws, so validating halfway through would leave the
- * half that already applied behind.
- *
- * @throws InvalidLinkHrefError
- * @throws InvalidDocLinkTargetError
- * @throws ConflictingLinkMarksError
+ * Validate all runs before writing: Yjs transactions do not roll back on throw,
+ * so validating midway could leave a partial write.
  */
 export function assertInlineWritable(runs: readonly InlineRun[]): void {
   for (const run of runs) attributesOf(run.marks);
 }
 
 /**
- * Every formatting key on a text that a source block cannot hold, in document
- * order.
- *
- * Deliberately *not* limited to the marks this package knows, and not filtered by
- * {@link readsAsMark}: the question is "would a block holding this text be
- * unbindable as a source block?", and the editor's gate judges a text by the
- * attribute keys it carries against what the node type allows. A key nothing here
- * recognises stops the editor just as dead as a known one, so it has to stop a
- * re-type too.
- *
- * `comment` is the one exemption, because it is the one mark every block type
- * allows — but only when its value is an anchor {@link readsAsMark} accepts. The
- * gate refuses a malformed one, so exempting it here would be this module saying
- * a re-type is fine and the editor then refusing to bind the result.
+ * Source blocks allow only valid comment anchors. Include unknown keys and
+ * malformed comments in document order, or a retype could pass this check but
+ * produce text the editor refuses to bind.
  */
 export function marksOtherThanComment(text: Y.XmlText | null): string[] {
   if (text === null) return [];
@@ -296,15 +197,8 @@ export function marksOtherThanComment(text: Y.XmlText | null): string[] {
 }
 
 /**
- * Write `runs` into a Y.XmlText as one delta — text and marks together.
- *
- * The text must be attached to a document (a detached Y.XmlText cannot take a
- * delta), and it is appended to rather than replaced: callers create the element
- * with an empty text and apply once.
- *
- * @throws InvalidLinkHrefError, InvalidDocLinkTargetError or
- * ConflictingLinkMarksError before writing anything, when a run carries a link
- * target this package refuses.
+ * Append one text-and-marks delta to attached Y.XmlText; detached text cannot
+ * take a delta. Building the complete delta validates every run before writing.
  */
 export function applyInlineRuns(
   text: Y.XmlText,

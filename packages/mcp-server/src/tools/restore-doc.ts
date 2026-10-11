@@ -6,6 +6,7 @@ import { operation } from "./operation.js";
 
 export const inputSchema = strictInput({ uuid: uuidArg });
 
+// Restore writes only the directory and never repins or changes document content.
 export const restoreDocOperation = operation("restore_doc", inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
 
@@ -20,18 +21,13 @@ export const restoreDocOperation = operation("restore_doc", inputSchema, (contex
   stage("directory", directory, () => {
     directory.doc.transact(() => {
       affected = restoreDirectoryEntry(directory.doc, uuid);
+      // Ordinary archived stubs skip repair while decision stubs keep healing.
+      // Republish current metadata before listing and index disagree after restore.
       for (const recordUuid of affected) replicas.republishStub(recordUuid);
     });
   });
-  // A rename or a retag that landed while the document was archived never
-  // reached its stub for an ordinary document, because repair skips those
-  // tombstones. Decision stub fields keep healing while archived. Catch
-  // the directory up here, or the document comes back under the metadata it
-  // was archived with while search answers from the newer.
-  //
-  // Hydration is what makes re-indexing possible; it is not proof that it
-  // happened. Both have to hold, and the store gets the last word — read
-  // after the republish, whose own directory write reconciles again.
+  // Republish reconciles the index through its directory write. Hydration permits
+  // indexing but does not prove success; query the store after republishing.
   return {
     uuid,
     title: titleFor(uuid, stub),

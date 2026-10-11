@@ -24,7 +24,7 @@ import {
 import { credentialsPath, resolveConfig, userConfigPath } from "../src/config.js";
 import { acquireInitLock, initLockPath, tryAcquireInitLock } from "../src/init-lock.js";
 import { readWorkspaceHub } from "../src/workspace-registry.js";
-import * as safeWrite from "@uberblick/hub/safe-write";
+import * as safeWrite from "@uberblick/mcp-server/safe-write";
 import { PACKAGE_ROOT, SECRET_ON_FILE, removeTempDirs, sandbox, waitUntil, type Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);

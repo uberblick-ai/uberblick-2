@@ -1,25 +1,9 @@
 /**
- * The `@` picker: type `@` in a prose block, choose a document, and the typed
- * query becomes an inline reference to it.
- *
- * The model — when an `@` is a mention, what it offers, and the edit behind
- * picking an entry — is `editor/mention-menu.ts`; what this file owns is pixels,
- * focus and keys. The shared CaretMenu uses Floating UI and ProseMirror's
- * native key handling for both menus.
- *
- * - **Nothing matching keeps the card open.** The block menu closes on an empty
- *   result, because a slash query nothing matches is a reader writing prose. An
- *   `@` query nothing matches is a reader looking for a document that has not
- *   reached this replica — silence would read as "there are none", so the card
- *   says which question it answered instead. It gives Enter and the arrows back
- *   to the prose all the same: there is nothing to move over or pick.
- *
- * - **The candidates are the directory, and only the directory.** No target room
- *   is opened to offer a document, so the picker works with the hub unreachable
- *   and cannot make an unresolved reference resolve by looking at it. It
- *   re-reads when the directory changes, so a document arriving mid-session
- *   joins the list.
- *
+ * The model owns mention triggers, candidates and writes; CaretMenu handles
+ * placement and ProseMirror keys. Empty results keep the answer visible but
+ * release Enter/arrows to prose. Read only directory candidates, never target
+ * rooms, and refresh arrivals while open so discovery cannot hydrate an
+ * unresolved reference.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -51,9 +35,8 @@ export function MentionMenu({
   /** The editor frame, used to find the pane's collision boundary. */
   host: RefObject<HTMLElement | null>;
   /**
-   * The directory this workspace's references resolve against. Null in an editor
-   * with no workspace behind it, where there is nothing to offer and the picker
-   * never opens.
+   * Without a workspace directory the picker has no candidates and never
+   * opens.
    */
   docLinks: DocLinkContext | null;
   /** The document on screen, which is never offered as a reference target. */
@@ -67,22 +50,17 @@ export function MentionMenu({
     keyboard: false,
   });
   /**
-   * Esc, remembered for as long as the session it dismissed — and set by a click
-   * outside too, which means the same thing. Cleared the moment the text stops
-   * looking like a mention, so typing a fresh `@` opens the picker again while
-   * typing on after Esc leaves the text alone.
+   * Escape and outside click dismiss this trigger until it stops matching; a
+   * fresh @ can open another session.
    */
   const dismissed = useRef(false);
   /** Bumped when the directory changes, so an open card re-reads its candidates. */
   const [directoryTick, setDirectoryTick] = useState(0);
 
-  // The session is derived from the state on every transaction and opened by
-  // the transaction — the same two questions, with the same two answers, as the
-  // block menu's slash session.
+  // Validate sessions from current state; opening still requires the
+  // qualifying local transaction.
   useEffect(() => {
-    // No workspace behind this editor is no directory to offer, so there is
-    // nothing for a session to be about — and nothing to re-render per
-    // keystroke either.
+    // Without a workspace, skip the session and its per-keystroke rendering.
     if (docLinks === null) return;
     const read = (transaction: Transaction | null): void => {
       const trigger = mentionTriggerAt(editor);
@@ -102,10 +80,8 @@ export function MentionMenu({
             ? here
             : null;
         }
-        // A session belongs to **one** `@`. Carrying its position through this
-        // transaction and comparing is what makes a caret moved to a second
-        // `@hub` in the same block close the card rather than silently re-aim
-        // it at the other occurrence.
+        // Map this @ through transactions and compare its position; moving to
+        // another trigger closes instead of re-aiming the session.
         const carried =
           transaction === null
             ? current.trigger.from
@@ -154,11 +130,9 @@ export function MentionMenu({
   const choose = useCallback(
     (docId: string | undefined): void => {
       if (docId === undefined || session === null) return;
-      // A refusal means the session no longer describes the document; either way
-      // the picker has had its answer and closes. `dismissed` is deliberately
-      // not set: the reference replaced the `@query`, so the trigger is already
-      // gone — and remembering a dismissal here would keep the *next* `@` from
-      // opening a picker at all.
+      // Close after either a pick or refusal. Do not remember dismissal: a
+      // successful reference removes the trigger, and retaining it would
+      // suppress the next @.
       linkMentionAtTrigger(editor, session.trigger, docId, docLinks);
       setSession(null);
     },
@@ -174,9 +148,8 @@ export function MentionMenu({
   );
 
   /**
-   * The keys the picker owns while it is open. Returns false for the rest — and
-   * for ↑/↓/Enter when nothing matched, because a key that moves nothing and
-   * picks nothing belongs to the prose underneath.
+   * Own keys only while they can act on options; empty results return Enter
+   * and arrows to prose.
    */
   const handleKey = useCallback(
     (key: string): boolean => {

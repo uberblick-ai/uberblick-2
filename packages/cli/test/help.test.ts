@@ -605,7 +605,7 @@ describe("what is not a request for help", () => {
   it("still refuses an unknown subcommand, `--help` after it or not", async () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
-    // level says so the same way — the top level always has.
+    // level says so the same way.
     for (const group of [[], ["workspace"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);

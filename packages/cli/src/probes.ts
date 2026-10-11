@@ -1,57 +1,27 @@
 /**
- * Observations of the running stack: does a hub answer, who holds a port, and
- * what time the hub thinks it is.
- *
- * Their own module because they are observations rather than verdicts. `ub
- * doctor` turns them into checks with remedies; `ub open` will ask the same two
- * questions to decide whether it has to start a hub before opening a document.
- *
- * **The hub probe is a real client, not a socket test.** It mints a token from
- * the stored device login for a remote endpoint or local signing secret,
- * sends it in Hocuspocus' auth message and reads
- * the workspace's directory room — the same path the MCP server and `ub workspace use`
- * take. So a probe that says `connected` means a client would connect, not
- * merely that something accepted a TCP connection; and `auth-failed` stays
- * distinct from `hub-down`, because authentication and reachability need
- * different next actions.
- *
- * **The port probe binds rather than dials**, because the question it answers is
- * the hub's: can `HUB_HOST`:`PORT` be bound, or is it taken. A dial cannot tell
- * a free port from one held by something that ignores connections.
- *
- * Probes never write documents or bindings; credential renewal may replace the
- * stored login. Nothing here throws: every failure is a
- * value, since the caller's whole job is to report failures.
+ * Hub probes authenticate with the stored remote login or local signing secret
+ * and read the directory room using the client's connect and sync budgets.
+ * Keep authentication failure distinct from reachability failure for remedies.
+ * Probes write no documents or bindings; renewal may replace the stored login.
+ * Failures are returned as values so callers can report them.
  */
 
 import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
-import { isLoopbackHost } from "@uberblick/hub/remote-url";
+import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 import { budget } from "./budget.js";
 
 /**
- * What a dial found, which is one answer more than a connection has.
- *
- * `unsettled` is the far side that is up, accepts the socket, and then does not
- * serve the room: `waitForQuiet` returns on its deadline exactly as it does on
- * success, so a probe reading only the connection state would call that
- * `connected` and a caller would report a hub that never answered as healthy.
+ * `unsettled` accepts the socket but misses the directory-room deadline;
+ * waitForQuiet returning alone does not prove the room was read.
  */
 export type HubReach = HubState["status"] | "unsettled";
 
 /** Keep the protocol versions and locally composed reason for diagnostics. */
 export type HubProbe = Omit<HubState, "status"> & { status: HubReach };
 
-/**
- * Dial an endpoint as a real client would and report what happened.
- *
- * Bounded by the configuration's own connect and sync budgets — the ones a
- * client uses — so what this waits for is what a client would wait for. Only
- * `connected` means the directory room was actually read with our token, which
- * is the one positive signal that the far side is our hub.
- */
 export async function probeHub(
   config: McpConfig,
   hubUrl: string = config.hubUrl,
@@ -65,8 +35,7 @@ export async function probeHubState(
 ): Promise<HubProbe> {
   const corpus = await inspectRemote({ ...config, hubUrl });
   const status = corpus.hub.status;
-  // `complete` is false exactly when the directory room never went quiet. A
-  // connection that could not finish reading it is not a reachable hub.
+  // A connected socket without a complete directory read is not a healthy hub.
   return {
     ...corpus.hub,
     status: status === "connected" && !corpus.complete ? "unsettled" : status,
@@ -89,7 +58,7 @@ export interface PortProbe {
   code: string | null;
 }
 
-/** Whether `host`:`port` can be bound right now. */
+/** Bind rather than dial: a silent listener still occupies the port. */
 export function probePort(host: string, port: number): Promise<PortProbe> {
   return new Promise((resolve) => {
     const server = createServer();
@@ -102,8 +71,7 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
         code,
       });
     });
-    // `exclusive`, so a port another process holds is reported as taken rather
-    // than shared with it.
+    // Never share a listener with another process and report the port as free.
     server.listen({ host, port, exclusive: true }, () => {
       server.close(() => resolve({ host, port, state: "free", code: null }));
     });
@@ -111,25 +79,12 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
 }
 
 /**
- * How far the **hub's** clock reads ahead of this machine's, in whole seconds,
- * or `null` when nothing answered with an HTTP `Date` to read. A negative
- * reading means this machine is ahead — the direction the hub refuses.
- *
- * Nothing here is authenticated: it is a plain GET, which a Hocuspocus hub
- * answers with a greeting, and the response carries the `Date` header this
- * reads. That is what makes the check usable before any credential exists.
- *
- * The reading is taken against the **midpoint** of the request rather than
- * against either end. `Date` has one-second resolution and the round trip takes
- * time, so the hub's clock is only known to lie somewhere in the interval this
- * request spanned; the midpoint splits that uncertainty instead of spending all
- * of it in one direction, where a hub exactly at the threshold would be
- * reported as inside it and then refuse the connection anyway.
- *
- * **What is actually measured is whoever wrote the `Date` header.** The request
- * is sent uncached (`no-store`, plus a cache-busting parameter) so a proxy does
- * not answer it from a store, but a terminating reverse proxy still writes its
- * own clock into that header. The check's remedy says so.
+ * Seconds the HTTP Date header is ahead of this machine; negative means this
+ * machine is ahead, the direction the hub refuses. Null means no observation.
+ * The unauthenticated greeting works before login. Use an uncached GET, while
+ * remembering a terminating proxy may supply its own clock in that header.
+ * Compare against the request midpoint to split round-trip uncertainty; Date
+ * has only one-second resolution, so either endpoint biases threshold checks.
  */
 export async function probeHubClock(
   hubUrl: string,
@@ -180,13 +135,8 @@ export interface HubBind {
 }
 
 /**
- * The address a hub started from this environment would bind.
- *
- * Read here so a *client-side* command can say what the server side would do —
- * which is the whole content of the port-disagreement failure: the hub binds
- * `HUB_HOST`:`PORT` and never parses `HUB_URL`, so the two are only ever kept
- * in step by whoever sets them. The defaults come from the hub's own module
- * rather than being restated, because a restated default is one that can drift.
+ * The hub binds HUB_HOST:PORT independently of HUB_URL; compare both sides.
+ * Import its defaults so client diagnostics cannot drift from the actual bind.
  */
 export function hubBind(env: NodeJS.ProcessEnv = process.env): HubBind {
   const host = env.HUB_HOST?.trim();
@@ -211,7 +161,6 @@ export interface Endpoint {
   port: number;
 }
 
-/** The default ports the two websocket schemes carry when a URL omits one. */
 const SCHEME_PORTS: Record<string, number> = {
   "ws:": 80,
   "wss:": 443,
@@ -220,11 +169,8 @@ const SCHEME_PORTS: Record<string, number> = {
 };
 
 /**
- * The host and port a `HUB_URL` dials, or null when it is not a URL at all.
- *
- * The port is resolved rather than reported as written: `ws://localhost` and
- * `ws://localhost:80` dial the same socket, and a check comparing ports must
- * not call them different.
+ * Resolve omitted scheme ports so ws://localhost and ws://localhost:80 compare
+ * as the same socket. Invalid URLs or unresolvable ports return null.
  */
 export function endpointOf(hubUrl: string): Endpoint | null {
   let parsed: URL;
@@ -243,14 +189,10 @@ export function endpointOf(hubUrl: string): Endpoint | null {
   return { host, port };
 }
 
-/** Strict loopback classification shared with hub admission and clients. */
 export const isLocalHost = isLoopbackHost;
 
 /**
- * The address to dial to reach a hub bound to `host`.
- *
- * A wildcard bind is an address to listen on, never one to connect to: a hub on
- * `0.0.0.0` is reached over loopback like any other local process.
+ * Wildcard bind addresses must be dialed through loopback.
  */
 export function dialHost(host: string): string {
   if (host === "0.0.0.0" || host === "::" || host === "[::]") {

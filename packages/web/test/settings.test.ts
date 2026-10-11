@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * The local settings store (#176): one namespaced key, a subscription open UI
+ * The local settings store: one namespaced key, a subscription open UI
  * can follow, and defaults rather than a crash when what is in storage is not
  * what was written — a setting that cannot be read is a setting nobody can
  * repair.

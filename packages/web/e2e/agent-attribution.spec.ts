@@ -1,6 +1,6 @@
 /**
  * A short-lived MCP session leaves its named caret and departed title avatar
- * behind for one grace period (#304, #1428).
+ * behind for one grace period.
  *
  * The pieces already pass in isolation — the server publishes a name, the
  * cursor builder renders one, and `collab.spec.ts` proves a long-lived peer's
@@ -9,10 +9,10 @@
  * awareness is gone milliseconds later. So this spec runs that exact path —
  * `ub mcp serve` as a child process, speaking JSON-RPC over its own stdio, to
  * the harness's real hub — rather than injecting an awareness state the way a
- * unit test would. A synthetic peer could not fail the way the real one did.
+ * unit test would. A synthetic peer would miss the real shutdown timing.
  *
- * Its own file, and its own harness: `collab.spec.ts` is #46's three proof
- * points and says so.
+ * Its own file and harness keep the short-lived MCP path separate from
+ * `collab.spec.ts`'s long-lived peer proof.
  */
 
 import { expect, test } from "@playwright/test";
@@ -24,7 +24,7 @@ import { placeCaret } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 
-// Keep the original readable-period proof inside the unchanged production grace.
+// The readable-period proof must fit inside the production grace.
 const READABLE_MS = 25_000;
 const { harness, openApp } = setupHarness({ app: { upstream: true, readySelector: ".ub-list-head" } });
 let mcpAgent: McpAgent | null = null;
@@ -62,7 +62,7 @@ interface DocPayload {
 }
 
 /**
- * The path the issue is about: initialize, rewrite one block, read the
+ * The MCP write path: initialize, rewrite one block, read the
  * response, exit. The browser observes the real departure before its own clock
  * advances; the MCP process and hub stay on real time.
  */

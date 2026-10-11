@@ -1,5 +1,5 @@
 /**
- * Inline document references, in a real browser (#444, #532).
+ * Inline document references, in a real browser.
  *
  * Two routes through real editor input and transport, with navigation and
  * caret-relative layout that jsdom cannot observe.

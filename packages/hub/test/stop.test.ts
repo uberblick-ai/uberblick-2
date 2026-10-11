@@ -16,7 +16,7 @@ import {
 } from "@hocuspocus/provider";
 import { afterEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { wrapToken } from "../src/protocol.js";
+import { wrapToken } from "@uberblick/schema/protocol";
 import type { Hub } from "../src/server.js";
 import {
   createClient,

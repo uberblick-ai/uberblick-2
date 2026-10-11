@@ -1,17 +1,16 @@
 // @vitest-environment node
 /**
- * The one derivation four surfaces read (#448).
+ * The one derivation four surfaces read.
  *
  * What is worth pinning here is the *precedence*, because that is the whole
- * reason this is one function: three surfaces used to re-derive their own
- * reading, none of them looked at the failure flags, and a page the hub had
- * refused read `syncing…` in all three. The words themselves are pinned once,
+ * reason this is one function: every surface must read a refusal before sync
+ * state so a refused page cannot appear merely busy. The words are pinned once,
  * here, rather than again in each surface's test — those assert that the
  * surface shows the derivation's word, not what the word is.
  */
 
 import { describe, expect, it } from "vitest";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomStatus } from "../src/collab/rooms.js";
 import type { SyncState } from "../src/ui/calm.js";
 import {
