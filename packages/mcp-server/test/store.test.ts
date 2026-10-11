@@ -2,8 +2,8 @@
  * Three properties of the store that are about the SQLite binding rather than
  * the data model, and that nothing else in the suite would notice losing.
  *
- * 1. **The file format is the format.** `better-sqlite3.sqlite` was written by
- *    the better-sqlite3 build (see `fixtures/make-legacy.ts`); `node:sqlite`
+ * 1. **The file format is the format.** The better-sqlite3 fixture (see
+ *    `fixtures/make-legacy.ts`) must stay independently generated; `node:sqlite`
  *    opens it and finds the same log, the same snapshot and the same FTS index.
  *    Compatibility migrations leave the authoritative log intact.
  * 2. **BLOBs are the bytes handed in**, including when those bytes are a view
@@ -26,7 +26,7 @@ import { getBlocks, getMeta } from "@uberblick/schema";
 import { MirrorStore } from "../src/store.js";
 import { PACKAGE_ROOT, WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
-/** The document `fixtures/make-legacy.ts` wrote, and what it wrote about it. */
+/** Expected content of the independently generated better-sqlite3 fixture. */
 const LEGACY = {
   uuid: "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90",
   linked: "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11",
@@ -68,13 +68,10 @@ afterEach(() => {
 describe("a database written by the better-sqlite3 build", () => {
   it("opens under node:sqlite with its log, snapshot and index intact", () => {
     const opened = store(legacyDatabase());
-    // The room key as the old binding wrote it into this fixture, back when a
-    // workspace id was a name. Room keys are opaque to the store, and the
-    // fixture is a byte-for-byte historical artefact: it is not re-keyed.
+    // Preserve the fixture's opaque room key; re-keying would invalidate compatibility.
     const room = `main/${LEGACY.uuid}`;
 
-    // The log: a snapshot the old binding compacted, plus the tail it appended
-    // after. Both BLOB columns, replayed with Yjs v1 as they always were.
+    // Replay both fixture BLOB columns as Yjs v1: snapshot, then live tail.
     const slice = opened.readSince(room, 0);
     expect(slice.snapshot?.throughSeq).toBe(1);
     expect(slice.updates.map((entry) => entry.seq)).toEqual([2]);
@@ -87,16 +84,14 @@ describe("a database written by the better-sqlite3 build", () => {
     expect(getBlocks(doc).map((block) => block.text)).toEqual(LEGACY.blocks);
     expect(getMeta(doc).title).toBe(LEGACY.title);
 
-    // The pending watermark, and the derived index — FTS5 rows written by the
-    // old binding, matched by the new one.
+    // Pending watermarks and FTS5 rows written by better-sqlite3 remain readable.
     expect(opened.pendingRooms()).toEqual([{ room, seq: 2 }]);
     expect(opened.search("binding", 10)).toEqual([
       {
         uuid: LEGACY.uuid,
         title: LEGACY.title,
         tags: ["legacy"],
-        // The column this file predates, added by migration and empty for
-        // every row it already held.
+        // Migrating a fixture without the description column leaves its rows empty.
         description: null,
         snippet: expect.stringContaining("old binding"),
       },
@@ -337,8 +332,8 @@ describe("derived GitHub references", () => {
   it("re-derives pre-change rows once at their existing cuts without admitting older cuts", () => {
     const databasePath = legacyDatabase();
     const legacy = new DatabaseSync(databasePath);
-    // The historical file predates sequencing. Give it the immediately prior
-    // schema to exercise an already-indexed database with unchanged log cuts.
+    // Add sequence metadata to the unsequenced fixture so migration exercises
+    // already-indexed rows with unchanged log cuts.
     legacy.exec(
       "CREATE TABLE doc_index_seq (uuid TEXT PRIMARY KEY, " +
         "indexed_through_seq INTEGER NOT NULL, catalog_through_seq INTEGER NOT NULL DEFAULT 0)",

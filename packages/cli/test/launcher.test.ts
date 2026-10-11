@@ -3,11 +3,10 @@
  *
  * Every other spawning suite here runs the bundle `test/global-setup.ts` builds,
  * because paying for a tsx registration and a fresh transpile of three packages
- * in each of several hundred children is most of what this package's test time
- * used to be. That trade is only safe if the shipped launcher keeps a test of
- * its own, because it owns two observable contracts a built entry does not
- * inherit — and a bundle can be perfectly green while the file a user runs is
- * broken.
+ * in each of several hundred children adds substantial startup time. The
+ * shipped launcher needs a test of its own because it owns two observable
+ * contracts a built entry does not inherit — a bundle can be green while the
+ * file a user runs is broken.
  *
  * The two:
  *

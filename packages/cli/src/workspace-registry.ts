@@ -1,1 +1,1 @@
-export * from "@uberblick/hub/workspace-registry";
+export * from "@uberblick/mcp-server/workspace-registry";

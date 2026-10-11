@@ -20,7 +20,7 @@ import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { PEER_ADDRESS_HEADER, resolvePeer } from "../src/server.js";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "../src/token.js";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import {
   createClient,
   forgeToken,
@@ -159,8 +159,8 @@ const cases: Case[] = [
       }),
   },
   {
-    // The situation the event was written for: a client that has not been
-    // restarted since the claims-v2 deploy, still minting the old shape.
+    // A parseable legacy payload has sub but no typ; diagnostics identify
+    // malformed claims without trusting them.
     name: "a pre-v2 token from a client that was never restarted",
     cause: "unsupported-claims",
     identity: { typ: null, sub: "pre-v2-client" },

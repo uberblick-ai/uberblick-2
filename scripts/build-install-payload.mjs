@@ -52,8 +52,8 @@ function assertWebBundle(dir) {
 	}
 }
 
-async function bundle(entryPoint, outfile, sourceMap = false) {
-	await build({
+export async function bundleInstallEntry(entryPoint, outfile, sourceMap = false) {
+	const result = await build({
 		entryPoints: [entryPoint],
 		outfile,
 		bundle: true,
@@ -61,6 +61,7 @@ async function bundle(entryPoint, outfile, sourceMap = false) {
 		format: "esm",
 		target: "node26",
 		minify: true,
+		metafile: true,
 		sourcemap: sourceMap ? "linked" : false,
 		sourcesContent: false,
 	});
@@ -78,6 +79,7 @@ async function bundle(entryPoint, outfile, sourceMap = false) {
 		});
 		writeFileSync(mapPath, `${JSON.stringify(map)}\n`, "utf8");
 	}
+	return result.metafile;
 }
 
 async function main() {
@@ -118,8 +120,8 @@ async function main() {
 		mkdirSync(join(cli, "lib"), { recursive: true });
 		mkdirSync(join(payload, "bin"), { recursive: true });
 		await Promise.all([
-			bundle(join(CLI_ROOT, "src", "main.ts"), join(cli, "lib", "ub.mjs")),
-			bundle(
+			bundleInstallEntry(join(CLI_ROOT, "src", "main.ts"), join(cli, "lib", "ub.mjs")),
+			bundleInstallEntry(
 				join(REPOSITORY_ROOT, "packages", "mcp-server", "src", "main.ts"),
 				join(cli, "lib", "mcp.mjs"),
 				true,
@@ -161,7 +163,9 @@ async function main() {
 	}
 }
 
-main().catch((error) => {
-	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-	process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	main().catch((error) => {
+		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		process.exitCode = 1;
+	});
+}

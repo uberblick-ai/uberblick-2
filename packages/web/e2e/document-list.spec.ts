@@ -1,5 +1,5 @@
 /**
- * The document list in a real browser (#406).
+ * The document list in a real browser.
  *
  * This holds transport, native activation, layout and real navigation: a
  * directory created by another context reaches this one, Enter and Space
@@ -110,8 +110,8 @@ test("an external status write reaches the open document and the directory", asy
   browser,
 }) => {
   const title = docTitle("roadmap");
-  // The local/upstream store replay is #752. This criterion concerns #441's
-  // lifecycle UI, so keep its browser on the same upstream as its MCP writer.
+  // Keep the lifecycle UI's browser on the same upstream as its MCP writer;
+  // local/upstream store replay is tested separately.
   const page = await openApp(browser, "/", { upstream: true });
   const session = agent().open({ name: "document-list-e2e" });
   const created = await session.call<{ uuid: string }>("create_doc", {

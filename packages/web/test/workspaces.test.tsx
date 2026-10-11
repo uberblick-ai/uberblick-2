@@ -1,5 +1,5 @@
 /**
- * Two workspaces on one hub, as the web client sees them (#151).
+ * Two workspaces on one hub, as the web client sees them.
  *
  * The client is not multi-tenant and gains nothing here that resembles tenancy.
  * All that is added is a *menu*: the configured list (the served document's,

@@ -18,7 +18,7 @@ cleanup:
 # Reinstall the control checkout's dependencies after a pull changes them, so
 # roles start with a working `ub mcp serve`. Needs ub-agents 0.1.16 or later.
 checkout-setup:
-  command: [mise, run, install]
+  command: [sh, -c, 'mise trust ./mise.toml && exec mise run install']
   when-changed: [pnpm-lock.yaml, mise.toml]
 
 agents:

@@ -1,1 +1,1 @@
-export * from "@uberblick/hub/project-config";
+export * from "@uberblick/mcp-server/project-config";

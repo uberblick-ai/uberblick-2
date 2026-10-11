@@ -35,21 +35,12 @@ export interface ServingRoomStatus {
 }
 
 /**
- * Poll the local serving endpoint for one room.
- *
- * No client or room returns null. A failed or malformed request, or an answer
- * that omits this room, returns a null acknowledgement and makes no upstream
- * claim. The acknowledgement is keyed by both client and room before it is
- * returned, so a render after either changes cannot expose the previous mode's
- * value while the effect cleanup catches up. Abort plus the `active` guard
- * keeps a late answer from an old room from becoming current.
- * The reason describes the serving run, not a room: keep its last answer for
- * this client through room changes and failed polls. A successful response
- * replaces it even when the response omits the current room.
- *
- * The usable boolean follows the same calm cadence as the room connection:
- * brief pending windows do not strobe while someone types, good news waits for
- * quiet, and loss of the HTTP reading itself blanks the fact immediately.
+ * Poll the local endpoint, pairing usable acknowledgement with client and
+ * room. Missing rooms, malformed responses and failures make no upstream
+ * claim; abort and active guard reject old answers. Retain the client-wide
+ * cause through room changes and failed polls, replacing it on every
+ * successful answer. Calm boolean transitions, but blank immediately when the
+ * HTTP fact becomes unusable.
  */
 export function useServingRoomStatus(
   client: DocumentSearchClient | null | undefined,

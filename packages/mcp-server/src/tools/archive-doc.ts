@@ -22,17 +22,8 @@ const ARCHIVE_RECOVERY: Record<string, string> & { other: string } = {
 export const inputSchema = strictInput({ uuid: uuidArg });
 
 /**
- * Archiving and restoring never write the *document*.
- *
- * Restore writes the directory alone, and reports durability for that room,
- * because that is the room whose update has to reach the hub. Archive writes
- * the sidebar too: a document that has left every other listing is not an
- * entry point, so archiving unpins it and reports both rooms. Restore does
- * not put the pin back — pinning again is a separate, deliberate act.
- *
- * Neither touches the derived index itself: `Replicas` reconciles it from the
- * directory update, which means the index follows an archive on every replica
- * that observes it, not only on the one that called the tool.
+ * Write only directory and sidebar rooms. Replicas reconciles the index from
+ * directory updates on every observing replica; do not mutate the index here.
  */
 export const archiveDocOperation = operation("archive_doc", inputSchema, (context, { uuid }, _request) => {
   const { replicas, requireStub, titleFor, durabilityAcross } = context;
@@ -62,16 +53,9 @@ export const archiveDocOperation = operation("archive_doc", inputSchema, (contex
     title,
     records: affected,
     archived: true,
-    // What the call asserts, not what it found: this replica hid every pin
-    // it could see, whether or not it was holding one, so there is no
-    // "there was no pin to remove" case left to report and this is true
-    // whenever the archive completed. It is not a claim about a pin that
-    // has not arrived here: that one can still surface afterwards, which
-    // is why the description sends the caller to get_sidebar for it.
+    // This reports the local unpin, including absence; unseen pins may surface later.
     unpinned: true,
-    // Withdrawing a document needs no copy of it, so hydration cannot make
-    // this false — but a store that refused the write can, and then the
-    // uuid stays queued for a later retry rather than being reported done.
+    // Withdrawal needs no hydration; refused index writes remain queued for retry.
     indexed: affected.every(recordUuid => replicas.indexReconciled(recordUuid)),
     ...durabilityAcross(directory, completed),
   };

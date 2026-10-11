@@ -1,17 +1,8 @@
 /**
- * Per-block content revisions.
- *
- * A `rev` is a cheap, dependency-free content hash of everything a caller can
- * change about a block: its type, its text and its type-specific attributes. It
- * is a change detector, not a version counter and not a checksum — two
- * different revs mean the block differs, and a matching rev means the caller is
- * looking at the same content it read.
- *
- * Deliberately not cryptographic: 64 bits from two independent 32-bit hashes
- * (FNV-1a and djb2), which is ample for optimistic concurrency and costs
- * nothing. Prose marks and comment anchors are excluded on purpose; a table
- * instead supplies inline-marked GFM as its text, so its cell formatting is
- * included. Annotating a block never invalidates a prepared edit.
+ * Non-cryptographic 64-bit content detector (FNV-1a + djb2), not a version or
+ * checksum. Type, text and attributes participate; prose marks and thread
+ * anchors do not. Table text is marked GFM, so cell formatting affects its rev.
+ * Annotations never invalidate prepared edits.
  */
 
 import type { BlockType, HeadingLevel, ListIndent, ListStyle } from "./types.js";
@@ -47,9 +38,8 @@ function hex8(value: number): string {
 }
 
 /**
- * The rev of a block's content. Stable across processes and platforms: it reads
- * UTF-16 code units, exactly what Yjs indexes. Fields are JSON-encoded before
- * hashing so no field value can be confused with a field boundary.
+ * UTF-16 indexing matches Yjs across processes/platforms. JSON field boundaries
+ * prevent ambiguous concatenation before hashing.
  */
 export function blockRev(input: RevInput): string {
   const canonical = JSON.stringify([

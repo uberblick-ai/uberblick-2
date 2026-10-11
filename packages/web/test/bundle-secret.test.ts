@@ -2,12 +2,9 @@
 /**
  * What a build emits — proved against a bundle, not against a config.
  *
- * The bundle carries no secret. The signing secret used to be a `define`, so
- * it was in every built asset; since #426 it is served at runtime instead.
- * That is the single change that lets the image be published, and nothing else
- * in the suite would notice it being undone: `mise run test` builds nothing,
- * and re-adding one line to `vite.config.ts` would put the secret back with
- * every other test still green.
+ * The bundle carries no secret: the signing secret is served at runtime.
+ * A build-time `define` would embed it in the published assets, and checks that
+ * build nothing would miss that leak.
  *
  * So this file performs the build. One build of the real app, with a sentinel
  * secret in the environment where `mise run build-web` and `ub open` build,
@@ -21,7 +18,7 @@
  * suggestive. `vite` is a devDependency, so this is honest under
  * `--network none`.
  *
- * That one build is also where the protocol stamp is checked (#452) and where
+ * That one build is also where the protocol stamp is checked and where
  * the font licenses are found beside the faces they cover. A stamp asserted
  * against a fixture would prove nothing about what Vite emits — which is the
  * whole claim `ub open` rests its refusal on.
@@ -38,7 +35,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "vite";
 
@@ -52,10 +49,10 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SENTINEL = "uberblick-bundle-scan-sentinel-1f4c9a";
 
 /**
- * The define that used to inject the secret — spelled in halves, deliberately.
+ * The forbidden secret-injection define — spelled in halves, deliberately.
  *
- * #426's acceptance is a `git grep` for that identifier across the repository,
- * and a scan that spelled it out would be the single hit: the check and the
+ * A repository search must find no occurrence of that identifier,
+ * and a scan that spelled it out would be a hit: the check and the
  * thing checked would be the same string, and the criterion could never be met
  * while the scan existed. Joined here, the scan is unchanged and the grep stays
  * honest.
@@ -64,7 +61,7 @@ const DEFINE = `__HUB_AUTH${"_TOKEN__"}`;
 
 /**
  * Every vendored face and the OFL text that has to travel with it. Geist ships
- * as two files under one license; Fraunces is its own (#536). The OFL requires
+ * as two files under one license; Fraunces is its own. The OFL requires
  * its text to accompany the font software wherever the font is distributed —
  * a built `dist/` included — and `public/` is how it gets there. A face added
  * without its license, or a license deleted from under a face, is the
@@ -99,8 +96,7 @@ function filesUnder(dir: string): string[] {
 }
 
 /**
- * The built files that carry either the secret or the define that used to
- * inject it.
+ * The built files that carry either the secret or its injection define.
  *
  * Both, because they fail differently: the sentinel catches a value that
  * reached the output by any route at all, and the identifier catches a build

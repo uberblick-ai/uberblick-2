@@ -1,1 +1,1 @@
-export * from "@uberblick/hub/safe-write";
+export * from "@uberblick/mcp-server/safe-write";

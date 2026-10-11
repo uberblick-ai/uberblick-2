@@ -1,9 +1,7 @@
 /**
- * A document has three fixed Y.Doc roots: metadata, blocks and annotations,
- * and an optional flat structured-data root (see `data.ts`).
- * Decision relationships live in the record's own metadata; topic answers and
- * requirement logs derive from the directory stubs, never another room.
- * Writers transact so callers may supply attribution through an outer origin.
+ * Fixed metadata, block and annotation roots share one document room; data is
+ * optional. Decision relationships stay in metadata, with logs derived from
+ * stubs. Writers transact so outer origins can carry attribution.
  */
 
 import type * as Y from "yjs";
@@ -33,27 +31,20 @@ export const ANNOTATIONS_KEY = "annotations";
  */
 const TAG_ASSIGNED_PREFIX = "tag-assigned:";
 
-/** The `meta` Y.Map. Created on first access, as Yjs root types are. */
 export function getMetaMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(META_KEY);
 }
 
 /**
- * The `blocks` Y.XmlFragment.
- *
- * Exposed because the web client binds this fragment directly to
- * Tiptap/y-prosemirror — the block shape exists to make that binding native.
+ * Tiptap/y-prosemirror binds directly to this fragment; preserve its native shape.
  */
 export function getBlocksFragment(ydoc: Y.Doc): Y.XmlFragment {
   return ydoc.getXmlFragment(BLOCKS_KEY);
 }
 
 /**
- * The `annotations` Y.Map: threadId → that thread's own Y.Map.
- *
- * The value is a Y type and not plain JSON, because a thread's conversation is
- * a Y.Array nested inside it — see `annotations.ts` for why the conversation
- * must not be a field of a replaced JSON value.
+ * Each thread owns a nested Y.Array so concurrent replies append independently
+ * rather than replacing a whole JSON conversation.
  */
 export function getAnnotationsMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(ANNOTATIONS_KEY);
@@ -70,23 +61,15 @@ export interface InitDocOptions {
   /** Earlier decision this decision replaces; immutable after creation. */
   supersedes?: string;
   /**
-   * One or two sentences saying what the document is for. Optional here because
-   * the web UI creates documents without one; MCP's `create_doc` requires it.
+   * Optional for web creation; MCP create requires a nonblank description.
    */
   description?: string;
 }
 
 /**
- * Initialise a fresh document: write identity metadata and materialise the
- * three root types.
- *
- * Idempotent for title/tags (they are overwritten with what is passed);
- * `links` is only seeded when absent, so re-initialising never drops links.
- * `description` is written only when one is given, so re-initialising a
- * document without one does not erase the description it since acquired. A
- * supplied `supersedes` is canonicalized and written once. A successor must
- * carry the topic copied from its predecessor; re-initialisation may repeat
- * immutable fields, but cannot add a predecessor or change identity or topic.
+ * Reinitialisation restates title/tags, preserves existing links and omitted
+ * descriptions, and cannot add/change predecessor, decision identity or topic.
+ * A successor supplies its predecessor's topic; first records own their topic.
  */
 export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   const supersedes =
@@ -200,11 +183,8 @@ export function decisionContentLocked(meta: Pick<DocMeta, "kind" | "status">): b
 }
 
 /**
- * Read metadata, with defaults for anything not yet written.
- *
- * `description` is null rather than empty when there is none: absent and blank
- * are the same fact — nobody has said what this document is for — and one shape
- * for it keeps every reader from having to test for both.
+ * Tolerant defaults make incomplete replicas readable; blank and absent
+ * descriptions/summaries both read as null.
  */
 export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const meta = getMetaMap(ydoc);
@@ -267,16 +247,8 @@ export function setTitle(ydoc: Y.Doc, title: string): void {
 }
 
 /**
- * Replace the description wholesale — there is no partial edit of it, because
- * one or two sentences are rewritten, not patched.
- *
- * The document is authoritative; whoever writes here is responsible for
- * bringing the directory stub along, exactly as a rename is. Length is not
- * enforced here, as it is not for a title: {@link MAX_DESCRIPTION_LENGTH} is the
- * number the write boundaries check against.
- *
- * The empty string is how a description is removed: `getMeta` reads it back as
- * null, and a stub upsert given it drops the cached copy.
+ * Whole-value writer; callers validate length and update the directory cache.
+ * Empty string clears the description, read as null by getMeta and cache readers.
  */
 export function setDescription(ydoc: Y.Doc, description: string): void {
   const meta = getMetaMap(ydoc);
@@ -286,11 +258,8 @@ export function setDescription(ydoc: Y.Doc, description: string): void {
 }
 
 /**
- * Replace or clear the person-facing summary wholesale.
- *
- * Length is enforced by write boundaries through `MAX_TLDR_LENGTH`, not here.
- * A clear stores null so it competes with concurrent whole-value writes like
- * the document's other metadata rather than behaving like key deletion.
+ * Write boundaries enforce length. Clearing writes null so it competes with
+ * whole-value writes rather than Y.Map key deletion.
  */
 export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
   const meta = getMetaMap(ydoc);
@@ -300,11 +269,8 @@ export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
 }
 
 /**
- * Set the document's record shape, validating it against the stored status.
- *
- * The empty string clears both keys: a status cannot outlive its kind. A
- * non-empty write never clears or masks an incompatible status on the caller's
- * behalf; it refuses before the transaction instead.
+ * Empty kind clears both keys; nonempty kind refuses an incompatible stored
+ * status before transacting rather than silently clearing it.
  */
 export function setKind(ydoc: Y.Doc, kind: DocumentKind | ""): void {
   const meta = getMetaMap(ydoc);
@@ -368,10 +334,8 @@ function effectiveLinks(curated: string[], derived: string[]): string[] {
 }
 
 /**
- * Replace the local tag set through independent per-tag presence writes.
- *
- * This is the provisional free-form boundary. Catalog-aware clients use
- * `assignDocumentTags`, which validates identities before calling this writer.
+ * Low-level presence writer; catalog-aware clients validate identities through
+ * assignDocumentTags before calling it.
  */
 export function setTags(ydoc: Y.Doc, tags: string[]): void {
   const meta = getMetaMap(ydoc);
@@ -380,7 +344,7 @@ export function setTags(ydoc: Y.Doc, tags: string[]): void {
   });
 }
 
-/** Replace the outbound link set. Values are target document UUIDs. */
+/** Whole-value replacement; link targets are document UUIDs. */
 export function setLinks(ydoc: Y.Doc, links: string[]): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {

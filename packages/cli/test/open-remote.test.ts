@@ -1,25 +1,21 @@
 /**
  * `ub open` against an upstream hub: device admission, recovery of remote
  * sharing, durable browser and MCP edits through the shared store, presence
- * across a reconnect, and the served search and status readings. Split from
- * `open.test.ts`, whose header explains the real-world rig; the fixtures are in
+ * across a reconnect, and the served search and status readings. The
+ * `open.test.ts` header explains the real-world rig; the fixtures are in
  * `open-fixtures.ts`.
  */
 
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { type StoredHubLogin, readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
+import { type StoredHubLogin, readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  createHub,
-  importRootSecret,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   appendBlock,
@@ -55,7 +51,7 @@ import {
 afterEach(cleanUp);
 
 /**
- * #752's budget: an MCP write reaches a served tab within 250 ms at p95.
+ * An MCP write reaches a served tab within 250 ms at p95.
  *
  * A round is 20 samples. Transient stalls on a host shared with other suites can
  * spoil a round without the product being slow, so a missed round is retaken,

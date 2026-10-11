@@ -1,62 +1,3 @@
-/**
- * `ub open` — the web UI, in the foreground.
- *
- * It serves the built web app over loopback, makes sure a hub is available,
- * opens the browser, and stays in the foreground until Ctrl-C. That is the
- * whole lifecycle model: no daemon, no `ub hub start|stop`, no log files.
- *
- * This is the counterpart to `mise run dev`, not a replacement. `dev` is Vite
- * with HMR for somebody editing web code; `ub open` is the product for somebody
- * using it, and it needs no decrypted secret and no toolchain once a bundle
- * exists.
- *
- * Four decisions are load-bearing:
- *
- * 1. **It starts a hub only when it has to.** A hub answering at the configured
- *    endpoint — a remote one after `ub workspace use`, or one somebody started
- *    with `mise run hub` — is used as it is, and Ctrl-C leaves it running. Only
- *    a *local* endpoint with nothing answering gets a hub of our own, started
- *    in this process with {@link createHub} so that stopping it is the same
- *    flush-then-close the hub's own `main.ts` performs.
- *
- * 2. **It reconciles the two halves of the port configuration**, which is the
- *    asymmetry `ub doctor` explains: the hub binds `HUB_HOST`:`PORT`, while
- *    every client dials the configured endpoint. A hub started here
- *    exists to answer the bundle this command is serving, so it binds the
- *    endpoint the bundle will dial. A `PORT` that disagrees is a warning naming
- *    both, never a silent bind of a socket nobody will connect to.
- *
- * 3. **It serves #91's configuration document** at {@link CONFIG_PATH}, with
- *    the local browser endpoint, frozen startup binding and recorded machine
- *    destinations, with independent browser keys and upstream endpoints and
- *    `Cache-Control: no-store` on it, matched *ahead* of the SPA fallback. That
- *    document is what lets one prebuilt bundle target any hub; the fallback
- *    answering it with the app's own HTML is precisely the production failure
- *    #91 exists to remove. A serving run freezes its binding at startup so the
- *    browser and silent replicas cannot split identities; later binding changes
- *    add `rebound: true` until restart. Unbound serving retains
- *    #449's per-request resolution because it owns no replica identity.
- *
- * 4. **It never serves a blank page.** With no bundle it exits 1 naming what
- *    is missing, rather than opening a browser onto 404s.
- *    A bundle that is *there* but stale is that blank page with extra steps: one
- *    built before a `SYNC_PROTOCOL_VERSION` bump sends a pre-envelope auth
- *    message, the hub refuses it as an unparseable one, and the page sits at
- *    `syncing…` and `0 docs` with nothing naming the cause (#452). So the build
- *    stamps the protocol it speaks into {@link BUILD_STAMP}, this command
- *    compares it to its own before it starts anything, and a bundle that
- *    differs — or carries no stamp, which is what one built before the stamp
- *    looks like — never gets served. A checkout's default bundle is refused
- *    with `mise run build-web` as the next step; a bundle `UBERBLICK_WEB_DIST`
- *    named is refused with both versions and the rebuild named. It compares
- *    the CLI and bundle protocols; whether the *hub* speaks it too is still
- *    settled at connect, where it always was.
- *
- * This command never builds or changes a bundle. Contributors build through
- * `mise run build-web`; installations serve their packaged web app. Bundle
- * refusals happen before a hub starts or a database file is created.
- */
-
 import { execFile } from "node:child_process";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
@@ -65,22 +6,18 @@ import { userInfo } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import type { Hub, LocalBrowserServer } from "@uberblick/hub";
-import {
-  createHub,
-  createLocalBrowserServer,
-  importRootSecret,
-  resolveHubConfig,
-  verifyToken,
-} from "@uberblick/hub";
+import { createHub, type Hub } from "@uberblick/hub";
+import { createLocalBrowserServer, type LocalBrowserServer } from "./local-browser-server.js";
+import { importRootSecret, verifyToken } from "@uberblick/schema/token";
+import { resolveHubConfig } from "./hub-config.js";
 import {
   SYNC_PROTOCOL_VERSION,
   isProtocolVersion,
   readAuthEnvelope,
-} from "@uberblick/hub/protocol";
-import { clampToken } from "@uberblick/hub/token";
-import { isLoopbackHost } from "@uberblick/hub/remote-url";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
+} from "@uberblick/schema/protocol";
+import { clampToken } from "@uberblick/schema/token";
+import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,
@@ -117,27 +54,22 @@ import {
 } from "./probes.js";
 
 /**
- * Where the client looks for its runtime configuration (#91).
- *
- * Contract, not detail: `packages/web/src/config.ts`, the Caddy configuration
- * and this command all have to agree on the path and on the shape.
+ * Runtime configuration lets one prebuilt bundle target any hub.
+ * The web client, Caddy and this server must agree on the path and shape.
  */
 export const CONFIG_PATH = "/uberblick-config.json";
 
 /**
- * The port the web app is served on, unless `--port` says otherwise.
- *
- * Keep a stable origin for browser settings, on a port distinct from Vite's
- * defaults. An occupied port is an error, never a reason to choose another.
+ * Keep a stable origin for browser settings, distinct from Vite's defaults.
+ * An occupied port is an error; never choose another automatically.
  */
 export const DEFAULT_WEB_PORT = 13379;
 
-/** Loopback, per the issue: reaching this from another machine is #75's job. */
 export const WEB_HOST = "127.0.0.1";
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-/** `packages/web/dist`, resolved from this module rather than from the cwd. */
+// Resolve the default bundle from this module, independently of the cwd.
 const DEFAULT_BUNDLE = join(packageRoot, "..", "web", "dist");
 
 export const OPEN_HELP = `usage: ub open [options]
@@ -184,9 +116,6 @@ async function defaultPresenceName(env: NodeJS.ProcessEnv): Promise<string> {
   return userInfo().username;
 }
 
-// --- the bundle --------------------------------------------------------------
-
-/** The default bundle, an installed payload, or a caller-supplied artifact. */
 type BundleSource = "default" | "installed" | "override";
 
 export type BundleAction =
@@ -202,7 +131,6 @@ function isFile(path: string): boolean {
 }
 
 /**
- * Find the prebuilt bundle, independently of the working directory.
  * An override is the caller's artifact, even when it names the default path.
  */
 export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
@@ -222,22 +150,14 @@ export function bundlePlan(env: NodeJS.ProcessEnv = process.env): BundleAction {
 }
 
 /**
- * The file the web build stamps its sync protocol version into.
- *
- * Contract, shared with `packages/web/vite.config.ts`, which emits it: this
- * name and the `syncProtocolVersion` in it.
+ * Keep this filename and its syncProtocolVersion field aligned with the
+ * stamp emitted by packages/web/vite.config.ts.
  */
 const BUILD_STAMP = "uberblick-build.json";
 
 /**
- * The protocol version a bundle says it speaks, or `null` when it says nothing
- * this command can believe.
- *
- * One answer for every unreadable case — no stamp, unreadable file, not JSON,
- * not an object, no usable version — because a bundle is refused the same way
- * for all of them, and because a stale bundle is far more often one from before
- * the stamp existed than one with a broken stamp. Never throws: an unparseable
- * file is a refusal to print, not a stack trace.
+ * Missing, unreadable or malformed stamps all yield null for a normal
+ * refusal rather than a stack trace.
  */
 function stampedProtocol(dir: string): number | null {
   try {
@@ -249,14 +169,12 @@ function stampedProtocol(dir: string): number | null {
   }
 }
 
-/** What a bundle's stamp says, in a sentence: a version, or nothing at all. */
 function speaks(stamped: number | null): string {
   return stamped === null
     ? "carries no sync protocol stamp"
     : `speaks sync protocol ${stamped}`;
 }
 
-/** Why a bundle cannot sync, and the recovery for the copy being served. */
 function staleBundle(dir: string, stamped: number | null, source: BundleSource): string {
   if (source === "installed") {
     return (
@@ -276,8 +194,9 @@ function staleBundle(dir: string, stamped: number | null, source: BundleSource):
 }
 
 /**
- * Check the bundle without changing it. Every refusal precedes hub and
- * database startup; building is the contributor's explicit mise task.
+ * Refuse before hub/database startup without changing the bundle. Compare
+ * CLI and bundle protocols here; the hub's protocol is checked at connection.
+ * Caller bundles name both versions and a rebuild; installed copies reinstall.
  */
 export function ensureBundle(plan: BundleAction, io: Io): "servable" | "refused" {
   if (plan.action === "missing" || !isFile(join(plan.dir, "index.html"))) {
@@ -297,8 +216,6 @@ export function ensureBundle(plan: BundleAction, io: Io): "servable" | "refused"
   io.err(staleBundle(plan.dir, stamped, plan.source));
   return "refused";
 }
-
-// --- the served files --------------------------------------------------------
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -321,16 +238,9 @@ const MIME: Record<string, string> = {
 };
 
 /**
- * The file a request path names, or `index.html`.
- *
- * The fallback is Caddy's `try_files {path} /index.html` and is here for the
- * same reason: deep links (#68) are client-side routes with no file behind
- * them. It is also why {@link CONFIG_PATH} is answered *before* this function
- * is ever reached — an absent configuration document served as the app's own
- * HTML is the failure #91 was written against.
- *
- * Anything that escapes the bundle directory — `..`, an absolute path, a
- * percent-encoded traversal, a NUL — falls back rather than being served.
+ * SPA deep links fall back to index.html, as in Caddy's try_files rule.
+ * Answer CONFIG_PATH first so configuration never receives the HTML fallback.
+ * Traversal, absolute paths, malformed escaping and NULs also fall back.
  */
 function fileFor(root: string, pathname: string): string {
   const fallback = join(root, "index.html");
@@ -351,16 +261,11 @@ function fileFor(root: string, pathname: string): string {
 }
 
 /**
- * The configuration document, byte for byte.
- *
- * The legacy endpoint/key describe the startup workspace. Local serving also
- * publishes an exact UUID-to-browser-key/upstream map for the offered replicas.
- * Workspace strings preserve the startup spelling; bare UUIDs key admission.
- *
- * Serialization only. {@link configSource} supplies live direct-serving
- * values; {@link servingConfigSource} supplies frozen local/upstream pairs and
- * the live `rebound` diagnostic. Only the loopback browser key may be served;
- * an unbound process has no key to give the page.
+ * The endpoint/key describe startup; the UUID map gives each offered replica
+ * its own browser key/upstream. Preserve workspace spelling but admit by bare UUID.
+ * Serialize only browser keys, never upstream credentials; unbound serving has no key.
+ * configSource refreshes unbound values; servingConfigSource freezes destinations
+ * and updates only rebound, keeping browser and replica identities aligned.
  */
 export function configDocument(
   hubUrl: string,
@@ -421,17 +326,8 @@ function sameBinding(left: Binding, right: Binding): boolean {
 }
 
 /**
- * This machine's configuration, as the document, right now.
- *
- * **Resolved against the environment this process started in**, never against
- * an earlier resolution's output. {@link resolveConfig} returns an *environment*
- * with what it resolved written over the process's own, so a `WORKSPACE_ID` or
- * `HUB_AUTH_TOKEN` that came from a file arrives back looking exactly like an
- * environment pin. Feeding that back in would freeze the first resolution's
- * file values into apparent permanent overrides, and no later `ub workspace use`
- * would ever be seen again — the refresh would resolve, and resolve the same
- * answer forever. Passing the original environment keeps the precedence honest:
- * a genuine pin still wins every time, and a file value stays a file value.
+ * Re-resolve from the original environment: feeding resolved file values back
+ * would turn them into permanent environment pins and hide binding changes.
  */
 function currentConfigDocument(env: NodeJS.ProcessEnv, defaultPresenceName: string): string {
   const resolved = resolveConfig({ env });
@@ -444,23 +340,10 @@ function resolvedConfigDocument(resolved: ReturnType<typeof resolveConfig>, defa
 }
 
 /**
- * The per-request source of the unbound configuration document. It refreshes
- * the hub endpoint and publishes no workspace or browser key.
- *
- * `ub workspace create`, `ub workspace use` and `ub open` publish configuration
- * files as separate atomic writes, holding `.init.lock` across the publication.
- * Each file is therefore whole whenever it is read. This source uses the same
- * lock so its resolution sees a completed configuration publication.
- *
- * So each refresh tries to take the same lock without waiting. While a writer
- * holds it, the last accepted document is served immediately. When the reader
- * gets it, no writer can complete a lock acquire/write/release cycle between
- * observations: the lock stays held across both file reads.
- *
- * Only an *active* write falls back like that. A completed removal, or a
- * `credentials.json` refused for its mode, resolves normally and is served
- * normally — {@link resolveConfig}'s own semantics, not a persistent cache of
- * the old configuration.
+ * Unbound requests refresh only the endpoint, without a workspace or browser key.
+ * Hold the writers' init lock across both atomic-file reads for one publication.
+ * Serve the last accepted value without waiting only while a writer holds it;
+ * completed removals and permission refusals resolve normally, without stale cache.
  */
 function configSource(env: NodeJS.ProcessEnv, initial: string, defaultPresenceName: string): () => string {
   let accepted = initial;
@@ -479,8 +362,7 @@ function configSource(env: NodeJS.ProcessEnv, initial: string, defaultPresenceNa
 }
 
 /**
- * The frozen local-serving destinations, plus one live fact: whether this machine
- * has since been rebound and `ub open` must be restarted.
+ * Freeze startup destinations; a later binding change sets rebound until restart.
  */
 function servingConfigSource(
   env: NodeJS.ProcessEnv,
@@ -835,9 +717,7 @@ function serveBundleRequest(
         200,
         {
           "content-type": "application/json",
-          // Load-bearing: a cached copy keeps a retargeted client dialling the
-          // hub it was pointed at last time, which is the whole failure #91
-          // exists to remove.
+          // Cached configuration would keep a retargeted client on its old hub.
           "cache-control": "no-store",
         },
         document(),
@@ -877,7 +757,7 @@ function serveBundle(
   });
 }
 
-/** Bind, with a bind failure as a rejection rather than an uncaught error. */
+/** Reject bind failures instead of letting an unhandled error escape. */
 function listen(server: Server, host: string, port: number): Promise<void> {
   return new Promise((done, failed) => {
     server.once("error", failed);
@@ -888,27 +768,13 @@ function listen(server: Server, host: string, port: number): Promise<void> {
   });
 }
 
-/** Who holds the web port, as far as one probe of it could establish. */
 export type PortHolder = "ub-open" | "foreign" | "unidentified";
 
 /**
- * Who holds the web port — another `ub open`, something else entirely, or
- * nobody this probe could name.
- *
- * The first two want different advice (`--port` versus "stop that process"),
- * and the only honest way to tell them apart is to ask the thing on the port
- * for the document only this command serves. What separates them is a
- * **complete** answer, read to its end within the budget: one that is this
- * command's configuration document is another `ub open`, and any other complete
- * answer — a refusal, a different document, a body that is not JSON at all — is
- * another process.
- *
- * Anything short of a complete answer identifies nobody, and that is a third
- * result rather than either of the first two. A healthy `ub open` that answered
- * too late lands there, and reading its expiry as a stranger is what sent a user
- * to stop their own process (#600). Guessing the other way round is no better:
- * a stranger that accepts the connection and never answers looks exactly the
- * same from here.
+ * Classify only a complete answer within budget: our configuration is ub-open;
+ * refusals, other documents and invalid JSON are foreign. An incomplete or
+ * expired response is unidentified, even if a healthy ub open answered late.
+ * Never advise stopping a holder that the probe could not identify.
  */
 export async function whoHoldsPort(port: number): Promise<PortHolder> {
   let body: string;
@@ -918,9 +784,7 @@ export async function whoHoldsPort(port: number): Promise<PortHolder> {
       cache: "no-store",
       signal: AbortSignal.timeout(budget(1_000)),
     });
-    // Before the status, because a refusal only counts as an answer once its
-    // body is in hand: headers followed by a body that never arrives is the
-    // unidentified case, whatever the status line claimed.
+    // Read the body before classifying status; headers alone identify nobody.
     body = await response.text();
     ok = response.ok;
   } catch {
@@ -936,7 +800,6 @@ export async function whoHoldsPort(port: number): Promise<PortHolder> {
   }
 }
 
-/** What to say about a taken web port, given who — if anyone — answered on it. */
 function portTakenMessage(port: number, holder: PortHolder): string {
   if (holder === "ub-open") {
     return (
@@ -950,36 +813,24 @@ function portTakenMessage(port: number, holder: PortHolder): string {
       "stop it, or serve the web app elsewhere with --port\n"
     );
   }
-  // Names no holder, because none was established — so the only advice here is
-  // the one that is safe whichever it turns out to be.
+  // An unidentified holder gets advice safe for either kind of process.
   return (
     `ub open: port ${port} is in use, and its holder did not answer in time to ` +
     "say what it is — serve the web app elsewhere with --port\n"
   );
 }
 
-// --- the hub -----------------------------------------------------------------
-
 interface HubDecision {
   /** The hub this command started, and is therefore responsible for stopping. */
   started: Hub | null;
-  /** One line for the banner: what happened about the hub, and why. */
   note: string;
   signInRequired?: boolean;
 }
 
 /**
- * Why no hub may be started for this endpoint, or null when one may.
- *
- * {@link createHub} starts a plain websocket listener on one address and one
- * port, and the configuration document tells the bundle to dial `hubUrl` — so
- * an endpoint the started hub would not actually answer has to be a refusal,
- * never a hub announced as running that nothing can reach. Ruled out: any
- * scheme but `ws:` (there is no TLS here, so `wss://` would be dialled and
- * never answered), an endpoint with no explicit port (the scheme's default
- * 80/443 is not a port anybody asked a hub to bind), port 0 (ephemeral — the
- * bundle would be told to dial 0), and a non-loopback host per
- * {@link isLoopbackHost}.
+ * A started hub must answer exactly what the bundle dials: plain ws on
+ * loopback with an explicit nonzero port. No TLS, default-port guess or
+ * ephemeral-port substitution is available here.
  */
 export function whyNotStartable(hubUrl: string, parsed: URL): string | null {
   const preamble = `nothing answers ${hubUrl}, and no hub can be started for it: `;
@@ -1009,13 +860,8 @@ export function whyNotStartable(hubUrl: string, parsed: URL): string | null {
 }
 
 /**
- * Make a hub available at the resolved endpoint, or explain why there is none.
- *
- * Reachability is a real client — {@link probeHubState} mints a token and reads the
- * workspace's directory room — so "already answering" means a client would
- * actually connect, not that something accepted a TCP connection. Without a
- * workspace or a signing secret there is no such client to be, and the port is
- * the only question that can be asked.
+ * Hub reachability requires authenticated directory-room access, not just TCP.
+ * Without a workspace or signing secret, only port occupancy can be probed.
  */
 async function ensureHub(
   resolved: NodeJS.ProcessEnv,
@@ -1029,9 +875,7 @@ async function ensureHub(
         "endpoint — it has to be a ws:// or wss:// URL",
     );
   }
-  // It parses, because `endpointOf` just parsed it too — but this keeps the
-  // scheme and whether a port was written down, which is what decides below
-  // whether a hub may be started for it.
+  // Preserve the scheme and explicit port for the startup eligibility check.
   const parsed = new URL(hubUrl);
   const workspace = trimmed(resolved.WORKSPACE_ID);
   const displayHub = isLocalHost(endpoint.host) ? hubUrl : displayWorkspaceHub(hubUrl);
@@ -1053,9 +897,7 @@ async function ensureHub(
   const secret = trimmed(resolved.HUB_AUTH_TOKEN);
 
   if (secret === null) {
-    // A hub with no secret would verify no tokens and accept anything, which is
-    // why the hub itself refuses to start without one. Nothing to start, then —
-    // and saying so is what keeps this apart from a hub that is merely down.
+    // Refuse startup without a signing secret; absence is distinct from downtime.
     return {
       started: null,
       note:
@@ -1078,27 +920,21 @@ async function ensureHub(
       return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)` };
     }
   } else {
-    // No workspace, so no client to be, so no way to ask whether the thing on
-    // that port is a hub. A port somebody else holds is one to leave alone
-    // rather than to fight over: the app is served either way.
+    // Without a workspace, leave any occupied port alone and still serve the app.
     const port = await probePort(endpoint.host, endpoint.port);
     if (port.state !== "free") {
       return { started: null, note: `${hubUrl} (already taken — left alone)` };
     }
   }
 
-  // Asked only now, and only about starting: an endpoint a hub already answers
-  // is used whatever it looks like, and only one nobody answers has to be one
-  // this command could actually stand a hub up on.
+  // Startup restrictions do not apply to a hub already answering the endpoint.
   const refusal = whyNotStartable(hubUrl, parsed);
   if (refusal !== null) {
     throw new Error(refusal);
   }
 
-  // The hub binds HUB_HOST:PORT and never reads the endpoint, so the two are
-  // only ever in step because somebody kept them there. A hub started here exists to
-  // answer the bundle this command serves, so the endpoint wins — and a PORT
-  // that disagrees is said out loud rather than silently obeyed.
+  // The hub reads HUB_HOST:PORT, not HUB_URL. Bind the dialled endpoint and
+  // warn on a conflicting PORT rather than silently starting an unreachable hub.
   const bind = hubBind(resolved);
   if (bind.raw !== null && bind.port !== endpoint.port) {
     io.err(
@@ -1110,9 +946,7 @@ async function ensureHub(
 
   let hub: Hub;
   try {
-    // `endpoint.host` is loopback — {@link whyNotStartable} has already refused
-    // everything else — so this binds the address the web app dials and no
-    // other interface.
+    // whyNotStartable has fenced this exact dialled address to loopback.
     hub = await createHub(
       resolveHubConfig({
         ...resolved,
@@ -1121,10 +955,8 @@ async function ensureHub(
       }),
     );
   } catch (error) {
-    // Nothing that answers this machine's credential is there — the probe just
-    // said so — and the port is taken anyway. Which of the several things it
-    // could be is `ub doctor`'s local hub check, so the message points there rather
-    // than guessing.
+    // An occupied port after a failed auth probe has no identified holder;
+    // point to doctor's local hub check rather than guessing.
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
       throw new Error(
         `nothing at ${hubUrl} answered this machine's credential, and its port ` +
@@ -1137,14 +969,11 @@ async function ensureHub(
   return { started: hub, note: `${hubUrl} (started here)` };
 }
 
-// --- the command -------------------------------------------------------------
-
 interface Options {
   port: number;
   browser: boolean;
 }
 
-/** Exported so the help above can be checked against the parser it describes. */
 export const OPEN_OPTIONS = {
   "no-browser": { type: "boolean" },
   port: { type: "string" },
@@ -1223,15 +1052,8 @@ interface Foreground {
 }
 
 /**
- * Take the foreground **before** anything is started.
- *
- * The ordering is the whole point. Node's default SIGINT kills the process
- * outright, so a handler installed only once the command is fully up leaves a
- * window — between the hub binding its socket and the web server binding its
- * own — in which Ctrl-C takes the hub down without its flush, which is the one
- * step the hub's durability contract is made of. Handlers first, then start
- * things and register them here as they come up; a signal at any point tears
- * down exactly what exists.
+ * Install signal handlers before startup so Ctrl-C cannot skip a hub flush
+ * between socket binds. Register owned resources as they start for partial teardown.
  */
 function takeForeground(owned: Owned, io: Io): Foreground {
   let seen = false;
@@ -1264,10 +1086,8 @@ function takeForeground(owned: Owned, io: Io): Foreground {
 
     const server = owned.server;
     if (server !== null) {
-      // `close()` refuses new connections and drops idle ones;
-      // `closeAllConnections` is what stops a request already in flight from
-      // holding the port — and the whole point of a foreground command is that
-      // Ctrl-C ends it now, not when a browser finishes downloading a chunk.
+      // close refuses new/idle connections; closeAllConnections prevents an
+      // in-flight download from holding the port after Ctrl-C.
       await new Promise<void>((done) => {
         server.close(() => done());
         server.closeAllConnections();
@@ -1284,8 +1104,7 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     }
     if (owned.hub !== null) {
       try {
-        // Flushes before it closes — the hub's own durability contract, which
-        // no exit path here may skip.
+        // Every exit path must flush the owned hub before closing it.
         await owned.hub.stop();
       } catch (error) {
         io.err(`ub open: the hub did not shut down cleanly: ${message(error)}\n`);
@@ -1312,17 +1131,14 @@ export async function openCommand(
     return 2;
   }
 
-  // Kept, not just used: rebound detection (and the direct-serving fallback)
-  // re-resolves from this original environment. Resolving from the output of a
-  // prior resolution would turn file values into permanent pins.
+  // Retain the original environment for refreshes; resolved file values are not pins.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   let initial = await initialConfig(startupEnv);
   let projectBinding = requireBinding(initial.resolved);
   for (const warning of initial.resolved.warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
-  // The default lives in the MCP server's configuration, which is where every
-  // other client reads it from; restating it here would be a second address.
+  // Share the MCP client's default endpoint rather than defining another.
   let hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
   let env: NodeJS.ProcessEnv = { ...initial.resolved.env, HUB_URL: hubUrl };
 
@@ -1397,10 +1213,8 @@ export async function openCommand(
           const current = new Set<string>();
           collectingServedRooms = current;
           try {
-            // `refresh` synchronously walks this workspace's loaded rooms. The
-            // read callback below therefore gives this endpoint exactly the
-            // rooms the in-process server currently has loaded, including the
-            // directory and sidebar rooms.
+            // Synchronous refresh/read callbacks collect exactly this workspace's
+            // loaded rooms, including directory and sidebar, for this status cut.
             localServer.refresh(workspaceId);
           } finally {
             collectingServedRooms = null;

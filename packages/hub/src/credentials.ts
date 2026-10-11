@@ -1,15 +1,9 @@
-/**
- * Hub-owned device credentials. These rows share the document database handle
- * and its backups, but are never synchronized document content. Independent
- * random signing keys keep the legacy shared root and other devices powerless
- * over a credential. Issuance and renewal return each new key once.
- */
 
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
 import type { MembershipRegistry } from "./memberships.js";
-import { sanitizeDeviceName } from "./device-name.js";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import {
   type ClampFailure,
   type RequestAction,
@@ -21,7 +15,7 @@ import {
   inspectToken,
   inspectRequestProof,
   readTokenKeyId,
-} from "./token.js";
+} from "@uberblick/schema/token";
 
 export interface CredentialRecord {
   id: string;
@@ -115,9 +109,10 @@ function recordFromRow(row: CredentialRow): CredentialRecord {
 }
 
 /**
- * This internal API fixes authorization at issuance. There is no mutation that
- * widens or restores a credential. Renewal issues a replacement and retires
- * the old key. Remote admission, sign-in and renewal share this registry.
+ * Existing credentials cannot gain authority or be restored; renewal replaces
+ * and retires the key.
+ * Admission, sign-in and renewal must share this registry and database handle.
+ * Rows belong to hub backups, never synchronized document content.
  */
 export class CredentialRegistry {
   private readonly db: DatabaseSync;
@@ -136,8 +131,8 @@ export class CredentialRegistry {
     const db = database.connection;
     this.db = db;
     db.exec(SCHEMA);
-    // Configured sign-in hubs already have this table. CREATE IF NOT EXISTS
-    // cannot upgrade it; old rows retain their issued/revoked meaning.
+    // CREATE IF NOT EXISTS leaves existing tables unchanged. Add nullable
+    // columns without changing existing rows' issued/revoked meaning.
     if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
       .some((column) => column.name === "replaced_at")) {
       db.exec("ALTER TABLE hub_credentials ADD COLUMN replaced_at INTEGER");
@@ -214,6 +209,8 @@ export class CredentialRegistry {
       revokedAt: null,
       replacedAt: null,
     };
+    // Independent keys deny authority to the shared root and other devices;
+    // return each new key only at issuance or renewal.
     const keyBytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
     this.insert.run({
       id: record.id,
@@ -247,10 +244,8 @@ export class CredentialRegistry {
   }
 
   /**
-   * Verify request-bound possession without granting any room or credential.
-   * A caller must perform its authority check synchronously after awaiting this
-   * result, including a fresh get() and re-clamping the returned proof at the
-   * operation's current time.
+   * Possession grants no room or credential. After awaiting, callers must
+   * synchronously re-read authority and clamp the proof at the operation's time.
    */
   async verifyRequest(token: string, request: RequestAction): Promise<CredentialRequestVerification | null> {
     const lookup = readTokenKeyId(token);
@@ -380,11 +375,9 @@ export class CredentialRegistry {
   }
 
   /**
-   * Revoke every row of an owned device in one transaction. A replacement that
-   * committed first is included; an exchange still verifying fails its later
-   * current-row check. No await separates the snapshot from the update.
-   * Historical rows retain sign-in time and support closure retries.
-   * Returns whether the device is owned, including an already-revoked retry.
+   * Snapshot and revoke every device row in one transaction without yielding.
+   * Include committed replacements; verifying exchanges fail their current-row check.
+   * Retain sign-in history for closure retries; owned revoked devices still return true.
    */
   revokeDevice(principalId: string, deviceId: string): boolean {
     let ids: string[];

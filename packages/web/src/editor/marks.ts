@@ -1,57 +1,16 @@
 /**
- * The inline marks: bold, italic, strike, inlineCode, link, docLink. Six marks,
- * hand-written, because the wire format is the contract and stock extensions do
- * not respect it.
+ * Keep schema wire values: bare mark keys, {} for flags, {href} for external
+ * links and {docId} for document links. Stock link attrs would persist rendering
+ * policy; target/rel stay render-only. Every mark excludes itself or y-prosemirror
+ * hashes its key. Link marks additionally exclude each other.
  *
- * The schema package owns the vocabulary (`INLINE_MARKS`) and the storage: a mark
- * is a Yjs formatting attribute on the block's Y.XmlText, keyed by the bare mark
- * name, holding that mark's ProseMirror attrs — `{}` for the four flags,
- * `{ href }` for a link and `{ docId }` for a docLink. Four constraints follow,
- * and each one is the reason a stock Tiptap mark is not used here:
+ * Use shared isExternalHref/canonicalDocumentUuid at every input, paste and HTML
+ * boundary. inlineCode has code:true to suppress neighboring input rules; its
+ * name differs from the code node because schema node/mark names cannot collide.
  *
- * 1. **Every mark excludes itself.** y-prosemirror's `marksToAttributes` checks
- *    `mark.type.excludes(mark.type)` and, for a mark that does not exclude
- *    itself, writes the Yjs attribute under a *hashed* key (`bold--A1b2C3d4`)
- *    instead of `bold`. Most marks get that from the ProseMirror default
- *    ("exclusive with marks of the same type"); the two link marks name their
- *    exclusions explicitly and so have to name *themselves* too, because
- *    `excludes` replaces the default rather than adding to it.
- * 2. **Only the link marks declare an attribute, and only one each** — `href`
- *    and `docId`. Every declared
- *    attribute lands in the Yjs value; Tiptap's Link ships `target`, `rel` and
- *    `class` attributes, which would put three keys of rendering policy into the
- *    document. `target`/`rel` are render-time only here.
- * 3. **A `link` is an external URL; a `docLink` is a document uuid.** They are
- *    one affordance over two disjoint target spaces, so they exclude each other
- *    both ways and a uuid in an `href` is never reinterpreted as a document
- *    reference. The invariant is enforced at the model boundary
- *    (the schema package refuses to write another scheme, and its palette gate
- *    refuses to bind one that arrived over the wire); the doors in front of it —
- *    the input rule, the paste rule and HTML parsing, here for `link` and in
- *    `doc-links.ts` for the typed and pasted `docLink` — keep it from being
- *    reached in the first place, and share the schema's `isExternalHref` and
- *    `canonicalDocumentUuid` so there is one definition. No validation
- *    registry, no link resolver.
- * 4. **The `inlineCode` mark declares `code: true`.** Tiptap's input-rule runner
- *    skips every rule adjacent to a mark whose spec says `code`, which is what
- *    keeps `**x**` from turning into bold inside an inline code span. (Code
- *    *blocks* get this from the node spec, which is why no rule fires inside
- *    them.)
- *
- * The name is `inlineCode` and not `code` because ProseMirror refuses a schema
- * where one name is both a node and a mark, and `code` is a block type. A mark's
- * name is its Yjs key, so the schema package uses the same name — see
- * `INLINE_MARKS` there.
- *
- * Input and paste rules open at the start of text, after whitespace or after
- * `(`, `[`, `{`, `"` or `'`. Paste rules see only the pasted text, so its start
- * counts as a boundary even when pasted into a word. Lookbehind keeps that
- * prefix outside the match: `markInputRule` and `markPasteRule` delete from the
- * match's start to the captured text, skipping only leading whitespace, so a
- * punctuation prefix inside the match would be eaten with the delimiter.
- * Underscore forms (`__b__`, `_i_`) work when typed or pasted: export writes
- * asterisks, while the markdown *reader* understands both — a `_` delimits under
- * CommonMark's flanking rules, which is what keeps `snake_case` a word.
+ * Keep delimiter boundaries outside matches with lookbehind: rule runners delete
+ * matched punctuation prefixes. Paste starts are boundaries even inside words.
+ * Accept underscore forms with flanking rules while export writes asterisks.
  */
 
 import {
@@ -219,8 +178,7 @@ export const Strike = Mark.create({
 });
 
 /**
- * Inline code. `code: true` is what stops the other input rules from firing
- * next to it — see constraint 4 in the module comment.
+ * code:true suppresses neighboring formatting input rules.
  */
 export const InlineCode = Mark.create({
   name: "inlineCode",
@@ -253,8 +211,7 @@ export const Link = Mark.create({
   // Typing after a link must not extend it — an href is a property of the words
   // it was put on, not of the caret.
   inclusive: false,
-  // Itself (constraint 1) and the other link mark: one range is a reference to
-  // one place.
+  // Self-exclusion keeps a bare Yjs key; mutual exclusion keeps one link target.
   excludes: "link docLink",
   addAttributes() {
     return {
@@ -271,9 +228,7 @@ export const Link = Mark.create({
     return [
       {
         tag: "a[href]",
-        // The paste door. Pasted HTML is the one place a `mailto:`,
-        // `javascript:` or in-app href could walk in, so anything that is not an
-        // external URL is not a link — the text comes through unmarked.
+        // Refuse non-external pasted hrefs; retain their text without a link mark.
         getAttrs: (element: HTMLElement): { href: string } | false => {
           const href = element.getAttribute("href") ?? "";
           return isExternalHref(href) ? { href } : false;
@@ -298,9 +253,7 @@ export const Link = Mark.create({
   addInputRules() {
     const type = this.type;
     return [
-      // Written out rather than built with `markInputRule`, which keeps the
-      // *last* capture group as the text: here that is the href, and the label
-      // is what has to survive.
+      // Preserve the label: markInputRule would keep the last capture, the href.
       new InputRule({
         find: LINK_INPUT,
         handler: ({ state, range, match }) => {
@@ -329,26 +282,10 @@ export const Link = Mark.create({
 });
 
 /**
- * An inline reference to another document, stored as the target's uuid alone.
- *
- * Storage and rendering only, deliberately: the typed and pasted spellings, the
- * title a shorthand borrows from the directory, the unresolved/archived states
- * and the click that follows a reference all live in `doc-links.ts` instead.
- * They need the workspace on screen, and `uberblickSchema` is one object for
- * the whole process — so the mark stays schema and the rest is behaviour, added
- * per editor. What this declaration buys is that the mark can exist at all: the
- * palette gate binds a text only when every attribute on it is a mark this
- * schema declares and the schema package's reader accepts, so a `docLink`
- * written by an agent would otherwise stop the editor from binding the block.
- *
- * `data-doc-id` rather than `href`: a reference names a document, and the
- * address of one is derived from the workspace the reader is in — so an `<a>`
- * here carries no href, and the live one a mark view paints gets its own. It is
- * also what keeps the two link marks' HTML doors apart — `a[href]` parses a
- * `link`, `a[data-doc-id]` a `docLink`, and an anchor carrying both is a
- * `docLink`, because this rule outranks that one — and the attribute is
- * validated on the way in, because pasted HTML is the one place a foreign value
- * walks in.
+ * Store UUID identity only. Per-workspace labels, availability and navigation
+ * stay in doc-links.ts because the schema is shared across editors.
+ * Render data-doc-id without href; addresses are derived by the live mark view.
+ * Its HTML rule outranks external links and validates pasted identities.
  */
 export const DocLink = Mark.create({
   name: "docLink",
@@ -358,11 +295,8 @@ export const DocLink = Mark.create({
     return {
       docId: {
         default: null as string | null,
-        // Canonicalizing rather than shape-checking, because this is a *write*
-        // door: an upper-cased uuid names the same document, and the schema
-        // package's write boundary lowercases it exactly the same way. The
-        // attribute's own parser is where it has to happen — Tiptap runs it
-        // after the rule's `getAttrs` and its value wins.
+        // Tiptap runs this after getAttrs and its value wins, so canonicalize
+        // here too: uppercase UUIDs must retain the same document identity.
         parseHTML: (element: HTMLElement): string | null =>
           canonicalDocumentUuid(element.getAttribute("data-doc-id")),
         renderHTML: (attributes: Record<string, unknown>): Record<string, string> =>
@@ -376,12 +310,8 @@ export const DocLink = Mark.create({
     return [
       {
         tag: "a[data-doc-id]",
-        // Ahead of `link`'s `a[href]` (default 50), which is declared first and
-        // would otherwise consume an anchor carrying both — turning a reference
-        // copied out of a document into a link to whatever href travelled with
-        // it. ProseMirror takes the first rule whose `getAttrs` does not refuse,
-        // so a `data-doc-id` that is not a document still falls through to that
-        // external door and the href decides, exactly as before.
+        // Prefer validated data-doc-id over copied href. An invalid id can still
+        // fall through to the independently validated external-link rule.
         priority: 60,
         // The paste door: a target that is not a document uuid is not a
         // reference, and the text comes through unmarked.

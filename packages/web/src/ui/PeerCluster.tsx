@@ -1,4 +1,4 @@
-/** The compact, operable document-presence cluster (#616). */
+/** A bounded, keyboard-operable document-presence cluster. */
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -24,9 +24,8 @@ function peerKey(clientId: number): string {
 }
 
 /**
- * At most three collaborators, followed by one bounded overflow surface.
- * Ordering comes from `readPresence`'s client-id order, so mutable identity or
- * caret fields never shuffle unrelated controls.
+ * Cap the roster at three controls plus overflow. Keep client-ID order so
+ * mutable names or caret fields cannot shuffle unrelated controls.
  */
 export function PeerCluster({
   presence,
@@ -169,9 +168,9 @@ export function PeerCluster({
               interactedOutside.current = true;
             }}
             onCloseAutoFocus={(event) => {
-              // Radix owns the close policy; this local override changes only its
-              // trigger focus to preventScroll. Plain focus would undo #616's
-              // editor jump by scrolling the pane back to this status row.
+              // Keep Radix close policy, but restore trigger focus with
+              // preventScroll so closing overflow does not jump the editor to
+              // this row.
               if (interactedOutside.current) return;
               event.preventDefault();
               overflowTrigger.current?.focus({ preventScroll: true });

@@ -1,7 +1,7 @@
 /**
- * No room is acquired before the hub endpoint is known (#91).
+ * No room is acquired before the hub endpoint is known.
  *
- * The one invariant the runtime-configuration change turns on. The shared
+ * The runtime-configuration invariant. The shared
  * websocket is built from the first room acquired and lives for the session, so
  * a room taken out a tick early would dial the build-time fallback and stay
  * there — with the served document fetched, parsed, and ignored. That failure

@@ -7,15 +7,15 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Server, type onAuthenticatePayload } from "@hocuspocus/server";
 import type * as Y from "yjs";
-import type { StoredHubLogin } from "../src/auth-store.js";
+import type { StoredHubLogin } from "../../mcp-server/src/auth-store.js";
 import { CredentialAdmission, type CredentialContext } from "../src/credential-admission.js";
 import { handleCredentialRenewal } from "../src/credential-renewal.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
-import { readAuthEnvelope, SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import type { TokenClaims } from "../src/token.js";
+import { readAuthEnvelope, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import type { TokenClaims } from "@uberblick/schema/token";
 
 export interface DeviceSyncAuthentication {
   room: string;

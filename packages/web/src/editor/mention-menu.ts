@@ -1,54 +1,8 @@
 /**
- * The `@` picker's model: when a typed `@` is a mention, what it offers, and the
- * one edit behind picking an entry.
- *
- * Editor-side and pure enough to test without a DOM. The React shell
- * (`ui/MentionMenu.tsx`) owns pixels, focus and keys; the reference itself is
- * made by `editor/doc-links.ts`, through the same {@link replaceWithDocLink} the
- * typed and pasted spellings go through — so a picked reference is the same mark
- * on the same kind of text as one written by hand, and #443's model (text plus a
- * mark, the title resolved once) needs no second implementation to keep in step.
- *
- * ## The trigger is derived, never remembered
- *
- * Web UI system's Exceptions records the owner-confirmed slash and `@` trigger
- * and session exception: Uberblick owns these rules because adopting
- * `@tiptap/suggestion` would retain the custom matchers while adding substantial
- * integration machinery.
- *
- * {@link mentionTriggerAt} answers "does the editor state still describe a
- * mention?": caret in a prose block, and the text immediately before it is an
- * `@` — at the start of the block or after a space — followed by a run of
- * non-space characters. Recomputed rather than remembered, exactly as the block
- * menu's slash session is: a session lasts as long as it keeps validating, so
- * moving the caret away, typing a space, or a peer rewriting the block closes
- * the picker with no bookkeeping to get wrong.
- *
- * That leading-space rule is also what keeps an e-mail address ordinary text:
- * the `@` in `ben@example.com` has a letter in front of it, so it is never a
- * trigger. And a query stops at a space, which means a mention is filtered by
- * **one word** — `@contract` finds "Editorial contract". Multi-word queries
- * would need some other way to end a session, and a session that never ended
- * would take Enter away from a reader writing prose.
- *
- * *Opening* a session is a different question from *having* one — see
- * {@link opensMentionSession}.
- *
- * ## Prose only
- *
- * `code`, `mermaid`, `table` and `terminal` are source text: the schema gives
- * them `code: true` and the comment mark alone, so a `docLink` cannot live in
- * one. The gate here reads that spec rather than listing the names, so a block
- * type's marks and its picker stay one decision.
- *
- * ## The block is named by id, the range is re-derived
- *
- * A ProseMirror position is a number about one version of the document. The
- * session therefore holds the block's **id** and the typed query; when an entry
- * is picked the trigger is recomputed from live state and compared, and the
- * *live* range is what gets replaced. A peer's edit above the block moves every
- * position after it, and a saved one would splice a reference into whatever text
- * had moved into the gap.
+ * Keep mention trigger/session matching aligned with block-menu.ts. A picked
+ * reference uses replaceWithDocLink, matching typed and pasted references.
+ * The shared schema is workspace-independent; the shell supplies directory
+ * context without opening target rooms.
  */
 
 import type { Editor } from "@tiptap/core";
@@ -71,24 +25,21 @@ export interface MentionTrigger {
 
 /**
  * `@` at the start of the text before the caret or after a space, then a run of
- * characters that are neither space nor another `@`.
+ * characters that are neither space nor another `@`; e-mail addresses never
+ * trigger. Multi-word queries would need another terminator to return Enter
+ * to prose.
  */
 const MENTION_QUERY = /(?:^|\s)@([^\s@]*)$/;
 
 /**
- * How many documents the picker shows at once.
- *
- * A workspace's whole corpus rendered as buttons on every keystroke is work
- * nobody asked for, and a list longer than a card is not read anyway — typing
- * one more character is the faster way through it.
+ * Bound per-keystroke rendering; further typing narrows the directory candidates.
  */
 export const MENTION_LIMIT = 8;
 
 /**
- * The mention session the editor state describes, or `null` when there is none.
- *
- * A block with no id yet is not a session: picking an entry has to find this
- * block again, and an id is the only handle that survives an edit above it.
+ * Require an identified top-level prose block. Recompute the live range so edits
+ * above the block cannot redirect an insertion. Space, caret departure or a
+ * rewritten trigger closes the session rather than retaining a saved mode.
  */
 export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
   const { selection } = editor.state;
@@ -100,12 +51,11 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
   if ($head.depth !== 1) return null;
 
   const block = $head.parent;
+  // Read the source-text spec so picker admission stays aligned with its marks.
   if (block.type.spec.code === true) return null;
   if (typeof block.attrs.id !== "string" || block.attrs.id === "") return null;
 
-  // A leaf stands in as one character (U+FFFC, the object replacement), so the
-  // offsets below stay in step with document positions whatever the block turns
-  // out to hold — and, being neither a space nor an `@`, it never reads as one.
+  // Count leaf nodes as one U+FFFC so text offsets track document positions.
   const before = block.textBetween(0, $head.parentOffset, undefined, "￼");
   const match = MENTION_QUERY.exec(before);
   if (match === null) return null;
@@ -120,23 +70,9 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
 }
 
 /**
- * Whether this transaction's own writing **ends** at `pos`.
- *
- * That is the shape of a character typed at the caret, and nothing else has it.
- * Each step map reports the range it wrote, in that step's own coordinates, so
- * the range is carried through the steps after it before being compared.
- *
- * - Typing `@`, over a selection or not, writes a range ending exactly at the
- *   caret.
- * - A **deletion writes nothing**, which is the gesture this exists for:
- *   backspacing back onto an `@` that has been sitting in the prose since last
- *   week leaves the caret exactly where a freshly typed one would, and nobody
- *   asked for a picker.
- *
- * A peer's edit, an undo and a redo never reach here — {@link isTypedHere}
- * closes all three, because y-prosemirror writes an undo to the Y.Doc and the
- * sync plugin marks what comes back as a change from elsewhere. A paste it
- * closes by its `uiEvent`.
+ * Match a written range ending at the caret, mapping through subsequent steps.
+ * Deletion back to a stored @ writes nothing and must not open a picker.
+ * isTypedHere separately excludes remote edits, undo/redo and clipboard edits.
  */
 function wroteUpTo(transaction: Transaction, pos: number): boolean {
   let matched = false;
@@ -151,23 +87,9 @@ function wroteUpTo(transaction: Transaction, pos: number): boolean {
 }
 
 /**
- * Whether `transaction` is the gesture that *opens* a mention session: this
- * reader typing the `@` itself.
- *
- * Three conditions, each ruling out a different way a picker could appear over
- * text nobody was mentioning with.
- *
- * - **This reader's keyboard** ({@link isTypedHere}): not a peer's keystroke,
- *   not an undo or a redo, and not a paste, drop or cut.
- * - **An empty query.** A paragraph that has held `@notes` since last week is
- *   prose; clicking into it and typing a letter must not pop a picker. Only an
- *   `@` with nothing typed after it yet can be the command.
- * - **The `@` is what this transaction wrote** ({@link wroteUpTo}), which is
- *   what tells the keystroke from deleting `notes` back off that week-old
- *   `@notes` — the same prose, reached backwards.
- *
- * Keeping an already-open session alive as the query grows is the state's job,
- * not this one's (see {@link mentionTriggerAt}).
+ * Only typing the @ itself opens a session: require local typing, an empty
+ * query and a written range ending at the caret. Editing stored @query prose
+ * or deleting back to its @ must not open one.
  */
 export function opensMentionSession(
   transaction: Transaction,
@@ -179,24 +101,15 @@ export function opensMentionSession(
 }
 
 /**
- * The documents a query offers, in the directory's own order (by title).
- *
- * Matched on the label — the words the reference will carry — and nothing else.
- * Descriptions and tags are what the corpus listing searches; a mention is a
- * reader reaching for a document *by name*, and a picker that answered `@meta`
- * with every document carrying that tag would be offering something else.
- *
- * The open document is excluded: a reference from a document to itself is a link
- * to where the reader already is.
+ * Match directory labels only, preserving title order and excluding the open
+ * document. Description/tag matches would offer references by a different name.
  */
 export function filterMentions(
   candidates: readonly DocLinkCandidate[],
   query: string,
   openDocId: string | null,
 ): DocLinkCandidate[] {
-  // One fold, run over needle and haystack alike, and the same one the Documents
-  // page filter runs (see `title-fold.ts`): the two surfaces match these same
-  // titles, so a query that finds a document in one has to offer it in the other.
+  // Use the Documents page's title fold for both query and candidates.
   const needle = foldForTitleMatch(query);
   const found: DocLinkCandidate[] = [];
   for (const candidate of candidates) {
@@ -209,18 +122,9 @@ export function filterMentions(
 }
 
 /**
- * Replace the typed `@query` with a reference to `docId`, in one transaction.
- * Returns false — having touched nothing — when the session no longer describes
- * the document, or when `docId` is not a document uuid.
- *
- * The refusal is the point. The trigger was read at some earlier moment, and
- * between then and now a peer may have deleted the block, or edited it, or the
- * caret may have left it. So the session is re-derived from live state and
- * compared before the live range is spliced.
- *
- * The label is resolved by `doc-links.ts` from the directory rather than passed
- * in from the row that was clicked: one rule decides what a new reference reads
- * as, whichever door it came through.
+ * Re-derive the live block/query and range before replacing @query in one
+ * transaction. Refuse stale sessions and invalid UUIDs without a write; resolve
+ * the label through doc-links.ts rather than the clicked row.
  */
 export function linkMentionAtTrigger(
   editor: Editor,
@@ -230,18 +134,12 @@ export function linkMentionAtTrigger(
 ): boolean {
   const live = mentionTriggerAt(editor);
   if (live === null) return false;
-  // The block and the query: what the picker offered was an answer to *this*
-  // question in *that* block, and a live state describing anything else is not
-  // this session's to replace. Which occurrence it is stays the caller's to
-  // watch — `ui/MentionMenu.tsx` closes the session the moment the caret's
-  // trigger stops being the one it opened on — and is deliberately not compared
-  // here, because a peer's edit above the block moves the position without
-  // changing which `@` was meant.
+  // MentionMenu watches occurrence changes. Compare id/query here, allowing
+  // remote edits above this block to shift the live range.
   if (live.blockId !== trigger.blockId) return false;
   if (live.query !== trigger.query) return false;
 
-  // A reader who undoes this means "give me my `@query` back", not "give me back
-  // the empty block I started from" — so the reference is its own undo step.
+  // Undo restores @query separately from the preceding typing.
   endUndoCapture(editor.state);
   const tr = editor.state.tr;
   if (

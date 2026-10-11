@@ -11,7 +11,7 @@
  *    and one undo gives back what was typed — which is how a reader writes a
  *    literal `# ` and keeps it.
  * 3. **Every trigger in the registry works, by construction.** The conversions
- *    are driven off `BLOCK_MENU_ENTRIES`, so the test is too: a #59 entry that
+ *    are driven off `BLOCK_MENU_ENTRIES`, so the test is too: an entry that
  *    fills in `trigger` is covered here without a line being added.
  *
  * Keystrokes go through `handleTextInput` the way prosemirror-view calls it on a
@@ -108,7 +108,7 @@ describe("typing a markdown prefix", () => {
    * the conversion is its own undo step, so the typing survives it. Nothing is
    * arranged here: the characters are typed straight through, well inside the
    * UndoManager's half-second capture window, which is the case the boundary in
-   * the command exists for (#105 review).
+   * the command exists for.
    */
   it("gives the typed prefix back as text on a single undo", () => {
     const { ydoc, ids } = docWith([""]);

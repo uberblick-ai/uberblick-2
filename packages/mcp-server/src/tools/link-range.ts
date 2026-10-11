@@ -27,8 +27,7 @@ export const linkRangeOperation = documentOperation("link_range", inputSchema, (
     blockId: block_id,
     docId: doc_id,
     title,
-    // Unchanged by construction — marks are not part of a rev — and
-    // answered with so the next call needs no re-read.
+    // Marks leave rev unchanged; return it so the next call needs no reread.
     rev: getBlockRev(replica.doc, block_id),
   };
 });

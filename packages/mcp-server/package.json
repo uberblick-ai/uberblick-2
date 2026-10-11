@@ -7,7 +7,17 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./device-login": "./src/device-login.ts",
+    "./auth-store": "./src/auth-store.ts",
+    "./management-client": "./src/management-client.ts",
+    "./init-lock": "./src/init-lock.ts",
+    "./safe-write": "./src/safe-write.ts",
+    "./remote-url": "./src/remote-url.ts",
+    "./storage": "./src/storage.ts",
+    "./project-config": "./src/project-config.ts",
+    "./project-binding": "./src/project-binding.ts",
+    "./workspace-registry": "./src/workspace-registry.ts"
   },
   "scripts": {
     "start": "tsx src/main.ts",
