@@ -2,8 +2,7 @@
 
 import { setWorkspaceName, validateWorkspaceName } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
  * The caller owns the UUID claim. Persist independently of starter seeding or
@@ -11,16 +10,15 @@ import { MirrorStore } from "./store.js";
  */
 export function storeWorkspaceName(config: McpConfig, name: string): void {
   const validated = validateWorkspaceName(name);
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  let replicas: Replicas | undefined;
+  const workspace = openWorkspaceReplicas(config, {
+    hubFree: true,
+    publishOwnPresence: false,
+  });
+  const { replicas } = workspace;
   try {
-    replicas = new Replicas({ ...config, authSecret: null }, store, {
-      publishOwnPresence: false,
-    });
     setWorkspaceName(replicas.settings().doc, validated);
     replicas.assertHealthy();
   } finally {
-    replicas?.destroy();
-    store.close();
+    workspace.close();
   }
 }

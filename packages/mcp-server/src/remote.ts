@@ -22,8 +22,8 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { McpConfig } from "./config.js";
 import { usesDeviceLogin } from "./config.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import type { HubState } from "./sync.js";
 import { HubSync } from "./sync.js";
 
@@ -440,8 +440,8 @@ function readCorpus(replicas: Replicas): Corpus {
  * Close the store and connection after this phase; later phases reopen the same file.
  */
 export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config);
+  const { replicas } = workspace;
   try {
     await replicas.settle();
     // Carry archived content too: a tombstone alone cannot restore blocks and
@@ -456,9 +456,7 @@ export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
     replicas.assertHealthy();
     return readCorpus(replicas);
   } finally {
-    replicas.destroy();
-    await replicas.sync.waitForDeviceWork();
-    store.close();
+    await workspace.close();
   }
 }
 

@@ -22,8 +22,8 @@ import {
 import type { BlockInput, ImportedBlock, ImportedDoc } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
  * Seed files require identity and a description even though ordinary imports may omit them.
@@ -329,8 +329,8 @@ export async function importSeedDir(
   config: McpConfig,
   starter: StarterSeed | null = null,
 ): Promise<{ results: SeedImport[]; hub: string; sidebar: boolean }> {
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config);
+  const { replicas } = workspace;
   try {
     const docs = readSeedDocs(dir);
     if (starter !== null) {
@@ -350,8 +350,6 @@ export async function importSeedDir(
       starter === null ? false : await seedSidebar(replicas, starter);
     return { results, hub: replicas.sync.state().status, sidebar: seeded };
   } finally {
-    replicas.destroy();
-    await replicas.sync.waitForDeviceWork();
-    store.close();
+    await workspace.close();
   }
 }

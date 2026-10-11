@@ -10,12 +10,13 @@ import { GuidanceBriefing, registerGuidanceResources } from "./guidance.js";
 import { registerHelpResources } from "./help-resources.js";
 import { STARTUP_ORIENTATION } from "./help-topics.js";
 import { log } from "./log.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import type { MirrorStore } from "./store.js";
 import { ServerWork } from "./server-work.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { registerTools } from "./tools.js";
 import { mcpVersion } from "./version.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 
 /**
  * Prefer the initialized session's human-readable title, then its client name.
@@ -38,15 +39,16 @@ export interface UberblickMcpServer {
 }
 
 /**
- * @param store The SQLite mirror. Defaults to one opened at
+ * @param injectedStore The SQLite mirror. Defaults to one opened at
  * `config.databasePath`; injectable so a test can drive persistence failures
  * through the real code path.
  */
 export function createMcpServer(
   config: McpConfig,
-  store: MirrorStore = new MirrorStore(config.databasePath, config.workspaceId),
+  injectedStore?: MirrorStore,
 ): UberblickMcpServer {
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config, injectedStore === undefined ? {} : { store: injectedStore });
+  const { store, replicas } = workspace;
   const briefing = new GuidanceBriefing(replicas);
   const work = new ServerWork();
 
@@ -110,9 +112,7 @@ export function createMcpServer(
         // SDK close aborts requests and drops replies but does not await
         // handlers. Their local writes still need the live replica and log.
         await work.drain();
-        replicas.destroy();
-        await replicas.sync.waitForDeviceWork();
-        store.close();
+        await workspace.close();
       });
       return closing;
     },

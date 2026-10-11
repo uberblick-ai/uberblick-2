@@ -1,6 +1,6 @@
 /**
  * Export factories from TypeScript source; ./main.ts owns process startup.
- * Access replicas, store and sync through the returned server for diagnostics.
+ * Servers, engines and one-shot diagnostics share the workspace replica factory.
  */
 
 export {
@@ -10,6 +10,8 @@ export {
   usesDeviceLogin,
 } from "./config.js";
 export type { McpConfig } from "./config.js";
+export { openWorkspaceReplicas } from "./workspace-replicas.js";
+export type { WorkspaceReplicaOptions, WorkspaceReplicaSet } from "./workspace-replicas.js";
 export { createMcpEngine } from "./engine.js";
 export type {
   EngineHealth,

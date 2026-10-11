@@ -3,8 +3,8 @@ import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
-import { collectSyncStatus, createMcpServer, formatHubFailure, readWorkspaceName } from "@uberblick/mcp-server";
-import type { McpConfig, SyncStatus, UberblickMcpServer } from "@uberblick/mcp-server";
+import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readWorkspaceName } from "@uberblick/mcp-server";
+import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
 import type { CredentialOrigin, Origin, ShadowedLayer } from "./config.js";
@@ -76,9 +76,9 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
 /** Use MCP's replica set and diagnostic snapshot; always release the replica. */
 export async function readSyncStatus(
   config: McpConfig,
-  inspect?: (replicas: UberblickMcpServer["replicas"]) => void,
+  inspect?: (replicas: WorkspaceReplicaSet["replicas"]) => void,
 ): Promise<SyncStatus> {
-  const instance = createMcpServer(config);
+  const instance = openWorkspaceReplicas(config);
   try {
     const status = await collectSyncStatus(instance.replicas);
     inspect?.(instance.replicas);
@@ -92,7 +92,7 @@ export async function readSyncStatus(
  * Read store cuts and pending markers together: a peer can clear a marker
  * before this replica applies its cut, and counts alone miss attach drain.
  */
-export function workspaceCaughtUp(replicas: UberblickMcpServer["replicas"]): boolean {
+export function workspaceCaughtUp(replicas: WorkspaceReplicaSet["replicas"]): boolean {
   const attached = replicas.attachedReplicas();
   const snapshot = replicas.store.syncSnapshot(
     attached.map(({ room, lastSeq }) => ({ room, throughSeq: lastSeq })),
