@@ -19,6 +19,7 @@ import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { ChartBlocks } from "./chart.js";
+import { WireframeBlocks } from "./wireframe.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -81,6 +82,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Opening transcript source also pauses its derived playback.
     TerminalBlocks,
     ChartBlocks,
+    WireframeBlocks,
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,

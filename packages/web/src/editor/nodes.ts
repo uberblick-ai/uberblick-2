@@ -25,6 +25,7 @@ import { TableNodes } from "./table.js";
 import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
+import { wireframeBlockView } from "./wireframe.js";
 
 /**
  * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
@@ -224,9 +225,21 @@ export const CodeBlock = Node.create({
       ["code", {}, 0],
     ];
   },
-  // Keep copy chrome in the NodeView; serialized HTML contains only source.
+  // Wireframe drawing is view chrome. Serialization still emits the ordinary
+  // pre/code source, regardless of which editor view its language selects.
   addNodeView() {
-    return sourceBlockView(codeBlockChrome);
+    const ordinary = sourceBlockView(codeBlockChrome);
+    const wireframe = wireframeBlockView();
+    return (props) => {
+      const rendered = props.node.attrs.language === "wireframe";
+      const view = (rendered ? wireframe : ordinary)(props);
+      const update = view.update;
+      view.update = (node, decorations, innerDecorations) => {
+        if ((node.attrs.language === "wireframe") !== rendered) return false;
+        return update?.(node, decorations, innerDecorations) ?? false;
+      };
+      return view;
+    };
   },
   // Keep the core Enter keymap: code enables newlineInCode, while a node-level
   // Enter override would also intercept paragraph splits.

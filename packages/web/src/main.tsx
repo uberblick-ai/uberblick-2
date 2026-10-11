@@ -11,6 +11,8 @@ import { App } from "./ui/App.js";
 import { NotificationToaster } from "./ui/shadcn/sonner.js";
 import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
+import "@uberblick/wireframe/styles.css";
+import "./ui/wireframe.css";
 // Layered Tailwind styles product controls; unlayered .ub-* rules still win.
 // Keep editor content in plain CSS; see ui/tailwind.css.
 import "./ui/tailwind.css";
