@@ -88,7 +88,7 @@ export function dataTableView(): {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "ub-data-sort";
-        button.append(document.createTextNode(column.label ?? column.field));
+        button.append(document.createTextNode(column.label?.trim() ? column.label : column.field));
         const arrow = document.createElement("span");
         arrow.setAttribute("aria-hidden", "true");
         button.addEventListener("mousedown", event => event.preventDefault());

@@ -551,7 +551,7 @@ test("touch header sorting starts from record order when the mapping has no sort
   const session = writer();
   const uuid = await tableDoc(session, "Touch header sorting", {
     version: 1, type: "table", collection: "measurements", title: "Touch order",
-    columns: [{ field: "name" }, { field: "value", format: "number" }],
+    columns: [{ field: "name", label: "" }, { field: "value", label: "   ", format: "number" }],
   });
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
     { id: "a", value: { name: "Third", value: 3 } }, { id: "b", value: { name: "First", value: 1 } },

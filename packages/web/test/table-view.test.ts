@@ -70,6 +70,16 @@ describe("continuous native table rendering", () => {
     view.element.remove();
   });
 
+  it.each(["", "   "])("names a sort button by its field when its label is blank (%j)", (label) => {
+    const view = dataTableView();
+    view.render(ready([record("b", 2), record("a", 1)], {
+      ...config, columns: [{ field: "value", label, format: "number" }],
+    }));
+    getByRole(view.element, "button", { name: "value" }).click();
+    expect(rows(view).map(row => row.cells[0]?.textContent)).toEqual(["1", "2"]);
+    expect(getByRole(view.element, "button", { name: "value" }).closest("th")?.getAttribute("aria-sort")).toBe("ascending");
+  });
+
   it("initially indicates the first mapped field and sorts a repeated field by its selected column's format", () => {
     const view = dataTableView();
     const mapping: TableConfig = { ...config, sort: { field: "value", direction: "asc" }, columns: [
