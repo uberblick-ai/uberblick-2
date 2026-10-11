@@ -1,29 +1,9 @@
 /**
- * Room connections: one Y.Doc and one Hocuspocus provider per room.
- *
- * Two things worth knowing:
- *
- * - **One WebSocket, many rooms.** A tab is always in at least two rooms (the
- *   directory doc and whatever document is open). Hocuspocus multiplexes rooms
- *   over a single `HocuspocusProviderWebsocket`, so we create one and share it;
- *   a socket per room would mean a fresh auth handshake per document.
- *
- * - **Refcounted, keyed by room name.** React effects mount and unmount
- *   (twice per mount under StrictMode), and the directory doc is needed by the
- *   list *and* by the create flow. Connections are shared and only torn down
- *   when the last holder releases them.
- *
- * - **A closed document means a dead connection.** The hub can close a
- *   document without closing the socket, which leaves a provider attached to a
- *   live-looking socket that delivers nothing — and Hocuspocus never announces
- *   the lost sync, because it only emits `synced` for `true`. Both halves are
- *   handled below: status is derived from the socket and provider rather than
- *   from event payloads, and an unsolicited close drops the socket so every
- *   room re-joins on the next `open`.
- *
- * The token is passed as an async callable, not a string: Hocuspocus accepts
- * `() => Promise<string>` and calls it before each connection attempt, so a
- * reconnect after the token would have expired re-mints instead of failing.
+ * Share one multiplexed socket and refcount each room's document/provider.
+ * Release only at the last holder, including overlapping React effects.
+ * Unsolicited document closes need a socket drop to make providers rejoin;
+ * derive sync from current state because Hocuspocus emits synced only for true.
+ * Async token callables mint afresh before every connection attempt.
  */
 
 import {
@@ -46,26 +26,11 @@ import type { AwarenessUser } from "./identity.js";
 import { PacedRoomProvider, RoomAdmission } from "./room-admission.js";
 
 /**
- * The shared socket's reconnect band.
- *
- * A hub restart should be picked up in seconds, not half a minute: the
- * library's default backoff climbs to 30s.
- *
- * Randomized, because release 1 is three clients — two Macs and the agent
- * machine — against one remote hub, plus however many tabs the owner has open.
- * They lose the hub together and come back together, so a deterministic ladder
- * has all of them redialling in the same millisecond, every time. `jitter: true`
- * is the retry library's full-jitter strategy: attempt *n* waits a uniform draw
- * from `[minDelay, min(delay * factor^(n-1), maxDelay)]`. The randomness is the
- * library's own `Math.random` — `HocuspocusProviderWebsocket` forwards only
- * these fields to it, so there is no source to inject, and this band is what a
- * test can pin instead.
- *
- * `minDelay` is not decorative: Hocuspocus defaults it to 1000, and the retry
- * library validates `delay >= minDelay` on every `connect()` regardless of
- * jitter — leave it out and each attempt rejects with "delay cannot be less
- * than minDelay" instead of dialling. Half the delay, so the first retry — the
- * one every client makes together — already spreads.
+ * Bound hub-restart recovery in seconds and jitter clients that fail together.
+ * Full jitter draws uniformly from minDelay to min(delay * factor^(n-1), maxDelay).
+ * Set minDelay explicitly below delay: the retry library otherwise defaults it
+ * to 1000 and refuses connect with "delay cannot be less than minDelay".
+ * Hocuspocus exposes no random-source seam; tests pin this band instead.
  */
 export const SOCKET_BACKOFF = {
   delay: 250,
@@ -81,26 +46,10 @@ const admission = new RoomAdmission();
 /** Set while a forced drop is in flight, so the `disconnect` handler re-dials. */
 let redialAfterDrop = false;
 
-/**
- * One forced drop per window: a hub that keeps closing us must not spin.
- *
- * A band rather than a number, drawn per drop. Release 1 is three clients
- * against one remote hub, and a hub that closes documents closes them for all
- * three at once — a fixed 5s window had every tab redialling in the same
- * millisecond, wave after wave, for as long as the hub kept doing it.
- *
- * The maximum stays at the 5s this used to be: a suppressed close waits out at
- * most one window before the trailing drop. `packages/web/test/reconnect.test.ts`
- * narrows the band through {@link setForcedDropCooldownForTesting} rather than
- * waiting it out.
- */
+/** Randomize each forced-drop window to avoid retry waves; trailing drops wait at most 5s. */
 export const FORCED_DROP_COOLDOWN = { minMs: 2_500, maxMs: 5_000 } as const;
 
-/**
- * How long the next forced-drop window lasts: a uniform draw from
- * {@link FORCED_DROP_COOLDOWN}. The source is a parameter rather than a bare
- * `Math.random` so a test can state the band's ends instead of sampling it.
- */
+/** Draw uniformly; an injected source lets tests check the band's endpoints. */
 export function forcedDropCooldownMs(
   random: () => number = Math.random,
   band: ForcedDropBand = FORCED_DROP_COOLDOWN,
@@ -114,26 +63,15 @@ type ForcedDropBand = { readonly minMs: number; readonly maxMs: number };
 /** The band {@link dropSocket} draws from: {@link FORCED_DROP_COOLDOWN} in the app. */
 let forcedDropBand: ForcedDropBand = FORCED_DROP_COOLDOWN;
 
-/**
- * Test seam: narrow the forced-drop band for this module instance, so a test
- * of the deferral need not wait out seconds of real cooldown. Nothing in the
- * app calls it.
- */
+/** Narrow the band for deferral tests without waiting seconds; unused by the app. */
 export function setForcedDropCooldownForTesting(band: ForcedDropBand): void {
   forcedDropBand = band;
 }
 
 /**
- * Set once the hub has refused this page for speaking a different sync
- * protocol: our version and its.
- *
- * Page-wide rather than per room, because the refusal is about the *socket*.
- * Every room shares one (see {@link sharedSocket}), `provider.disconnect()` is
- * a no-op on a socket the provider does not manage, and a permission denial
- * never closes the socket by itself — so "this room stops retrying" would not
- * be a mechanism. What stops is the socket, and nothing re-dials it: a client
- * the hub cannot talk to is not made compatible by connecting again. A reload
- * starts over, which is exactly what a person does after updating.
+ * Protocol refusal stops the shared socket until reload. A room disconnect is
+ * insufficient: providers do not manage the socket, and permission denial does
+ * not close it. Retrying cannot make an incompatible protocol readable.
  */
 let protocolMismatch: { hub: number; client: number } | null = null;
 
@@ -141,16 +79,10 @@ let protocolMismatch: { hub: number; client: number } | null = null;
 const storeRefusedRooms = new Set<string>();
 
 let lastForcedDrop = 0;
-/**
- * The window the last drop opened. Only read after a drop has set it — the
- * band's maximum is a safe standing value until then.
- */
+/** Retain the last drop's window; use the band's maximum before any drop. */
 let forcedDropWindowMs: number = FORCED_DROP_COOLDOWN.maxMs;
 
-/**
- * The store's terminal refusal. `uberblick:store-busy` is deliberately an
- * ordinary drop so the existing reconnect backoff handles it.
- */
+/** Store-busy remains retryable through ordinary reconnect backoff. */
 const STORE_REFUSED_REASON = "uberblick:store-refused";
 
 /** A drop asked for during the cooldown, waiting for the window to end. */
@@ -162,15 +94,7 @@ function cancelPendingDrop(): void {
   pendingDrop = null;
 }
 
-/**
- * Stop this page: the hub refuses the protocol it speaks.
- *
- * Idempotent, and deliberately at socket granularity — one refusal ends the
- * page's sync, not one room's. The socket is disconnected (which also clears
- * its own retry), any deferred forced drop is cancelled and the redial flag is
- * cleared, so nothing dials again; then every open room is told, because they
- * are all on the socket that just stopped.
- */
+/** Stop retries, deferred drops and every room at the shared socket's protocol boundary. */
 function haltForProtocolMismatch(hub: number): void {
   if (protocolMismatch !== null) return;
   protocolMismatch = { hub, client: SYNC_PROTOCOL_VERSION };
@@ -181,12 +105,8 @@ function haltForProtocolMismatch(hub: number): void {
     const status = entry.connection.status;
     status.protocolMismatch = protocolMismatch;
     status.hasAnswered = true;
-    // Said here rather than left to the socket's close event, which lands a
-    // tick or more later: `disconnect()` above only *asks*, so `socket.status`
-    // still reads connected right now and a reader told "refused, and
-    // connected" would be told something that is already untrue. A halted page
-    // never connects or syncs again, so both are settled at the halt — and
-    // `refresh` keeps them settled when the close finally arrives.
+    // disconnect() precedes its close event; settle both flags immediately and
+    // keep refresh from reviving stale socket/provider state after the halt.
     status.connected = false;
     status.synced = false;
     status.writable = false;
@@ -199,17 +119,14 @@ function haltForProtocolMismatch(hub: number): void {
 function sharedSocket(): HocuspocusProviderWebsocket {
   if (socket !== null) return socket;
   const created = new HocuspocusProviderWebsocket({
-    // Resolved before the first render (see main.tsx), so it is a plain read
-    // here — the socket is created by a React effect, long after startup.
+    // Room acquisition waits for startup config before creating this socket.
     url: hubUrl(),
     ...SOCKET_BACKOFF,
   });
   created.on("disconnect", () => {
     if (!redialAfterDrop) return;
-    // `disconnect()` cleared `shouldConnect`, so nothing would dial again on its
-    // own. Doing it here rather than straight after `disconnect()` is the whole
-    // point: `connect()` returns early while the status still reads
-    // "connected", which it does until the close event lands.
+    // disconnect() clears shouldConnect; wait for close because connect()
+    // returns early while the socket still reports connected.
     redialAfterDrop = false;
     void created.connect();
   });
@@ -218,34 +135,19 @@ function sharedSocket(): HocuspocusProviderWebsocket {
 }
 
 /**
- * Drop the shared socket and dial again.
- *
- * Called when the hub closes a *document* while the socket is still up — see
- * {@link openRoom}. Every attached provider re-authenticates and re-syncs on
- * the next `open`, which is what actually resumes live sync; nothing else does.
- *
- * The cooldown *defers*, never discards. A close is the only signal that a room
- * needs repairing — no later socket transition or provider event repeats it — so
- * dropping one inside the cooldown window would strand the room in exactly the
- * orphaned state this whole path exists to repair. Suppressed closes coalesce
- * into one trailing drop at the end of the window, which bounds how often we
- * reconnect without ever forgetting that we owe a reconnect.
+ * Rejoin providers orphaned by a document close on a live socket.
+ * Coalesce suppressed closes into one trailing drop; never discard the sole
+ * signal that a room needs repair. The cooldown bounds reconnect frequency.
  */
 function dropSocket(): void {
-  // A page the hub has refused has nothing to repair by reconnecting, and the
-  // close that refusal produces would otherwise land here and redial straight
-  // back into the same refusal. See {@link protocolMismatch}.
+  // Terminal refusal must not reconnect through its own resulting close.
   if (protocolMismatch !== null) return;
   const current = sharedSocket();
-  // Only meaningful while the socket believes it is connected: a socket that
-  // already knows it is down is reconnecting on its own — and every attached
-  // provider re-syncs on that `open` — so dropping it here would fight the
-  // retry loop that is already doing the repair.
+  // A down socket already retries and resyncs rooms; do not fight that loop.
   if (current.status !== WebSocketStatus.Connected) return;
 
   const sinceLastDrop = Date.now() - lastForcedDrop;
-  // The window the last drop drew, not a fresh draw: the check and the trailing
-  // timer below have to agree about when this one ends.
+  // Use the retained draw so the check and trailing timer share a deadline.
   if (sinceLastDrop < forcedDropWindowMs) {
     // One trailing drop covers every close suppressed in this window.
     if (pendingDrop !== null) return;
@@ -263,24 +165,10 @@ function dropSocket(): void {
   current.disconnect();
 }
 
-/**
- * Signing keys, each imported once for the life of the page.
- *
- * Once, not per connect: each belongs to one key in the usable served
- * document, so a secret rotated under a tab that already has one keeps
- * minting with the old one until the page is reloaded. Stated rather than
- * solved — replacing a loopback browser key needs a page reload.
- */
+/** Import each signing key once per page; rotating a held key requires reload. */
 const signingKeys = new Map<string, Promise<CryptoKey>>();
 
-/**
- * Set while the served document has supplied no secret to mint with.
- *
- * Per workspace: an unavailable key must not disable another served workspace
- * whose settings room happens to be open for the switcher. It is not terminal
- * — {@link hubToken} re-reads the document
- * before every connect attempt, and the flag clears the moment one arrives.
- */
+/** Missing keys are workspace-local and retryable; the next minted key clears the flag. */
 const missingWorkspaceKeys = new Set<string>();
 
 /** Tell this workspace's open rooms whether their signing key is missing. */
@@ -318,8 +206,7 @@ async function signedAuthMessage(
       sub: subject,
       workspace,
       scope: "read-write",
-      // Root-signed: what this client was handed is the root secret itself —
-      // served to it at runtime (#426) — and not a credential minted for it.
+      // Direct loopback development receives the root secret, not a minted credential.
       kid: null,
       lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     }),
@@ -342,19 +229,9 @@ export async function mintHubAuthMessage(
 }
 
 /**
- * Mint a fresh hub token for one room. Called by Hocuspocus before every
- * connect.
- *
- * The workspace claim comes from the room name rather than from configuration:
- * the hub compares the two as strings, so reading them out of one place is what
- * keeps them equal. A room name carries the bare uuid by construction
- * (`roomForDoc` parses any slug off), which is exactly what the claim must be.
- *
- * The secret comes from the served document (#426), re-read here rather than
- * captured at page load: `resolveClientConfig` does not memoise a read that
- * produced no secret, so a document that missed its deadline is fetched again
- * on this attempt, under the same deadline. A page that already has one pays
- * nothing — the resolved answer is memoised and this returns immediately.
+ * Derive the bare UUID claim from the room so the hub's string comparison agrees.
+ * Re-read config before each connect: missing keys retry under the same deadline;
+ * already resolved keys reuse the memoised answer.
  */
 async function hubToken(room: string, identity: AwarenessUser): Promise<string> {
   const config = await resolveClientConfig();
@@ -362,25 +239,16 @@ async function hubToken(room: string, identity: AwarenessUser): Promise<string> 
   const secret = hubAuthToken(workspace);
   setTokenMissing(workspace, secret === "");
   if (secret === "") {
-    // Ask for a fresh socket, because nothing else would. A token that cannot
-    // be minted leaves the provider unauthenticated on a socket that is open
-    // and staying open: Hocuspocus only re-sends a token on an `open`, and the
-    // only thing that eventually produces one is its 30s message-reconnect —
-    // measured at ~60s end to end, which is a tab dead for a minute after its
-    // deployment came up. The window in {@link dropSocket} bounds this to one
-    // attempt every few seconds, and each attempt re-reads the document.
-    // A missing document needs a fresh connection attempt to re-read it.
-    // An exact local map with another valid key is already settled: dropping
-    // its shared socket would interrupt healthy workspaces over this refusal.
+    // Hocuspocus resends tokens on open; force a bounded reconnect to retry
+    // missing config promptly. An exact local map with another usable key is
+    // settled: leave healthy workspaces on the shared socket uninterrupted.
     if (config.servedWorkspaces === undefined ||
       Object.values(config.servedWorkspaces).every((entry) => entry.browserKey === "")) dropSocket();
     throw new Error(
       `uberblick web: ${HUB_CONFIG_PATH} carries no hubAuthToken, so this client cannot authenticate`,
     );
   }
-  // The ceiling is inside signedAuthMessage. Hocuspocus calls this before every
-  // connect, so each reconnect mints a fresh token rather than replaying an
-  // expired one.
+  // signedAuthMessage bounds expiry; reconnects mint rather than replay tokens.
   return await signedAuthMessage(secret, workspace, getSetting("presenceName") ?? identity.name);
 }
 
@@ -400,53 +268,24 @@ export interface RoomStatus {
    */
   hasAnswered: boolean;
   /**
-   * True only after this room's live connection has admitted the client.
-   * Authentication is the observable admission boundary, not a per-write
-   * acknowledgement: during #402's rare same-tick re-acquire race, the
-   * accepted in-flight loss window widens until the room repairs itself if the
-   * tab also dies before then.
+   * Authentication marks live admission, not acknowledgement of each write.
+   * A same-tick re-acquire can widen the in-flight loss window until repair if
+   * the tab dies before the room rejoins.
    */
   writable: boolean;
   /** The local store refused this room; terminal until a page reload. */
   storeRefused: boolean;
-  /**
-   * Provider sync messages awaiting the hub's acknowledgement. Messages, not
-   * updates: a batch merges into one message, and a reconnect resets the
-   * backlog to the single sync-handshake message — see `StatusLine`, which is
-   * where the number is labelled.
-   */
+  /** Unacked messages, not edits; batches merge and reconnect resets to one handshake. */
   unsyncedChanges: number;
-  /**
-   * Set when the hub refused this page for speaking a different sync protocol
-   * version: `hub` is the hub's, `client` is ours. `null` while it has not.
-   *
-   * Both integers, because "which side is old" is the whole of what a reader
-   * can act on. Page-wide and terminal — see {@link protocolMismatch} — so
-   * every open room carries the same object and a room opened after the
-   * refusal carries it too, without dialling.
-   */
+  /** Terminal page-wide client/hub versions; new rooms inherit refusal without dialing. */
   protocolMismatch: { hub: number; client: number } | null;
   /**
-   * True while the hub's last word on this room's token was a refusal that is
-   * *not* a protocol mismatch — a wrong secret, or a hub too old to read our
-   * envelope, which answers identically and cannot be told apart.
-   *
-   * A flag, not the hub's message: what is rendered is composed locally (see
-   * `AUTH_REJECTED`). Unlike {@link RoomStatus.protocolMismatch} this is not
-   * terminal — a refusal is not proof the secret is wrong, since a hub on its
-   * way out refuses the room it is unloading — so the socket goes on retrying
-   * and the next accepted token clears it.
+   * Non-protocol token refusal; do not render the hub's message. Wrong keys and
+   * old envelopes are indistinguishable. Keep retrying: an unloading hub can
+   * also refuse, and the next accepted token clears this flag.
    */
   authFailed: boolean;
-  /**
-   * True while no token could be minted at all: the served configuration
-   * document carried no signing secret (#426).
-   *
-   * A different reading from {@link RoomStatus.authFailed} — nothing was ever
-   * sent, so the hub has said nothing — and the one a reader can act on: the
-   * deployment serving this app is what is incomplete. Page-wide and not
-   * terminal; see {@link tokenMissing}.
-   */
+  /** Workspace key missing: no token was sent; retry config rather than imply hub refusal. */
   tokenMissing: boolean;
 }
 
@@ -481,31 +320,16 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     token: () => hubToken(room, identity),
   });
 
-  // Required when the socket is shared. `HocuspocusProvider` only attaches
-  // itself in its constructor if it created the socket (`manageSocket`); with an
-  // injected `websocketProvider` it stays detached — no listeners, no room in
-  // the socket's provider map, no connection at all — until `attach()` is
-  // called. `destroy()` detaches again on its own, and leaves the shared socket
-  // alone. This is silent when you get it wrong: the UI just reads "offline".
-  // Not on a page the hub has already refused: attaching is what subscribes the
-  // provider to the socket and sends its token, and there is nothing to send an
-  // envelope this hub will not read. The room still opens and the status line
-  // says why it is not syncing.
+  // Injected sockets require attach(): the provider constructor attaches only
+  // sockets it owns. destroy() detaches without destroying the shared socket.
+  // Keep terminally refused rooms detached; they still expose their status.
   const storeRefused = storeRefusedRooms.has(room);
   const tokenMissing = missingWorkspaceKeys.has(parseRoom(room).workspaceId);
   if (protocolMismatch === null && !storeRefused) {
     provider.attach();
   }
 
-  /**
-   * Publish who is here: the tab's identity, with the browser's chosen presence
-   * name and colour over it.
-   *
-   * Re-run whenever a setting changes, because the picker is the *menu*, not
-   * this module — and a colour peers only see after a reconnect is not a live
-   * presence colour. Compared before it is published: a settings write about
-   * something else must not put an awareness message on the wire per room.
-   */
+  /** Publish settings live; compare values so unrelated changes send no awareness update. */
   let publishedColor = "";
   let publishedName = "";
   const publishUser = (): void => {
@@ -538,10 +362,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     awareness?.setLocalState(next);
   };
 
-  // Seeded from the socket rather than defaulted to false. A room joined while
-  // the shared socket is already connected gets no `status` event — the event
-  // fires on socket transitions, and the socket is not transitioning — so a
-  // second room would read "offline" forever.
+  // A room joining an already-connected socket receives no status transition;
+  // seed from the socket or it would stay falsely offline.
   const status: RoomStatus = {
     connected:
       protocolMismatch === null &&
@@ -554,12 +376,10 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     writable: false,
     storeRefused,
     unsyncedChanges: provider.unsyncedChanges,
-    // A room opened after the refusal reads the same terminal state as the
-    // rooms that were open when it arrived.
+    // New rooms inherit the page's terminal refusal.
     protocolMismatch,
     authFailed: false,
-    // Same reasoning: a room opened while the page already knows it has no
-    // secret reads that from the start rather than after its first attempt.
+    // Seed the workspace's known missing-key state before its first attempt.
     tokenMissing,
   };
   const listeners = new Set<(status: RoomStatus) => void>();
@@ -567,16 +387,10 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     for (const listener of listeners) listener({ ...status });
   };
 
-  // Read from the socket and the provider rather than from the event payloads.
-  // Hocuspocus only emits `synced` when it becomes *true* — losing sync is
-  // silent — so mirroring payloads leaves a stale `synced: true` behind after
-  // every disconnect, which is the indicator claiming "synced" over a
-  // connection that stopped delivering anything.
+  // Read current socket/provider state: synced emits only true, so mirroring
+  // events would retain a stale true after disconnect.
   const refresh = (): void => {
-    // The halt is terminal, so nothing the socket or the provider says
-    // afterwards may raise either flag again — including the close event that
-    // arrives after `haltForProtocolMismatch` has already settled them, and a
-    // provider still reporting the sync it had before it was refused.
+    // Terminal refusal wins over late close events and stale provider sync.
     const halted = protocolMismatch !== null;
     status.connected =
       !halted &&
@@ -591,9 +405,8 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     status.unsyncedChanges = provider.unsyncedChanges;
     emit();
   };
-  // The hub's one string about our token, read by strict match and never
-  // rendered. A mismatch is terminal and stops the whole page; every other
-  // refusal is a room-level reading the socket keeps retrying underneath.
+  // Match protocol refusal strictly and never render hub text. Other refusals
+  // remain room-local while the shared socket retries.
   provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
     const hub = readProtocolMismatch(reason);
     if (hub !== null) {
@@ -618,16 +431,9 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   provider.on("close", refresh);
 
   provider.on("close", (event: { event?: { reason?: string } }) => {
-    // A close on a live socket is the hub closing this *document*:
-    // `closeConnections` (hub shutdown, document reset) drops the connection
-    // server-side and sends a CLOSE message without touching the socket. The
-    // provider resets its own sync state and then waits for an `open` that will
-    // never come, so the room silently stops receiving updates while the socket
-    // still looks connected. The socket is the only thing that can re-join.
-    //
-    // `provider_initiated` is the hub echoing back a close *we* asked for by
-    // detaching (switching documents, a StrictMode remount). Re-joining after
-    // that works by itself, so dropping the socket there would be pure churn.
+    // Unsolicited document CLOSE resets sync but leaves the socket up; only a
+    // socket open makes that provider rejoin. provider_initiated is our detach
+    // echo (navigation/remount) and must not churn the shared socket.
     const reason = event?.event?.reason;
     if (reason === "provider_initiated") return;
     status.hasAnswered = true;
@@ -698,8 +504,7 @@ export function acquireRoom(
       held.listeners.clear();
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
-      // Nothing left to repair: a deferred drop would reconnect a socket no
-      // room is listening on.
+      // Cancel deferred repair once no room holds the socket.
       if (entries.size === 0) cancelPendingDrop();
     },
   };

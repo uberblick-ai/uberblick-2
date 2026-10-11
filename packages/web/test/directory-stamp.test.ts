@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * `updatedAt` on the directory stub, written by a web client (#257).
+ * `updatedAt` on the directory stub, written by a web client.
  *
  * What this suite defends is the bargain, the same one
  * `packages/mcp-server/test/timestamps.test.ts` defends for the server: the

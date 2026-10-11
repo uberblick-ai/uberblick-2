@@ -1,5 +1,5 @@
 /**
- * Getting to a comment thread without a mouse, and without a wide window (#101).
+ * Getting to a comment thread without a mouse, and without a wide window.
  *
  * Two claims, and both are about the *whole* app rather than a pane, because
  * both cross panes: a highlight lives in the editor and the card it leads to

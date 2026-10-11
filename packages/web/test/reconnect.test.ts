@@ -12,9 +12,9 @@
  * `hub.stop()` here is harsher than a real hub restart: it closes the listener
  * and tells clients their document is gone, but the process stays alive, so the
  * client's socket is never closed for it. A tab in that state is exactly the
- * reported bug — "synced", and receiving nothing until a reload.
+ * failure this guards against — "synced", and receiving nothing until a reload.
  *
- * The last test is the same shape of claim about a different input: since #426
+ * The last test is the same shape of claim about a different input:
  * the signing secret arrives in the served document, so "no secret yet" is a
  * state a healthy tab can start in — a host still booting, a proxy holding one
  * request. It must also end without a reload.
@@ -122,8 +122,8 @@ const WAIT_TIMEOUT_MS = 20_000;
  * to it, nor does the hub acknowledge anything it writes, until the provider
  * repairs itself. Rare (single-digit occurrences in thousands of cycles) and
  * not load-dependent — idle machines produce it too. *Why* the hub stops
- * serving a room it has just been re-joined on is #402's question, not this
- * file's; the wait below depends only on the two observables above.
+ * serving a room it has just been re-joined on is not determined here;
+ * the wait below depends only on the two observables above.
  *
  * The repair is the socket's message-reconnect check: Hocuspocus runs
  * `checkConnection` every `messageReconnectTimeout / 10` (3s), forces a
@@ -131,8 +131,8 @@ const WAIT_TIMEOUT_MS = 20_000;
  * takes up to two close attempts to get there, and then still owes a reconnect
  * delay and a fresh handshake — end to end, 30.4s to 33.3s across every
  * instrumented recovery. So 30s is a floor rather than the number, and
- * WAIT_TIMEOUT_MS is under it either way: the step this replaces went red on a
- * live write that would have landed a second or two later. 45s is that
+ * WAIT_TIMEOUT_MS is under it either way and can expire before a live write
+ * lands. 45s is that
  * measured band plus ~12s, the same kind of margin WAIT_TIMEOUT_MS gives an
  * ordinary condition — not a guess at how slow a machine is, and not
  * trimmable to the 31s that a single run happens to show.
@@ -309,7 +309,7 @@ it("resumes live sync after a hub restart, and never claims to be synced while i
   await first.flush();
 
   // The hub goes away. Its shutdown closes every document and leaves the socket
-  // open — the state in which the indicator used to lie.
+  // open — the state in which stale sync could leave the indicator misleading.
   await first.stop();
   await waitFor(
     "the status to stop claiming 'synced'",
@@ -465,7 +465,7 @@ it("leaves the socket alone when it is the client that leaves a room", async () 
   countDrops = false;
 
   // "Synced" is the handshake alone, and a re-joined room can report it and
-  // still be unserved — see REJOIN_REPAIR_TIMEOUT_MS and #402. What gates a
+  // still be unserved — see REJOIN_REPAIR_TIMEOUT_MS. What gates a
   // live write is the hub actually serving this room, and the tab can prove
   // that without asking the hub directly: write something, and wait for the
   // acknowledgement to come back. An ack is a message the hub only sends over

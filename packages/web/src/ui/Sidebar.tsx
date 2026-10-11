@@ -1,20 +1,8 @@
 /**
- * The sidebar: the `_sidebar` document, rendered (#115).
- *
- * Curation, not a listing. The groups and their order, and the pinned uuids and
- * their order, are read out of the sidebar doc with `readSidebar` and rendered
- * exactly as stored — nothing here sorts, and nothing here derives a group from
- * a tag. Titles come from the directory stubs, which is the only thing the
- * directory is asked for: the sidebar stores uuids and nothing else.
- *
- * Every gesture writes through the schema module (`packages/schema/src/sidebar.ts`),
- * so a human dragging a document and an agent calling `pin_doc` are one
- * operation with two front doors — and the re-render is an observer over the
- * same Y.Doc, so either writer's change is live in every client.
- *
- * dnd-kit owns pointer/touch/keyboard gestures, sorting feedback and focus.
- * Rows keep their navigation and disclosure clicks alongside dragging. Shared
- * order changes cancel a drag; only a successful drop commits through the schema.
+ * Render curated groups and pinned UUIDs in stored order, without sorting or
+ * tag-derived groups. Resolve titles from directory stubs. Schema writes and
+ * observers share one Y.Doc; dnd-kit owns gestures and feedback, shared order
+ * changes cancel dragging, and only a successful drop commits.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -69,17 +57,9 @@ function groupCollapsedKey(groupId: string): string {
 }
 
 /**
- * Pin the document, or unpin it — the one-button path the doc chrome offers.
- *
- * The sidebar is re-read here rather than taken from the caller's props: a
- * remote pin that landed between paint and click is already in the document,
- * and deciding from a stale reading would pin a document twice or unpin one
- * that is not there.
- *
- * A pin with no group to go in creates one. Which group a *deliberate* choice
- * of group belongs to is the drag, so the button does not ask: it puts the
- * document at the end of the first group, where the reader can see it and move
- * it. That is the least chrome that still has a keyboard path.
+ * Re-read the sidebar at click time so remote pins are honored. Append a new
+ * pin to the first group, creating it if needed; deliberate group and
+ * position changes belong to dragging.
  */
 export function togglePin(sidebarDoc: Y.Doc, uuid: string): void {
   const groups = readSidebar(sidebarDoc);
@@ -120,7 +100,7 @@ type SidebarProps = {
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
-  /** Go to the "All docs" listing (#118) — the live row in Navigation. */
+  /** Navigate to the All docs listing. */
   onOpenAll: () => void;
   /** Enter workspace settings. Like every selection, this is navigation. */
   onOpenSettings: (page: SettingsPage) => void;
@@ -207,20 +187,13 @@ function SidebarContent({
   const ydoc = sidebarWritable ? sidebar.ydoc : null;
   const canWriteSidebar = (): boolean => sidebar?.status.writable === true;
   /**
-   * The group whose name is being edited, and whether it exists only because
-   * that field was opened — `+ group` makes the group first, so cancelling has
-   * something to take back.
+   * Remember whether opening the rename field created its group, so
+   * cancellation can remove it.
    */
   const [renaming, setRenaming] = useState<{ id: string; fresh: boolean } | null>(null);
   /**
-   * The directory stub behind each pinned uuid — tombstones included, which is
-   * why this reader includes stubs that ordinary document listings omit.
-   *
-   * The sidebar is the one reader that names documents by uuid instead of
-   * listing them, so it is the one reader that still has something to draw
-   * after a document leaves the listings. Read without the tombstones, an
-   * archived pin has no title and falls back to eight characters of uuid
-   * (#287); with the stub in hand the row says what it is.
+   * Include tombstoned directory stubs: pinned UUIDs still need their
+   * archived titles after leaving ordinary listings.
    */
   const stubs = useDirectory(connection, true);
   const labels = useMemo(
@@ -240,23 +213,21 @@ function SidebarContent({
 
   const addGroup = (): void => {
     if (ydoc === null || !canWriteSidebar()) return;
-    // Straight into its rename field: a group is named by the person making it,
-    // and "New group" is a placeholder, not a decision.
+    // Open the rename field immediately; New group is only a placeholder.
     setRenaming({ id: createGroup(ydoc, NEW_GROUP_NAME), fresh: true });
   };
 
   const commitRename = (groupId: string, name: string): void => {
     setRenaming(null);
-    // An empty name is a slip, not a rename: the group keeps the one it has.
+    // An empty rename keeps the existing name.
     if (ydoc !== null && canWriteSidebar() && name.trim() !== "") {
       renameGroup(ydoc, groupId, name.trim());
     }
   };
 
   /**
-   * Escape out of the name field. A group that exists only because the field
-   * was opened goes with it: cancelling means "never mind", and leaving "New
-   * group" behind would be the field making a decision the reader declined.
+   * Escape preserves an existing name and removes a group created only for
+   * this cancelled field.
    */
   const cancelRename = (): void => {
     const open = renaming;
@@ -321,11 +292,10 @@ function SidebarContent({
               >
                 {status.writable ? "+ new doc" : "new doc unavailable"}
               </button>
-              {/* A refusal takes this line's word, because the three readings below
-                  all describe a connection that is working or coming back and none of
-                  them is true of a page the hub will not admit (#448). The ordinary
-                  readings stay exactly as they were — uncalmed, and saying
-                  "directory", since this line is about the directory room. */}
+              {/*
+                  * Refusals take precedence over ordinary directory readings, which describe
+                  * working or reconnecting rooms. Keep directory readings uncalmed.
+               */}
               <span className="ub-muted">
                 {reading.detail !== null
                   ? reading.word
@@ -496,22 +466,9 @@ function SettingsNavigation({
 }
 
 /**
- * The sidebar's fixed navigation (#483): the destination the app has, and the
- * two it is going to have.
- *
- * Chrome rather than curation — not a group, not draggable, not a drop target,
- * nothing of it in `_sidebar` — so it is drawn above the groups whether
- * anything is pinned or not, and above the "nothing pinned yet" line too.
- *
- * The two placeholders are shown before their destinations exist (owner
- * decision, 2026-08-29), because both are recorded product intent rather than
- * invented labels: the dashboard in *Product Overview* and *My daily
- * workflows*, requirement documents in #438. They are unavailable rather than
- * hidden, in the workspace menu's own words (#480) — `aria-disabled` and no
- * handler, so a screen reader is told what the muted ink and the missing hover
- * ground tell a pointer. Focusable on purpose: `disabled` would drop them out
- * of the tab order, and a reader who never meets a row never learns the
- * destination is coming.
+ * Fixed navigation is outside sidebar curation and dragging. Keep both
+ * unbuilt destinations visible as focusable aria-disabled rows without
+ * handlers; keyboard readers must encounter their unavailable state.
  */
 function Navigation({
   allOpen,
@@ -542,7 +499,7 @@ function Navigation({
   );
 }
 
-/** A navigation row for a destination the product has decided on and not built. */
+/** An unbuilt destination remains visible without accepting navigation. */
 function Soon({
   icon,
   children,
@@ -567,12 +524,7 @@ function Soon({
   );
 }
 
-/**
- * The three navigation glyphs. Drawn here rather than pulled from an icon set,
- * for the reason `Chevron` and `DocumentIcon` are (#110): three 16px marks are
- * not worth a dependency, and `currentColor` is what lets a muted row mute its
- * own glyph.
- */
+/** Local 16px paths use currentColor so disabled rows also mute their glyphs. */
 function GridIcon(): ReactElement {
   return (
     <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -663,14 +615,8 @@ function BackIcon(): ReactElement {
 }
 
 /**
- * The group header's disclosure mark: one shape, rotated.
- *
- * Drawn rather than typed. The bug this fixes (#110) was that the two glyphs
- * `›` and `⌄` sit at different heights in their em boxes, so the mark neither
- * lined up with the label nor stayed put when the group toggled — swapping one
- * badly-centred glyph for another badly-centred glyph is the failure mode, not
- * the fix. A path on a square viewBox is centred by construction and rotates
- * about its own middle, which leaves CSS one job: `transform`.
+ * Rotate one centered square path for disclosure; swapping text glyphs
+ * changes vertical alignment.
  */
 function Chevron(): ReactElement {
   return (
@@ -687,13 +633,7 @@ function Chevron(): ReactElement {
   );
 }
 
-/**
- * The leading mark on a pinned row: a page with a folded corner.
- *
- * Drawn, not typed, for the reason `Chevron` is (#110) — and drawn here rather
- * than pulled from an icon set, because one 16px glyph is not worth a
- * dependency. `currentColor` is what lets the row's own tint reach it.
- */
+/** A local page path uses currentColor to inherit the pinned row tint. */
 function DocumentIcon(): ReactElement {
   return (
     <svg className="ub-doc-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -710,11 +650,8 @@ function DocumentIcon(): ReactElement {
 }
 
 /**
- * One group: its header, and the documents pinned into it.
- *
- * A component rather than inline markup so each group owns its own
- * `useStoredFlag` — the hook count stays fixed however many groups the sidebar
- * holds.
+ * One component per group keeps useStoredFlag hook counts independent of the
+ * group count.
  */
 function GroupSection({
   index,
@@ -778,14 +715,8 @@ function GroupSection({
     data: { kind: "append", group: group.id, label: `end of ${group.name}` },
   });
   /**
-   * Focus and select the name, once — when the field appears.
-   *
-   * The identity is stable, which is the whole point: React calls a callback
-   * ref again whenever the callback itself changes, so an inline arrow would
-   * re-run on every render of this group. A sidebar that re-renders while
-   * somebody is typing — an agent pinning, a peer dragging, anything at all —
-   * would then reselect the draft under the caret, and the next keystroke would
-   * replace what they had typed.
+   * Keep the callback ref stable: rerunning focus/select during a remote
+   * sidebar render would replace the draft on the next keystroke.
    */
   const openField = useCallback((element: HTMLInputElement | null) => {
     element?.focus();
@@ -812,9 +743,8 @@ function GroupSection({
               className="ub-group-rename font-medium tracking-[0.12em] uppercase [--input:var(--sidebar-input)] [--background:var(--sidebar)]"
               defaultValue={group.name}
               aria-label="Group name"
-              // Focused *and* selected: the field is opened to replace the name
-              // far more often than to edit it, and `select()` alone leaves the
-              // caret somewhere the keyboard is not.
+              // Focus before selecting so replacement typing reaches this
+              // field.
               ref={openField}
               onBlur={(event) => onCommit(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -867,12 +797,9 @@ function GroupSection({
         )}
       </div>
       {/*
-        Always rendered, never conditionally: the open/closed transition is a
-        `grid-template-rows` animation (see styles.css), and CSS cannot animate
-        an element that is not there. `inert` is what keeps that honest — a
-        collapsed group is out of the tab order and out of the accessibility
-        tree, exactly as it was when React removed it from the DOM.
-      */}
+          * Keep the group mounted for grid-row animation; inert removes collapsed
+          * content from Tab order and the accessibility tree.
+       */}
       <div className="ub-group-body" data-collapsed={collapsed} inert={collapsed}>
         <ul>
           {group.docs.map((uuid, index) => (
@@ -946,20 +873,9 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
 }
 
 /**
- * What a pinned row is called — the three states `get_sidebar` reports, in the
- * same words.
- *
- * A uuid the directory has never mentioned is shown as itself rather than
- * dropped: the sidebar is somebody's curation, and silently hiding an entry
- * from it would be the one thing a curated list must not do. It resolves into
- * its title when the directory arrives.
- *
- * An archived document used to be drawn as that same stub (#287), which was a
- * lie about a document the directory can describe perfectly well: the stub is
- * there, tombstoned, with the title still in it. So the row keeps the title and
- * marks it. Archiving is not unpinning — whether a pin should follow the
- * document out of the listings is #210 — and the row stays live, because
- * opening it read-only is where Restore is.
+ * Never hide an unresolved curated pin: show its UUID until its title
+ * arrives. Archived stubs keep their title and marker, and remain navigable
+ * read-only so Restore stays reachable.
  */
 function PinLabel({
   uuid,
@@ -980,14 +896,8 @@ function PinLabel({
 }
 
 /**
- * The same four things {@link PinLabel} draws, as the one string a `title`
- * attribute can carry.
- *
- * The row ellipsises anything longer than the column (#481), which
- * is the right geometry but left the name unrecoverable: the tooltip offered
- * the uuid, so a clipped title could be read nowhere at all. Here the stub is
- * the whole uuid rather than the eight characters the row shows, because the
- * tooltip is the place the rest of it is recoverable from.
+ * The tooltip recovers clipped titles and the full UUID of an unresolved pin;
+ * the visible row may truncate both.
  */
 function pinTitle(uuid: string, entry: DirectoryEntry | undefined): string {
   if (entry === undefined) return uuid;

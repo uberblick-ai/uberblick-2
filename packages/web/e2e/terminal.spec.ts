@@ -1,5 +1,5 @@
 /**
- * A terminal block playing itself, in a real browser (#843).
+ * A terminal block playing itself, in a real browser.
  *
  * Only what jsdom structurally cannot answer is here. `test/terminal.test.ts`
  * pins everything about the document and the frames — that playing writes
@@ -54,7 +54,7 @@ function control(page: Page): Locator {
  * The control as the *cascade* leaves it, which is the only way to see it.
  * `getByRole` honours the `hidden` attribute whatever the stylesheet computes,
  * so a control the attribute hides and CSS still paints counts as absent to it
- * while a reader sees and tabs to a blank button (#906).
+ * while a reader sees and tabs to a blank button.
  */
 function toggle(page: Page): Locator {
   return page.locator(".ub-terminal-toggle");

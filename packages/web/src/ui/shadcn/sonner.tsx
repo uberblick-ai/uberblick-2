@@ -17,14 +17,14 @@ export function NotificationToaster(): ReactElement {
       theme={appearance}
       position="bottom-right"
       duration={TRANSIENT_DURATION}
+      // Decision: eb98aea4-ca81-4883-a044-a87e684b4e5a.
       hotkey={["shiftKey", "F8"]}
       customAriaLabel="Notifications (Shift+F8)"
       closeButton
-      // Sonner's default cap also hides old notices after keyboard expansion.
-      // Keep all active conditions reachable through the native scroll/Tab route.
-      // Expanded bottom stacks need in-flow boxes for Safari to count upward
-      // overflow. Relative placement cancels the primitive's translation offset;
-      // its transforms, gestures, focus and timers stay with Sonner.
+      // Expose every active notice through native scroll/Tab. Safari needs
+      // in-flow expanded boxes to count upward overflow; relative placement
+      // cancels Sonner translation while its transforms, gestures, focus and
+      // timers remain native.
       visibleToasts={Infinity}
       offset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))" }}
       mobileOffset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))", left: "max(16px, env(safe-area-inset-left))" }}

@@ -1,56 +1,21 @@
-/**
- * Awareness defaults: a random name and colour, one per tab.
- *
- * ub open supplies the name before rooms connect. Browser settings can
- * override either default, and rooms publish those choices live.
- *
- * Self-asserted for now. Identity can later be derived from authenticated token
- * claims — which is why `AwarenessUser` is a value passed into the
- * provider rather than something the provider invents.
- */
+/** Random, self-asserted per-tab name/color; ub open and settings override them before publication. */
 
 /**
- * The two values of the `client` awareness field: what a session says it is.
- *
- * A web tab publishes `WEB_CLIENT` (#74) and an MCP session publishes
- * `AGENT_CLIENT` (#494) — both positively, beside the `user` they belong to, so
- * a session is read *as an agent* only from the agent marker it publishes,
- * never from what it omits. (Omission still has a meaning, just not that one: a
- * session claiming nothing is drawn as a person, `ui/doc-chrome.ts`.)
- * The old absence test ("not a web client, therefore an agent") counted a
- * browser tab running a bundle from before the marker as an MCP connection for
- * as long as that tab stayed open, and held a closed tab's caret over the prose
- * for the whole of `editor/collaboration.ts`'s agent grace (#564).
- *
- * They live here, with the rest of the awareness identity, because the readers
- * that classify a peer are presentation code: routing them through `rooms.ts`
- * for one string would pull the provider, the local replica and the token mint
- * into a chrome test that needs none of them.
- *
- * `AGENT_CLIENT` is the agent's own constant, held as a literal rather than
- * imported: this package does not depend on `@uberblick/mcp-server`, and an
- * awareness field is a wire format either way. Its other end is
- * `packages/mcp-server/src/replica.ts`.
+ * Positively classify agents by AGENT_CLIENT; omission renders as a person and
+ * must not activate the agent cursor grace period. Keep markers independent of
+ * rooms so presentation readers need no provider, replica or token imports.
+ * AGENT_CLIENT is shared wire spelling with mcp-server/src/replica.ts; web does
+ * not depend on that package.
  */
 export const WEB_CLIENT = "web";
 export const AGENT_CLIENT = "agent";
 
 /**
- * y-prosemirror only accepts 6-digit hex colours — `cursor-plugin.js` tests
- * against `/^#[0-9a-fA-F]{6}$/` and warns on anything else. No shorthand, no
- * `rgb()`, no alpha. This is the one place in the app where a colour is a
- * literal rather than a CSS token: the theme cannot reach inside the inline
- * styles the cursor plugin writes.
- *
- * Because the app is painted in either scheme — the system's preference, or the
- * appearance the reader chose — each colour has to work on both grounds. All eight sit near luminance 0.18: ≥4.1:1 against the dark
- * background, ≥4.1:1 against the light one, and ≥4.69:1 against the white
- * cursor-label text (`--cursor-label-foreground`).
- *
- * Named, because the presence picker (#74) draws them as swatches and a swatch
- * needs a word for the reader who cannot see it. The names describe the hue and
- * nothing else — they are labels, not identifiers, and nothing is stored by
- * them.
+ * y-prosemirror requires six-digit hex: no shorthand, rgb() or alpha. Cursor
+ * inline styles need literal colors, not theme tokens. Keep all eight readable
+ * on both grounds: luminance near 0.18, at least 4.1:1 against each background
+ * and 4.69:1 against white cursor-label text. Hue names label swatches, never
+ * identify persisted settings.
  */
 const COLORS = [
   { name: "crimson", hex: "#e30c4e" },

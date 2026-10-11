@@ -1,5 +1,5 @@
 /**
- * The sync detail panel (#72): what a reader is told when they ask about sync.
+ * The sync detail panel: what a reader is told when they ask about sync.
  *
  * Everything the panel draws is client-held state, so the test supplies exactly
  * that and nothing else — a Y.Doc with blocks, a real Awareness carrying two
@@ -41,7 +41,7 @@ const ENDPOINT: HubEndpoint = { url: "ws://hub.example:1234", source: "document"
 const AGENT_CLIENT = 424_242;
 const HUMAN_CLIENT = 515_151;
 
-/** The `client` markers each of them publishes (#494) — the wire values. */
+/** The `client` markers each of them publishes — the wire values. */
 const AGENT_MARKER = "agent";
 const WEB_MARKER = "web";
 
@@ -95,7 +95,7 @@ function blockText(ydoc: Y.Doc, index: number): Y.XmlText {
 /**
  * Publish a foreign session, in the wire format an MCP session uses:
  * relative-position JSON under `cursor`, `user` beside it, and the session's own
- * `client` marker (#494) beside both. `blockIndex` null is a session publishing
+ * `client` marker beside both. `blockIndex` null is a session publishing
  * presence with no caret — a tab that has not been clicked into, which the list
  * still has to name.
  */
@@ -373,7 +373,7 @@ describe("the sync panel renders the state this client holds", () => {
     const { host } = mount(fix);
     expect(facts(host)).toEqual({
       Hub: ENDPOINT.url,
-      // Which hub this "synced" is about, and who decided it (#362).
+      // Which hub this "synced" is about, and who decided it.
       Source: "served /uberblick-config.json",
       Room: ROOM,
       // A backlog is what stops the state being `synced` — the provider's own
@@ -461,7 +461,7 @@ describe("the sync panel renders the state this client holds", () => {
    * The three are then compared pairwise rather than counted. One state
    * collapsing into another is how this panel stops being worth opening, and
    * that is what this catches; the *number* of readings is not a contract —
-   * #96 adds an auth-failure one — so a test that pinned it would fail the day
+   * an auth-failure state could add another — so a count assertion would fail when
    * a fourth earns its place.
    */
   it("says synced with nothing unacked, and no two states read the same", () => {
@@ -486,11 +486,9 @@ describe("the sync panel renders the state this client holds", () => {
   });
 
   /**
-   * #448: the `State` row used to read the calm word for a refused page too,
-   * so the panel someone opens *because* sync is broken agreed with the pill
-   * that everything was merely busy. The word now comes from the shared
-   * derivation, and the sentence it carries gets a row of its own — drawn only
-   * under a refusal, which is why the whole-fact-map test above still holds.
+   * A refused page must not read as merely busy in the `State` row.
+   * Its word comes from the shared derivation, and the sentence it carries
+   * gets a row of its own only under a refusal, preserving the ordinary fact map.
    */
   it("names a refusal in State, and why in a Reason row", () => {
     vi.useFakeTimers();
@@ -543,7 +541,7 @@ describe("the sync panel renders the state this client holds", () => {
       person,
     ]);
     // Avatar plus name, each in its own presence colour — the one its cursor
-    // carries in the prose (#494).
+    // carries in the prose.
     // Avatars are decorative; the colour and glyph are their styling contract.
     const avatars = [...host.querySelectorAll<HTMLElement>(".ub-avatar")];
     expect(
@@ -593,7 +591,7 @@ describe("the sync panel renders the state this client holds", () => {
   });
 
   /**
-   * #362's fallback path: the served document did not decide this endpoint.
+   * The fallback path: the served document did not decide this endpoint.
    * Falling back to compiled values is exactly how a tab ends up on the wrong
    * hub while still reading "synced", so the panel says so in words rather
    * than leaving the address to be recognised.

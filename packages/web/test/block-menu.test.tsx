@@ -386,7 +386,7 @@ describe("the slash menu", () => {
       // inside the UndoManager's half-second capture window. The boundary that
       // keeps the conversion its own undo step is the command's job, not the
       // test's — a test that called `stopCapturing` itself would be testing
-      // nothing but its own arrangement (#105 review).
+      // nothing but its own arrangement.
       press("ArrowDown");
       press("Enter");
 
@@ -954,7 +954,7 @@ describe("the gutter menu", () => {
 
   /**
    * A `code` block is rendered by a NodeView whose root holds chrome (the copy
-   * button, #103) outside the content — so the pointer resolves to a block whose
+   * button) outside the content — so the pointer resolves to a block whose
    * DOM is not simply its text. The gutter has to find it like any other.
    */
   it("resolves a block rendered by a node view", () => {

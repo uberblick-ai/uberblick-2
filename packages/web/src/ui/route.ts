@@ -1,28 +1,8 @@
 /**
- * Deep links: every document is addressable at `/<workspaceId>/<docUuid>`.
- *
- * The first segment *is* the workspace — this client is not configured for one
- * and cannot enumerate them. A link carries the workspace it belongs to, which
- * is what makes a pasted link from somebody else's workspace open that
- * workspace rather than the wrong document in this one. The configured
- * workspaces (the served document's, else the build's defines — see
- * `config.ts`) only answer the one address that names no workspace, `/`, and
- * are otherwise a menu of places to go (see {@link workspaceList}): an address
- * outside the list still opens its own workspace, and an address inside it is
- * read exactly like any other.
- *
- * The segment may be decorated — `uberblick-<uuid>` — and is kept exactly as
- * typed: the slug is display, so nothing here rewrites somebody's spelling of
- * their own workspace. Only {@link Workspace.uuid} reaches a room key.
- *
- * Hand-rolled on purpose (#68). There are four routes — the workspace, one
- * document, the whole corpus listed (`/<workspace>/all`, #118), and workspace
- * settings (`/<workspace>/settings`, with Tags and Access children); a router library
- * would be a new runtime dependency buying nothing but indirection.
- *
- * The address bar is the selection. Nothing else stores "which document is
- * open": the sidebar navigates, Back navigates, a pasted link navigates, and
- * all three arrive at the same `parseRoute`.
+ * The URL is the only selection. A link's workspace wins over the configured
+ * menu; configuration supplies only the / default. Preserve decorated
+ * workspace spelling in links, but use the bare UUID in room keys and token
+ * claims. Parse workspace, document, all-docs and settings addresses here.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -41,20 +21,10 @@ export interface Workspace {
 export type SettingsPage = "general" | "tags" | "access";
 
 /**
- * What an address resolves to.
- *
- * `invalid` is a statement about the *link*, never about the corpus: a
- * well-formed uuid this replica has not heard of is a `doc` route that has not
- * arrived yet, not a 404. See {@link docIsHydrated}. It still carries the
- * workspace when the address named a usable one, so a mistyped document uuid
- * does not also empty the sidebar.
- *
- * `no-workspace` carries *why* there is none, because the two causes have
- * different fixes: a client configured with no workspace at all needs one,
- * while one configured with a value that is not a workspace id — the legacy
- * `main`, say — needs that value replaced. Telling a developer the client
- * "carries none" when it carries a rejected one sends them looking in the wrong
- * place.
+ * Invalid describes link syntax, never an unseen valid document UUID.
+ * Preserve a usable workspace on invalid document links. Distinguish absent
+ * configuration from invalid configured workspace values because their
+ * recovery steps differ.
  */
 export type Route =
   | { kind: "no-workspace"; reason: "absent" }
@@ -65,13 +35,7 @@ export type Route =
   | { kind: "doc"; workspace: Workspace; uuid: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
-/**
- * The one reserved second segment: the whole corpus, listed (#118).
- *
- * It can never collide with a document, because the other thing a second
- * segment may be is a uuid and no uuid spells a word. Reserved rather than
- * derived, so the listing has an address to be linked to and returned to.
- */
+/** Reserve all for the listing; document UUIDs cannot collide with this word. */
 export const ALL_SEGMENT = "all";
 
 /** The workspace-settings mode. General keeps the mode's root address. */
@@ -82,11 +46,8 @@ export const TAG_SETTINGS_SEGMENT = "tags";
 export const ACCESS_SETTINGS_SEGMENT = "access";
 
 /**
- * One path segment, percent-decoding tolerated.
- *
- * A malformed escape (`/<workspace>/%zz`) makes `decodeURIComponent` throw, and
- * an uncaught throw here would blank the app instead of showing the
- * invalid-link state that such a URL has earned.
+ * Malformed percent escapes must return invalid-link state instead of
+ * throwing and blanking the app.
  */
 function decodeSegment(segment: string): string {
   try {
@@ -106,21 +67,13 @@ function readWorkspace(segment: string): Workspace | null {
 }
 
 /**
- * Resolve a pathname.
- *
- * `configured` is the default workspace — the first one this client is
- * configured with — or null when it has none. It answers `/` and nothing else.
- * A value that is not a workspace id is treated as no workspace at all, which
- * is what a misconfigured build has; the route says which of the two it was.
+ * The first configured workspace answers / only. An invalid configured value
+ * yields no-workspace with its distinct cause.
  */
 export function parseRoute(pathname: string, configured: string | null): Route {
   const parts = pathname.split("/");
-  // A pathname always starts with "/", so the head is always an empty string;
-  // one trailing slash is a benign spelling of the same address and is dropped
-  // (`canonicalPath` then takes it out of the address bar). Every *other* empty
-  // segment is a malformed link — `/<workspace>//<uuid>` names no room, and
-  // `parseRoom` rejects empty segments too, so the two agree about what a
-  // well-formed `<workspace>/<uuid>` is.
+  // Drop one benign trailing slash. Reject every other empty segment,
+  // matching parseRoom, rather than constructing a malformed room key.
   if (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
   const segments = parts.slice(1).map(decodeSegment);
   if (segments.some((segment) => segment === "")) {
@@ -131,10 +84,8 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     };
   }
 
-  // `/` — the app with no workspace named. Canonicalised to the build's
-  // workspace by `canonicalPath`, so the doc list has an address of its own;
-  // with no build-time workspace there is nothing to open, and saying so is the
-  // whole answer.
+  // Canonicalize / to the configured workspace list; without one, no
+  // workspace can open.
   if (segments.length === 0) {
     if (configured === null) return { kind: "no-workspace", reason: "absent" };
     const workspace = readWorkspace(configured);
@@ -196,21 +147,9 @@ export function parseRoute(pathname: string, configured: string | null): Route {
 }
 
 /**
- * The workspaces to offer, in the order they were configured, with the one the
- * address names always among them.
- *
- * `configured` is the resolved workspace list — the served document's, else the
- * build's defines (see `config.ts`). An entry that is not a workspace id is
- * dropped rather than shown: a typo in a config list is not somewhere anyone
- * can go, and offering it would put the invalid-link screen behind a menu item.
- *
- * Deduplicated by uuid, because `<slug>-<uuid>` and `<uuid>` are one workspace
- * and a second entry would be another way to sit where you already are.
- * `current` wins that tie: the switcher shows the address bar's own spelling,
- * not a config file's opinion of it.
- *
- * A workspace the address names but the list omits is appended, so a reader who
- * arrived by a link can see where they are — and get back to a configured one.
+ * Keep configured order, filter invalid entries and deduplicate by UUID. The
+ * current address's spelling wins ties; append an unconfigured linked
+ * workspace so the reader can identify it and return to configured choices.
  */
 export function workspaceList(
   configured: readonly string[],
@@ -229,17 +168,14 @@ export function workspaceList(
 }
 
 /**
- * The path of one document, under the workspace as the address spells it.
- *
- * Not `roomForDoc`: the room key carries the bare uuid, while a link keeps the
- * decorated spelling it was written with. For an undecorated workspace the two
- * strings are the same, which is why {@link shareUrl} can take a room key.
+ * Links retain the decorated workspace spelling; roomForDoc uses only its
+ * UUID.
  */
 export function docPath(segment: string, uuid: string): string {
   return `/${segment}/${uuid}`;
 }
 
-/** The path of the workspace's "All docs" listing (#118). */
+/** The workspace All docs listing path. */
 export function allPath(segment: string): string {
   return `/${segment}/${ALL_SEGMENT}`;
 }
@@ -254,12 +190,8 @@ export function settingsPath(
 }
 
 /**
- * The address `route` should be shown at, or `null` to leave the URL alone.
- *
- * Only routes that resolve get rewritten. A bad link keeps the address it was
- * opened with: correcting it would erase the evidence the error message is
- * about, and would put a working address behind a screen that says something is
- * wrong.
+ * Rewrite only resolvable routes. Invalid links keep their original address
+ * as the evidence named by the error.
  */
 export function canonicalPath(route: Route): string | null {
   switch (route.kind) {
@@ -277,55 +209,27 @@ export function canonicalPath(route: Route): string | null {
 }
 
 /**
- * The absolute link to an address, for sharing.
- *
- * `address` is the path without its leading slash — `<workspace>/<uuid>`, with
- * the workspace spelled the way the address bar spells it. For an undecorated
- * workspace that is also the room key, which is why one function serves both.
+ * Build a shareable absolute URL from the path without its leading slash,
+ * preserving workspace spelling.
  */
 export function shareUrl(address: string, origin: string): string {
   return `${origin}/${address}`;
 }
 
 /**
- * Whether this replica actually holds the document a link names — the gate on
- * mounting a *writable* editor over it.
- *
- * One witness, and it is the document's own `meta.uuid`. A directory stub is
- * deliberately not enough. The stub is a cache that travels in its own room, so
- * "the directory knows this uuid, the document's room has not hydrated" is a
- * real state — and on a fresh deep link it is the *common* state, because the
- * small directory doc usually syncs before the document does. Unlocking on the
- * stub would bind the editor to a Y.Doc with no meta and no blocks, where a
- * keystroke writes blocks and metadata into a replica the real document is
- * about to merge into.
- *
- * Compared against `uuid` rather than tested for non-emptiness, because the
- * meta on screen belongs to whichever room is mounted and that can lag the
- * address by one effect.
- *
- * False is a "not yet", not a "no": `meta` is observed, so the waiting screen
- * resolves into the document the moment its content merges — nothing polls and
- * nothing retries.
+ * Require this room's meta.uuid to equal the routed UUID before mounting a
+ * writable editor. Directory stubs arrive independently and cannot prove
+ * hydration. A false answer waits for observed room content rather than
+ * becoming a 404.
  */
 export function docIsHydrated(uuid: string, meta: DocMeta | null): boolean {
   return meta !== null && meta.uuid === uuid;
 }
 
 /**
- * Whether the replica has *answered* about the routed room yet.
- *
- * `meta` being null is one kind of silence — nothing has been read. An empty
- * `meta` is a second kind, and it looks identical: `getMeta` on a Y.Doc that
- * holds nothing returns `uuid: ""`, and a room that has just been opened starts
- * there too. Reading that as "answered, and not this document" is what put
- * "waiting for sync" on screen for a frame when a reader navigates away from a
- * document and back (#161).
- *
- * So the empty answer only counts once the room has completed a sync or its
- * connection has failed or been refused. After that an empty room *is* an
- * answer: a deep link to a uuid this server does not hold keeps its waiting
- * screen, which is the whole point of that screen.
+ * Null metadata is unread. Empty metadata answers only after sync, failure or
+ * refusal; a newly joining empty room must not flash waiting. A completed
+ * empty answer keeps waiting for this document.
  */
 export function replicaHasAnswered(
   meta: DocMeta | null,
@@ -338,11 +242,8 @@ export function replicaHasAnswered(
 export type Navigate = (path: string, mode?: "push" | "replace") => void;
 
 /**
- * The current pathname, two-way bound to the History API.
- *
- * `popstate` covers Back and Forward; the browser does not fire it for our own
- * `pushState`, so {@link Navigate} sets the state itself. Both ends write the
- * same value, which is what keeps the address bar and the app from disagreeing.
+ * popstate handles browser history; Navigate updates local state for
+ * pushState, which emits no popstate. Both must carry the same pathname.
  */
 export function useRoutePath(): [string, Navigate] {
   const [path, setPath] = useState(() => window.location.pathname);
