@@ -1,14 +1,19 @@
 /**
  * Writes address one logical block; whole-document replacement loses
  * concurrent edits. Block elements stay flat, including list items and quotes.
- * Only table rows, cells and their single paragraphs nest.
+ * Table cells and card parts contain their own single paragraphs.
  */
 
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
+import { CARD_PARTS, buildCardElement, cardInline, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
+import type { CardInline } from "./card.js";
+import { parseInline } from "./markdown.js";
 import {
   BlockNotFoundError,
+  CardAnnotationError,
+  CardConversionError,
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
@@ -160,6 +165,7 @@ export function requireBlockText(
   blockId: string,
 ): Y.XmlText {
   if (element.nodeName === "table") throw new TableAnnotationError(blockId);
+  if (element.nodeName === "card") throw new CardAnnotationError(blockId);
   const existing = textOf(element);
   if (existing !== null) return existing;
   ydoc.transact(() => {
@@ -189,11 +195,12 @@ function indentOf(element: Y.XmlElement): ListIndent {
 }
 
 function toBlock(element: Y.XmlElement): Block {
-  // Prose text/rev exclude marks; table GFM includes cell formatting in both.
+  // Prose rev excludes marks; table and card projections include inline formatting.
   const type = elementType(element);
   const id = element.getAttribute("id") ?? "";
-  const text = type === "table" && element.toArray().some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")
-    ? tableText(element) : readText(textOf(element));
+  const text = type === "card" ? cardText(element)
+    : type === "table" && element.toArray().some((node) => node instanceof Y.XmlElement && node.nodeName === "tableRow")
+      ? tableText(element) : readText(textOf(element));
   if (type === "heading") {
     const level = levelOf(element);
     return { id, type, text, rev: blockRev({ type, text, level }), level };
@@ -258,18 +265,19 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
  */
 export function getBlocksWithInline(
   ydoc: Y.Doc,
-): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][] }> {
+): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][]; card?: CardInline }> {
   return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
     block: toBlock(element),
     inline: readInlineRuns(textOf(element)),
     ...(element.nodeName === "table" ? {
       table: tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).flatMap(readInlineRuns))),
     } : {}),
+    ...(element.nodeName === "card" ? { card: cardInline(element) } : {}),
   }));
 }
 
 /**
- * Inline input overrides text only for prose; source blocks and tables ignore it.
+ * Inline input overrides text only for prose; structured/source blocks ignore it.
  */
 function inlineOf(input: BlockInput): readonly InlineRun[] | null {
   if (input.inline === undefined) return null;
@@ -280,6 +288,12 @@ function buildElement(id: string, input: BlockInput, inlineTables = true): Y.Xml
   // Validate before insertion: Yjs transactions cannot roll back stray blocks.
   const runs = inlineOf(input);
   if (runs !== null) assertInlineWritable(runs);
+
+  if (input.type === "card") {
+    const card = parseCardInput(input.text ?? "");
+    for (const part of CARD_PARTS) assertInlineWritable(parseInline(card[part]));
+    return buildCardElement(id);
+  }
 
   if (input.type === "table") {
     const table = parseTableInput(input.text ?? "");
@@ -315,6 +329,10 @@ function buildElement(id: string, input: BlockInput, inlineTables = true): Y.Xml
  * Use the insert transaction so readers see no unformatted intermediate state.
  */
 function writeInline(element: Y.XmlElement, input: BlockInput): void {
+  if (input.type === "card") {
+    writeCardInline(element, parseCardInput(input.text ?? ""));
+    return;
+  }
   if (input.type === "table") {
     const table = parseTableInput(input.text ?? "");
     const cells = tableRows(element);
@@ -506,6 +524,11 @@ export function setBlockType(
     const old = fragment.get(index) as Y.XmlElement;
     const oldType = elementType(old);
 
+    if (oldType === "card" || newType === "card") {
+      if (oldType === newType) return;
+      throw new CardConversionError();
+    }
+
     if (oldType === "table" || newType === "table") {
       // Same-type tables are inert. Table/flat offsets cannot preserve marks;
       // refuse every mark before mutation. Only legacy normalization may drop anchors.
@@ -629,6 +652,12 @@ export function editBlock(
       return;
     }
     if (options.tableMapping !== undefined) throw new InvalidTableMappingError("mapping applies only to a table block");
+    if (current.type === "card") {
+      // Empty editor titles project without a title header; MCP must repair them.
+      const after = parseCardInput(newText);
+      editCard(element, cardTextParts(element), after);
+      return;
+    }
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);

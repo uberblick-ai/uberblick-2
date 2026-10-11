@@ -13,7 +13,8 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, isBlockType, readsAsMark, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
+import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
+import type { CardPart } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
 /** The node names the editor may render. Identical to the schema's block types. */
@@ -114,6 +115,13 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       ))) foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
       continue;
     }
+    if (child.nodeName === "card") {
+      if (!isSupportedCard(child)) foreign.push({ index, nodeName: "#card-shape", id, preview: previewOf(child) });
+      else if (CARD_PARTS.some((part) => cardPartTexts(child, part).some((text) => linkConflictsIn(text).length > 0))) {
+        foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
+      }
+      continue;
+    }
     for (const inner of child.toArray()) {
       const nodeName = foreignInsideBlock(child.nodeName, inner);
       if (nodeName === null) continue;
@@ -150,6 +158,8 @@ export interface LinkConflict extends LinkConflictRange {
   textIndex: number;
   /** Position of the table cell, absent for prose. Display, never lookup. */
   cell?: { row: number; column: number };
+  /** Card prose part, absent for other block types. Display, never lookup. */
+  part?: CardPart;
   /** The element's `id` attribute, when it has one. Display, never lookup. */
   blockId: string | null;
   /** The text holding the range, and the handle the repair writes through. */
@@ -210,6 +220,12 @@ export function linkConflictsIn(text: Y.XmlText): LinkConflictRange[] {
  * limit would hide repairs. Only prose permitting both marks can be repaired;
  * the same pair in source is a disallowed-mark problem.
  */
+function cardLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
+  return CARD_PARTS.flatMap((part) => cardPartTexts(child, part).flatMap((text, textIndex) =>
+    linkConflictsIn(text).map((range) => ({ ...range, index, textIndex, part, blockId, text })),
+  ));
+}
+
 export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
   const conflicts: LinkConflict[] = [];
   const children = fragment.toArray();
@@ -218,6 +234,10 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
     if (!(child instanceof Y.XmlElement)) continue;
     if (!isBlockType(child.nodeName)) continue;
     const blockId = child.getAttribute("id") ?? null;
+    if (child.nodeName === "card") {
+      conflicts.push(...cardLinkConflicts(child, index, blockId));
+      continue;
+    }
     if (child.nodeName === "table") {
       for (const [rowIndex, row] of tableRows(child).entries()) {
         for (const [column, cell] of row.entries()) {

@@ -235,11 +235,12 @@
                   "quote",
                   "table",
                   "terminal",
-                  "chart"
+                  "chart",
+                  "card"
                 ]
               },
               "text": {
-                "description": "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
                 "type": "string"
               },
               "level": {
@@ -253,7 +254,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -636,7 +637,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -694,7 +695,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -755,7 +756,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -824,7 +825,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -855,7 +856,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -867,7 +868,8 @@
                       "mermaid",
                       "table",
                       "terminal",
-                      "chart"
+                      "chart",
+                      "card"
                     ]
                   }
                 },
@@ -2605,7 +2607,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2663,7 +2665,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2724,7 +2726,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2793,7 +2795,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2824,7 +2826,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2836,7 +2838,8 @@
                       "mermaid",
                       "table",
                       "terminal",
-                      "chart"
+                      "chart",
+                      "card"
                     ]
                   }
                 },
@@ -2903,6 +2906,15 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "part": {
+                        "type": "string",
+                        "enum": [
+                          "label",
+                          "title",
+                          "body",
+                          "footer"
+                        ]
                       },
                       "start": {
                         "type": "integer",
@@ -2992,7 +3004,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM with formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table cell links have no block-level ranges. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4818,7 +4830,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4848,7 +4860,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4881,7 +4893,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4922,7 +4934,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4953,7 +4965,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4965,7 +4977,8 @@
                         "mermaid",
                         "table",
                         "terminal",
-                        "chart"
+                        "chart",
+                        "card"
                       ]
                     }
                   },
@@ -5091,7 +5104,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables. Cards take canonical container content with inline Markdown, refuse invalid input with invalid_card, and splice only changed parts, characters and formatting while preserving unchanged comment anchors. Their rev includes formatting.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -5134,11 +5147,12 @@
             "quote",
             "table",
             "terminal",
-            "chart"
+            "chart",
+            "card"
           ]
         },
         "text": {
-          "description": "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
           "type": "string"
         },
         "level": {
@@ -5152,7 +5166,7 @@
           "type": "string"
         },
         "inline": {
-          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
           "type": "array",
           "items": {
             "type": "object",
@@ -5222,7 +5236,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5252,7 +5266,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5285,7 +5299,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5326,7 +5340,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5357,7 +5371,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5369,7 +5383,8 @@
                         "mermaid",
                         "table",
                         "terminal",
-                        "chart"
+                        "chart",
+                        "card"
                       ]
                     }
                   },
@@ -5495,7 +5510,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Card text omits its :::card and ::: delimiter lines: label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Parts hold inline Markdown; unknown, duplicate or non-key header lines refuse with invalid_card. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -6652,6 +6667,15 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
+                    "part": {
+                      "type": "string",
+                      "enum": [
+                        "label",
+                        "title",
+                        "body",
+                        "footer"
+                      ]
+                    },
                     "start": {
                       "type": "integer",
                       "minimum": 0,
@@ -6786,7 +6810,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; open it in the web editor. Existing card threads accept replies, resolution and reopening.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6965,7 +6989,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links and code, mermaid, table, terminal or chart source blocks refuse. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links, source blocks, tables and cards refuse. Write card links as inline Markdown in the card text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7022,7 +7046,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Cards export as separate :::card containers with inline Markdown parts and escaped ::: prose lines. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

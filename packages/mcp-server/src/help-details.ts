@@ -49,7 +49,9 @@ export const toolHelpDetails = {
     "values; documents without data omit it.\n\n" +
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
-    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. For other blocks " +
+    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
+    "canonical container content with inline Markdown parts; its rev also includes formatting. Card thread " +
+    "ranges name their anchored part. For other blocks " +
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
     "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
@@ -175,7 +177,11 @@ export const toolHelpDetails = {
     "recovery and `applied: false`, `partial: false`, `synced: false`. Stale assertions retain precedence and " +
     "invalid GFM remains `invalid_table`. Malformed input shapes are refused by the MCP input schema before " +
     "the handler. Previously accepted structural and multi-cell table calls must now supply mappings as part " +
-    "of the coordinated table cutover. Other blocks use plain text with no markdown and reject " +
+    "of the coordinated table cutover. Cards take the canonical content between :::card and :::, with " +
+    "inline Markdown in each part. Invalid input refuses with invalid_card before writing. An edit splices " +
+    "only changed parts, characters and mark keys; unchanged parts and comment anchors on unchanged " +
+    "characters survive. Newly added document targets must be known locally; existing targets in a part " +
+    "remain editable. A card's rev includes formatting. Cards reject table_mapping. Other blocks use plain text with no markdown and reject " +
     "`table_mapping`. In other blocks, spliced-in text inherits the formatting of the character to its left, " +
     "and `rev` ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM " +
     "preserves representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's " +
@@ -194,7 +200,15 @@ export const toolHelpDetails = {
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
-    "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A terminal's text is a " +
+    "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
+    "content between lines exactly :::card and :::. Header keys are lowercase label, title and footer, " +
+    "each at most once, in any order. A nonempty title is required. Values are one-line inline Markdown " +
+    "after the colon and one optional space, not YAML; quotes stay literal. The first blank line ends the " +
+    "header, and the remainder is one optional prose body. Parts keep table-cell inline marks. Missing " +
+    "title, unknown or duplicate keys and non-key header lines refuse with invalid_card and write nothing. " +
+    "get_doc orders present keys label, title, footer, then a blank line and body. Export wraps that content " +
+    "in :::card and :::, folds header newlines to spaces, omits empty keys and escapes prose/body lines " +
+    "beginning :::. Invalid imports become plain paragraphs preserving all container text. A terminal's text is a " +
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +
     "whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's " +
     "text is a JSON mapping, for example " +
@@ -295,7 +309,10 @@ export const toolHelpDetails = {
     "range adds `row` and `column`, recomputed as cells move; it is null when orphaned. Coordinates on a " +
     "non-table block, missing coordinates or a cell outside the projection refuse with `annotation_cell` " +
     "before anything is written. Empty and overlapping ranges refuse with `annotation_range`. Orphaned legacy " +
-    "table threads stay orphaned and accept replies, resolution and reopening.\n\n" +
+    "table threads stay orphaned and accept replies, resolution and reopening. Card comments are opened in " +
+    "the web editor; MCP opening a new card thread refuses with annotation_card before writing. Existing " +
+    "card threads accept replies, resolution and reopening. Their returned ranges name label, title, body " +
+    "or footer in part.\n\n" +
     "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all " +
     "three, none of them optional — plus `row` and `column` for a table cell, or reply to one with " +
     "`thread_id` and no range fields at all. Mixing them, or leaving a range half-stated, is refused at the " +
@@ -314,8 +331,8 @@ export const toolHelpDetails = {
     "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
     "reversed; a range that clamps to nothing is refused.\n\n" +
     "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-    "one range cannot be both — and so is a code, mermaid, table, terminal or chart block, which holds source " +
-    "text. The answer carries the target's current `title` for information; the label in the document is the " +
+    "one range cannot be both — and so are source blocks, tables and cards. Write card links as inline " +
+    "Markdown through insert_block or edit_block. The answer carries the target's current `title` for information; the label in the document is the " +
     "text you linked, and it does not follow a later rename.\n\n" +
     "The target must be a document this replica's directory knows, or the call refuses with " +
     "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +

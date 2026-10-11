@@ -6,9 +6,11 @@
 
 import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
-import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, InvalidTableError } from "./errors.js";
+import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, InvalidCardError, InvalidTableError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
 import { tableCellTexts, tableRows } from "./table.js";
+import { CARD_PARTS, cardPartTexts } from "./card.js";
+import type { CardPart } from "./card.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
@@ -25,6 +27,7 @@ export interface CommentRun {
   /** Table projection coordinates; absent for a block-level text range. */
   row?: number;
   column?: number;
+  part?: CardPart;
   start: number;
   end: number;
 }
@@ -87,7 +90,11 @@ function annotationTexts(element: Y.XmlElement): Array<{
   texts: Y.XmlText[];
   row?: number;
   column?: number;
+  part?: CardPart;
 }> {
+  if (element.nodeName === "card") {
+    return CARD_PARTS.map((part) => ({ texts: cardPartTexts(element, part), part }));
+  }
   if (element.nodeName !== "table") {
     return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
   }
@@ -166,28 +173,35 @@ export function createAnnotation(
   endIndex: number,
   author: string,
   text: string,
-  cell?: { row: number; column: number },
+  target?: { row: number; column: number } | { part: CardPart },
 ): Annotation {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
   let texts: Y.XmlText[];
   if (element.nodeName === "table") {
-    if (cell === undefined) throw new AnnotationCellError("missing", blockId);
+    if (target === undefined || !("row" in target)) throw new AnnotationCellError("missing", blockId);
+    const cell = target;
     const rows = tableRows(element);
     const width = Math.max(0, ...rows.map((row) => row.length));
     if (!Number.isSafeInteger(cell.row) || !Number.isSafeInteger(cell.column) ||
       cell.row < 0 || cell.row >= rows.length || cell.column < 0 || cell.column >= width) {
       throw new AnnotationCellError("out-of-bounds", blockId);
     }
-    const target = rows[cell.row]?.[cell.column];
-    texts = target === undefined ? [] : tableCellTexts(target);
+    const targetCell = rows[cell.row]?.[cell.column];
+    texts = targetCell === undefined ? [] : tableCellTexts(targetCell);
     // Embeds consume Yjs indices but are absent from the cell's displayed text
     // projection. Refuse rather than mark a different character than requested.
     if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
       throw new InvalidTableError();
     }
+  } else if (element.nodeName === "card") {
+    if (target === undefined || !("part" in target) || !CARD_PARTS.includes(target.part)) throw new CardAnnotationError(blockId);
+    texts = cardPartTexts(element, target.part);
+    if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
+      throw new InvalidCardError("The card part contains unsupported embedded content");
+    }
   } else {
-    if (cell !== undefined) throw new AnnotationCellError("not-table", blockId);
+    if (target !== undefined) throw new AnnotationCellError("not-table", blockId);
     texts = [requireBlockText(ydoc, element, blockId)];
   }
   const length = texts.reduce((total, value) => total + value.length, 0);
@@ -280,12 +294,13 @@ export function resolveAnnotationRange(
   if (first === undefined) return null;
   // Foreign writers can copy marks into other cells. A cell thread still has
   // one cell's offset space, so resolve the first marked cell in reading order.
-  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column);
+  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column && run.part === first.part);
   const last = sameCell[sameCell.length - 1];
   if (last === undefined) return null;
 
   return {
     ...(first.row === undefined || first.column === undefined ? {} : { row: first.row, column: first.column }),
+    ...(first.part === undefined ? {} : { part: first.part }),
     start: first.start,
     end: last.end,
     collapsed: first.start === last.end,

@@ -11,7 +11,10 @@ export function registerInsertBlock(server: ToolRegistrar, context: ToolContext)
     description:
       "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block " +
       "palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table " +
-      "refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this " +
+      "refuses; it stores parsed cells and inline formatting. Card text omits its :::card and ::: delimiter lines: " +
+      "label, title and footer keys at most once, a required nonempty title, then a blank line and optional " +
+      "prose body. Parts hold inline Markdown; unknown, duplicate or non-key header lines refuse with invalid_card. " +
+      "Document-link targets must be known in this " +
       "replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is " +
       "plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; " +
       "other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for " +

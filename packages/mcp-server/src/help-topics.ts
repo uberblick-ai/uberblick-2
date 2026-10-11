@@ -125,13 +125,31 @@ A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
+## Cards
+
+A card holds prose in four parts: optional label, required title, optional body and optional footer. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal mermaid, terminal and chart source fences.
+
+The header uses lowercase \`label:\`, \`title:\` and \`footer:\` keys, each at most once, in any input order. A value is the rest of its line after the colon and one optional space. It is inline Markdown, not YAML: quotes remain literal. The first blank line ends the header; everything after it is one prose body. All parts support the same inline marks as table cells. For example:
+
+    :::card
+    label: Recommendation
+    title: Keep **one** item together
+    footer: [Details](https://example.com)
+
+    The body supports prose and inline code.
+    :::
+
+Export orders label, title, footer, omits empty keys and folds header-value newlines to spaces. It escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, unknown key, duplicate key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
+
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 ## MCP content writes
 
-For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. get_doc exposes table text as canonical GFM; its revision includes cell formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
+For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. A card's text is the content between the container delimiters. get_doc exposes canonical table GFM and card content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
 
 Table structural and multi-cell edits require \`table_mapping\` rows and columns; see \`edit_block\` for the full mapping contract. For prose carrying formatting, text splices can re-anchor a mark when a changed range touches its edge. See \`edit_block\` before changing a marked span and verify the result with \`export_markdown\`.
+
+Card edits splice only changed parts and characters, preserving unchanged marks and comment anchors. Card links count toward backlinks. Open card comments in the web editor: MCP \`annotate\` refuses new card anchors but accepts replies, resolution and reopening by thread_id. \`link_range\` refuses cards; write links as inline Markdown in their text. Returned annotation ranges name the card part.
 
 ## Export
 

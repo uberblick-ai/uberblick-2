@@ -16,7 +16,8 @@ export function registerAnnotate(server: ToolRegistrar, context: ToolContext): v
       "edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates " +
       "follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid " +
       "or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with " +
-      "annotation_range. Offsets are clamped to text." +
+      "annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; " +
+      "open it in the web editor. Existing card threads accept replies, resolution and reopening." +
       helpPointer("annotate"),
     outputSchema: outputSchemas.annotate,
     inputSchema,

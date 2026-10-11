@@ -97,7 +97,7 @@ const docLink = z.object({
 }).strict();
 const blockFields = {
   id: z.string(),
-  text: z.string().describe("Plain prose or source text; tables carry canonical GFM with cell formatting."),
+  text: z.string().describe("Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."),
   rev: z.string().describe("Content hash to assert on a later block edit."),
 };
 const linkRanges = {
@@ -110,7 +110,7 @@ function blockSchema(withLinks: boolean) {
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(["bullet", "ordered"]), indent: z.number().int().min(0).max(3) }).strict(),
     z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
-    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart"]) }).strict(),
+    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart", "card"]) }).strict(),
   ]);
 }
 const block = blockSchema(false);
@@ -123,6 +123,7 @@ const annotation = z.object({
   range: z.object({
     row: count.optional(),
     column: count.optional(),
+    part: z.enum(["label", "title", "body", "footer"]).optional(),
     start: count,
     end: count,
     collapsed: z.boolean(),

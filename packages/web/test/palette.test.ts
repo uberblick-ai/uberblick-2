@@ -42,6 +42,11 @@ import { mountEditor } from "./helpers.js";
 describe("the palette is exactly the schema's block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
+      "card",
+      "cardBody",
+      "cardFooter",
+      "cardLabel",
+      "cardTitle",
       "chart",
       "code",
       "doc",
@@ -67,6 +72,7 @@ describe("the palette is exactly the schema's block types", () => {
       "table",
       "terminal",
       "chart",
+      "card",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
@@ -98,7 +104,7 @@ describe("the palette is exactly the schema's block types", () => {
   it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table")) {
+    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);

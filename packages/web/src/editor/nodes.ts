@@ -8,8 +8,8 @@
  * !==; clamp level and indent only while rendering.
  *
  * Every text block allows comment anchors. Source blocks allow only comment;
- * the palette gate rejects other marks before binding. TableKit cells hold one
- * prose paragraph with formatting/comments; table integration refuses docLinks.
+ * the palette gate rejects other marks before binding. TableKit cells and card
+ * parts hold one prose paragraph with formatting, links and comments.
  */
 
 import { Node, Mark, mergeAttributes } from "@tiptap/core";
@@ -26,6 +26,7 @@ import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
+import { Card, CardParts } from "./card.js";
 
 /**
  * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
@@ -66,8 +67,8 @@ export function renderableIndent(raw: unknown): ListIndent {
 export const Doc = Node.create({
   name: "doc",
   topNode: true,
-  // The document is a flat sequence of blocks. Table blocks alone hold rows
-  // and cells below that top level.
+  // The document is a flat sequence of blocks. Tables and cards hold their
+  // structured prose parts below that top level.
   content: "block+",
 });
 
@@ -388,6 +389,8 @@ export const paletteExtensions = [
   TableNodes,
   Terminal,
   ChartBlock,
+  Card,
+  ...CardParts,
   CommentMark,
   ...inlineMarkExtensions,
 ];

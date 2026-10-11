@@ -190,6 +190,7 @@ describe("the registry", () => {
       "Heading 2",
       "Heading 3",
       "Quote",
+      "Card",
       "Bullet list",
       "Numbered list",
       "Code",

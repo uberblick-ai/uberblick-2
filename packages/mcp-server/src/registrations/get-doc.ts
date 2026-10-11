@@ -12,8 +12,9 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
       "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. " +
       "Missing description and TL;DR return null. Structured data is summarized by collection names and record " +
       "counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is " +
-      "canonical GFM with formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links " +
-      "expose character ranges; table cell links have no block-level ranges. Reading eligible guidance counts " +
+      "canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other " +
+      "text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links " +
+      "have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts " +
       "toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before " +
       "editing and use the returned text and rev." +
       helpPointer("get_doc"),

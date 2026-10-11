@@ -10,8 +10,8 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
-import type { BlockType } from "@uberblick/schema";
+import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
+import type { BlockType, CardPart } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
@@ -32,6 +32,46 @@ export interface CellTextTarget {
   blockType: "table";
   blockIndex: number;
   clamped: boolean;
+}
+
+/** Character offsets are scoped to one of the card's four paragraphs. */
+export interface CardTextTarget extends Omit<CellTextTarget, "kind" | "cellPos" | "row" | "column" | "blockType"> {
+  kind: "card";
+  part: CardPart;
+  blockType: "card";
+}
+
+function cardCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | null {
+  const { selection, doc } = editor.state;
+  if (!(selection instanceof TextSelection) || selection.empty) return null;
+  const { $from } = selection;
+  if ($from.depth !== 3 || $from.node(1).type.name !== "card") return null;
+  const card = $from.node(1);
+  const part = CARD_PARTS[$from.index(1)];
+  if (part === undefined || typeof card.attrs.id !== "string" || card.attrs.id === "") return null;
+  const contentStart = $from.start(3);
+  const contentEnd = contentStart + $from.parent.content.size;
+  const to = Math.min(selection.to, contentEnd);
+  if (to <= selection.from) return null;
+  let length = 0;
+  let matched = false;
+  for (const child of getBlocksFragment(ydoc).toArray()) {
+    if (!(child instanceof Y.XmlElement) || child.getAttribute("id") !== card.attrs.id) continue;
+    for (const text of cardPartTexts(child, part)) {
+      for (const op of text.toDelta() as Array<{ insert?: unknown }>) {
+        if (typeof op.insert !== "string") return null;
+        length += op.insert.length;
+      }
+    }
+    matched = true;
+    break;
+  }
+  if (!matched || length !== $from.parent.content.size) return null;
+  return {
+    kind: "card", part, blockId: card.attrs.id, start: selection.from - contentStart,
+    end: to - contentStart, text: doc.textBetween(selection.from, to), contentStart,
+    blockType: "card", blockIndex: $from.index(0), clamped: selection.to > contentEnd,
+  };
 }
 
 function cellDepth($pos: ResolvedPos): number | null {
@@ -197,7 +237,7 @@ function anchorTextLength(ydoc: Y.Doc, blockId: string): number | null {
  * Reject empty/node selections, unnamed blocks and PM/Y text mismatches.
  * Run cheap PM checks first; collapsed typing must not walk the Yjs fragment.
  */
-export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | null {
+export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | null {
   const { selection, doc } = editor.state;
   if (selection.empty) return null;
 
@@ -210,6 +250,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | Ce
 
   const type = block.type.name;
   if (type === "table") return cellCommentTargetOf(editor, ydoc);
+  if (type === "card") return cardCommentTargetOf(editor, ydoc);
   if (!(BLOCK_TYPES as readonly string[]).includes(type)) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;

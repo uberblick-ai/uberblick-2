@@ -19,7 +19,9 @@ export function registerEditBlock(server: ToolRegistrar, context: ToolContext): 
       "change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. " +
       "Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added " +
       "document targets must be known locally. Read edit_block help for mapping invariants and formatting " +
-      "limits before editing tables." +
+      "limits before editing tables. Cards take canonical container content with inline Markdown, refuse " +
+      "invalid input with invalid_card, and splice only changed parts, characters and formatting while " +
+      "preserving unchanged comment anchors. Their rev includes formatting." +
       helpPointer("edit_block"),
     outputSchema: outputSchemas.edit_block,
     inputSchema,

@@ -1,9 +1,9 @@
 import * as Y from "yjs";
-import fastDiff from "fast-diff";
 import { InvalidTableError, InvalidTableMappingError, TableMappingRequiredError } from "./errors.js";
-import { applyInlineRuns, assertInlineWritable, attributesOf, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
+import { spliceInlineText } from "./inline-edit.js";
 import { parseInline, renderInline } from "./markdown.js";
-import type { InlineMarkSet, InlineRun } from "./types.js";
+import type { InlineRun } from "./types.js";
 
 /** `null` leaves alignment at the renderer's default. */
 export type ColumnAlign = "left" | "center" | "right" | null;
@@ -213,22 +213,6 @@ export function seedNewTableCells(transaction: Y.Transaction): void {
   }
 }
 
-/** One mark set per UTF-16 character, matching Yjs and fast-diff offsets. */
-function characterMarks(runs: readonly InlineRun[]): InlineMarkSet[] {
-  return runs.flatMap((run) => Array<InlineMarkSet>(run.text.length).fill(run.marks));
-}
-
-/** Only mark keys whose projected values the caller changed. */
-function changedMarks(before: InlineMarkSet, after: InlineMarkSet): Record<string, unknown> {
-  const previous = attributesOf(before) ?? {};
-  const next = attributesOf(after) ?? {};
-  const changes: Record<string, unknown> = {};
-  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)])) {
-    if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) changes[key] = next[key] ?? null;
-  }
-  return changes;
-}
-
 /**
  * Diff only changed characters and mark keys in the old projection, preserving
  * unexpressible marks, comments and trimmed edge whitespace elsewhere.
@@ -244,45 +228,10 @@ function spliceTableCell(cell: Y.XmlElement, before: string, after: string): voi
   const oldRuns = parseTableCell(before);
   const newRuns = parseTableCell(after);
   const oldValue = inlinePlainText(oldRuns);
-  const newValue = inlinePlainText(newRuns);
-  const oldMarks = characterMarks(oldRuns);
-  const newMarks = characterMarks(newRuns);
   // Keep edge whitespace omitted by scanRow outside the projected edit range.
-  let offset = plainXmlText(text).indexOf(oldValue);
+  const offset = plainXmlText(text).indexOf(oldValue);
   if (offset < 0) throw new InvalidTableError();
-  let oldOffset = 0;
-  let newOffset = 0;
-  for (const [op, chunk] of fastDiff(oldValue, newValue)) {
-    if (op === 0) {
-      let start = 0;
-      while (start < chunk.length) {
-        const changes = changedMarks(oldMarks[oldOffset + start] ?? {}, newMarks[newOffset + start] ?? {});
-        const signature = JSON.stringify(changes);
-        let end = start + 1;
-        while (end < chunk.length && JSON.stringify(changedMarks(oldMarks[oldOffset + end] ?? {}, newMarks[newOffset + end] ?? {})) === signature) end += 1;
-        if (Object.keys(changes).length > 0) text.format(offset + start, end - start, changes);
-        start = end;
-      }
-      offset += chunk.length;
-      oldOffset += chunk.length;
-      newOffset += chunk.length;
-    } else if (op === -1) {
-      text.delete(offset, chunk.length);
-      oldOffset += chunk.length;
-    } else {
-      let start = 0;
-      while (start < chunk.length) {
-        const marks = newMarks[newOffset + start] ?? {};
-        const signature = JSON.stringify(marks);
-        let end = start + 1;
-        while (end < chunk.length && JSON.stringify(newMarks[newOffset + end] ?? {}) === signature) end += 1;
-        text.insert(offset + start, chunk.slice(start, end), attributesOf(marks) ?? {});
-        start = end;
-      }
-      offset += chunk.length;
-      newOffset += chunk.length;
-    }
-  }
+  spliceInlineText(text, oldRuns, newRuns, offset);
 }
 
 /** Create a new mapped cell's inline content only after attaching its text. */

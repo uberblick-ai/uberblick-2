@@ -7,7 +7,7 @@ import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
-import { seedNewTableCells } from "@uberblick/schema";
+import { seedNewCardParts, seedNewTableCells } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import { CaretMenuKeys } from "./caret-menu.js";
 import { Collaboration } from "./collaboration.js";
@@ -23,6 +23,7 @@ import { WireframeBlocks } from "./wireframe.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
+import { CardBlocks } from "./card.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
@@ -52,12 +53,15 @@ export interface CreateEditorOptions {
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
-  // TableKit constructs empty paragraphs without text children. Insert their
+  // Structured nodes construct empty paragraphs without text children. Insert their
   // shared text before observers/transport publish the creating transaction,
   // so replicas' first keystrokes target one existing CRDT type.
   const ydoc = options.fragment.doc;
   const seedCells = (transaction: Y.Transaction): void => {
-    if (options.canWrite?.() !== false) seedNewTableCells(transaction);
+    if (options.canWrite?.() !== false) {
+      seedNewTableCells(transaction);
+      seedNewCardParts(transaction);
+    }
   };
   const extensions: Extensions = [
     ...paletteExtensions.map((extension) => extension.name === "chart"
@@ -79,6 +83,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // TableKit supplies cell editing and navigation; the integration limits
     // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
+    CardBlocks,
     // Opening transcript source also pauses its derived playback.
     TerminalBlocks,
     ChartBlocks,
