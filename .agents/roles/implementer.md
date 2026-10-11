@@ -155,7 +155,8 @@ Continue the pull request's remote head; never rebase or force-push it.
   once, as `corrected in <sha>` or `answered: <evidence>`. Finish `review` when
   the protocol's Rounds rule requires a second round, or when a correction
   carries risk of its own; otherwise finish `integrate`.
-- **An integrator's `changes`:** fix what it names and finish `integrate`.
+- **An integrator's `changes`,** or ub-agents' `changes` for a PR GitHub reports
+  as conflicting: fix what it names and finish `integrate`.
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
