@@ -152,7 +152,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   const picker = first.getByRole("button", { name: "Edit tags" });
   await picker.focus();
   await picker.press("Enter");
-  // Six entries is under the panel's ten-entry search threshold (#958), so the
+  // Six entries is under the panel's ten-entry search threshold, so the
   // keyboard enters the list itself and walks it to the entry just created.
   await expect(first.getByRole("searchbox", { name: "Search tags" })).toHaveCount(
     0,

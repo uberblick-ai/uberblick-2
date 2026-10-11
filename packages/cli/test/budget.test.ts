@@ -7,7 +7,7 @@
  * right. In-process callers pass an environment explicitly, and that is where
  * the two come apart: `bridgeConfig` replaces both deadlines with its own
  * longer ones, so a cap applied only by `resolveMcpConfig` does not survive the
- * bridge (#524, F2).
+ * bridge.
  */
 
 import { describe, expect, it } from "vitest";

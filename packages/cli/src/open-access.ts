@@ -1,4 +1,3 @@
-/** Live access management for the one workspace this `ub open` serves. */
 import type { IncomingMessage } from "node:http";
 import { readDeviceLogin, ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "@uberblick/mcp-server/management-client";

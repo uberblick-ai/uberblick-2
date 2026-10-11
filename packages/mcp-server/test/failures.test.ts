@@ -449,8 +449,7 @@ describe("the failure contract", () => {
       ).payload,
     );
 
-    // No data tool is introduced in this slice. Exercise the shared operation
-    // errors through the same adapter a later dedicated tool will use.
+    // Exercise shared data-operation errors through the tool failure adapter.
     const dataDoc = rig.instance.replicas.replica(doc.uuid).doc;
     const directory = rig.instance.replicas.directory().doc;
     const dataSchema = {
@@ -714,7 +713,7 @@ describe("the failure contract", () => {
     const malformed = [
       // A field whose value is the wrong shape.
       { uuid: "not-a-uuid", block_id: "b", old_text: "", new_text: "" },
-      // And a field nobody declared, which used to be dropped in silence.
+      // An undeclared field must be refused rather than silently dropped.
       {
         uuid: doc.uuid,
         block_id: doc.blockId,

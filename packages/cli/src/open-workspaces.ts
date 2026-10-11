@@ -1,4 +1,3 @@
-/** Frozen browser destinations and the serving replicas this foreground owns. */
 import { statSync } from "node:fs";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
@@ -27,7 +26,7 @@ function isFile(path: string): boolean {
   catch { return false; }
 }
 
-/** Only an existing replica with explicit machine knowledge is a destination. */
+/** Freeze destinations to existing replicas with explicit machine knowledge. */
 export function browserWorkspaces(
   startup: ProjectBinding,
   startupConfig: McpConfig,

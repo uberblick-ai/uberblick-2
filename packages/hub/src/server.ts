@@ -1,46 +1,3 @@
-/**
- * The sync hub.
- *
- * A Hocuspocus server with SQLite persistence and claims-token auth. One Y.Doc
- * per room; a room is `<workspaceId>/<docUuid>`, with a workspace's directory
- * doc at `<workspaceId>/_directory`.
- *
- * Two things here are load-bearing beyond "start a websocket server":
- *
- * 1. **Auth is scoped to a workspace.** `onAuthenticate` verifies the token,
- *    then refuses any room outside `claims.workspace`. Tokens arrive in the
- *    Hocuspocus auth message; a token in the URL query string is rejected
- *    outright, because query strings end up in access logs and proxy traces.
- *    A refusal is one `hub.auth.rejected` line naming the peer, a stable cause
- *    and whatever the token said about itself; the client still learns only
- *    that it was refused.
- *
- * 2. **The flush is an operation, not a side effect.** Hocuspocus debounces
- *    `onStoreDocument` (2s by default), so a document lives in memory for a
- *    while before it is durable. Its `destroy()` does fire those pending stores
- *    and wait for the documents to unload, and it installs signal handlers that
- *    await that — but only as part of shutting the whole server down, and
- *    `flushPendingStores()` (the piece that fires them) returns `void`, so
- *    nothing can await the writes on their own. "Kill the hub loses nothing" is
- *    an acceptance criterion, so {@link Hub.flush} makes that step explicit,
- *    awaitable and testable without a shutdown, and `stop()` and the signal
- *    handler in `main.ts` run it first.
- *
- * 3. **Only the hub can tell whether a store landed.** `storeDocumentHooks()`
- *    catches a failing store, logs it, keeps the document in memory and
- *    *resolves*, so completion is not durability: a hub whose database went
- *    away would flush, stop and exit 0 having written nothing.
- *    {@link HubDatabase} records the failure where it is still an exception,
- *    and `flush()`/`stop()` reject on it — `stop()` after the teardown as well
- *    as before, because the teardown stores too. Likewise, storage is opened
- *    before the socket, here rather than in a Hocuspocus hook nobody awaits:
- *    a hub that is listening is a hub that can persist.
- *
- * Persistence is {@link HubDatabase} — the hub's own `node:sqlite` adapter, one
- * row per document holding `Y.encodeStateAsUpdate(doc)`, hydrated with
- * `Y.applyUpdate`. Yjs v1, matching the one-encoding-everywhere invariant.
- */
-
 import type {
   Extension,
   Hocuspocus,
@@ -88,38 +45,15 @@ export interface Hub {
   readonly databasePath: string;
   readonly server: Server<HubContext>;
   readonly hocuspocus: Hocuspocus<HubContext>;
-  /**
-   * Execute every pending debounced `onStoreDocument` now and await it, so
-   * that everything currently in memory is on disk when this resolves.
-   *
-   * @throws when any store has failed — resolving would claim a durability the
-   * hub does not have.
-   */
+  /** Await pending stores until documents are on disk; rejects if any store has failed. */
   flush(): Promise<void>;
   /**
-   * Quiesce every client websocket and its rooms, flush, unload documents, and
-   * close the database. Rejects unless the hub's state is known to be on disk
-   * when it returns — a failed store, before or during teardown, or a teardown
-   * that did not finish inside the shutdown timeout. The resources are released
-   * either way, so a caller can exit on the rejection rather than because of it.
-   *
-   * **What a client sees.** A socket holding at least one room is sent a `1001`
-   * close frame and reports itself disconnected within ~5–10ms, which is what
-   * makes an in-process stop as legible as a killed process — see
-   * {@link openSockets} for why that is not what Hocuspocus does on its own. A
-   * client whose upgrade is in flight, or accepted but not yet upgraded, when
-   * `stop()` is called is refused within ~5ms by the `httpServer.close()` that
-   * runs first, so it never lands on a dead socket either.
-   *
-   * **The one exception**, a boundary rather than a bug: a socket holding *no*
-   * room — never authenticated, token refused, every room detached — is sent no
-   * frame, because Hocuspocus exposes a socket only through
-   * `Connection.webSocket`. Hocuspocus' own connection timeout ends it instead,
-   * with code `4408`, no later than about 60s after it connected; the port is
-   * released immediately either way. Reaching those sockets would mean tracking
-   * raw ones from `onUpgrade`, where a socket can only be destroyed and not
-   * closed — trading a 60s wait for an abrupt reset, on a connection that by
-   * definition holds no client state — so it is not done.
+   * Quiesce sockets/rooms, flush, unload, then close the database; release resources
+   * even when a store fails or teardown times out, and reject on either failure.
+   * Room sockets receive 1001; pending upgrades are refused and the port releases
+   * immediately. Roomless sockets are unreachable through Connection.webSocket:
+   * no close frame is sent, so Hocuspocus ends them with 4408 within about 60s
+   * of connection. Tracking raw upgrade sockets would permit only abrupt resets.
    */
   stop(): Promise<void>;
 }
@@ -165,20 +99,12 @@ function handleUnconfiguredAuthRequest(request: IncomingMessage, response: Serve
   return true;
 }
 
-/** Query parameters that would carry a token. Their presence is a rejection. */
+/** Reject even empty token query parameters: URLs reach access logs and proxy traces. */
 export const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 /**
- * The header the upgrade hook stamps the direct peer's address into, and the
- * only way `onAuthenticate` can learn it.
- *
- * Hocuspocus hands the auth hook a web-standard `Request` rebuilt from the
- * upgrade request's headers; the TCP socket, and with it `remoteAddress`, is
- * not on it. `onUpgrade` is the last hook that still holds the Node request, so
- * that is where the address is written. Stamped unconditionally: a client that
- * sends this header itself has its value overwritten before anything reads it.
- *
- * Exported for the tests, which build the headers `onAuthenticate` would see.
+ * onAuthenticate receives headers without the TCP socket. Stamp the address
+ * during upgrade, overwriting client-supplied values before authentication.
  */
 export const PEER_ADDRESS_HEADER = "x-uberblick-peer-address";
 
@@ -196,12 +122,7 @@ export interface PeerAddress {
   proxied: boolean;
 }
 
-/**
- * Loopback, private, or link-local: an address no client reaches this hub from.
- *
- * Node reports an IPv4 peer on a dual-stack socket as `::ffff:127.0.0.1`, so
- * the mapped form is unwrapped first.
- */
+/** Unwrap IPv4-mapped IPv6 before recognizing loopback, private and link-local peers. */
 function isLocalProxy(address: string): boolean {
   const ip = address.startsWith("::ffff:") ? address.slice(7) : address;
   const octets = ip.split(".");
@@ -221,36 +142,12 @@ function isLocalProxy(address: string): boolean {
 }
 
 /**
- * The address to name in a log line: the socket's peer, or — when that peer is
- * the deployment's own proxy — the address the proxy observed.
- *
- * Exported for the tests, which cannot open a socket from an untrusted address.
- *
- * **Which peers may speak for others.** Only one that is not globally routable.
- * In the Compose deployment the hub publishes no port and Caddy reaches it over
- * the bridge network, so a private address on that socket is the proxy; a
- * client dialling the hub directly arrives from the tailnet (100.64/10,
- * deliberately not in the list) and speaks only for itself.
- *
- * **Which hop of `X-Forwarded-For`.** The *last* one — the address the proxy
- * itself saw. With this repo's Caddyfile, which configures no `trusted_proxies`,
- * Caddy discards whatever the client put in that header and writes the single
- * peer it observed, so the header has one hop today and both readings coincide.
- * The last hop is taken because it stays correct if `trusted_proxies` is ever
- * configured: Caddy would then preserve the client's entries and append its
- * own, making the conventional leftmost entry client-controlled. Two chained
- * proxies would make it the inner proxy's address, which is the reason the
- * deployment stays one hop deep.
- *
- * **What this address is for.** A log field, and never an auth input: nothing
- * downstream branches on it, so a wrong `peer` misleads a reader rather than
- * admitting a connection. That matters because the trust rule is about the
- * *shape* of the direct peer, not about a configured proxy — on a loopback-bound
- * `mise run hub` any local client can send `X-Forwarded-For` and be logged with
- * `proxied: true`, and `proxied: true` on a hub that has no proxy in front of it
- * is exactly the tell. In the Compose deployment it cannot happen at all: the
- * hub publishes no port, so Caddy on the bridge network is the only thing that
- * can open that socket.
+ * Log-only attribution, never authentication. Trust forwarded addresses only
+ * from local/private/link-local peers; tailnet 100.64/10 speaks for itself.
+ * Take the last hop appended by the proxy, since earlier hops may be client-controlled.
+ * This assumes one proxy: Compose exposes no hub port and only Caddy reaches
+ * it over the bridge. On a direct loopback bind any local client can supply a
+ * forwarded address, so proxied:true without a deployed proxy is untrusted attribution.
  */
 export function resolvePeer(headers: Headers): PeerAddress {
   const direct = headers.get(PEER_ADDRESS_HEADER) ?? "";
@@ -274,10 +171,7 @@ type RejectionCause =
   | "workspace-mismatch";
 
 /**
- * The token's own account of itself on a rejection line: `typ` and `sub` when
- * the payload was readable at all, and the fact that it was not otherwise.
- * Unverified by construction — the token did not verify — and never the token,
- * its signature or the secret.
+ * Unverified typ/sub for diagnostics only; never log the token, signature or secret.
  */
 function tokenFields(identity: TokenIdentity | null): Record<string, unknown> {
   return identity === null
@@ -301,13 +195,9 @@ export type RoomAuthenticator = (
 ) => Promise<HubContext>;
 
 /**
- * Build the hub's room-authentication boundary for any Hocuspocus server.
- *
- * `ub open` supplies keys scoped to its served workspace-local stores; the
- * ordinary hub uses one root key and may admit any workspace whose room and
- * signed claim agree. Everything else — query-token refusal,
- * protocol envelope, signature and lifetime checks, read-only scope and log
- * vocabulary — is deliberately one implementation.
+ * Shared query, protocol, signature, lifetime, read-only and logging boundary.
+ * ub open supplies per-workspace keys; the ordinary hub's root key admits only
+ * rooms whose workspace matches the signed claim.
  */
 export async function createRoomAuthenticator(options: {
   protocolVersion: number;
@@ -335,9 +225,7 @@ export async function createRoomAuthenticator(options: {
     requestParameters,
     connectionConfig,
   }) => {
-    // Every rejection names the peer. A rejection nobody can attribute is
-    // the operational problem this event exists to solve: several machines,
-    // browser tabs and long-lived agent sessions present tokens to one server.
+    // Attribute each rejection to its peer without exposing token contents.
     const peer = resolvePeer(requestHeaders);
     const rejected = (
       cause: RejectionCause,
@@ -364,10 +252,7 @@ export async function createRoomAuthenticator(options: {
       );
     }
 
-    // The version exchange comes before anything about the token is believed,
-    // and before JSON parsing, which keeps MAX_TOKEN_LENGTH's promise that an
-    // unauthenticated caller cannot choose how much work the server does. A
-    // bare token is a flag-day mismatch too.
+    // Bound the envelope before parsing; reject skew/bare tokens before trusting claims.
     const envelope = readAuthEnvelope(token);
     if (
       envelope === null ||
@@ -449,14 +334,8 @@ export async function createRoomAuthenticator(options: {
 }
 
 /**
- * The workspace a room belongs to, or `null` when the name is not a room.
- *
- * Schema owns what a room name is — exactly two segments, the first a workspace
- * uuid — and this is the one place the hub asks. A name that is not a room has
- * no workspace to match a token claim against, so it fails authentication with
- * the workspace mismatch rather than opening a document keyed by a name nobody
- * can name again. Room names are also SQLite keys, so the strictness earns its
- * keep twice.
+ * Schema owns two-segment room names with a bare workspace UUID.
+ * Reject malformed names before they can become authenticated rooms or SQLite keys.
  */
 function roomWorkspace(room: string): string | null {
   try {
@@ -467,19 +346,9 @@ function roomWorkspace(room: string): string | null {
 }
 
 /**
- * Execute all pending debounced document stores and await them.
- *
- * Hocuspocus ships `flushPendingStores()`, which fires the same debounced
- * callbacks but returns `void` — fine inside its own shutdown, which then waits
- * for the documents to unload, useless when you want to know the writes landed
- * without tearing the server down. `storeDocumentHooks(document, payload,
- * true)` re-enters the debouncer with a 0ms delay, which cancels the pending
- * timer, waits for any in-flight store of that document, runs the store hooks
- * under the document's save mutex, and hands back a promise.
- *
- * Documents with nothing pending are skipped: Hocuspocus already stores a
- * document when its last client disconnects, so re-storing every loaded
- * document on every flush would write rows for no reason.
+ * Awaitable counterpart to Hocuspocus' void flushPendingStores. Immediate stores
+ * cancel pending timers, wait for in-flight writes and use the document save mutex.
+ * Skip loading/clean documents; disconnect already stores them when needed.
  */
 async function flushPendingStores(
   hocuspocus: Hocuspocus<HubContext>,
@@ -522,22 +391,9 @@ async function flushPendingStores(
 const GOING_AWAY = 1001;
 
 /**
- * The websockets the hub is currently holding, one entry per socket.
- *
- * Hocuspocus' `closeConnections()` closes *rooms*: it sends each connection an
- * in-band close message and drops it from its document, and leaves the socket
- * underneath open. A client therefore hears nothing it can act on when a hub
- * stops in-process — every room dead, no close frame, nothing that will ever
- * offer a token again — until its own dead-connection timer fires some thirty
- * seconds later, where a `SIGKILL`ed hub is noticed in milliseconds. Sending
- * the frame is what makes `stop()`'s "quiesce connections" true for the client
- * as well as for the server.
- *
- * The sockets are read back from the documents, so this must run *before* the
- * rooms are closed: closing one removes the connection that names its socket.
- * One client on three documents is three connections over one socket, hence the
- * Set. A socket holding no room is not reachable here at all; {@link Hub.stop}
- * states what that costs.
+ * Collect before closing rooms, which removes the connections exposing sockets.
+ * Deduplicate multiplexed rooms; Hocuspocus closes rooms without a websocket
+ * close frame, so the hub closes these sockets itself. Roomless sockets remain unreachable.
  */
 function openSockets(hocuspocus: Hocuspocus<HubContext>): Set<WebSocketLike> {
   const sockets = new Set<WebSocketLike>();
@@ -557,8 +413,7 @@ function closeSockets(sockets: Set<WebSocketLike>, log: HubLogger): void {
       socket.close(GOING_AWAY, "hub shutting down");
       closed += 1;
     } catch (error) {
-      // A socket that went away between the two steps is already gone, and
-      // releasing one is never the reason a shutdown reports failure.
+      // A concurrently closed socket must not turn teardown into a failure.
       log({ event: "hub.stop.socketCloseFailed", error: String(error) });
     }
   }
@@ -587,13 +442,8 @@ async function withTimeout(
 }
 
 /**
- * Bind the socket, with a bind failure as a rejection.
- *
- * `Server.listen()` resolves from the HTTP server's `listening` callback and
- * never subscribes to its `error` event, so a failed bind — a second hub on the
- * same port, `EADDRINUSE` — takes the process down with an uncaught exception
- * while the returned promise stays pending forever. The listener is
- * startup-only: once the hub is up, socket errors are Hocuspocus' business.
+ * Server.listen does not watch HTTP errors. Reject bind failures instead of
+ * leaving a pending promise and uncaught error; remove this listener after startup.
  */
 async function listen(
   server: Server<HubContext>,
@@ -612,14 +462,8 @@ async function listen(
 }
 
 /**
- * Build and start a hub.
- *
- * Resolves once the database is open *and* the server is listening, so
- * `hub.port` is the real bound port even for `port: 0` and a resolved hub is a
- * hub that can persist. Rejects — leaving nothing open behind it — when the
- * database cannot be opened or the port cannot be bound. Installs no signal
- * handlers and mutates no process state — `main.ts` owns the process, this owns
- * a server — which is what makes it usable from tests.
+ * Resolve only with an open database and bound port; release both on startup failure.
+ * Signal handlers belong to main.ts so this factory stays embeddable.
  */
 export async function createHub(config: HubConfig, options: {
   /** Test seam that can only make loopback admission stricter. */
@@ -635,11 +479,9 @@ export async function createHub(config: HubConfig, options: {
   }
 
   const log = config.log ?? stderrLogger;
-  // The build's, unless a test moved one end to observe a skew. See HubConfig.
+  // Production uses the build version; tests can override one end to observe skew.
   const protocolVersion = config.protocolVersion ?? SYNC_PROTOCOL_VERSION;
-  // Held to the range the wire can carry: the refusal sentinel is the only way
-  // a client learns this number, and it can only spell 1..999999. A hub outside
-  // it would refuse every client with a reason none of them could read.
+  // Versions outside 1..999999 cannot be represented by the refusal sentinel.
   if (!isProtocolVersion(protocolVersion)) {
     throw new Error(
       `createHub: protocolVersion must be an integer between 1 and 999999, got ${protocolVersion}`,
@@ -656,8 +498,7 @@ export async function createHub(config: HubConfig, options: {
   }
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
-  // Sticky on purpose: once a store has failed, the hub cannot claim that what
-  // it holds is on disk, so every later flush and the shutdown must say so.
+  // Hocuspocus swallows store failures; retain the first so flush/stop cannot claim durability.
   let storeFailure: { error: unknown } | undefined;
   const database = new HubDatabase(databasePath, (error) => {
     storeFailure ??= { error };
@@ -689,9 +530,7 @@ export async function createHub(config: HubConfig, options: {
   }
 
   if (isEphemeralDatabase(databasePath)) {
-    // The extension said this with console.warn (plus a blank line on stdout);
-    // it is one structured stderr line now, and still worth saying: nothing
-    // written to an anonymous database survives the handle being closed.
+    // Anonymous databases lose all writes when this handle closes.
     log({ event: "hub.database.ephemeral", database: databasePath });
   }
 
@@ -706,16 +545,11 @@ export async function createHub(config: HubConfig, options: {
   const server = new Server<HubContext>({
     port: config.port ?? DEFAULT_PORT,
     address,
-    // Hocuspocus would otherwise add its own SIGINT/SIGQUIT/SIGTERM handlers
-    // here. A factory must not touch process state: every hub a test starts
-    // would hijack the runner's signals. main.ts wires them instead.
+    // Leave process signals to main.ts; embedded/test hubs must not install handlers.
     stopOnSignals: false,
     // No start banner on stdout; startup is one structured line on stderr.
     quiet: true,
-    // The hub states its own ceiling rather than inheriting a library default
-    // that an upgrade could move under it. See MAX_PENDING_DOCUMENTS for why
-    // this is a guard and not a capacity knob, and why its two siblings stay
-    // at their defaults.
+    // Own the auth-in-flight ceiling across library upgrades; see MAX_PENDING_DOCUMENTS.
     maxPendingDocuments: config.maxPendingDocuments ?? MAX_PENDING_DOCUMENTS,
     ...(config.debounce === undefined ? {} : { debounce: config.debounce }),
     ...(config.maxDebounce === undefined
@@ -724,10 +558,8 @@ export async function createHub(config: HubConfig, options: {
     extensions: [database, ...(extension?.extensions ?? [])],
 
     /**
-     * Stamp the direct peer's address onto the upgrade request, the one place
-     * it is still reachable. See {@link PEER_ADDRESS_HEADER}. It must not throw:
-     * Hocuspocus rethrows out of an async `upgrade` listener, which nothing
-     * catches.
+     * Stamp the direct peer before losing the socket. Never throw: Hocuspocus
+     * rethrows upgrade errors from an async listener with no catch.
      */
     async onUpgrade({ request }) {
       request.headers[PEER_ADDRESS_HEADER] = request.socket?.remoteAddress ?? "";
@@ -751,24 +583,10 @@ export async function createHub(config: HubConfig, options: {
     },
 
     /**
-     * Connection lifecycle, per room and not per socket: Hocuspocus runs these
-     * hooks once per document a client attaches to, so one client on three
-     * documents produces three of each event. Hence the names and the `room`
-     * field — and `socketId`, which is what ties a room's events back to one
-     * client and makes a reconnect legible (same room, new socket).
-     *
-     * `connected` rather than `onConnect` because only the post-handshake hook
-     * has the token claims in its context. The close is registered on the
-     * connection rather than read from the `onDisconnect` hook because
-     * Hocuspocus discards the websocket close event when it builds that hook's
-     * payload; `Connection.onClose` still carries it.
-     *
-     * A close the hub initiated names itself (`4205 Reset Connection` on
-     * shutdown, the timeout code when a client stops answering). A client
-     * going away does not: it arrives as `1006` with an empty reason, or with
-     * no event at all when the hub noticed the dead socket on its next write
-     * before the close frame got here. Both mean the same thing, so they are
-     * logged under one name instead of as an empty field.
+     * These hooks run per room; socketId groups multiplexed rooms and changes on reconnect.
+     * connected has verified claims; Connection.onClose retains the close event
+     * that onDisconnect discards. Empty/absent client close reasons share client-gone;
+     * hub resets/timeouts keep their supplied code/reason.
      */
     async connected({ documentName, context, socketId, connection }) {
       log({
@@ -796,8 +614,7 @@ export async function createHub(config: HubConfig, options: {
     await extension?.start();
     hocuspocus = await listen(server);
   } catch (error) {
-    // Half a hub is worse than none: release the socket and the handle so the
-    // caller sees a rejection and nothing else.
+    // Startup rejection must leave no socket, database or identity task running.
     await extension?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
@@ -835,23 +652,16 @@ export async function createHub(config: HubConfig, options: {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
     await extension?.stop();
-    // Collected before the rooms are closed, because closing one removes the
-    // connection that names its socket. See openSockets.
+    // Closing rooms removes the connections exposing their sockets.
     const sockets = openSockets(hocuspocus);
 
-    // Quiesce first. Begin the websocket close before closing its rooms, so
-    // Hocuspocus' per-room Close messages cannot provoke replies or another
-    // admission wave on the socket being stopped. Closing the rooms then makes
-    // the flush final: while clients can still send updates — or connect — a
-    // document can go dirty again after it was stored, and the write that would
-    // have caught up happens during the teardown, where a failure is
-    // Hocuspocus' to swallow.
+    // Stop admissions and begin socket closes before room Close messages can provoke
+    // replies/reattachment. Quiesce before flushing so no update can dirty a stored document.
     server.httpServer.close();
     closeSockets(sockets, log);
     hocuspocus.closeConnections();
 
-    // A failed flush must not skip the teardown — the socket and the handle are
-    // released either way — but it is what stop() reports.
+    // Flush failure must still release resources, then reject stop().
     let failure: unknown;
     try {
       await flush();
@@ -859,10 +669,7 @@ export async function createHub(config: HubConfig, options: {
       failure = error;
     }
 
-    // destroy() closes every connection and waits for the documents to unload.
-    // It can only wait forever if a document refuses to unload — which is
-    // exactly what a failing store makes it do — so bound it rather than
-    // hanging a shutdown, and remember that the wait did not finish.
+    // A failing store can prevent document unload forever; bound destroy and retain the timeout.
     let timedOut = false;
     await withTimeout(server.destroy(), shutdownTimeoutMs, () => {
       timedOut = true;
@@ -873,18 +680,12 @@ export async function createHub(config: HubConfig, options: {
       });
     });
 
-    // Plain HTTP keep-alive connections only: Node stops tracking a socket the
-    // moment it is upgraded, so this reaches no websocket, and the port is
-    // released by `httpServer.close()` above either way. It is kept because a
-    // request that never upgraded is otherwise free to hold its socket open.
+    // End HTTP keep-alives; Node no longer tracks upgraded websockets here.
     server.httpServer.closeAllConnections?.();
 
     closeDatabase();
 
-    // Teardown stores too: it fires the pending stores of the documents it
-    // unloads, and Hocuspocus swallows a failure there as it does everywhere
-    // else. Only re-reading the sticky failure after the teardown can tell
-    // whether those writes landed.
+    // Teardown stores too, swallowing failures; recheck the sticky error after it finishes.
     failure ??= storeError();
     if (failure === undefined && timedOut) {
       failure = new Error(

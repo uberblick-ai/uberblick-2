@@ -22,8 +22,7 @@ export async function manageRequest(
   options: { signal?: AbortSignal; maxResponseBytes?: number } = {},
 ): Promise<ManagementReply> {
   options.signal?.throwIfAborted();
-  // A credential-free request can distinguish missing sign-in from an older or
-  // shared-secret hub. It has no authority to read or mutate management state.
+  // Credential-free requests diagnose sign-in/protocol state without management authority.
   const token = login === null ? "" : await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
     ...action, kid: login.credential.record.id, lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,
   });
@@ -71,11 +70,7 @@ function member(value: unknown): Record<string, unknown> {
     githubUsername: value.githubUsername, role: value.role };
 }
 
-/**
- * A local browser bridge projects only the delivered contract. Upstream extra
- * fields and messages never enter its responses, including otherwise-valid
- * responses with credential material beside the public data.
- */
+/** Project only public contract fields; upstream extras and messages may contain credentials. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function sanitizeManagementReply(
   action: ManagementAction,

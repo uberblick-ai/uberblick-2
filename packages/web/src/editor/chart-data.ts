@@ -1,3 +1,4 @@
+// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /** A chart derives a bounded view from the shared reader; it never repairs data. */
 import { compareCodePoints } from "@uberblick/schema";
 import type { DocData, JSONObject } from "@uberblick/schema";
@@ -13,6 +14,7 @@ export interface ChartConfig {
   x: { field: string; type: "number" | "date"; label?: string };
   y: ChartSeriesMapping[];
   title?: string;
+  limit?: number;
   missing: "gap" | "connect";
 }
 export interface ChartPoint { x: number; y: number | null; id: string }
@@ -53,7 +55,7 @@ export function parseChartConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid chart configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "title", "missing"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "title", "missing", "limit"]) ||
       value.version !== 1 || value.type !== "line" || !name(value.collection) ||
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
@@ -61,8 +63,9 @@ export function parseChartConfig(source: string):
       !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit"]) &&
         name(series.field) && optionalText(series, "label") && optionalText(series, "unit")) ||
       !optionalText(value, "title") ||
+      (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "missing") && value.missing !== "gap" && value.missing !== "connect")) {
-    return { ok: false, message: "Invalid chart configuration: expected a version 1 line mapping with one x field and one to eight y series; unknown keys are not supported." };
+    return { ok: false, message: "Invalid chart configuration: expected a version 1 line mapping with one x field, one to eight y series and optional positive integer limit; unknown keys are not supported." };
   }
   // Defaulting is a detached view value, never a write to the source block.
   return { ok: true, config: { ...value, missing: value.missing ?? "gap" } as ChartConfig };
@@ -72,7 +75,7 @@ const DAY = 86_400_000;
 // RFC 3339's complete-date/date-time grammar, with an explicit timezone. Native
 // Date parsing alone accepts nonstandard strings and normalizes impossible days.
 const DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([Zz]|[+-]\d{2}:\d{2}))?$/;
-// Announced UTC leap-second boundaries, from IERS Bulletin 72 (July 2026):
+// UTC leap-second boundaries; keep the authoritative IERS list:
 // https://hpiers.obspm.fr/iers/bul/bulc/Leap_Second.dat
 const LEAP_SECOND_BOUNDARIES = new Set([
   "1972-07-01", "1973-01-01", "1974-01-01", "1975-01-01", "1976-01-01", "1977-01-01", "1978-01-01",
@@ -137,13 +140,16 @@ export function projectChart(config: ChartConfig, data: DocData | null): ChartPr
     if (x === null) { diagnostics.invalidX += 1; continue; }
     const values = config.y.map((series) => own(record.value as JSONObject, series.field));
     const hasY = values.some(numeric);
-    if (!hasY) diagnostics.noNumericY += 1;
     rows.push({ id: record.id, x, values, hasY });
   }
   rows.sort((a, b) => a.x - b.x || compareCodePoints(a.id, b.id));
-  const excluded = Math.max(0, rows.length - CHART_RECORD_LIMIT);
-  diagnostics.limited = rows.slice(0, excluded).filter((row) => row.hasY).length;
+  const limit = Math.min(config.limit ?? CHART_RECORD_LIMIT, CHART_RECORD_LIMIT);
+  // Larger author limits retain the system cap's notice and omission diagnostics.
+  const authorWindow = config.limit !== undefined && config.limit <= CHART_RECORD_LIMIT;
+  const excluded = Math.max(0, rows.length - limit);
   const selected = rows.slice(excluded);
+  diagnostics.noNumericY = (authorWindow ? selected : rows).filter((row) => !row.hasY).length;
+  diagnostics.limited = authorWindow ? 0 : rows.slice(0, excluded).filter((row) => row.hasY).length;
   const series: ChartSeries[] = config.y.map((mapping, index) => ({
     field: mapping.field,
     label: mapping.label || mapping.field,
@@ -162,8 +168,8 @@ export function projectChart(config: ChartConfig, data: DocData | null): ChartPr
     }),
   }));
   const plotted = selected.filter((row) => row.hasY);
-  const notice = excluded > 0 ? { notice: `Showing the latest 5,000 of ${rows.length} records` } : {};
-  const notPlotted = collection.records.length - plotted.length;
+  const notice = excluded > 0 ? { notice: `Showing the latest ${limit === CHART_RECORD_LIMIT ? "5,000" : limit} of ${rows.length} records` } : {};
+  const notPlotted = collection.records.length - plotted.length - (authorWindow ? excluded : 0);
   const first = plotted[0];
   const last = plotted[plotted.length - 1];
   if (first === undefined || last === undefined) return {

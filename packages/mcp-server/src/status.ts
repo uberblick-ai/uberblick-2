@@ -1,10 +1,6 @@
 /**
- * Status readings derived from one full local replica.
- *
- * The `sync_status` MCP tool and `ub status` share {@link SyncStatus}; `ub open`
- * exposes the smaller {@link ServingSyncStatus} its browser consumers need.
- * Neither shape turns a hub acknowledgement into a claim that the hub owns the
- * document.
+ * CLI and MCP share SyncStatus; browser consumers use ServingSyncStatus.
+ * Both report hub acknowledgement without claiming durable hub storage.
  */
 
 import type { UberblickMcpEngine } from "./engine.js";
@@ -69,12 +65,8 @@ function unavailableServingStatus(
 }
 
 /**
- * Read the full replica's acknowledgement state without waiting on the hub.
- *
- * A provider's quiet flag is necessary but not sufficient: another process
- * can append, apply and acknowledge a change, then release the one shared
- * pending marker while this replica is still behind. A true reading therefore
- * also requires this replica to cover the store cut sampled with that marker.
+ * Require both a quiet provider and coverage of the store cut sampled with its
+ * pending marker: another process can clear that marker while this one lags.
  */
 export function collectReplicaSyncState(replicas: Replicas): {
   hub: HubState;
@@ -135,11 +127,7 @@ export function collectServingSyncStatus(
 }
 
 /**
- * Settle, then read.
- *
- * `requireHealthy: false` because diagnostics must still answer when persistence
- * has failed — that is exactly when someone needs to know why everything else
- * stopped.
+ * Diagnostics must still settle and answer after persistence has failed.
  */
 export async function collectSyncStatus(
   replicas: Replicas,

@@ -1,5 +1,5 @@
 /**
- * The document page's human-facing TL;DR (#534).
+ * The document page's human-facing TL;DR.
  *
  * This pins the browser-owned write boundary: the callout is absent when the
  * value is absent, inline and document-actions editing share the same form,

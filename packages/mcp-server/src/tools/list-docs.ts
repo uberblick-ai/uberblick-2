@@ -51,8 +51,7 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
       .map((entry) => ({
       ...entry,
       tags: readDirectoryTags(entry, catalog),
-      // Always present, null when absent: an agent scanning this listing
-      // should read one shape, not test for a missing key.
+      // Keep absent descriptions explicit as null.
       description: entry.description ?? null,
       pinned: pinned.has(entry.uuid),
     })),

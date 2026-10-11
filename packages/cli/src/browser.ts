@@ -10,7 +10,6 @@ function trimmed(value: string | undefined): string | null {
   return text === undefined || text === "" ? null : text;
 }
 
-/** The command that opens a URL on this platform, or null when asked not to. */
 export function browserCommand(
   url: string,
   env: NodeJS.ProcessEnv,
@@ -31,18 +30,12 @@ export function browserCommand(
   return { command: "xdg-open", args: [url] };
 }
 
-/**
- * Hand the URL to a browser, and carry on regardless.
- *
- * A machine with no `xdg-open` is a headless one, and the URL is already on
- * stdout — failing the command over it would be refusing to serve because
- * nobody could be shown the door.
- */
 export function openBrowser(url: string, env: NodeJS.ProcessEnv, io: Io): void {
   const opener = browserCommand(url, env);
   if (opener === null) {
     return;
   }
+  // Pass the URL as one argument without a shell; the detached opener may outlive ub.
   const child = spawn(opener.command, opener.args, {
     stdio: "ignore",
     detached: true,

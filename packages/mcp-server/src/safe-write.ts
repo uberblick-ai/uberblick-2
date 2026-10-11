@@ -1,27 +1,7 @@
 /**
- * How `ub` writes the files it owns.
- *
- * Three of them carry configuration this command is the only writer of, and one
- * of those carries the hub signing secret. That makes three properties
- * non-negotiable, and none of them is what `writeFileSync` gives you:
- *
- * **Owner-only from birth.** A file that already exists at 0644 keeps that mode
- * through a `writeFileSync`, because `mode:` applies only on creation. Nothing
- * here ever writes into a file whose mode it has not already set: the contents
- * are written to a fresh 0600 file and that file is moved into place.
- *
- * **Never through a symlink.** The path is classified through a descriptor
- * opened with `O_NOFOLLOW`, so a symlink is a refusal rather than a secret
- * written into whatever somebody pointed the name at. Publication is `link` or
- * `rename`, which replace a name rather than following it — so even a symlink
- * swapped in after the check cannot receive anything.
- *
- * **Whole, or not at all.** `ub status`, an MCP client and mise all read these
- * files, possibly while this command writes them, and half a file is a parse
- * error rather than an old value. Every publication is one atomic step.
- *
- * Reads deliberately stay path-based. Following a symlink to read a file you own
- * is not the hazard; writing one is.
+ * Publish configuration atomically from fresh owner-only files. Writers refuse
+ * symlinks; link/rename publication replaces names without following them, even
+ * if a symlink appears after classification. Reads may still follow symlinks.
  */
 
 import {
@@ -42,8 +22,7 @@ import { basename, dirname, join } from "node:path";
 const OWNER_ONLY = 0o600;
 
 /**
- * An errno in brackets, or nothing. What a diagnostic is allowed to say about a
- * file it could not use: the path, and why the kernel said no. Never contents.
+ * Diagnostics may expose paths and errno, never file contents.
  */
 function errno(error: unknown): string {
   const code = (error as NodeJS.ErrnoException).code;
@@ -62,11 +41,7 @@ export type Target =
   | { kind: "refused"; because: string };
 
 /**
- * Classify a path through one descriptor, opened without following symlinks.
- *
- * The fd is closed again immediately: it exists so that "is this a regular
- * file?" is answered about an inode rather than about a name that could be
- * something else by the time anyone looks twice.
+ * Classify one opened inode with `O_NOFOLLOW`, avoiding path-check races.
  */
 export function classify(path: string): Target {
   let fd: number;
@@ -76,9 +51,7 @@ export function classify(path: string): Target {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "absent" };
     }
-    // ELOOP is what `O_NOFOLLOW` reports for a symlink, and it earns its own
-    // message: "permission denied" and "you have a symlink here" lead to
-    // completely different fixes.
+    // Distinguish symlink refusal from permission failures for recovery.
     if ((error as NodeJS.ErrnoException).code === "ELOOP") {
       return { kind: "refused", because: "it is a symbolic link" };
     }
@@ -94,11 +67,7 @@ export function classify(path: string): Target {
 }
 
 /**
- * Write every byte, however many `write(2)` calls that takes.
- *
- * A single `writeSync` may be short — that is the contract of the syscall, not
- * an exotic failure — and a short write to a file holding the signing secret is
- * a file that parses as something else or not at all.
+ * `writeSync` may write fewer bytes than requested; complete the entire buffer.
  */
 function writeAll(fd: number, contents: string): void {
   const data = Buffer.from(contents, "utf8");
@@ -109,22 +78,9 @@ function writeAll(fd: number, contents: string): void {
 }
 
 /**
- * Write `contents` to a fresh owner-only file beside `path`, and return it.
- *
- * The staging half of an atomic publication: the caller then `link`s it into
- * place (a claim that must not overwrite) or `rename`s it (a replacement that
- * must). Same directory, because both of those are only atomic within one
- * filesystem.
- *
- * The name is unpredictable because the file briefly holds the signing secret,
- * and it is created with `wx` so it can never land on somebody else's file.
- *
- * **Nothing survives this call except a file whose name it returned.** The close
- * is inside the guarded region, not in a `finally` after it: `close(2)` is where
- * a deferred write error such as EIO finally surfaces, and a close that throws
- * after the write "succeeded" would otherwise leave a complete, readable copy of
- * a signing secret on disk under a name the caller never receives and nobody
- * would think to look for. A failed close is treated as a failed write.
+ * Stage beside the target for same-filesystem atomic publication. An unpredictable
+ * exclusive name and chmod protect secret bytes even if the target had wider modes.
+ * Write and deferred close failures attempt cleanup of the unreturned staging name.
  */
 export function writeTempBeside(path: string, contents: string): string {
   const temp = join(
@@ -132,9 +88,7 @@ export function writeTempBeside(path: string, contents: string): string {
     `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
   );
   const fd = openSync(temp, "wx", OWNER_ONLY);
-  // Set immediately BEFORE the close, not after: POSIX releases the descriptor
-  // even when `close` reports an error, so closing again could land on an
-  // unrelated file that has since been given the same number.
+  // Mark before close: POSIX releases the fd even on error, so never retry it.
   let closeAttempted = false;
   try {
     fchmodSync(fd, OWNER_ONLY);
@@ -146,7 +100,7 @@ export function writeTempBeside(path: string, contents: string): string {
       try {
         closeSync(fd);
       } catch {
-        // Already unwinding; the unlink below is what actually matters.
+        // Preserve the write error and still remove the secret staging file.
       }
     }
     removeQuietly(temp);
@@ -156,12 +110,8 @@ export function writeTempBeside(path: string, contents: string): string {
 }
 
 /**
- * Move a staged file onto `path`.
- *
- * `link` when the path was absent, because a claim must not overwrite whatever
- * appeared since; `rename` when a file is already there, because a replacement
- * must. Returns false when `link` lost the race, which is the caller's cue to
- * leave the winner alone.
+ * Link an absent target without overwriting a racing winner; rename replaces
+ * a regular target atomically. A lost claim returns false.
  */
 export function publishStaged(
   staged: string,
@@ -181,18 +131,14 @@ export function publishStaged(
     }
     throw error;
   } finally {
-    // After `rename` this name is already gone; after `link` and after a loss it
-    // is not, and it is holding a secret.
+    // Link or a lost claim leaves secret bytes under this staging name.
     removeQuietly(staged);
   }
 }
 
 /**
- * Create or replace `path` as an owner-only regular file, atomically.
- *
- * @throws when the path is a symlink or is not a regular file — both are
- * refusals rather than repairs; when something else claimed the name first; and
- * when the write itself fails.
+ * Refuse symlinks and non-files; a competing creator or write failure throws.
+ * Accepted targets receive an atomic owner-only replacement.
  */
 export function publishOwnerOnly(
   path: string,
@@ -216,22 +162,15 @@ export function publishOwnerOnly(
 }
 
 /**
- * Remove a file that may already be gone.
- *
- * ENOENT is the ordinary case — a publication consumed the name. Anything else
- * means a staging file survived, possibly holding a signing secret, and that is
- * worth one line on stderr even though there is nothing to be done about it
- * here. stderr because stdout belongs to reports and, elsewhere in this CLI, to
- * a protocol.
+ * Ignore an already-consumed name; other failures may leave secret staging bytes
+ * and must warn on stderr, keeping stdout available to reports and protocols.
  */
 export function removeQuietly(path: string): void {
   try {
     unlinkSync(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      // The verb has to match the operation that failed: "could not remove X:
-      // it could not be opened" is the kind of message that sends somebody
-      // looking in the wrong place.
+      // Name the failed unlink operation without revealing contents.
       process.stderr.write(
         `ub: warning: could not remove ${path}${errno(error)}\n`,
       );

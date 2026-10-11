@@ -1,4 +1,3 @@
-/** Remote sign-in stores a device credential; live sync still uses its existing auth. */
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { hostname } from "node:os";

@@ -72,6 +72,25 @@ A requirement's \`decisions\` are a derived, oldest-topic-first log resolved ent
 
 \`list_docs({})\` omits decision records. Use \`list_docs({kind: "decision"})\` for one row per topic; a status or tag filter also asks for exact matching topics. Each row presents its record in force, otherwise a pending record, otherwise the first record. \`include_superseded: true\` returns individual records. A topic with conflicting maximal decided records has nothing in force; get_doc returns every predecessor, direct successor and the resolution rather than choosing one replacement.
 
+### When to create a decision record
+
+A decision record preserves a deliberate architectural, product or UX choice, its enduring reason, and the guidance future work should follow. It adds something that reading the code or configuration alone cannot tell you.
+
+**Do** propose a record when the choice will guide multiple tasks, prevent a consequential accidental reversal, or settle a topic repeatedly debated or reconsidered. A rarely consulted record can still be valuable if it protects an important compatibility, security or product commitment. Issues, reviews and Git history can reveal repeated uncertainty; they do not prove historical intent.
+
+**Do not** create a record just to describe existing code, configuration, a routine fix, a temporary workaround or implementation mechanics. Do not turn every changed detail into policy. Keep the meaningful choice precise while leaving its implementation flexible.
+
+| Useful decision | Description that does not justify a record |
+| --- | --- |
+| Support these iOS versions because of our users’ devices and maintenance budget; reconsider when those conditions change. Specify whether this means minimum support, an explicit set or tested versions. | The deployment target is set to this version. |
+| Users can read and edit previously opened documents offline, so interrupted connectivity does not interrupt their work. | This function reads from the local database. |
+| Use shadcn/ui as the sole component library and prefer its standard components to custom implementations, to keep the UI consistent and reduce maintenance. Custom alternatives require clear justification and human approval. | This screen imports a Button component from shadcn/ui. |
+| Clients synchronize through a shared service rather than directly with each other, for stated operational and connectivity reasons. | A list of endpoints, classes or dependencies. |
+
+Before proposing a record, ask: **What concrete future choice would it guide, or what consequential mistake would it prevent?** If neither has a credible answer, keep the explanation in ordinary documentation, code comments, an issue or a PR.
+
+Check existing decision topics first. Reuse the current topic; when changing its answer, follow the successor lifecycle. A useful candidate is not automatically authorized for creation: follow the project’s approval rules. These examples illustrate how to judge a candidate; they do not establish policies for your project.
+
 ## Content locks
 
 Both content locks leave document-room access and structured-data reads available.
@@ -169,7 +188,7 @@ A \`chart\` block holds editable JSON source, configured with ordinary \`create_
 {"version":1,"type":"line","collection":"observations","x":{"field":"day","type":"date"},"y":[{"field":"count","label":"Count"}],"missing":"gap"}
 \`\`\`
 
-Mapping fields are version 1, type line, collection, x with field and type number or date (optional label), and one to eight numeric y series with field (optional label and unit). Optional title and missing gap or connect control presentation; gap is the default. A numeric x is finite; a date x is an ISO date-only string or an RFC 3339 date-time string with an explicit timezone. Date-only values are UTC days. Charts sort by x then record id, never coerce or aggregate values, omit schema-invalid records and report omissions. Missing/null y values break a series under gap and bridge under connect; wrong types remain gaps. At most the latest 5,000 eligible x records are plotted.
+Mapping fields are version 1, type line, collection, x with field and type number or date (optional label), and one to eight numeric y series with field (optional label and unit). Optional title and missing gap or connect control presentation; gap is the default. Optional limit is an integer of 1 or more and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. A numeric x is finite; a date x is an ISO date-only string or an RFC 3339 date-time string with an explicit timezone. Date-only values are UTC days. Charts sort by x then record id, never coerce or aggregate values, omit schema-invalid records and report omissions. Missing/null y values break a series under gap and bridge under connect; wrong types remain gaps. At most the latest 5,000 eligible x records are plotted.
 
 ### Data tables
 
@@ -179,11 +198,13 @@ People insert Data table from the block menu, then edit its JSON source. Agents 
 {"version":1,"type":"table","collection":"observations","columns":[{"field":"day","label":"Day","format":"date"},{"field":"count","label":"Count","format":"number","decimals":0},{"field":"run_h","label":"Run time","format":"number","unit":"h","decimals":1},{"field":"url","format":"link"}],"sort":{"field":"day","direction":"desc"}}
 \`\`\`
 
-A table mapping has version 1, type table, collection and 1–30 ordered columns. Each column has field, optional label and optional format: text (default), number, date or link. Only number accepts unit as a suffix and decimals as an integer from 0–10 setting exact fraction digits; without decimals it uses the line chart's number formatting. Optional title supplies only the table's accessible name; otherwise it is \`Data table of <collection>\`. Optional sort names one column field and direction asc or desc. Existing pageSize values remain accepted as integers from 1–100 for compatibility and never affect display; omit pageSize from new mappings. Unknown keys or options are invalid, including percent, currency, duration and textField.
+A table mapping has version 1, type table, collection and 1–30 ordered columns. Each column has field, optional label and optional format: text (default), number, date or link. Only number accepts unit as a suffix and decimals as an integer from 0–10 setting exact fraction digits; without decimals it uses the line chart's number formatting. Optional title supplies only the table's accessible name; otherwise it is \`Data table of <collection>\`. Optional sort names one column field and direction asc or desc. Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order (record-id order without sort). Existing pageSize values remain accepted as integers from 1–100 for compatibility and never affect display; omit pageSize from new mappings. Unknown keys or options are invalid, including percent, currency, duration and textField.
 
-Text shows strings verbatim and other values as compact JSON. Number shows JSON numbers in the reader's locale. Date accepts the line chart's ISO dates and RFC 3339 date-times. Link shows only external http(s) URLs as links, opening without an opener or referrer. Absent, null and invalid values have distinct visible markers; invalid markers include the stored value as text. Values never become markup. Sort uses numbers, date instants or Unicode code points for text and links; absent, null and invalid values follow valid ones in either direction. Ties and unsorted rows follow record id. Schema-invalid records are omitted and counted. Every valid record appears in one continuous native table styled like an ordinary document table, with Generated from document data · read-only below it. Open table source and copy appear on hover or keyboard focus without moving the table; source stays reachable on devices without hover.
+Text shows strings verbatim and other values as compact JSON. Number shows JSON numbers in the reader's locale. Date accepts the line chart's ISO dates and RFC 3339 date-times. Link shows only external http(s) URLs as links, opening without an opener or referrer. Absent, null and invalid values have distinct visible markers; invalid markers include the stored value as text. Values never become markup. Sort uses numbers, date instants or Unicode code points for text and links; absent, null and invalid values follow valid ones in either direction. Ties and unsorted rows follow record id. Schema-invalid records are omitted and counted. Without limit, every valid record appears in one continuous native table styled like an ordinary document table, with Generated from document data · read-only below it. Limited rows remain one continuous table, with no pager or page state. When limit hides rows, the footnote includes shown and total valid-record counts. Open table source and copy appear on hover or keyboard focus without moving the table; source stays reachable on devices without hover.
 
-\`update_data\` refreshes open charts and tables without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions and block text, not record values; Markdown exports mappings while omitting datasets.
+For both views, limit has no upper bound of its own. Records hidden by the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing notice and diagnostics when N exceeds 5,000.
+
+\`update_data\` refreshes open charts and tables and recomputes a limited window without changing their source. All mounted views in one document share one validated data snapshot. Views are read-only; invalid mappings, missing collections, unsupported schemas and incompatible fields show problems without repairing stored content. Tables also report an empty collection. Charts and tables remain readable in locked documents; their source follows existing content locks. Search indexes titles, descriptions and block text, not record values; Markdown exports mappings while omitting datasets.
 
 ## Related
 
@@ -234,7 +255,7 @@ export const conceptTopics: readonly HelpTopic[] = [
   {
     id: "lifecycle",
     title: "Decision records and lifecycle",
-    description: "Requirements, decision topics, supersession, status, authority, content locks, archive and restoration.",
+    description: "Requirements, decision topics, when to create decision records, supersession, status, authority, content locks, archive and restoration.",
     text: lifecycle,
   },
   {

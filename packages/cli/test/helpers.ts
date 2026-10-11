@@ -69,6 +69,7 @@ export const REPO_ROOT = dirname(dirname(PACKAGE_ROOT));
 const RESOLVED_VARIABLES = [
   "UB_WORKSPACE_ID",
   "UB_HUB_URL",
+  "UB_AGENT_SESSION",
   "WORKSPACE_ID",
   "HUB_URL",
   "HUB_AUTH_TOKEN",
@@ -206,13 +207,8 @@ function createSandbox(parent: string, files: SandboxFiles): Sandbox {
   //
   // A ceiling, never a floor: it shortens waits and lengthens nothing.
   //
-  // 400 ms, and not assumed to be safe — checked under the worst contention
-  // available. The same suites do real work against a real hub on loopback,
-  // seeding a corpus and syncing it, and that completes in tens of
-  // milliseconds; the whole suite is green with every spawned run, every
-  // in-process hub and vitest's own workers sharing a single core
-  // (`taskset -c 0`). A test that needs longer passes its own value through
-  // `extraEnv`.
+  // The 400 ms ceiling bounds ordinary loopback waits. Tests needing longer
+  // waits pass their own ceiling through `extraEnv`.
   //
   // The suites' *own* clients — the hubs they start, the replicas they verify
   // with — import `resolveMcpConfig` straight from `@uberblick/mcp-server` and
@@ -376,7 +372,7 @@ let portCursor = Math.floor(Math.random() * TEST_PORTS.perWorker);
  * Not `listen(0)`: a port read back from that and released is in the kernel's
  * ephemeral range, which every in-process hub and client socket draws from
  * too. On a busy host one of them can take it before the `ub` under test binds
- * it, and `ub open` rightly refuses an occupied port (#1216). Only explicit
+ * it, and `ub open` rightly refuses an occupied port. Only explicit
  * picks land below that range. Each worker walks its own slice, rotated by an
  * offset drawn once per run, so one suite's workers never pick alike. A random
  * starting step per file scatters picks between suites sharing the host.

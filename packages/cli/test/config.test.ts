@@ -281,7 +281,7 @@ describe("claimSigningSecret", () => {
   it("leaves no staging file behind holding a second copy of the secret", () => {
     // Deliberately NOT asserting that the published file is complete: with the
     // secret written before the name is published, no single-process test can
-    // tell the `link` idiom from the exclusive `open` it replaced — the empty
+    // tell `link` publication from exclusive `open` — the empty
     // window the idiom closes is between two syscalls of another process. That
     // property is structural. What IS observable is the staging file, which
     // holds the secret under a name nobody would think to look for.
@@ -360,10 +360,10 @@ describe("writeCredentials", () => {
 
 describe("the committed mise config", () => {
   // Belt and braces beside the resolution above. `ub` ignores an ambient
-  // `HUB_URL` outright now, but the checkout tasks hand their environment to
+  // `HUB_URL` outright, but the checkout tasks hand their environment to
   // programs that do read it — vite bakes it into a dev bundle — so a committed
   // endpoint here would still bind a checkout to whatever the repository
-  // guessed (#376, #385). The address belongs in the clients' code as a
+  // guessed. The address belongs in the clients' code as a
   // fallback, and the real one in this machine's `config.json`, which the resolver
   // is what puts in front of a task.
   it("exports no HUB_URL, so a checkout binds no endpoint", () => {

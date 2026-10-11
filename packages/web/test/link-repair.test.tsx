@@ -1,12 +1,11 @@
 /**
- * The way out of a link conflict, in the browser (#451).
+ * The way out of a link conflict, in the browser.
  *
  * One story: **a merge that leaves both link marks on a range is repaired by
- * the person, one range at a time, and by nothing else.** PR #450 shipped the
- * refusal — the palette gate will not bind a document holding such a range,
- * because y-prosemirror would render two nested anchors — and kept it
- * deliberately. What it left open was the way back, and until this the fallback
- * could only point a browser reader at the MCP tools they do not have.
+ * the person, one range at a time, and by nothing else.** The palette gate will
+ * not bind a document holding such a range because y-prosemirror would render
+ * two nested anchors. The browser must offer a repair without requiring MCP
+ * tools.
  *
  * So everything here hangs off that one claim: opening writes nothing, a choice
  * writes exactly one cleared mark on exactly one range, a stale choice writes

@@ -95,8 +95,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       if (!env.UB_HUB_URL.trim()) throw new Error("UB_HUB_URL must not be empty; use a hub address or local.");
       hubUrl = env.UB_HUB_URL.trim() === LOCAL_HUB ? null : env.UB_HUB_URL;
     } else {
-      // `env` can be an MCP entry's own partial map, or {} to read only the
-      // project file. Machine knowledge always comes from this process's roots.
+      // Machine records use this process's roots, even when env is a partial MCP map.
       const recorded = readWorkspaceHub(workspaceId);
       if (recorded === undefined) {
         throw new Error("This machine has no hub record for UB_WORKSPACE_ID. Add UB_HUB_URL (a hub address, or local), or fetch the workspace with `ub workspace use <link>`.");
@@ -112,8 +111,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       path: null,
     };
   }
-  // Old named MCP entries pinned WORKSPACE_ID only. Ignoring that pin while
-  // adopting a project file would silently send that entry to another corpus.
+  // Refuse legacy selectors before reading the project file to avoid opening another corpus.
   if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) {
     throw new Error("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported. Replace it with UB_WORKSPACE_ID (add UB_HUB_URL until this machine has its record), or remove both legacy variables and explicitly select a .uberblick.json binding. No workspace was opened.");
   }

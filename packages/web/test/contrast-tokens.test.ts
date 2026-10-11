@@ -92,7 +92,7 @@ const text = (name: string, ink: string, ground: string, under?: string): Pair =
 });
 
 const pairs: Pair[] = [
-  // Sidebar column and its anchored menus (#515). Alpha belongs to the ink,
+  // Sidebar column and its anchored menus. Alpha belongs to the ink,
   // so ratios composite it over each ground rather than discarding the alpha.
   ...["--sidebar-foreground", "--sidebar-row-icon", "--sidebar-muted-foreground"]
     .flatMap((ink) => ["--sidebar", "--sidebar-accent"].map((ground) => text("sidebar and anchored-menu ink", ink, ground))),
@@ -107,11 +107,11 @@ const pairs: Pair[] = [
   ...["--sidebar", "--sidebar-accent"].map((ground): Pair => ({
     name: "tag checkbox neutral stroke", ink: "--sidebar-muted-foreground", ground, measure: "stroke",
   })),
-  // Document-panel highlights (#1062); dark's >.02 was already held by the
-  // tag-picker proof. Rendered checks retain the relative sidebar-step floor.
+  // Document-panel highlights retain dark's >.02 floor.
+  // Rendered checks retain the relative sidebar-step floor.
   { name: "panel highlight remains distinct", ink: "--sidebar-accent", ground: "--sidebar", measure: "separation", floor: Number.EPSILON },
   { name: "dark tag-panel highlight step", ink: "--sidebar-accent", ground: "--sidebar", measure: "separation", floor: 0.02, appearance: "dark" },
-  // The one card highlight (#516, #567, #572). The table cannot know which
+  // The one card highlight. The table cannot know which
   // consumer receives it; the rendered proof holds that separate clause.
   { name: "card highlight", ink: "--card-accent", ground: "--card", measure: "separation", floor: cardHighlightFloor },
   text("block-menu selected entry ink", "--accent-foreground", "--card-accent"),
@@ -119,7 +119,7 @@ const pairs: Pair[] = [
   text("resting orphaned chip ink", "--foreground", "--status-warning-subtle", "--card"),
   text("focused orphaned chip ink", "--brand-foreground", "--status-warning", "--brand-subtle"),
   { name: "focused orphaned chip step", ink: "--status-warning", ground: "--brand-subtle", measure: "separation", floor: focusedOrphanedChipFloor },
-  // Functional brand ink (#569): flat chrome, the page gradient, annotated
+  // Functional brand ink: flat chrome, the page gradient, annotated
   // ranges and inline-code grounds. Dark --brand-ink aliases --brand.
   ...["--background", "--card", "--card-accent", "--sidebar", "--sidebar-accent", "--brand-subtle", "--muted", "--page-ground[0]", "--page-ground[1]"]
     .map((ground) => text("functional brand ink", "--brand-ink", ground)),
@@ -128,7 +128,7 @@ const pairs: Pair[] = [
   ...["--background", "--card", "--card-accent", "--muted", "--secondary", "--brand-subtle", "--status-warning-subtle", "--destructive-subtle", "--page-ground[0]", "--page-ground[1]"]
     .map((ground): Pair => ({ ...text("full-strength light muted ink", "--muted-foreground", ground), appearance: "light" })),
   // These are enabled consumers, so card text must still clear AA at full
-  // strength (#1062). CSS opacity and real backing remain browser obligations.
+  // strength. CSS opacity and real backing remain browser obligations.
   ...["--card", "--brand-subtle"].flatMap((ground) => ["--card-foreground", "--foreground", "--muted-foreground"].map((ink) => text("enabled conversation ink", ink, ground))),
   text("source copy ink", "--muted-foreground", "--muted"),
   // Retained avatar initials and their dashed rings use full-strength muted

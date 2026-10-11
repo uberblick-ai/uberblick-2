@@ -174,7 +174,7 @@ export interface ClientOptions {
   messageReconnectTimeout?: number;
   /**
    * The protocol version this client claims, or `null` to send the token bare —
-   * a client from before the envelope, which is what the flag day refuses.
+   * bare tokens must fail the protocol check before token inspection.
    *
    * Defaults to this build's, because a real client always wraps: a test that
    * hands this rig a garbage or forged *token* is asking what the hub makes of

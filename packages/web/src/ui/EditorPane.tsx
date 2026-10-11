@@ -6,6 +6,7 @@
 import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
+  decisionContentLocked,
   getAnnotation,
   getBlocksFragment,
   getMeta,
@@ -56,17 +57,12 @@ import type { SelectThread, ThreadView } from "./threads.js";
 
 /** Read the document itself, including before its React subscription answers. */
 function isDecided(connection: RoomConnection): boolean {
-  const meta = getMeta(connection.ydoc);
-  return meta.kind === "decision" && meta.status === "decided";
+  return decisionContentLocked(getMeta(connection.ydoc));
 }
 
 /**
- * The pane frame with a message in it instead of a document.
- *
- * Every "there is nothing to edit here" screen renders through this — no
- * document picked, no workspace at all, a malformed link, a link whose
- * document has not synced yet. One frame for all of them means resolving a link
- * swaps the words inside the column rather than moving the column.
+ * Use one pane frame for every unresolved route so loading changes words
+ * without moving the document column.
  */
 export function PaneNotice({
   children,
@@ -84,14 +80,9 @@ export function PaneNotice({
 }
 
 /**
- * The archive banner: what an archived document says about itself, and the one
- * action it offers.
- *
- * Deliberately the *only* action. Archiving is a tombstone on the directory
- * stub, not a deletion — every byte of the document is still here, which is
- * why the pane below still renders it, still scrolls, still copies. What it
- * does not do is take an edit: restoring is the way back, and there is no
- * second path that quietly writes to a document someone archived.
+ * Archived content stays rendered, scrollable and copyable. Restore is the
+ * only write action; title, editor and comments remain read-only while the
+ * directory tombstone stands.
  */
 function ArchivedBanner({
   onRestore,
@@ -319,18 +310,9 @@ function TldrCallout({
 }
 
 /**
- * The compact document reading, also used while waiting for sync.
- * Three things keep the line still while someone types:
- *
- * 1. The state is debounced (`useCalmSyncState`) — the truth is unchanged, the
- *    redraw cadence is.
- * 2. Each composition reserves the mark and its longest word. Inline not-saved
- *    uses the ordinary words' shorter slot; refusals keep their wider one.
- * 3. Recovery sentences live in shared sticky notices and Sync details, so
- *    appearing problems need no reserved bands below the compact row.
- *
- * A backlog still makes `rawSyncState` busy: one that outlives the calm window
- * reads `syncing…` or `saving here…`. Its count belongs only in Sync details.
+ * Debounce status redraws while reserving each mark and its longest label.
+ * Persistent backlogs still read busy; counts and recovery prose belong to
+ * details and notices so the compact line does not shift.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function StatusLine({
@@ -347,13 +329,9 @@ export function StatusLine({
 }: {
   connection: RoomConnection;
   /**
-   * This room's title roster, including departed agents whose named cursors
-   * are still retained. The sync panel receives the shell's live-only reading.
-   *
-   * A prop rather than a `useTitlePresence` of its own, because the shell already
-   * holds this room's reading: a second subscription would add an awareness
-   * `change` listener and a fragment observer that re-derive, on every
-   * keystroke anyone types, a reading the shell has already made.
+   * Reuse the shell title roster, including agents with retained named
+   * cursors; Sync details uses live presence. A second subscription would
+   * repeat awareness and fragment work on every keystroke.
    */
   presence: readonly RemotePresence[];
   /** The selected directory stub's edit-freshness hint, not a sync state. */
@@ -384,9 +362,8 @@ export function StatusLine({
     !status.writable && reading.detail === null ? (
       <span className="ub-muted ub-not-saved flex-none whitespace-nowrap">not saved</span>
     ) : null;
-  // Presence is independent of the connection's settled status word. Keep the
-  // current room's roster in its ordinary slot while that word is blank; the
-  // directory's roster is already excluded by App's room pairing (#606).
+  // Show this room's presence independently of its blank settle-state word.
+  // App room pairing excludes the directory roster.
   const peerStrip = (
     <PeerCluster presence={presence} onActivate={onActivatePresence} reserveSpace={documentLayout} />
   );
@@ -493,10 +470,9 @@ export function StatusLine({
     );
   const shownUpdatedAt =
     blank || formattedUpdatedAt === null ? undefined : lastUpdated;
-  // The details panel mounts independently, often after this line has already
-  // settled. Report what this line actually shows before paint rather than
-  // give the panel another initial settle window or display a stamp this line
-  // omitted. Pair every report with its room, including unmount cleanup.
+  // Report the displayed timestamp before paint, paired with its room
+  // including cleanup. The separately mounted details panel must not restart
+  // its settle window or invent an omitted stamp.
   useLayoutEffect(() => {
     onLastUpdatedChange?.(connection.room, shownUpdatedAt);
     return () => onLastUpdatedChange?.(connection.room, undefined);
@@ -509,11 +485,10 @@ export function StatusLine({
         {syncReading}
         {!blank && saveNote}
         {!blank && updatedReading}
-        {/* Circles, not name pills (#494): the strip is the constrained surface,
-            and a row of words pushes the status line around as sessions come and
-            go. The detail a name carried is on the avatar's hover instead — which
-            is why this is the presence reading and not `usePeers`: the block a
-            caret sits in is resolved once, in `readPresence`. */}
+        {/*
+            * Use bounded circles so roster changes leave status geometry still;
+            * readPresence supplies names and resolved caret locations for hover.
+         */}
         {reading.detail === null && peerStrip}
       </div>
     </div>
@@ -521,21 +496,10 @@ export function StatusLine({
 }
 
 /**
- * The way back out of a link conflict, and the only one a browser reader has.
- *
- * A merge of two replicas that formatted one range as different kinds of link
- * leaves both marks on it, the gate refuses to bind (see `editor/palette.ts`),
- * and until this existed the fallback could only point at the MCP tools — which
- * is no answer at all for the person who does not have them. So the choice is
- * offered here, and it is offered **per conflicting range**: two ranges in one
- * block can legitimately want different answers, and a sweep would decide for
- * the reader.
- *
- * Each choice names its own target, because that is what the reader is picking
- * between — the URL as written, and the document by the title the directory
- * advertises for it, falling back to the uuid when it cannot name it. Nothing
- * is repaired by opening the document or by rendering this list; only a click
- * writes, and only the mark it did not choose.
+ * Repair link conflicts per range, naming both competing targets and falling
+ * back to a document UUID. Rendering never repairs anything; only a
+ * deliberate pick removes the competing mark. Separate ranges may need
+ * different answers.
  */
 function LinkConflictRepair({
   connection,
@@ -594,18 +558,9 @@ function LinkConflictRepair({
 }
 
 /**
- * The loud fallback. Rendered instead of the editor whenever the document holds
- * a block the palette cannot bind.
- *
- * It refuses to edit on purpose: y-prosemirror's node factory deletes
- * Y.XmlElements whose node name its ProseMirror schema does not know, so
- * binding the editor here would destroy the very blocks this screen is warning
- * about. Read-only means nothing is dropped.
- *
- * The lead says only that the editor is off, because the reasons differ and
- * `summary` is what names them: unsupported content is one, and two supported
- * link marks a merge left on one range is another — calling that "unsupported"
- * would name a mark this client renders perfectly well.
+ * Do not bind unsupported content: y-prosemirror deletes elements absent from
+ * its schema. Preserve it read-only, and let summary distinguish foreign
+ * content from supported link marks that conflict on one range.
  */
 function ForeignFallback({
   connection,
@@ -675,11 +630,9 @@ const BoundEditor = memo(function BoundEditor({
   // now — there is no registry, and a mention is plain text.
   const peers = usePeers(connection);
   /**
-   * The current value, readable from the binding effect without making it a
-   * dependency of it. Read-only content must be bound read-only from the
-   * start — never editable-then-corrected — while a *change* of the flag must
-   * not rebind (see the effect below), and those two are only compatible if the
-   * effect can read the flag without re-running when it moves.
+   * The binding effect reads the latest read-only flag without depending on
+   * it: initial binding must already enforce read-only, and later permission
+   * changes must not rebind.
    */
   const readContentReadOnly = useEffectEvent(() => contentReadOnly);
 
@@ -687,10 +640,9 @@ const BoundEditor = memo(function BoundEditor({
   useEffect(() => {
     const element = host.current;
     if (element === null) return;
-    // The gate lives in bindGuardedEditor: it registers a synchronous guard
-    // before binding, so a foreign block arriving mid-session unbinds the editor
-    // instead of being destroyed by it. `useForeignBlocks` above then re-renders
-    // into the read-only fallback.
+    // bindGuardedEditor registers its synchronous guard before binding. A
+    // foreign block arriving later unbinds the editor without deleting it,
+    // then useForeignBlocks displays the fallback.
     const binding = bindGuardedEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
@@ -704,13 +656,10 @@ const BoundEditor = memo(function BoundEditor({
       },
       docLinks,
     });
-    // A comment highlight is a plain span ProseMirror renders from the `comment`
-    // mark, so the click that focuses its thread is read by delegation on the
-    // host: no ProseMirror plugin, and nothing competing with the caret. A
-    // document reference is read the same way, and *first*. External links also
-    // bypass thread selection: following a link and opening a thread would be
-    // two actions from one gesture. The link wins; the thread stays reachable
-    // through the highlight beside the link or its card in the rail.
+    // Delegate comment-highlight clicks on the host. Document references and
+    // external links win over surrounding thread selection so one gesture has
+    // one action; the conversation remains reachable from adjacent highlight
+    // or rail.
     const selectThread = (threadId: string, viaKeyboard = false): void => {
       onSelectThread(threadId, {
         viaKeyboard,
@@ -758,22 +707,13 @@ const BoundEditor = memo(function BoundEditor({
       const threadId = threadIdFromTarget(event.target);
       if (threadId !== null) selectThread(threadId);
     };
-    // And the keyboard's version of that click (#101): the span is a
-    // `role="button"` tab stop, so Enter and Space on a *focused* highlight
-    // select its thread and send focus after it.
-    //
-    // Capture, and it stops there: ProseMirror binds keydown on the
-    // contenteditable inside this element, and an Enter that reached it would
-    // split a block. Nothing else is intercepted — a key press with the caret
-    // in the prose targets the contenteditable, which is no highlight's
-    // descendant, so `threadIdFromActivation` reads it as null.
+    // Enter/Space activates only a focused button-role highlight. Capture and
+    // stop activation before ProseMirror can split a block; caret typing
+    // targets the contenteditable and must remain untouched.
     const activateThread = (event: KeyboardEvent): void => {
-      // The same one-action rule as the click, for the one place the anchor is
-      // a tab stop: a read-only pane. Enter on a focused reference follows it
-      // in-app rather than selecting the thread it happens to sit inside — and
-      // rather than letting the browser reload the whole app on the href. The
-      // caret's own keystrokes target the contenteditable, which no anchor is
-      // an ancestor of, so typing never reaches this.
+      // Enter on a focused read-only reference navigates in-app, preserving
+      // Back and avoiding surrounding thread selection. Caret typing targets
+      // contenteditable, outside the anchor.
       const docId = docLinkFromTarget(event.target);
       if (docId !== null) {
         if (event.key !== "Enter" || docLinks === null) return;
@@ -812,20 +752,10 @@ const BoundEditor = memo(function BoundEditor({
   }, [connection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
-   * Read-only is a *setting* on the live editor, never a reason to rebind.
-   * Archiving or deciding a document has to flip it in place — a rebind
-   * would throw away their caret and their scroll position, on a change that
-   * touched no content at all.
-   *
-   * ProseMirror's own `editable` is what enforces it: with it off the view
-   * ignores every user input path — keys, `beforeinput`, paste, drop — while
-   * leaving selection and copy exactly as they were.
-   *
-   * `useLayoutEffect`, because a passive effect runs *after* paint. The render
-   * that draws the banner and takes the chrome away would otherwise leave the
-   * editor itself editable for one committed, painted frame — a frame that
-   * accepts a keystroke, which is the one thing the whole feature is for. This
-   * runs inside the same commit, so the two never disagree on screen.
+   * Change ProseMirror editable in place to preserve caret, scroll, selection
+   * and copying while refusing keys, beforeinput, paste and drop. Use a
+   * layout effect so the banner and editor permissions agree in the same
+   * painted commit.
    */
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
@@ -863,9 +793,8 @@ const BoundEditor = memo(function BoundEditor({
             editor={editor}
             host={frame}
             docLinks={docLinks}
-            // The document on screen, from the room it is open in — the one
-            // place its uuid is already known here, and the same parse a copied
-            // link goes through.
+            // Read the document identity from its current room key, using the
+            // shared parser.
             openDocId={parseRoom(connection.room).uuid}
           />
         )}
@@ -921,8 +850,8 @@ export function EditorPane({
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
   /**
-   * Whether the directory tombstones this document. Live in both directions:
-   * the value changes under an open pane when anyone archives or restores.
+   * Observe directory tombstones in both directions so remote archive and
+   * restore update this pane.
    */
   archived: boolean;
   /** The selected directory stub's edit-freshness hint. */
@@ -937,19 +866,16 @@ export function EditorPane({
   focusRestore?: boolean;
   onRestoreFocused?: (() => void) | undefined;
   /**
-   * What a `docLink` resolves against: the address of a document in the
-   * workspace on screen, the directory that names it, and where a click goes
-   * (`editor/doc-links.ts`). Null before a workspace is known. Must be
-   * referentially stable — it is an effect dependency, and a new object every
-   * render would rebind the editor under the reader's caret.
+   * References use the current workspace address, directory titles and
+   * navigation callback; null means no workspace. Keep the object stable
+   * because it is a binding dependency.
    */
   docLinks: DocLinkContext | null;
   /** Lift the tombstone. */
   onRestore: (() => void) | null;
   /**
-   * Called when a click lands inside a comment highlight, so the rail can focus
-   * that thread. Must be referentially stable — it is an effect dependency.
-   * Also called with a thread this client has just started.
+   * Notify the rail of a clicked highlight or newly created thread. Keep this
+   * callback stable because it is a binding dependency.
    */
   onSelectThread: SelectThread;
   endpoint?: HubEndpoint | null;
@@ -980,7 +906,7 @@ export function EditorPane({
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
-  const decided = meta?.kind === "decision" && meta.status === "decided";
+  const decided = meta !== null && decisionContentLocked(meta);
   const contentReadOnly = archived || decided;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
@@ -1018,8 +944,7 @@ export function EditorPane({
             onRestoreFocused={onRestoreFocused}
           />
         )}
-        {/* The eyebrow: what this document is, what it is tagged, and which
-            version of it is on screen — above the title, as design 1a has it. */}
+        {/* Keep document kind, tags and revision above the title. */}
         <DocMetaLine
           connection={connection}
           catalogConnection={catalogConnection}
@@ -1042,9 +967,8 @@ export function EditorPane({
           // `readOnly`, not `disabled`: the title is still the document's name
           // and still worth selecting and copying — it just cannot be retyped.
           readOnly={contentReadOnly || !writable}
-          // And the write is guarded as well as the field. `readOnly` is a
-          // statement to the browser about typing; guard the live document too,
-          // because it can become decided before this render hears about it.
+          // Guard the live write too: a document may become decided before
+          // this readOnly render updates.
           onChange={(event) => {
             if (archived || isDecided(connection) || !connection.status.writable) return;
             setTitle(connection.ydoc, event.target.value);

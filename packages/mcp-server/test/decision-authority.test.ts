@@ -160,7 +160,15 @@ describe("decision authority through MCP", () => {
       ["delete_block", { block_id: block.id }],
       ["link_range", { block_id: block.id, start: 0, end: 3, doc_id: target.uuid, rev: block.rev }],
     ];
-    for (const [name, args] of mutations) await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
+    for (const [name, args] of mutations) {
+      const refused = await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
+      expect(refused).toMatchObject({
+        message: "A decided record's title, decision line, blocks and structured data are read-only; create a superseding record.",
+        recoveryClass: "manual",
+        recovery: "A decided record's title, decision line, blocks and structured data are read-only. Create an open superseding record " +
+          "for any content change, then record a person's answer to decide it. Comments stay open.",
+      });
+    }
     const thread = await rig.ok("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 3, text: "Discuss the rationale." });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: thread.annotation.id, text: "Resolved in discussion.", resolved: true });
     await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." });

@@ -569,8 +569,7 @@ describe("the derived index", () => {
 
     rig.instance.replicas.rebuildIndex();
 
-    // The rebuild walks every attached replica, tombstoned ones included, so
-    // this is where a deleted document used to come back to life.
+    // Rebuild visits tombstoned replicas too; they must remain absent from search.
     expect(
       rig.instance.store.search("numbat", 10).map((hit) => hit.uuid),
     ).toEqual([kept.uuid]);

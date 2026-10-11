@@ -50,20 +50,9 @@ export function activeTagCatalog(catalog: Y.Doc): TagCatalogEntry[] {
 }
 
 /**
- * Whether this replica may call the catalog it holds the whole workspace one.
- *
- * With no hub configured this replica *is* the workspace, so what it holds is
- * all there is. With a hub, the seeded examples are only this replica's guess
- * until the settings room has actually exchanged state with it — a curated
- * vocabulary lives there, and answering `complete: true` before it arrives
- * tells an agent a false vocabulary is the whole one.
- *
- * `isRoomQuiet` is the conservative side of that question: it cannot be true
- * before the room synced, so this never dresses an unhydrated catalog up as a
- * complete one. It also reads false for the moment a local seed is still on
- * its way to the hub, which understates completeness rather than overstating
- * it — and every read settles first, so that moment is not one an agent waits
- * in.
+ * With sync disabled, the local catalog is complete. Otherwise require the
+ * settings handshake and acknowledgement; a pending seed conservatively reads
+ * incomplete. Catalog reads settle first.
  */
 export function tagCatalogComplete(replicas: Replicas): boolean {
   return (
@@ -72,18 +61,8 @@ export function tagCatalogComplete(replicas: Replicas): boolean {
 }
 
 /**
- * Refuse a whole call for tag values this catalog does not have.
- *
- * The recovery depends on what this replica knows. With the catalog complete,
- * the failure table's "call list_tags" is the whole answer. Where the settings
- * room has not reached this replica, `list_tags` cannot name the value either
- * — it may be a real workspace tag — so the failure says that instead of
- * sending the caller round a loop that cannot help.
- *
- * A retired blocker is the exception: this replica already holds the value and
- * already knows it is retired, and hydration cannot make it assignable again.
- * The table's `manual` stands for any refusal carrying one, so an agent is
- * never told to repeat a call only catalog curation can unblock.
+ * An incomplete catalog may explain an unknown value, so recovery waits for it.
+ * Retired values always need manual curation; hydration cannot make them active.
  */
 function refuseTagValues(
   replicas: Replicas,
@@ -101,11 +80,8 @@ function refuseTagValues(
 }
 
 /**
- * Resolve an id or exact current name for a discovery filter.
- *
- * A selector nothing resolves is refused rather than answered with an empty
- * result: the same value refuses on a write, and an empty listing is
- * indistinguishable from the honest "no document carries this tag".
+ * Refuse unknown filters: an empty result would falsely imply a known tag has
+ * no documents. Accept an id or exact current name.
  */
 export function resolveTagFilter(
   replicas: Replicas,
