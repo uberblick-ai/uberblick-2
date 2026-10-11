@@ -108,6 +108,8 @@ const EXPECTED: Record<
     detail: ["collection", "recordId", "limit", "value", "attempted"],
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
+  invalid_card: { recoveryClass: "manual", detail: [] },
+  annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
@@ -262,6 +264,15 @@ describe("the failure contract", () => {
     record((await rig.call("get_help", { topic: "no-such-help-topic" })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid, type: "table", text: "not a GFM table",
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, type: "card", text: "label: Missing title",
+    })).payload);
+    const card = await rig.ok("insert_block", {
+      uuid: doc.uuid, type: "card", text: "title: Card\n\nBody",
+    });
+    record((await rig.call("annotate", {
+      uuid: doc.uuid, block_id: card.block.id, start: 0, end: 3, text: "Open this in the web editor",
     })).payload);
     const table = await rig.ok("insert_block", {
       uuid: doc.uuid, after_block_id: doc.blockId, type: "table", text: "| Header |\n| --- |\n| Cell |",
