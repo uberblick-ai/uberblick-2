@@ -231,9 +231,7 @@ function tableContent(element: Y.XmlElement | null): unknown {
  * A content hash of one document, over everything the schema puts in it.
  *
  * Meta, the ordered blocks, the inline marks on those blocks,
- * and the annotations map — which is the whole documented
- * layout (`meta`, `blocks`, `annotations`), so nothing a document
- * can carry is outside this.
+ * the annotations map and structured data.
  *
  * **Meta is hashed as `getMeta` returns it, not as a list of fields named
  * here.** The list this used to carry went stale three times without anyone
