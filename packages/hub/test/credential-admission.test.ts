@@ -345,8 +345,8 @@ describe("credential admission on a composed server", () => {
     expect(logText).not.toContain("client-asserted-person-and-device");
   });
 
-  // 0.2.9 shipped protocol 2; keep it fixed so another independent bump
-  // cannot collapse the table cutover into an already shipped version.
+  // Keep the incompatible table writer's protocol fixed at 2 so an independent
+  // version bump cannot erase this compatibility check.
   it.each([2, SYNC_PROTOCOL_VERSION + 1])("refuses protocol %s before credential room writes", async (protocolVersion) => {
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop");
