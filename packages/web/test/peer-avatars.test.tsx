@@ -135,6 +135,23 @@ describe("the compact collaborator cluster", () => {
     );
   }
 
+  it("uses a live session caret for its label and activation when another connection is idle", () => {
+    const idle = reading({ clientId: 10, block: null, blockId: null });
+    const editing = reading({ clientId: 20 });
+    const activate = vi.fn();
+    const view = render(<PeerCluster presence={groupAgentPresence([idle, editing])} onActivate={activate} />);
+    const control = within(view.container).getByRole<HTMLButtonElement>("button", {
+      name: `Claude Code · agent · ${SESSION} · editing block 5`,
+    });
+    act(() => control.click());
+    expect(activate).toHaveBeenCalledWith(editing);
+
+    view.rerender(<PeerCluster presence={groupAgentPresence([idle, { ...editing, departed: true }])} onActivate={activate} />);
+    expect(within(view.container).getByRole("button", {
+      name: `Claude Code · agent · ${SESSION}`,
+    })).toBe(control);
+  });
+
   it("caps the circles at three and makes every remaining session operable", () => {
     const activate = vi.fn();
     const view = render(<PeerCluster presence={peers(5)} onActivate={activate} />);

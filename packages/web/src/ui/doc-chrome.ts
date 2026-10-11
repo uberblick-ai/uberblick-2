@@ -146,7 +146,12 @@ export function groupAgentPresence(
   for (const peer of presence) {
     const key = presenceKey(peer);
     const previous = groups.get(key);
-    if (previous === undefined || (previous.departed && !peer.departed)) {
+    if (
+      previous === undefined ||
+      (previous.departed && !peer.departed) ||
+      ((previous.departed === true) === (peer.departed === true) &&
+        previous.blockId === null && peer.blockId !== null)
+    ) {
       groups.set(key, peer);
     }
   }
