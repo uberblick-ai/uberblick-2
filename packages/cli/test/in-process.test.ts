@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, afterEach, expect, it } from "vitest";
 import { removeTempDirs, sandbox } from "./helpers.js";
+import { cleanUp, rig } from "./auth-fixtures.js";
 import { runInProcess } from "./in-process.js";
 
 afterAll(removeTempDirs);
+afterEach(cleanUp);
 
 function environmentFingerprint(): string {
   return createHash("sha256").update(JSON.stringify(Object.entries(process.env).sort())).digest("hex");
@@ -43,4 +45,42 @@ it("refuses overlapping invocations instead of sharing process configuration", a
   const first = runInProcess(["--help"], sandbox());
   await expect(runInProcess(["--help"], sandbox())).rejects.toThrow("Concurrent CLI invocations");
   expect((await first).status).toBe(0);
+});
+
+it("refuses startup options instead of silently ignoring a preload", async () => {
+  const box = sandbox();
+  const cwd = process.cwd();
+  const environment = environmentFingerprint();
+  await expect(runInProcess(["--help"], box, { NODE_OPTIONS: "--import=missing-fixture" }))
+    .rejects.toThrow("Node startup options require the subprocess helper");
+  expect(process.cwd()).toBe(cwd);
+  expect(environmentFingerprint()).toBe(environment);
+  expect((await runInProcess(["--help"], box)).status).toBe(0);
+});
+
+it("keeps login noninteractive even when the test runner owns a terminal", async () => {
+  const remote = await rig();
+  const box = sandbox();
+  const record = join(box.cwd, "opened-browser");
+  const opener = join(box.cwd, "record-browser");
+  writeFileSync(opener, `#!/bin/sh\nprintf opened > '${record}'\n`, { mode: 0o700 });
+  const streams = [process.stdin, process.stdout];
+  const properties = streams.map(stream => Object.getOwnPropertyDescriptor(stream, "isTTY"));
+  try {
+    for (const stream of streams) Object.defineProperty(stream, "isTTY", { configurable: true, value: true });
+    const run = await runInProcess(["auth", "login", remote.origin], box, {
+      BROWSER: opener, SSH_CONNECTION: undefined, SSH_CLIENT: undefined, SSH_TTY: undefined,
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("signed in");
+    expect(existsSync(record)).toBe(false);
+    for (const stream of streams) expect(stream.isTTY).toBe(true);
+  } finally {
+    streams.forEach((stream, index) => {
+      const property = properties[index];
+      if (property === undefined) Reflect.deleteProperty(stream, "isTTY");
+      else Object.defineProperty(stream, "isTTY", property);
+    });
+    rmSync(record, { force: true });
+  }
 });

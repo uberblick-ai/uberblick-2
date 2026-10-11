@@ -7,7 +7,7 @@ import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store"
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";
 
@@ -202,12 +202,12 @@ Socket.prototype.connect = () => { throw new Error("list must stay local"); };
 globalThis.fetch = () => { throw new Error("list must stay local"); };
 `);
     const env = { NODE_OPTIONS: `--import=${preload}` };
-    const text = await runInProcess(["workspace", "list"], box, env);
+    const text = runUb(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
       `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | hub unknown\n`,
     );
-    const json = await runInProcess(["workspace", "list", "--json"], box, env);
+    const json = runUb(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)).toEqual([
       { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },

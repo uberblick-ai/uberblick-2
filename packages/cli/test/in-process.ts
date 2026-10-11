@@ -11,9 +11,12 @@ export async function runInProcess(
   extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<Run> {
   if (running) throw new Error("Concurrent CLI invocations require the subprocess helper");
+  if (extraEnv.NODE_OPTIONS) throw new Error("Node startup options require the subprocess helper");
   running = true;
   const previousDirectory = process.cwd();
   const previousEnvironment = { ...process.env };
+  const streams = [process.stdin, process.stdout];
+  const terminalProperties = streams.map(stream => Object.getOwnPropertyDescriptor(stream, "isTTY"));
   let stdout = "";
   let stderr = "";
   const io: Io = {
@@ -21,6 +24,7 @@ export async function runInProcess(
     err: (text) => { stderr += text; },
   };
   try {
+    for (const stream of streams) Object.defineProperty(stream, "isTTY", { configurable: true, value: false });
     process.chdir(box.cwd);
     for (const key of Object.keys(process.env)) delete process.env[key];
     Object.assign(process.env, box.env, extraEnv);
@@ -30,6 +34,11 @@ export async function runInProcess(
     process.chdir(previousDirectory);
     for (const key of Object.keys(process.env)) delete process.env[key];
     Object.assign(process.env, previousEnvironment);
+    streams.forEach((stream, index) => {
+      const property = terminalProperties[index];
+      if (property === undefined) Reflect.deleteProperty(stream, "isTTY");
+      else Object.defineProperty(stream, "isTTY", property);
+    });
     running = false;
   }
 }
