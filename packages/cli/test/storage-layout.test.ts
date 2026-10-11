@@ -11,13 +11,14 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { defaultDatabasePath } from "../src/config.js";
-import { resolveStorage } from "../src/storage.js";
+import { build } from "esbuild";
+import { defaultDatabasePath } from "../src/hub-config.js";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
 
 const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -120,31 +121,33 @@ describe("the hub database", () => {
 
   it(
     "does not move when the package does",
-    () => {
+    async () => {
       // The reason this module exists: a Homebrew or tarball upgrade replaces
       // program files, so a database resolved from the package's own location
       // is a database an upgrade deletes. Proving that means *relocating the
-      // package* — a copy of the module under a directory that is not the
-      // checkout — and asking the copy where the database is.
+      // package* — a bundle under a directory that is not the checkout — and
+      // asking the copy where the database is.
       const root = home();
       const relocated = join(root, "opt", "uberblick-1.2.3", "hub");
       mkdirSync(relocated, { recursive: true });
-      for (const file of ["config.ts", "storage.ts", "log.ts", "loopback.ts"]) {
-        copyFileSync(join(PACKAGE_ROOT, "src", file), join(relocated, file));
-      }
-      writeFileSync(
-        join(relocated, "probe.ts"),
-        'import { defaultDatabasePath } from "./config.js";\n' +
-          "process.stdout.write(defaultDatabasePath());\n",
-        "utf8",
-      );
+      await build({
+        stdin: {
+          contents: 'import { defaultDatabasePath } from "./hub-config.js";\n' +
+            "process.stdout.write(defaultDatabasePath());\n",
+          resolveDir: join(PACKAGE_ROOT, "src"),
+          loader: "ts",
+        },
+        bundle: true,
+        platform: "node",
+        format: "esm",
+        outfile: join(relocated, "probe.mjs"),
+      });
 
       const probe = spawnSync(
         process.execPath,
-        ["--import", "tsx", join(relocated, "probe.ts")],
+        [join(relocated, "probe.mjs")],
         {
-          // tsx is resolved from the checkout; the *module under test* is the
-          // one that moved, which is the axis this test is about.
+          // The released modules moved; the working directory stays independent.
           cwd: PACKAGE_ROOT,
           env: { PATH: process.env.PATH ?? "", HOME: root },
           encoding: "utf8",

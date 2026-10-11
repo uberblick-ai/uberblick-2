@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHub, type Hub } from "@uberblick/hub";
+import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
 import { expect } from "vitest";
 import { type Run, type Sandbox, sandbox } from "./helpers.js";
 

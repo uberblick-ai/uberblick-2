@@ -9,19 +9,19 @@
  * the shutdown can also be logged and bounded.
  */
 
-import { resolveRemoteHubConfig } from "./config.js";
+import { resolveRemoteHubConfig } from "./team-config.js";
 import { stderrLogger } from "./log.js";
-import { createHub } from "./server.js";
+import { createTeamHub } from "./team.js";
 import { isEphemeralDatabase } from "./persistence.js";
 
 const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 async function main(): Promise<void> {
   const config = resolveRemoteHubConfig();
-  const hub = await createHub(config, {
+  const hub = await createTeamHub(config, {
     initializeDefaultWorkspace: true,
     operatorSetup: process.platform !== "win32" &&
-      !isEphemeralDatabase(config.databasePath ?? "durable-default"),
+      !isEphemeralDatabase(config.databasePath!),
   });
 
   let shuttingDown = false;

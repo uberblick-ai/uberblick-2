@@ -8,8 +8,8 @@ import { silentLogger } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath,
   testRoom, type TestClient, waitForText, WORKSPACE,

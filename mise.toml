@@ -16,10 +16,9 @@ fnox = "1"
 # device credentials with current membership and configured GitHub sign-in.
 [env]
 
-# The hub's SQLite file, checkout-local and gitignored. Absent this, a hub opens
-# the *packaged user's* database — `$XDG_DATA_HOME/uberblick/hub.sqlite`, or
-# `~/.local/share/uberblick/hub.sqlite`, the one layout on every platform
-# (#385) — and development has no business writing there. Every mise path
+# The hub's SQLite file, checkout-local and gitignored. The standalone hub
+# requires this path. Without it, `ub open` uses the user's data-root database,
+# and development has no business writing there. Every mise path
 # inherits it: `mise run hub`, `mise run dev`, `mise run e2e` (whose harness
 # goes further and starts its hub on a temp database of its own). The Docker
 # review container does not — it runs `pnpm` directly and mise never executes
@@ -56,7 +55,7 @@ run = 'sh "{{config_root}}/bin/setup.sh"'
 
 [tasks.hub]
 description = "Start the Hocuspocus sync hub (binds HUB_HOST:PORT, default 127.0.0.1:1234)"
-# The package's development preload resolves private credentials before main.ts.
+# The MCP package's development preload resolves private credentials before the hub's main.ts.
 # Release builds bundle main.ts directly, without that preload.
 run = "pnpm --filter @uberblick/hub start"
 

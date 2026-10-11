@@ -17,8 +17,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
-import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   directoryRoom,

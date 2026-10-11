@@ -17,11 +17,8 @@
  * **Nothing here creates anything.** Resolution is string joins; the writers
  * (`ub workspace create`, the replicas, the hub) create directories when they write.
  *
- * **Why this module is in `@uberblick/hub`.** The cli, the MCP server and the
- * hub must agree on one layout, and the hub is the lowest of the three in the
- * dependency graph (cli → mcp-server → hub → schema). A package of its own for
- * four path functions buys nothing but a manifest; `@uberblick/hub/storage`
- * costs a line in the exports map. It imports node builtins and nothing else.
+ * The CLI and MCP clients share this desktop layout. The released hub takes
+ * its database path from `HUB_DB_PATH` instead.
  *
  * `HUB_DB_PATH` and `UBERBLICK_DB` are unchanged and untouched by any of this:
  * they name a file outright, and a file someone named outright is not a layout

@@ -37,7 +37,7 @@ import {
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
-} from "@uberblick/hub/protocol";
+} from "@uberblick/schema/protocol";
 import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";

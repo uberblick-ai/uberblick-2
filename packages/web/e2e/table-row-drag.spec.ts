@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import type { Browser, CDPSession, Locator, Page, TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock, decisionDirectoryFields, deleteBlock, directoryRoom, editBlock,
   getBlocks, getBlocksFragment, initDoc, roomForDoc, setKind, setStatus,

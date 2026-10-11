@@ -11,7 +11,7 @@ import {
   importRootSecret,
   mintToken,
   readTokenKeyId,
-} from "../src/token.js";
+} from "@uberblick/schema/token";
 import { removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";

@@ -22,7 +22,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
 import {

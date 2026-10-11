@@ -44,7 +44,7 @@
 import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createDataDirectory } from "@uberblick/hub/storage";
+import { createDataDirectory } from "@uberblick/mcp-server/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type {

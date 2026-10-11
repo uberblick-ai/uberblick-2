@@ -1,7 +1,7 @@
 /**
  * Hub auth token minting.
  *
- * The signing and verification logic lives in `@uberblick/hub`'s `./token`
+ * The signing and verification logic lives in `@uberblick/schema/token`
  * subpath: it is WebCrypto-only (no Node builtins), so the exact same module
  * runs in the browser to mint and in the hub to verify. Re-implementing it here
  * would be a second definition of the wire format, and the two would drift —
@@ -12,7 +12,7 @@
  * hosted design lands (server mints per OAuth session, client only *receives* a
  * token) the change is confined to this file.
  *
- * Format, for reference — see @uberblick/hub/token for the authority:
+ * Format, for reference — see @uberblick/schema/token for the authority:
  *
  *     base64url(JSON {typ, sub, workspace, scope, kid, iat, exp}) "." base64url(HMAC-SHA256(key, payloadPart))
  *
@@ -29,10 +29,10 @@ export {
   MAX_TOKEN_LIFETIME_SECONDS,
   importRootSecret,
   mintToken,
-} from "@uberblick/hub/token";
+} from "@uberblick/schema/token";
 export type {
   TokenClaims,
   TokenRequest,
   TokenScope,
   TokenType,
-} from "@uberblick/hub/token";
+} from "@uberblick/schema/token";

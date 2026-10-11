@@ -71,7 +71,7 @@
  */
 
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { resolveDevProjectConfig } from "../dev-project-config.js";
 import * as Y from "yjs";
 import {

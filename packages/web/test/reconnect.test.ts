@@ -26,17 +26,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { HocuspocusProvider, HocuspocusProviderWebsocket, MessageType } from "@hocuspocus/provider";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-  STORE_BUSY_REASON,
-  STORE_REFUSED_REASON,
-} from "@uberblick/hub";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { STORE_BUSY_REASON, STORE_REFUSED_REASON } from "../../cli/src/local-browser-server.js";
 import type { Hub } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { getBlocks, getWorkspaceName, initDoc, insertBlock, setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";

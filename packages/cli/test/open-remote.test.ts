@@ -9,17 +9,13 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { type StoredHubLogin, readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
+import { type StoredHubLogin, readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  createHub,
-  importRootSecret,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { wrapToken } from "@uberblick/schema/protocol";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   appendBlock,

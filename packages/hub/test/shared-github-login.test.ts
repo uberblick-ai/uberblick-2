@@ -4,13 +4,13 @@ import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
-import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/config.js";
+import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/team-config.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
 import { HubDatabase } from "../src/persistence.js";
-import { createHub, type Hub } from "../src/server.js";
-import { importCredentialKey, mintToken } from "../src/token.js";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
+import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { removeTempDatabases, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
 const ACCOUNT = { id: 1234, login: "same-person" };

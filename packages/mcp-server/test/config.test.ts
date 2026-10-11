@@ -20,7 +20,7 @@ import {
 } from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
 import { bridgeConfig } from "../src/remote.js";
-import { writeHubLogin } from "@uberblick/hub/auth-store";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -121,7 +121,7 @@ describe("resolveMcpConfig", () => {
   });
 
   it("puts both spellings of one workspace in one replica file", () => {
-    // The layout is `@uberblick/hub/storage`'s to decide and its suite's to
+    // The layout is `@uberblick/mcp-server/storage`'s to decide and its suite's to
     // prove; what matters here is that both spellings of one workspace land on
     // one file — two replicas of one corpus would converge with neither.
     const dataHome = mkdtempSync(join(tmpdir(), "uberblick-data-home-"));

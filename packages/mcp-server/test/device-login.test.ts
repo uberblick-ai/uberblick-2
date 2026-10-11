@@ -7,10 +7,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { startDeviceSyncHub } from "./device-sync-hub.js";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
