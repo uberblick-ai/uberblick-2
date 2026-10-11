@@ -1,20 +1,3 @@
-/**
- * `ub status` — whether this project's work is reaching the hub.
- *
- * The command boots the same replica set the MCP server boots and reads the same
- * snapshot the `sync_status` tool returns (`collectSyncStatus`), so a human and
- * an agent see one answer, not two. That is also why it opens the real database
- * and gives the hub a bounded chance to answer: a status command that reported
- * only the configuration would say "fine" while nothing syncs.
- *
- * `--json` prints exactly one object to stdout and nothing else. Warnings,
- * diagnostics and the MCP server's own logging all go to stderr, so the JSON
- * stays parseable by a pipe.
- *
- * The short public report is projected from the diagnostic reading. Workspace
- * status keeps its selection and storage details; doctor keeps the full reading.
- */
-
 import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { hubDatabasePath } from "./hub-config.js";
@@ -32,18 +15,9 @@ import { processIo } from "./io.js";
 import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
 import { cliVersion } from "./version.js";
 
-/**
- * Where this machine keeps its files.
- *
- * Internal diagnostic paths used by workspace status. Directories and database
- * files only — no credential, and no value out of one.
- */
+/** Diagnostic paths contain no credentials or values read from them. */
 export interface StorageReport {
-  /**
-   * Always `"xdg"` — there is one layout on every platform (#385). The field
-   * stays because a script that reads this object should not have to handle a
-   * key disappearing; it is a constant, not a detection.
-   */
+  /** Keep the constant field for consumers; it does not detect a platform. */
   layout: "xdg";
   /** The user config file, `config.json`. `credentials.json` sits beside it. */
   config: string;
@@ -62,17 +36,9 @@ export interface StatusReport {
   version: string;
   /** The workspace id as configured — the spelling its owner typed. */
   workspace: string;
-  /**
-   * The identity behind that spelling. Equal to `workspace` unless it carries a
-   * display slug, and the only half that names a room, a token claim or the
-   * database file — so it is what you quote when you tell somebody which
-   * workspace this is.
-   */
+  /** Bare identity for room names, token claims and database paths; no display slug. */
   workspaceUuid: string;
-  /**
-   * The endpoint that would be dialled. Reported whether or not sync is on —
-   * `hub.url` is null when no signing secret makes it local-only.
-   */
+  /** Configured endpoint, even when absent credentials make `hub.url` null. */
   hubUrl: string;
   /** The account stored on this computer, independent of live hub acceptance. */
   account: { login: string; provider: "github" } | null;
@@ -81,22 +47,14 @@ export interface StatusReport {
   credentialPresent: boolean;
   credentialSource: CredentialOrigin | null;
   sources: { workspace: Origin; hubUrl: Origin };
-  /**
-   * The layers that lost to a *different* value above them — which is what
-   * `sources` and `credentialSource` name. Absent unless something disagrees,
-   * so a reader of the JSON can treat the key's presence as the conflict.
-   */
+  /** Absent unless a lower configuration layer disagrees with the winning value. */
   shadowed?: ShadowedLayer[] | undefined;
   /** `disabled` means no signing secret, so this machine is local-only. */
   hub: SyncStatus["hub"];
   rooms: SyncStatus["rooms"];
   /** Rooms holding local changes the hub has not acknowledged. Counts ROOMS. */
   unsyncedChanges: number;
-  /**
-   * Which rooms those are, with the log sequence still unacknowledged. The
-   * count alone answers "is anything at risk"; this answers "what", which is
-   * what someone about to close their laptop actually needs.
-   */
+  /** Unacknowledged log sequences grouped by room. */
   pendingRooms: SyncStatus["pendingRooms"];
   /** Last time this replica was caught up with its hub; null for local workspaces. */
   lastSync: SyncStatus["lastSync"];
@@ -115,7 +73,7 @@ export const ORIGIN_LABELS: Record<Origin, string> = {
   default: "built-in default",
 };
 
-/** The live replica reading used by `ub status`. Always releases it. */
+/** Use MCP's replica set and diagnostic snapshot; always release the replica. */
 export async function readSyncStatus(
   config: McpConfig,
   inspect?: (replicas: UberblickMcpServer["replicas"]) => void,
@@ -131,10 +89,8 @@ export async function readSyncStatus(
 }
 
 /**
- * The full-replica acknowledgement rule used by the serving status reader.
- * Counts alone miss attach drain and a peer clearing a shared pending marker
- * before this replica has applied the store cut. Keep the cut and markers in
- * one snapshot, using the server's public diagnostic primitives.
+ * Read store cuts and pending markers together: a peer can clear a marker
+ * before this replica applies its cut, and counts alone miss attach drain.
  */
 export function workspaceCaughtUp(replicas: UberblickMcpServer["replicas"]): boolean {
   const attached = replicas.attachedReplicas();
@@ -160,9 +116,8 @@ export interface UnboundStatusReport {
 }
 
 /**
- * Collect the report without printing it. Exported for tests.
- * Name and acknowledgement metadata stay beside the diagnostic report. The
- * workspace leaf also reads stored accounts for shared-secret hubs.
+ * Keep name and acknowledgement metadata outside the diagnostic report.
+ * Workspace status also reads stored accounts for shared-secret hubs.
  */
 export async function statusReport(
   options: { env?: NodeJS.ProcessEnv; cwd?: string; workspaceStatus?: boolean } = {},
@@ -184,8 +139,7 @@ export async function statusReport(
   let caughtUp = false;
   const sync = await readSyncStatus(config, options.workspaceStatus === true
     ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined);
-  // Reuse the existing local presence read; the account never requests a login
-  // or renewal. A refused connection still has an account if it is stored here.
+  // Read the stored account without login or renewal, even after a hub refusal.
   const deviceLogin = config.deviceLogin === undefined &&
     !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
     ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
@@ -226,8 +180,7 @@ export async function statusReport(
         layout: "xdg",
         config: resolved.paths.userConfig,
         data: resolved.storage.dataDir,
-        // Asked of the hub package, so that what this reports and what a hub
-        // started here would open cannot drift apart.
+        // Use the hub's own path resolver so its reported and opened paths agree.
         hub: hubDatabasePath(resolved.env),
         workspace: config.databasePath,
       },
@@ -400,7 +353,6 @@ export function renderStatus(
   return text;
 }
 
-/** Exported so the help below can be checked against the parser it describes. */
 export const STATUS_OPTIONS = {
   json: { type: "boolean", default: false },
 } as const;

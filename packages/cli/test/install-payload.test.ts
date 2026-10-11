@@ -368,7 +368,7 @@ describe("the versioned install payload", () => {
   /**
    * `ub update` reaches Homebrew and nothing else.
    *
-   * The tree is the shape #849 installs — the payload under Homebrew's prefix —
+   * The tree is an installed payload under Homebrew's prefix,
    * and `brew`, `git` and `mise` are all on PATH, all recording what they were
    * asked to do. The working directory is this repository's own checkout on
    * purpose: which copy `ub update` updates comes from where `ub`'s own files

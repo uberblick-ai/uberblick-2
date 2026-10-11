@@ -1,11 +1,9 @@
 /**
  * Build the `ub` the suite spawns — once per `vitest run`, not once per spawn.
  *
- * Every process test used to go through `bin/ub.mjs`, which registers tsx and
- * transpiles the CLI, the schema package and the MCP server afresh in each
- * child. That is a tenth of a second of pure boot per spawn, several hundred
- * times a run. Bundling `src/main.ts` to plain JavaScript once moves that cost
- * to a single ~200 ms step here.
+ * `bin/ub.mjs` registers tsx and transpiles the CLI, schema and MCP server in
+ * each child. Bundling `src/main.ts` once avoids that cost across the suite's
+ * several hundred spawns.
  *
  * **Why a bundler at all.** The workspace packages export TypeScript
  * (`"exports": {".": "./src/index.ts"}`) and `tsconfig.base.json` sets
@@ -58,12 +56,9 @@ export default async function setup(project: TestProject): Promise<void> {
     // and esbuild includes it once). Only Node's builtins stay external, which
     // `platform: "node"` already arranges.
     //
-    // Minified because the file is read and compiled on every spawn and this is
-    // measurably half of what is left: 2.0 MB unminified starts in 0.166 s on
-    // the machine this was written on, 1.0 MB minified in 0.143 s. The map is a
-    // sibling file rather than inline, so `--enable-source-maps` still gives a
-    // readable stack when a spawned run fails, and a run that does not ask pays
-    // nothing for it.
+    // Minify to reduce the file read and compiled on every spawn. A sibling
+    // map gives `--enable-source-maps` readable failure stacks without adding
+    // bytes to runs that do not request maps.
     minify: true,
     sourcemap: true,
   });

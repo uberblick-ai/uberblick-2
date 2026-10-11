@@ -1,5 +1,3 @@
-/** Verified workspace fetching and promotion share the same bridge checks. */
-
 import { Console } from "node:console";
 import { Writable } from "node:stream";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
@@ -123,23 +121,15 @@ function warn(io: Io, warnings: readonly string[]): void {
   }
 }
 
-// --- the shared bridge machinery -------------------------------------------
-
 /**
- * Why a corpus reading cannot be trusted, or null when it can.
- *
- * The facts a bounded wait cannot establish on its own, in one place: the hub
- * answered, its directory was read in full, every room is acknowledged, and
- * every document the directory names actually arrived. Fail-closed throughout:
- * an unknown directory is not a small directory, and missing is missing.
+ * Trust only a responding hub, a complete directory, acknowledged rooms and
+ * every named document. A bounded wait alone proves none of these.
  */
 export function corpusProblem(url: string, corpus: Corpus): string | null {
   if (corpus.hub.status !== "connected") {
     return `${hubProblem(url, corpus.hub)}.\n`;
   }
-  // Before anything is read off it. An incomplete reading is not a small
-  // reading: it is no reading at all, and its empty document list must never be
-  // mistaken for an empty hub.
+  // Reject incomplete readings before their empty document list can look authoritative.
   if (!corpus.complete) {
     return (
       `${url} accepted the connection but never finished serving its ` +
@@ -167,13 +157,8 @@ export function corpusProblem(url: string, corpus: Corpus): string | null {
 }
 
 /**
- * The verification `use <link>` ends with: what a fresh client finds there, compared
- * with what this machine holds, in both directions.
- *
- * Both directions, because "the far side has everything we have" is only half
- * of it. A document that appeared over there while the bridge was running means
- * the corpus this was verified against is already stale, and persisting the
- * endpoint on that basis would claim a completeness nobody checked.
+ * Compare fresh-client and local snapshots both ways; a new remote document
+ * makes the verified snapshot stale just as a missing document does.
  */
 export async function verify(
   bridge: Bridge,
@@ -181,10 +166,8 @@ export async function verify(
   workspace?: readonly CorpusDoc[],
 ): Promise<{ corpus: Corpus; problem: string | null }> {
   bridge.io.err(`ub workspace: verifying ${bridge.target} as a fresh client…\n`);
-  // The directory proves the complete identity/tombstone set. Reading one live
-  // room proves the fresh-client path without making the command's fixed
-  // network budget grow with the corpus; archived rooms are all read because a
-  // tombstone alone cannot prove their restorable content moved.
+  // Check the full identity/tombstone set, all archived contents and one live room.
+  // One live room bounds network work; tombstones alone do not prove restorable content.
   const corpus = await inspectRemote(remoteConfig(bridge), {
     documents: workspace === undefined ? "sample" : true,
     workspace: workspace !== undefined,
@@ -217,12 +200,9 @@ export async function verify(
   return { corpus, problem: null };
 }
 
-// --- ub workspace use <link> ------------------------------------------------
-
 /**
- * The CLI runs one command at a time. Give its bounded bridge a quiet console,
- * including lib0/Yjs messages, then restore the caller's console on every exit.
- * Diagnostics come from the returned Corpus and thrown errors instead.
+ * The CLI runs one command at a time; silence library logs and restore the
+ * caller's console on every exit. Returned readings and errors own diagnostics.
  */
 async function quietLibraries<T>(action: () => Promise<T>): Promise<T> {
   const original = globalThis.console;
@@ -240,7 +220,6 @@ export interface WorkspaceUseOptions {
   json: boolean;
 }
 
-/** Fetch the named replica using the same reconciliation and verification as before. */
 export async function useRemoteWorkspace(
   flags: { endpoint: string; workspace: string },
   command: string,
