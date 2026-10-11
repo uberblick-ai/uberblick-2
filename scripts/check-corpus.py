@@ -43,14 +43,17 @@ def main(timeout_seconds=50):
         # The SDK owns its direct child; only this supervisor owns the entire
         # route's process group when a hung server outlives the CLI wrapper.
         stop_group(child, signal.SIGKILL)
-        child.communicate()
+        _, stderr = child.communicate()
 
+    lines = stderr.decode("utf-8", errors="replace").splitlines()
+    last_line = next((line.strip() for line in reversed(lines) if line.strip()), None)
     if reason is not None:
+        if last_line:
+            reason += f"; {last_line}"
         print(f"corpus health check: {reason}", file=sys.stderr)
         return 1
     if child.returncode != 0:
-        lines = stderr.decode("utf-8", errors="replace").splitlines()
-        reason = next((line.strip() for line in reversed(lines) if line.strip()), "probe exited without a reason")
+        reason = last_line or "probe exited without a reason"
         print(f"corpus health check: {reason}", file=sys.stderr)
         return 1
     return 0

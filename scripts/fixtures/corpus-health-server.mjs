@@ -34,7 +34,7 @@ process.on("SIGTERM", () => {});
 writeFileSync(${JSON.stringify(config.descendant)}, String(process.pid));
 setInterval(() => {}, 1000);`,
 		],
-		{ stdio: "ignore" },
+		{ stdio: config.inheritDescendantPipes ? ["ignore", "inherit", "inherit"] : "ignore" },
 	);
 	while (!existsSync(config.descendant)) await delay(5);
 }

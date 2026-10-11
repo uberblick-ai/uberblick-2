@@ -222,3 +222,17 @@ test("deadline cleanup kills descendants while retaining the supervisor's reason
 	assert.match(lastReason(invoke(f, 1.5)), /route or probe shutdown timed out after 1\.5s/);
 	await assertDescendantStopped(f);
 });
+
+test("a shutdown timeout retains the failed pin when a descendant holds SDK pipes open", async (t) => {
+	const f = fixture(t, {
+		mode: "document-refused",
+		descendant: true,
+		inheritDescendantPipes: true,
+		probeTimeout: 10_000,
+	});
+	const reason = lastReason(invoke(f, 4.5));
+	assert.match(reason, /route or probe shutdown timed out after 4\.5s/);
+	assert.ok(reason.includes(pins[1].uuid), reason);
+	assert.match(reason, /doc_not_hydrated/);
+	await assertDescendantStopped(f);
+});
