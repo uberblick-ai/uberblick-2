@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { resolveStorage } from "@uberblick/hub/storage";
-import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
-export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/hub/auth-store";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
+export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
 
 /** Internal fallback; public startup resolves the project's workspace binding. */

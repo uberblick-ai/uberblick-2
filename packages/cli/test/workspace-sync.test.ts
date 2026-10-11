@@ -1,7 +1,7 @@
 /** A workspace is current only when this replica covers the hub-acknowledged store cut. */
 
 import { randomUUID } from "node:crypto";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import type { UberblickMcpServer } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it, vi } from "vitest";

@@ -8,7 +8,7 @@ import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 import type { HubClaimState } from "./hub-claim.js";
 import type { HubDatabase } from "./persistence.js";
 import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
-import { sanitizeDeviceName } from "./device-name.js";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {

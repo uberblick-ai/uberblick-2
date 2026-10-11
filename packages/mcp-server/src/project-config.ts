@@ -84,9 +84,8 @@ export class SigningSecretExposureError extends Error {}
 
 /**
  * The directory `ub`'s own files live in: `$XDG_CONFIG_HOME/uberblick`, or
- * `~/.config/uberblick`. `@uberblick/hub/storage` resolves that, for the hub
- * and the MCP server as well as for this one — one layout, decided in one
- * place.
+ * `~/.config/uberblick`. `@uberblick/mcp-server/storage` resolves one layout
+ * for the CLI and MCP clients.
  */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolveStorage({ env }).configDir;

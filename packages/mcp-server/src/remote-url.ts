@@ -1,6 +1,6 @@
 import { parseWorkspaceId } from "@uberblick/schema";
-import { isLoopbackHost } from "./loopback.js";
-export { isLoopbackHost } from "./loopback.js";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
+export { isLoopbackHost } from "@uberblick/schema/loopback";
 
 /** Wildcards and unrecognized host spellings always require device login. */
 export function isLoopbackEndpoint(endpoint: string): boolean {

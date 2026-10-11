@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomStatus } from "../src/collab/rooms.js";
 import type { SyncState } from "../src/ui/calm.js";
 import {

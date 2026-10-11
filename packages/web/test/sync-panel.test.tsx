@@ -27,7 +27,7 @@ import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { TOKEN_MISSING } from "../src/ui/status-reading.js";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 
 /** A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";

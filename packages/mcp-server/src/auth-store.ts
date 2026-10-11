@@ -5,7 +5,8 @@
  */
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
-import { validateWorkspaceName } from "@uberblick/schema";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
+export { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { credentialsPath } from "./storage.js";
 export { CREDENTIALS_FILE, credentialsPath } from "./storage.js";
 import { authenticationOrigin, isLoopbackEndpoint } from "./remote-url.js";
@@ -58,27 +59,6 @@ function uuid(value: unknown): value is string {
 
 function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-/** Bad display data never invalidates a credential or adds workspace authority. */
-export function sanitizeWorkspaceNames(
-  value: unknown,
-  workspaces: readonly string[],
-  credentialKey: string,
-  collectionSecret?: string,
-): Record<string, string> | undefined {
-  if (!object(value)) return undefined;
-  const names: Record<string, string> = {};
-  for (const workspace of workspaces) {
-    if (!Object.hasOwn(value, workspace)) continue;
-    const name = value[workspace];
-    if (typeof name !== "string" || name.includes(credentialKey) ||
-        (collectionSecret !== undefined && name.includes(collectionSecret))) continue;
-    try {
-      if (validateWorkspaceName(name) === name) names[workspace] = name;
-    } catch { /* Unsafe names remain unnamed. */ }
-  }
-  return Object.keys(names).length === 0 ? undefined : names;
 }
 
 /** Validate exactly the identity and issued credential that collection supplies. */

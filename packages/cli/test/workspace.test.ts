@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it } from "vitest";
-import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";

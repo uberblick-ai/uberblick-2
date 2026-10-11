@@ -10,17 +10,17 @@ import {
   importCredentialKey,
   importRootSecret,
   mintToken,
-} from "@uberblick/hub/token";
+} from "@uberblick/schema/token";
 import {
   AUTH_REJECTED,
   protocolSkew,
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
-} from "@uberblick/hub/protocol";
-import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/hub/device-login";
-import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { isLoopbackEndpoint } from "@uberblick/hub/remote-url";
+} from "@uberblick/schema/protocol";
+import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
+import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";

@@ -10,28 +10,19 @@
  * Loopback hubs use the local shared-secret model. Any other bind, including
  * a wildcard, requires device credentials and current workspace membership.
  *
- * `HUB_DB_PATH` names the SQLite file outright. With none set the hub opens
- * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage` — and
- * never a path inside the installed package, which an upgrade replaces. Every
- * mise task in this checkout sets `HUB_DB_PATH` to a checkout-local file, so
- * development never touches the packaged user's database.
+ * The embedding client supplies the database path. The standalone release
+ * resolves it from `HUB_DB_PATH`; desktop storage is a client concern.
  *
  * `HUB_AUTH_TOKEN` is required only for loopback admission. Remote hubs never
  * read it for admission, including a value left by an earlier deployment.
  */
 
 import type { HubLogger } from "./log.js";
-import type { GithubSignInConfig } from "./github-sign-in.js";
-import type { StorageOptions } from "./storage.js";
-import { resolveStorage } from "./storage.js";
-import { isLoopbackHost } from "./loopback.js";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
 
 /** The only hardcoded address-ish defaults in the repo. */
 export const DEFAULT_PORT = 1234;
 export const DEFAULT_HOST = "127.0.0.1";
-
-/** Public Uberblick Login GitHub App; device flow needs no client secret. */
-export const SHARED_GITHUB_CLIENT_ID = "Iv23liLW6D5SqP77El3z";
 
 /**
  * How many documents one websocket may have in flight through authentication.
@@ -78,8 +69,6 @@ export interface HubConfig {
   databasePath?: string;
   /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
   authSecret?: string;
-  /** Remote device admission is unavailable without configured sign-in. */
-  github?: GithubSignInConfig;
   log?: HubLogger;
   /**
    * How long `onStoreDocument` is debounced (ms). Hocuspocus' own defaults
@@ -97,7 +86,7 @@ export interface HubConfig {
   maxPendingDocuments?: number;
   /**
    * The sync protocol this hub speaks, defaulting to `SYNC_PROTOCOL_VERSION`
-   * (`./protocol.ts`).
+   * (`@uberblick/schema/protocol`).
    *
    * A test seam, not an operator dial — a hub's protocol version is a property
    * of the build, and nothing in production sets it. It is settable because the
@@ -118,36 +107,6 @@ export interface HubConfig {
   shutdownTimeoutMs?: number;
 }
 
-/**
- * `hub.sqlite` in the user's data root — see `@uberblick/hub/storage`.
- *
- * Derived from the *user*, never from where this package sits: a Homebrew or
- * tarball upgrade replaces program files, so a database under the install
- * directory is a database an upgrade can delete. Nothing here reads
- * `import.meta.url` or `process.cwd()`, which is what makes the answer the same
- * from any directory and from any copy of the package.
- *
- * This checkout's mise tasks set `HUB_DB_PATH` to a checkout-local file, so
- * development never opens the packaged user's database.
- */
-export function defaultDatabasePath(options: StorageOptions = {}): string {
-  return resolveStorage(options).hubDatabase;
-}
-
-/**
- * The database a hub started with this environment opens: `HUB_DB_PATH` when it
- * names one, and {@link defaultDatabasePath} otherwise. `ub status` reports it,
- * so the rule lives here rather than in two places that could disagree.
- */
-export function hubDatabasePath(
-  env: NodeJS.ProcessEnv = process.env,
-): string {
-  const configured = env.HUB_DB_PATH?.trim();
-  return configured === undefined || configured === ""
-    ? defaultDatabasePath({ env })
-    : configured;
-}
-
 function parsePort(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "") {
     return DEFAULT_PORT;
@@ -159,21 +118,14 @@ function parsePort(raw: string | undefined): number {
   return port;
 }
 
-/** Public app identifiers, distinct from an App ID or OAuth App client ID. */
-export function validateGithubClientId(clientId: string): void {
-  if (typeof clientId !== "string" || !/^(?:Iv1\.[a-fA-F0-9]{16}|Iv23[A-Za-z0-9]{16})$/.test(clientId)) {
-    throw new Error("HUB_GITHUB_CLIENT_ID must be a GitHub App client ID (Iv1. followed by 16 hex digits, or Iv23 followed by 16 alphanumeric characters)");
-  }
-}
-
 /**
  * Build a config from the environment.
  *
  * @throws when a loopback hub has no `HUB_AUTH_TOKEN`, or the port is invalid.
- * `createHub` validates GitHub configuration before opening the database.
  */
-export function resolveHubConfig(
-  env: NodeJS.ProcessEnv = process.env,
+export function resolveCoreHubConfig(
+  env: NodeJS.ProcessEnv,
+  databasePath: string,
 ): HubConfig {
   const host = env.HUB_HOST?.trim();
   const address = host === undefined || host === "" ? DEFAULT_HOST : host;
@@ -185,26 +137,10 @@ export function resolveHubConfig(
     );
   }
 
-  const githubClientId = env.HUB_GITHUB_CLIENT_ID;
-
   return {
     port: parsePort(env.PORT),
     address,
-    databasePath: hubDatabasePath(env),
+    databasePath,
     ...(authSecret === undefined ? {} : { authSecret }),
-    ...(githubClientId === undefined || githubClientId === "" ? {} : { github: { clientId: githubClientId } }),
   };
-}
-
-/**
- * The standalone hub process used by remote deployments offers GitHub sign-in
- * without operator setup. Embedded hubs, including `ub open`, keep the
- * explicit-only configuration of `resolveHubConfig`.
- */
-export function resolveRemoteHubConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): HubConfig {
-  const config = resolveHubConfig(env);
-  config.github ??= { clientId: SHARED_GITHUB_CLIENT_ID };
-  return config;
 }

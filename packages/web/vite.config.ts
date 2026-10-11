@@ -61,7 +61,7 @@ const BUILD_STAMP = "uberblick-build.json";
  *
  * Through `runnerImport` rather than a plain `import`, because a plain one does
  * not work here: Vite bundles a config file but externalises every bare import
- * in it, so `@uberblick/hub/protocol` is handed to Node — which runs
+ * in it, so `@uberblick/schema/protocol` is handed to Node — which runs
  * TypeScript, but does not rewrite that module's own `./token.js` specifier to
  * `token.ts` the way every bundler in this repo does. `runnerImport` resolves
  * it with Vite's resolver, the one that already resolves the client's import of
@@ -74,7 +74,7 @@ function buildStampPlugin(): Plugin {
     apply: "build",
     async generateBundle() {
       const { module } =
-        await runnerImport<typeof import("@uberblick/hub/protocol")>("@uberblick/hub/protocol");
+        await runnerImport<typeof import("@uberblick/schema/protocol")>("@uberblick/schema/protocol");
       this.emitFile({
         type: "asset",
         fileName: BUILD_STAMP,

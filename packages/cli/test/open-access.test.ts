@@ -2,8 +2,9 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
-import { createHub, silentLogger, type Hub } from "@uberblick/hub";
-import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { pointAt, waitUntil } from "./helpers.js";

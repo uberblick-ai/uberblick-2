@@ -19,8 +19,8 @@
  */
 
 import { beforeEach, expect, it, vi } from "vitest";
-import { readAuthEnvelope } from "@uberblick/hub/protocol";
-import { importRootSecret, verifyToken } from "@uberblick/hub/token";
+import { readAuthEnvelope } from "@uberblick/schema/protocol";
+import { importRootSecret, verifyToken } from "@uberblick/schema/token";
 import * as Y from "yjs";
 import {
   Awareness,

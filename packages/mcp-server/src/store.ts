@@ -2,7 +2,7 @@ import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 // Decision: 90ce6355-9455-4e18-aa56-eb2347e57d6d
 import { DatabaseSync } from "node:sqlite";
-import { createDataDirectory } from "@uberblick/hub/storage";
+import { createDataDirectory } from "@uberblick/mcp-server/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import type {
