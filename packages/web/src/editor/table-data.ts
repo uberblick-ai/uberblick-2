@@ -1,4 +1,4 @@
-/** Detached projections retain every valid record for a native read-only table. */
+/** Detached projections select sorted valid records for a native read-only table. */
 import { compareCodePoints, isExternalHref } from "@uberblick/schema";
 import type { DataRecord, DocData } from "@uberblick/schema";
 import { chartDate, chartDateFormatter, chartNumberFormatter } from "./chart-data.js";
@@ -18,6 +18,7 @@ export interface TableConfig {
   collection: string;
   columns: TableColumnMapping[];
   title?: string;
+  limit?: number;
   sort?: { field: string; direction: "asc" | "desc" };
   pageSize: number;
 }
@@ -27,6 +28,7 @@ export interface TableReady {
   rows: DataRecord[];
   recordCount: number;
   invalidSchema: number;
+  notice?: string;
 }
 export interface TableProblem {
   status: "invalid-configuration" | "collection-absent" | "collection-unusable" | "mapping-incompatible" | "no-records";
@@ -57,16 +59,17 @@ export function parseTableConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid table configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "columns", "title", "sort", "pageSize", "limit"]) ||
       value.version !== 1 || value.type !== "table" || !name(value.collection) ||
       !Array.isArray(value.columns) || value.columns.length < 1 || value.columns.length > 30 ||
       !value.columns.every(column) || !optionalText(value, "title") ||
+      (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "pageSize") && (typeof value.pageSize !== "number" ||
         !Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100)) ||
       (Object.hasOwn(value, "sort") && (!object(value.sort) || !keys(value.sort, ["field", "direction"]) ||
         !name(value.sort.field) || (value.sort.direction !== "asc" && value.sort.direction !== "desc") ||
         !value.columns.some((entry: { field: string }) => entry.field === (value.sort as { field: string }).field)))) {
-    return { ok: false, message: "Invalid table configuration: expected a version 1 table mapping with one to thirty columns, supported formats and pageSize 1 to 100; unknown keys are not supported." };
+    return { ok: false, message: "Invalid table configuration: expected a version 1 table mapping with one to thirty columns, supported formats, pageSize 1 to 100 and optional positive integer limit; unknown keys are not supported." };
   }
   // Defaults belong to this detached view, never to the authored JSON source.
   return { ok: true, config: {
@@ -119,6 +122,10 @@ export function projectTable(config: TableConfig, data: DocData | null): TablePr
     });
   }
   if (rows.length === 0) return { status: "no-records", message: "No records to show in this table collection.", invalidSchema };
+  if (config.limit !== undefined && rows.length > config.limit) return {
+    status: "ready", config, rows: rows.slice(0, config.limit), recordCount: collection.records.length, invalidSchema,
+    notice: `Showing ${config.limit} of ${rows.length} records`,
+  };
   return { status: "ready", config, rows, recordCount: collection.records.length, invalidSchema };
 }
 

@@ -33,6 +33,14 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it.each([1, 90, 5_001, Number.MAX_VALUE])("accepts positive integer limit %s without an authoring ceiling", (limit) => {
+    expect(parseChartConfig(JSON.stringify({ ...mapping, limit }))).toMatchObject({ ok: true, config: { limit } });
+  });
+
+  it.each([0, -1, 1.5, "14", null, true, [], {}])("refuses non-positive or non-integer limit %j", (limit) => {
+    expect(prepareChart(JSON.stringify({ ...mapping, limit }), null).status).toBe("invalid-configuration");
+  });
+
   it("hides the not-plotted line for complete plots and empty collections, but keeps omitted values", () => {
     const { data } = fixture([{ id: "a", value: { x: 1, y: 2 } }]);
     expect(chartDiagnosticsText(ready(data))).toBe("");
@@ -69,6 +77,10 @@ describe("chart mapping", () => {
     JSON.stringify({ ...mapping, x: { field: "\ud800", type: "number" } }),
   ])("refuses malformed or unsupported mappings without data changes: %s", (source) => {
     expect(prepareChart(source, null)).toMatchObject({ status: "invalid-configuration", message: expect.stringContaining("Invalid chart configuration") });
+    const value: unknown = (() => { try { return JSON.parse(source); } catch { return null; } })();
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      expect(prepareChart(JSON.stringify({ ...value, limit: 1 }), null).status).toBe("invalid-configuration");
+    }
   });
 
   it("accepts eight series and treats field names as literal top-level properties", () => {
@@ -105,6 +117,52 @@ describe("chart dates", () => {
 });
 
 describe("chart data projection", () => {
+  it("selects latest valid x records, keeps ties and gaps, and reports only genuine omissions", () => {
+    const { data } = fixture([
+      { id: "old", value: { x: 0, y: "bad" } },
+      { id: "a", value: { x: 2, y: 2 } },
+      { id: "b", value: { x: 2 } },
+      { id: "c", value: { x: 3, y: 3 } },
+      { id: "missing", value: { y: 4 } },
+      { id: "invalid", value: { x: "4", y: 4 } },
+    ]);
+    const chart = ready(data, { ...mapping, limit: 2 });
+    expect(chart.series[0]?.points).toEqual([{ id: "b", x: 2, y: null }, { id: "c", x: 3, y: 3 }]);
+    expect(chart.notice).toBe("Showing the latest 2 of 4 records");
+    expect(chart.diagnostics).toMatchObject({ missingX: 1, invalidX: 1, noNumericY: 1, limited: 0 });
+    expect(chart.notPlotted).toBe(3);
+    expect(chart.firstX).toBe(3);
+    expect(chart.lastX).toBe(3);
+    expect(chart.diagnostics.series[0]).toMatchObject({ missing: 1, invalid: 0 });
+    expect(chartDiagnosticsText(chart)).not.toContain("outside");
+    const complete = ready(fixture([{ id: "a", value: { x: 1, y: 1 } }, { id: "b", value: { x: 2, y: 2 } }]).data, { ...mapping, limit: 1 });
+    expect(chartDiagnosticsText(complete)).toBe("");
+    for (const limit of [4, 100]) expect(ready(data, { ...mapping, limit }).notice).toBeUndefined();
+  });
+
+  it("recomputes a latest-date window from updated data without writes to its source or snapshot", () => {
+    const config: ChartConfig = { ...mapping, limit: 2, x: { field: "x", type: "date" } };
+    const source = JSON.stringify(config);
+    const { doc, data } = fixture([
+      { id: "a", value: { x: "2026-10-01", y: 1 } },
+      { id: "b", value: { x: "2026-10-02", y: 2 } },
+      { id: "c", value: { x: "2026-10-03", y: 3 } },
+    ]);
+    const before = getDocDataEntries(doc);
+    expect(ready(data, config).series[0]?.points.map(point => point.id)).toEqual(["b", "c"]);
+    expect(getDocDataEntries(doc)).toEqual(before);
+    applyDocData(doc, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "d", value: { x: "2026-10-04", y: 4 } }] }]);
+    const chart = prepareChart(source, readDocData(doc));
+    expect(chart.status).toBe("ready");
+    if (chart.status !== "ready") throw new Error(chart.message);
+    expect(chart.series[0]?.points.map(point => point.id)).toEqual(["c", "d"]);
+    expect(chart.firstX).toBe(Date.parse("2026-10-03"));
+    expect(chart.lastX).toBe(Date.parse("2026-10-04"));
+    expect(chart.notPlotted).toBe(0);
+    expect(source).toBe(JSON.stringify(config));
+    expect(ready(data, config).series[0]?.points.map(point => point.id)).toEqual(["b", "c"]);
+  });
+
   it("orders x then Unicode record id, preserving duplicates and zero", () => {
     const { doc, data } = fixture([
       { id: "last", value: { x: 9, y: 4 } },
@@ -178,6 +236,15 @@ describe("chart data projection", () => {
     expect(chart.diagnostics.invalidSchema).toBe(1);
     expect(chartDiagnosticsText(chart)).toContain("1 invalid under the collection schema");
     expect(getDocDataEntries(doc)).toEqual(before);
+    applyDocData(other, new Y.Doc(), [{ collection: "observations", upsert: [{ id: "second", value: { x: 3, y: 30 } }] }]);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
+    const updated = readDocData(doc);
+    if (updated === null) throw new Error("Missing data");
+    const limited = ready(updated, { ...mapping, limit: 1 });
+    expect(limited.notice).toBe("Showing the latest 1 of 2 records");
+    expect(limited.series[0]?.points.map(point => point.id)).toEqual(["second"]);
+    expect(limited.notPlotted).toBe(1);
+    expect(limited.diagnostics.invalidSchema).toBe(1);
   });
 
   it("bounds by greatest x with deterministic ties while preserving gaps", () => {
@@ -194,6 +261,13 @@ describe("chart data projection", () => {
     expect(chart.plottedCount).toBe(4_999);
     expect(chart.notPlotted).toBe(4);
     expect(chart.diagnostics).toMatchObject({ limited: 3, noNumericY: 1 });
+    const overCap = ready(data, { ...mapping, limit: 5_001 });
+    expect({ ...overCap, config: chart.config }).toEqual(chart);
+    const atCap = ready(data, { ...mapping, limit: 5_000 });
+    expect(atCap.series).toEqual(chart.series);
+    expect(atCap.notice).toBe(chart.notice);
+    expect(atCap.notPlotted).toBe(1);
+    expect(atCap.diagnostics).toMatchObject({ limited: 0, noNumericY: 1 });
   });
 });
 

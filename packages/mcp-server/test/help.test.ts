@@ -305,7 +305,7 @@ it("documents the table mapping through both help routes and accepts its source 
     sort: { field: "day", direction: "desc" },
   });
   expect(JSON.parse(source!)).not.toHaveProperty("pageSize");
-  expect(section).toContain("Every valid record appears in one continuous native table");
+  expect(section).toContain("Without limit, every valid record appears in one continuous native table");
   expect(section).toContain("Generated from document data · read-only");
   expect(section).toContain("never affect display; omit pageSize from new mappings");
   expect(section).not.toContain("Page controls");
@@ -322,7 +322,7 @@ it("documents the table mapping through both help routes and accepts its source 
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
     "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
-    "Every valid record appears in one continuous native table", "Generated from document data · read-only",
+    "Without limit, every valid record appears in one continuous native table", "Generated from document data · read-only",
     "Open table source appears on hover or keyboard focus and stays reachable without hover",
     "Unknown mapping keys and options are invalid", "contain no record values",
   ]) expect(constraints, guidance).toContain(guidance);
@@ -331,4 +331,21 @@ it("documents the table mapping through both help routes and accepts its source 
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
+});
+
+it("documents optional record limits for both views through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional limit is an integer of 1 or more",
+      "selects the latest N records with a valid x in x-then-record-id order, still at most 5,000",
+      "shows only the first N valid rows in sort order (record-id order without sort)",
+      "limit has no upper bound of its own", "Records hidden by the author limit are not omissions",
+      "no pager or page state", "footnote includes shown and total valid-record counts",
+      "when it hides nothing, no count appears", "notice and diagnostics when N exceeds 5,000",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
 });
