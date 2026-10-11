@@ -71,9 +71,11 @@ async function measurements(session: McpSession, uuid: string): Promise<void> {
 }
 
 async function tabTo(page: Page, target: Locator): Promise<void> {
+  // Safari's default Tab preference reaches text fields; Option+Tab includes buttons.
+  const webkitMac = process.platform === "darwin" && page.context().browser()?.browserType().name() === "webkit";
   for (let count = 0; count < 40; count += 1) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press("Tab");
+    await page.keyboard.press(webkitMac ? "Alt+Tab" : "Tab");
   }
   await expect(target).toBeFocused();
 }
@@ -411,16 +413,24 @@ test("every header sorts through native pointer and keyboard input without movin
   const mapping = { ...MAPPING, sort: { field: "day", direction: "desc" } };
   const uuid = await tableDoc(session, "Native header sorting", mapping);
   await measurements(session, uuid);
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+    hasTouch: touch, isMobile: info.project.use.isMobile === true,
+    ...(info.project.use.viewport === undefined ? {} : { viewport: info.project.use.viewport }),
+    ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+    ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+  } });
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table).toBeVisible();
   await expectHeaderOrder(table, "Day", "descending");
+  expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+  expect(page.viewportSize()).toEqual(info.project.use.viewport);
   for (const { label } of MAPPING.columns) {
-    await placeCaretIn(editor(page).locator(":scope > p").first());
+    await placeCaretIn(editor(page).locator(":scope > p").first(), { touch });
     const selection = await documentSelection(page);
     const button = table.getByRole("button", { name: label, exact: true });
     expect(await button.evaluate(element => element.tagName)).toBe("BUTTON");
-    await activateControl(button);
+    await activateControl(button, { touch });
     await expectHeaderOrder(table, label, "ascending");
     await expect(button).toBeFocused();
     expect(await documentSelection(page)).toEqual(selection);
@@ -429,6 +439,13 @@ test("every header sorts through native pointer and keyboard input without movin
       await expect(table.locator("tbody tr td:first-child")).toHaveText([
         "Relative link", "<strong>kept as text</strong>", '{"compact":true}', "Absent", "Null", "Invalid values",
       ]);
+    }
+    if (touch) {
+      await activateControl(button, { touch });
+      await expectHeaderOrder(table, label, "descending");
+      await expect(button).toBeFocused();
+      expect(await documentSelection(page)).toEqual(selection);
+      continue;
     }
     await placeCaretIn(editor(page).locator(":scope > p").first());
     await tabTo(page, button);
