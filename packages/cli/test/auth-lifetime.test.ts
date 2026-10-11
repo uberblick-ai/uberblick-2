@@ -5,6 +5,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil,
@@ -19,15 +20,17 @@ afterAll(removeTempDirs);
 
 describe("CLI sign-in validates availability and has a finite lifetime", () => {
   it("reports unreachable and unconfigured hubs without changing the store", async () => {
-    const remote = await rig([], false);
+    const remote = await rig([], false, false, false, SYNC_PROTOCOL_VERSION + 1);
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET } });
     const before = readFileSync(credentialPath(box));
     const unconfigured = await runUbAsync(["auth", "login", remote.origin], box);
     expect(unconfigured.status).toBe(1);
     expect(unconfigured.stderr).toMatch(/not configured|not.configured/i);
+    expect(unconfigured.stderr).not.toMatch(/sync protocol|update/i);
     const unreachable = await runUbAsync(["auth", "login", DEAD_HUB_URL], box);
     expect(unreachable.status).toBe(1);
     expect(unreachable.stderr).toMatch(/unreachable|cannot reach/i);
+    expect(unreachable.stderr).not.toMatch(/sync protocol|update/i);
     expect(readFileSync(credentialPath(box))).toEqual(before);
   });
 

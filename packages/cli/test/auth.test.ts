@@ -8,6 +8,7 @@ import {
 import { join } from "node:path";
 import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
@@ -291,7 +292,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
-    expect(remote.requests[0]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
+    expect(remote.requests[0]).toMatchObject({ path: "/auth/credential/renew", method: "POST", body: {
+      protocolVersion: SYNC_PROTOCOL_VERSION, token: "",
+    } });
+    expect(remote.requests[1]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
     const again = await runUbAsync(["auth", "login", remote.origin], box);
     expect(again.status, again.stderr).toBe(0);
     expect(again.stdout).not.toContain("this hub is unclaimed");
@@ -493,7 +497,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
       expect(request.authorization).toBeUndefined();
       expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? ["deviceName"]
-        : request.path === "/auth/claim-state" ? [] : ["collectionSecret", "requestId"]);
+        : request.path === "/auth/claim-state" ? []
+        : request.path === "/auth/credential/renew" ? ["protocolVersion", "token"] : ["collectionSecret", "requestId"]);
+      if (request.path === "/auth/credential/renew") expect(request.body).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
       if (request.path.endsWith("start")) expect(request.body.deviceName).toBe(hostname());
     }
     const bridge = resolveConfig({ env: box.env, cwd: box.cwd }).env;
