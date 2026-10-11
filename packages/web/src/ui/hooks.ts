@@ -561,7 +561,10 @@ function observeTitlePresence(
       if (!order.has(key)) order.set(key, peer.clientId);
     }
     // Keep a session's first position until its live and retained states vanish.
-    grouped.sort((a, b) => order.get(presenceKey(a))! - order.get(presenceKey(b))!);
+    grouped.sort((a, b) =>
+      (order.get(presenceKey(a)) ?? a.clientId) -
+      (order.get(presenceKey(b)) ?? b.clientId)
+    );
     emit(grouped);
   }, view.isDeparted);
 }
