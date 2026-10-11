@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manageRequest } from "../src/access-management.js";
 import {
@@ -47,13 +48,18 @@ async function olderHub(refusal = { status: 400, result: { status: "invalid-requ
   const login = fixture([]);
   const starts: Record<string, unknown>[] = [];
   const cancellations: Record<string, unknown>[] = [];
+  const probes: { body: Record<string, unknown>; authorization: string | undefined }[] = [];
   const remote = await serve((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString("utf8"));
       response.setHeader("Content-Type", "application/json");
-      if (request.url === "/auth/claim-state") {
+      if (request.url === "/auth/credential/renew") {
+        probes.push({ body, authorization: request.headers.authorization });
+        response.statusCode = 401;
+        response.end(JSON.stringify({ status: "sign-in-required" }));
+      } else if (request.url === "/auth/claim-state") {
         response.end(JSON.stringify({ unclaimed: false, canClaim: false }));
       } else if (request.url === "/auth/github/start") {
         starts.push(body);
@@ -72,7 +78,7 @@ async function olderHub(refusal = { status: 400, result: { status: "invalid-requ
       }
     })().catch(() => { response.statusCode = 500; response.end(); });
   });
-  return { ...remote, login, starts, cancellations };
+  return { ...remote, login, starts, cancellations, probes };
 }
 
 describe("CLI device hostname metadata", () => {
@@ -107,6 +113,7 @@ describe("CLI device hostname metadata", () => {
     const remote = await olderHub(); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
     expect(run.status, run.stderr).toBe(0);
+    expect(remote.probes).toEqual([{ body: { protocolVersion: SYNC_PROTOCOL_VERSION, token: "" }, authorization: undefined }]);
     expect(remote.starts).toEqual([{ deviceName: "agent-server" }, {}]);
     expect(savedLogin(box, remote.origin)).toEqual(remote.login);
     expect(remote.cancellations).toEqual([]);

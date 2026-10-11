@@ -205,7 +205,12 @@ labels as well. Operators can read this metadata with Docker alone as shown in
 `SYNC_PROTOCOL_VERSION` in `packages/hub/src/protocol.ts` is the compatibility
 unit. From 0.5.0 on, the hub and Homebrew client share a release number and source
 commit; matching release numbers alone do not establish wire compatibility.
+An incompatible change to `/auth/github/start`, `/auth/github/collect`,
+`/auth/github/cancel` or `/auth/claim-state` increments this same version. Keep the
+credential-free version probe's envelope and replies stable across versions,
+as described under [device renewal in REMOTE.md](REMOTE.md#claim-a-fresh-hub).
 When a release changes anything covered by REMOTE.md's wire-semantics rule —
-token shape or claims, protocol, room key or the served configuration contract —
+token shape or claims, protocol, room key, the served configuration contract,
+or incompatible sign-in or claim-state semantics —
 operators move the host and every client in the same sitting and reload browser
 tabs. Do not present one half as an upgrade operators can safely apply alone.

@@ -158,9 +158,15 @@ this version first opens it gets no default workspace and is never claimable.
 **The wire-semantics rule.** A change to what travels over the socket — the auth
 token's shape or claims, the sync protocol, the room key, the served
 `/uberblick-config.json` contract — requires a matching client release. Such a
-hub release is published together with that client release. Move the host to
-the new hub release and update all clients in the **same sitting**, and reload
-every open browser tab so it takes its bundle and configuration from the host.
+hub release is published together with that client release. An incompatible
+change to `/auth/github/start`, `/auth/github/collect`, `/auth/github/cancel`
+or `/auth/claim-state` also requires a matching client release and increments
+the same `SYNC_PROTOCOL_VERSION`; there is no separate HTTP version. The
+credential-free version probe's envelope and replies described under
+[device renewal](#claim-a-fresh-hub) stay stable across protocol versions.
+Move the host to the new hub release and update all clients in the **same
+sitting**, and reload every open browser tab so it takes its bundle and
+configuration from the host.
 If you cannot finish both halves now, do neither now. Check the protocol
 version recorded by the hub release before choosing it.
 
@@ -575,6 +581,10 @@ No GitHub token, response body or upstream exception is logged. Check the app's
 Device Flow setting and client ID when the code reports `device_flow_disabled`
 or `incorrect_client_credentials`.
 
+Before starting an attempt or displaying a GitHub code, `ub auth login` checks
+protocol compatibility without a credential. A differing version stops login
+and says whether to update this client or the hub; no login is stored.
+
 The sign-in interface is `POST /auth/github/start`, `POST /auth/github/collect`
 and `POST /auth/github/cancel`. Starting returns a GitHub approval URL, short
 code, bounded lifetime and a private collection secret. A device displays the
@@ -690,6 +700,16 @@ ceiling and sixty-second clock skew as room tokens. A request proof opens no
 room, and a room token authorizes no renewal. Send secrets only in JSON bodies,
 never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
 all answers are `no-store`.
+
+Login uses this route as a credential-free version probe before sign-in,
+posting `{protocolVersion, token: ""}`. A configured hub checks the version
+before the token: skew returns HTTP 409 with
+`{status: "protocol-mismatch", reason: "protocol-mismatch:<hubVersion>"}`;
+an equal version returns HTTP 401 with `{status: "sign-in-required"}`. The
+probe creates no sign-in attempt, changes no hub state and needs no GitHub
+connection. This envelope and these replies remain stable across protocol
+versions. Login believes only a validated mismatch reply; other replies or
+probe failures leave sign-in's existing diagnostics in charge.
 
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the

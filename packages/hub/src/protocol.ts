@@ -1,8 +1,8 @@
 /**
  * The sync protocol version, and the envelope that carries it.
  *
- * One integer, exchanged at connect and compared for **exact equality** — not a
- * build identity and not a capability negotiation. It answers only "do these
+ * One integer, exchanged before sign-in and at connect for **exact equality** —
+ * not a build identity and not a capability negotiation. It answers only "do these
  * two processes speak the same sync language", so a client that has not been
  * updated is refused with a message saying so instead of silently diverging.
  *
@@ -20,9 +20,18 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * **Bump policy.** Increment it, in the same PR as the change, when a client of
  * the previous version can no longer sync *correctly* against this hub: a
  * different Yjs update encoding, a changed room key, a change in what the auth
- * message means, a document shape one side would apply wrongly. Do **not** bump
- * for anything a mismatched pair survives — a new MCP tool, a UI change, a new
+ * message means, a document shape one side would apply wrongly. Incompatible
+ * changes to `/auth/github/start`, `/auth/github/collect`, `/auth/github/cancel`
+ * or `/auth/claim-state` also bump this same version. Do **not** bump for
+ * anything a mismatched pair survives — a new MCP tool, a UI change, a new
  * claim the far side ignores, a bug fix.
+ *
+ * Login probes `/auth/credential/renew` with an empty token before sign-in.
+ * Across versions, keep that envelope and its credential-free replies stable:
+ * configured sign-in hubs check version before token, return 409 with
+ * `status: "protocol-mismatch"` and `reason: "protocol-mismatch:<hubVersion>"`
+ * on skew, or 401 with
+ * `status: "sign-in-required"` on equality, without changing hub state.
  *
  * Every bump is a flag day: the comparison is exact and nothing negotiates, so
  * a bump nobody needed costs a hand update of every machine, and one that was
