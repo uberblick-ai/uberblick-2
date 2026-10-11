@@ -11,7 +11,7 @@
  *   has no other way to be retargeted or to be told which workspaces exist, and
  *   a fallback nobody announces makes a misconfigured client look like an
  *   offline hub — or like a deployment that was never given a workspace.
- * - **One fallback behaviour, never a crash.** Under the SPA fallback (#68) an
+ * - **One fallback behaviour, never a crash.** Under the SPA fallback an
  *   absent document arrives as 200-with-HTML, so "missing" and "wrong shape"
  *   are the same observation in production. Both must land the client on a
  *   working endpoint with one diagnostic.
@@ -199,7 +199,7 @@ describe("the served configuration", () => {
     expect(message).toContain("text/plain");
 
     // And the read is not remembered, because it produced no secret: with the
-    // fallback gone (#426) a memoised miss is a tab that can never authenticate
+    // fallback absent, a memoised miss is a tab that can never authenticate
     // for as long as it stays open. `rooms.ts` calls this before every connect
     // attempt, so "not memoised" is what makes the next attempt try again — and
     // the answer it gets is the one now being served.
@@ -545,9 +545,9 @@ describe("the workspaces it names", () => {
 });
 
 /**
- * What the UI is allowed to *say* about the endpoint (#362).
+ * What the UI is allowed to *say* about the endpoint.
  *
- * The surfaces that assert sync state now name the hub, so the label they name
+ * The surfaces that assert sync state name the hub, so the label they name
  * it with is the one place a credential could reach a screen. `usableEndpoint`
  * already refuses userinfo in the served document — but the build-time defines
  * are not validated at all, and a `HUB_URL` set to a credential-bearing address

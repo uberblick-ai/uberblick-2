@@ -1,22 +1,9 @@
 /**
- * The block-insertion menu — one component, two ways in.
- *
- * Typing `/` in an empty paragraph opens it at the caret and converts that
- * block; hovering a block or placing a caret by touch reveals a `+` in the left
- * gutter which opens the same list and inserts a new block below. The entries,
- * filtering and transactions live in `editor/block-menu.ts`; what this file
- * owns is pixels, focus and keys.
- *
- * ProseMirror owns composition and menu keys; the shared CaretMenu uses
- * Floating UI placement and native-click dismissal. Trigger state and picks
- * remain the model's.
- * The gutter is reserved rather than inserted, so hover never moves prose.
- *
- * The menu is local UI, and the document does not change until an entry is
- * picked — but the document underneath it is not. A peer can delete or move the
- * block a session or a gutter button is aimed at, so both hold a block **id**
- * rather than a position, both re-resolve it on every transaction, and both
- * close rather than act on a block that has gone.
+ * Slash entry converts the empty paragraph; gutter entry inserts below its
+ * block. The model owns entries and transactions, ProseMirror owns
+ * composition and keys, and CaretMenu owns placement and native-click
+ * dismissal. Reserve the gutter so showing it moves no prose. Keep targets by
+ * block ID, re-resolve shared edits and close when their block disappears.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -41,8 +28,8 @@ interface SlashSession {
 }
 
 /**
- * The block the gutter button belongs to, by hover or touch caret. Named by id:
- * its block has to be findable again after the document has moved under it.
+ * Keep the hovered or touch-caret target by ID so shared edits cannot
+ * invalidate a stored position.
  */
 interface GutterTarget {
   blockId: string;
@@ -55,15 +42,8 @@ const FINE_BUTTON_SIZE = 24;
 const TOUCH_BUTTON_SIZE = 44;
 
 /**
- * The top-level block a DOM node inside the editor belongs to — its id and its
- * position — or `null` when the node is not in one.
- *
- * Two steps, both cheap, because this runs on every fine-pointer move over the
- * prose: walk up the ancestors to the ProseMirror root's own child (bounded by nesting
- * depth, which this schema caps at a block plus its inline spans), then let the
- * view map that element to a document position in one call. Scanning the
- * document instead — `nodeDOM` per top-level node until one matches — was a walk
- * of the whole document per pointer move, and it grew with the document.
+ * Resolve pointer targets by bounded DOM ancestry and one posAtDOM call; a
+ * whole-document scan per pointer move grows with document length.
  */
 function blockAt(
   editor: Editor,
@@ -97,11 +77,7 @@ function blockAt(
   }
 }
 
-/**
- * Where the gutter button sits for the block at `pos`: centred on its first
- * line, so the `+` beside a heading lines up with the heading rather than
- * floating above it.
- */
+/** Center the gutter button on the block's first line, including headings. */
 function gutterTop(
   editor: Editor,
   pos: number,
@@ -142,10 +118,9 @@ export function BlockMenu({
     keyboard: false,
   });
   /**
-   * Esc, remembered for as long as the session it dismissed. Cleared the moment
-   * the block stops looking like a slash session — so deleting the `/` and
-   * typing it again opens the menu, while typing on after Esc leaves the text
-   * alone, which is what Esc meant.
+   * Remember Escape until this slash trigger disappears; further typing
+   * leaves it dismissed, while deleting and retyping slash opens a fresh
+   * session.
    */
   const dismissed = useRef(false);
   const gutterButton = useRef<HTMLButtonElement | null>(null);
@@ -160,18 +135,9 @@ export function BlockMenu({
   const gutterPressed = useRef(false);
   /** The gutter menu's search field, when one is open — a composition surface. */
   const search = useRef<HTMLInputElement | null>(null);
-  // Two questions with two different answers.
-  //
-  // Whether a session *stays* open is asked of the state, on every transaction:
-  // `slashTriggerAt` is recomputed, and the session lives exactly as long as it
-  // keeps validating. So anything that moves the caret out of the block, or
-  // stops its text looking like a query, closes the menu — a peer deleting the
-  // block, an undo, a click elsewhere — while a peer editing some *other* block
-  // leaves it alone, because none of that is what the menu is watching.
-  //
-  // Whether a session *opens* is asked of the transaction instead:
-  // `opensSlashSession` refuses everything that is not this reader typing into
-  // an empty paragraph, so none of those events can open one either.
+  // Validate an existing slash session on every state transaction, closing
+  // when its caret or query stops matching. Open only for local typing into
+  // an empty paragraph; peer edits, undo and navigation cannot open one.
   useEffect(() => {
     const read = (transaction: Transaction | null): void => {
       const trigger = slashTriggerAt(editor);
@@ -200,12 +166,9 @@ export function BlockMenu({
     };
   }, [editor]);
 
-  // Fine-pointer hover is tracked on the ProseMirror root so the button
-  // itself — which is outside it — never counts as leaving the block, and
-  // cleared when the pointer leaves the frame. The gutter strip the button
-  // overhangs into is the frame's too (`.ub-editor-frame::before`), so the
-  // route from the prose to the button is one unbroken piece of it: the button
-  // cannot hide in the gap on the way.
+  // Track hover on ProseMirror and clear it only at the frame edge. The
+  // frame's reserved gutter bridges travel to its outside button so crossing
+  // the gap does not hide it.
   useEffect(() => {
     const dom = editor.view.dom;
     const frame = host.current;
@@ -236,9 +199,8 @@ export function BlockMenu({
       show(id, $head.before(1), true);
     };
     const track = (event: PointerEvent): void => {
-      // Pointer events distinguish a trackpad on an iPad from its touchscreen.
-      // Listening to mousemove would also reveal the button for iOS's
-      // compatibility mouse events after a tap or touch range selection.
+      // Use pointer events to distinguish iPad trackpad input from touch
+      // compatibility mouse events.
       if (event.pointerType === "touch") return;
       touchInput.current = false;
       const block = blockAt(editor, event.target);
@@ -302,16 +264,14 @@ export function BlockMenu({
   // A slash query nothing matches is a reader writing prose, not choosing a
   // block: the menu gets out of the way and gives Enter back to the editor.
   const open = path === "gutter" || (path === "slash" && entries.length > 0);
-  // The highlight belongs to one list. Editing the query makes a different
-  // list, so the remembered position no longer means anything and the first
-  // entry is highlighted again — no effect needed to reset it.
+  // A changed query creates a different list and resets highlight to its
+  // first entry.
   const list = `${path}:${query}`;
   const chosen = highlight.list === list ? highlight.index : 0;
   const active = entries.length === 0 ? -1 : Math.min(chosen, entries.length - 1);
 
-  // Idempotent, because the pointer calls it on every `mousemove` over the
-  // entry it is already on: returning the same state is how React is told there
-  // is nothing to render.
+  // Return unchanged state for repeated pointer highlighting to avoid
+  // redundant renders.
   const highlightAt = useCallback(
     (index: number, keyboard = false): void =>
       setHighlight((current) =>
@@ -322,9 +282,7 @@ export function BlockMenu({
     [list],
   );
 
-  // A closed menu keeps no highlight, so the next one opens on its first entry
-  // — which is the entry a list scrolled back to the top is showing. Remembering
-  // an index instead would reopen the menu highlighting something off screen.
+  // Clear highlight on close so reopening starts at the first visible entry.
   useEffect(() => {
     if (!open) setHighlight({ list: "", index: 0, keyboard: false });
   }, [open]);
@@ -335,15 +293,9 @@ export function BlockMenu({
   }, []);
 
   /**
-   * An *open* gutter menu follows its block on every transaction: gone means
-   * closed, moved means re-measured. Its target stays fixed even while focus
-   * belongs to the menu's search field rather than the editor.
-   *
-   * A merely hovered button gets the cheap treatment above instead. Following it
-   * too meant a `findBlockById` plus a `getBoundingClientRect` plus a
-   * `getComputedStyle` on **every transaction** — that is per keystroke, local
-   * or remote, for as long as the pointer rests anywhere over the prose, to keep
-   * a hint in the right place.
+   * Follow an open gutter menu's fixed block ID on every transaction, closing
+   * if gone and remeasuring if moved even while search owns focus. Do not run
+   * block lookup and geometry reads per keystroke for a merely hovered hint.
    */
   const menuAnchorId = gutter?.blockId ?? null;
   const menuTouch = gutter?.touch ?? false;
@@ -438,9 +390,10 @@ export function BlockMenu({
   const visible = anchor !== null;
   return (
     <>
-      {/* Always mounted, so revealing it is a change of opacity and nothing
-          else. Out of the tab order while invisible: the keyboard route to this
-          menu is the slash, not a button nobody can see. */}
+      {/*
+          * Keep the button mounted for opacity-only reveal, but remove its invisible
+          * Tab stop; slash is the keyboard entry route.
+       */}
       <button
         type="button"
         ref={gutterButton}

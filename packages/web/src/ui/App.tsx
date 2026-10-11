@@ -1,11 +1,7 @@
 /**
- * The app shell. Two rooms at a time: the workspace directory, and whichever
- * document is open.
- *
- * Which document that is comes from the address bar and nowhere else (#68) —
- * see route.ts. The sidebar, Back/Forward and a pasted link are then the same
- * gesture, and there is no second copy of the selection to drift out of step
- * with the URL.
+ * The shell joins the directory and open document rooms. The URL is the only
+ * document selection; sidebar navigation, pasted links and browser history
+ * use route.ts.
  */
 
 import {
@@ -135,12 +131,8 @@ export function ReboundNotice({
 }
 
 /**
- * What the address resolves to on screen.
- *
- * The three non-document branches are states, never errors to be swallowed: a
- * link is worth telling the truth about. A well-formed uuid this replica has
- * not seen is explicitly *not* one of them — it is a document that has not
- * arrived, and it resolves into itself when it does.
+ * A well-formed unseen document remains a document route and resolves when
+ * its room arrives; non-document routes render their own states.
  */
 export function RoutePane({
   route,
@@ -172,24 +164,18 @@ export function RoutePane({
 }: {
   route: Route;
   /**
-   * Whether the client configuration has been read yet.
-   *
-   * Only the no-workspace branch cares. Until the read settles this client
-   * knows of no workspaces, which is indistinguishable from having none — and
-   * "No workspace" is a notice about a *misconfiguration*, so flashing it
-   * across the pane for the length of one same-origin fetch would accuse a
-   * perfectly configured deployment of being broken.
+   * Wait for configuration before showing No workspace; an unresolved fetch
+   * does not establish misconfiguration.
    */
   configured?: boolean;
   /**
-   * The connection to the room `route` names, or null while there is none —
-   * `useRoom` withholds a connection that belongs to a different room, so this
-   * is null for one render after the address changes.
+   * useRoom returns null during a route change rather than exposing the old
+   * room.
    */
   connection: RoomConnection | null;
   /**
-   * Who else is in that room, read once by the shell (`usePresence`) and passed
-   * down to every reader of it — see {@link StatusLine}.
+   * Read presence once in the shell and share it with every room-status
+   * surface.
    */
   presence: readonly RemotePresence[];
   /** The hub the document-local sync reading describes. */
@@ -198,10 +184,8 @@ export function RoutePane({
   hubAcked?: boolean | null | undefined;
   notSharedReason?: NotSharedReason | null;
   /**
-   * That room's metadata, or null while it has not been read yet. The
-   * difference carries a decision: unread is silence, read-and-not-this-document
-   * is the waiting screen — and an *empty* meta is only the second of those once
-   * the room has answered. See {@link replicaHasAnswered}.
+   * Null metadata means unread. Empty metadata earns the waiting screen only
+   * after replicaHasAnswered confirms a room answer.
    */
   meta: DocMeta | null;
   author: string;
@@ -236,13 +220,12 @@ export function RoutePane({
   /** The document-local sync reading opens the existing details panel. */
   syncDetails?: boolean;
 }): ReactElement {
-  // Before the branches: a hook may not sit behind an early return. The answer
-  // flag tells a freshly opened empty room apart from an empty server answer.
+  // Hooks precede early returns. The answer flag distinguishes a joining
+  // empty room from an empty server answer.
   const { hasAnswered } = useRoomStatus(connection);
 
   if (route.kind === "no-workspace") {
-    // Nothing is known yet — keep the frame, say nothing, as everywhere else
-    // here that ignorance would otherwise read as an answer.
+    // Keep the frame silent until configuration answers.
     if (!configured) return <PaneNotice>{null}</PaneNotice>;
     return (
       <PaneNotice>
@@ -277,12 +260,8 @@ export function RoutePane({
   }
 
   if (route.kind === "doc") {
-    // Nothing is known about this address yet: the room has not been joined, or
-    // it has but nothing has been read out of it — no metadata at all, or the
-    // empty metadata of a room that is still joining. All of those last
-    // a render or two, and all keep the frame while saying nothing. Drawing
-    // "waiting for sync" from ignorance would flash those words across the pane
-    // every time a reader moves between two documents they already have.
+    // Unread metadata or a joining empty room keeps the frame silent; neither
+    // establishes waiting for sync.
     if (connection === null || !replicaHasAnswered(meta, hasAnswered)) {
       return <PaneNotice documentLayout>{null}</PaneNotice>;
     }
@@ -290,11 +269,10 @@ export function RoutePane({
     if (!docIsHydrated(route.uuid, meta)) {
       return (
         <PaneNotice documentLayout>
-          {/* The live sync state, so a link that is waiting says what it is
-              waiting on rather than looking stuck — and the copy control, which
-              this screen carried before the identity line existed and still
-              needs: this is the address of a document that has not arrived, and
-              handing it to somebody who does have it is the way out (#535). */}
+          {/*
+              * Keep live sync status and link copying on the waiting screen so the address
+              * can reach a replica that has the document.
+           */}
           <div className="ub-waiting-meta">
             <StatusLine
               connection={connection}
@@ -319,9 +297,8 @@ export function RoutePane({
   return (
     <EditorPane
       connection={connection}
-      // Only `doc` reaches here — the shell renders the corpus journey itself
-      // (#406) — and it carries the workspace the address spelled, which is
-      // what a copied link has to keep.
+      // Only document routes reach this callback. Copy the workspace spelling
+      // carried by the address.
       segment={route.workspace.segment}
       presence={presence}
       endpoint={endpoint}
@@ -351,11 +328,9 @@ export function RoutePane({
 
 export function App(): ReactElement {
   const [path, navigate] = useRoutePath();
-  // No room before the client configuration is known (#91): the shared
-  // websocket is built from the first room acquired, so one acquired early
-  // would pin the session to the build-time fallback. The workspaces come out
-  // of that same read, and are empty until it settles — which is also what
-  // re-renders this component with them.
+  // Wait for configuration before acquiring rooms: the first room fixes the
+  // shared socket endpoint for the session, and this read also supplies the
+  // workspace list.
   const hubReady = useHubEndpoint();
   // Rooms retain the default identity so clearing an override restores it,
   // without rebuilding their providers when the browser's name changes.
@@ -388,9 +363,8 @@ export function App(): ReactElement {
           : { url: serving.remoteHubUrl === null ? "local" : endpointLabel(serving.remoteHubUrl), source: "document" },
     [endpoint, hubReady, serving],
   );
-  // The address names the workspace — this client is configured for none and
-  // cannot enumerate them. Null only where the address named none it could use,
-  // and then there are no rooms to join at all.
+  // The URL selects its workspace independently of the configured menu.
+  // Document search needs ub open serving and a usable workspace.
   const documentSearch = useMemo(
     () =>
       !hubReady
@@ -443,10 +417,9 @@ export function App(): ReactElement {
   const [collapsed, setCollapsed] = useStoredFlag(SIDEBAR_COLLAPSED_KEY, false);
   const previousCollapsed = useRef(collapsed);
 
-  // Collapsing makes the control that received the gesture inert. Move focus to
-  // its visible counterpart after that commit, and do the inverse on restore.
-  // Run after retiring portalled menus release their focus scopes. The initial
-  // stored preference is not a gesture, so it must not steal focus.
+  // A collapse makes its initiating control inert. Transfer focus to its
+  // visible counterpart after portal focus scopes retire; initial stored
+  // preference must not steal focus.
   useEffect(() => {
     if (previousCollapsed.current === collapsed) return;
     previousCollapsed.current = collapsed;
@@ -456,11 +429,7 @@ export function App(): ReactElement {
     event.preventDefault();
     (restoreSidebar.current ?? hideSidebar.current)?.focus();
   }, []);
-  /**
-   * The thread the reader is looking at. It lives here because the two ends of
-   * the link are in different panes: a highlight in the editor and a card in the
-   * rail focus each other through this one value.
-   */
+  /** One focus value connects the editor highlight and rail card across panes. */
   const [focusedThread, setFocusedThread] = useState<ThreadFocus | null>(null);
   /**
    * Whether the narrow rail is open. Retained across resizing; the wide rail
@@ -481,15 +450,14 @@ export function App(): ReactElement {
   }, []);
   const threadsOpenNow = useRef(threadsOpen);
   threadsOpenNow.current = threadsOpen;
-  /** Whether the sync detail panel is open (#72) — the status reading's state. */
+  /** Whether the sync detail panel is open. */
   const [syncOpen, setSyncOpen] = useState(false);
   useEffect(() => {
     if (route.kind !== "doc" && syncOpen) setSyncOpen(false);
   }, [route.kind, syncOpen]);
   /**
-   * What opened the drawer, so closing it can hand focus back there. Closing
-   * *hides* the rail below 1100px, and focus inside a hidden panel is focus
-   * nobody has — the reader would be back at the top of the page.
+   * Remember the drawer opener so closing a hidden narrow rail restores
+   * visible focus.
    */
   const threadsOpener = useRef<HTMLElement | null>(null);
 
@@ -561,11 +529,7 @@ export function App(): ReactElement {
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
   const entries = useDirectory(directory);
-  /**
-   * The curated sidebar (#115), live — the same reading a second browser and an
-   * agent's `get_sidebar` produce, because all three are `readSidebar` over the
-   * one synced document.
-   */
+  /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
   /** Whether the open document is pinned — what its actions menu shows. */
   const pinned =
@@ -581,14 +545,13 @@ export function App(): ReactElement {
       ? undefined
       : getDirectoryEntry(directory.ydoc, selected);
   /**
-   * The open document's threads: the rail's content, read once here because two
-   * things depend on it — the handle at the pane edge, and whether the drawer is
-   * allowed to be open at all.
+   * Share one thread reading between rail content, the pane-edge count and
+   * the empty-drawer gate.
    */
   const threads = useThreads(doc);
   /**
-   * The room the document-local sync reading and panel describe. A route with
-   * no open document has no global replacement control, so it has no room here.
+   * Sync details describe the open document room; routes without a document
+   * have no replacement room.
    */
   const chromeRoom = selected === null ? null : doc;
   // Read the timestamp segment the status line actually displays, preserving
@@ -613,21 +576,20 @@ export function App(): ReactElement {
     chromeRoom?.room ?? directory?.room ?? null,
   );
   /**
-   * Present now reads live awareness. The title cluster also shows departed
-   * agents for exactly as long as their named editor cursors remain visible.
+   * The title retains departed agents exactly while their named editor
+   * cursors remain visible; present-now reporting uses live awareness.
    */
   const presence = usePresence(chromeRoom);
   const titlePresence = useTitlePresence(chromeRoom);
   /**
-   * The agent sessions the user menu counts. It is a workspace-wide fact, so
-   * the directory is the room every session joins.
+   * Count workspace agent sessions in the directory room, which every session
+   * joins.
    */
   const agentSessions = useAgentSessions(directory);
 
   /**
-   * A drawer over an empty rail is a panel of nothing. The rail can empty out
-   * *under* an open drawer — the last thread deleted, or the reader navigating
-   * to a document that has none — with nobody having closed anything.
+   * An open drawer must close if navigation or a remote deletion empties its
+   * rail.
    */
   useEffect(() => {
     // Opening for a newly created thread can precede the observer's reading.
@@ -636,9 +598,8 @@ export function App(): ReactElement {
   }, [threads.length, closeThreads]);
 
   /**
-   * Lift the tombstone — the same schema call `restore_doc` makes, against the
-   * same directory document, so a restore from here and a restore from an agent
-   * are one operation with two front doors.
+   * Restore through the shared schema lifecycle operation against the
+   * directory document.
    */
   const onRestore = useCallback(() => {
     if (
@@ -658,9 +619,8 @@ export function App(): ReactElement {
   }, []);
 
   /**
-   * Remember focus only while it is inside the archive confirmation. A remote
-   * tombstone can remove that portalled surface without calling `onArchive`,
-   * and the surviving Restore control is then the nearest place to stand.
+   * Remember focus inside archive confirmation so a remote tombstone can
+   * transfer it to Restore when the portal disappears.
    */
   const onArchiveConfirmationFocusChange = useCallback(
     (focused: boolean) => {
@@ -675,20 +635,10 @@ export function App(): ReactElement {
   );
 
   /**
-   * Archive only a live directory stub, matching the MCP lifecycle boundary.
-   * The pane follows the resulting tombstone through `useArchived`; there is no
-   * optimistic archived state here.
-   *
-   * Archiving unpins (#957), so this writes the sidebar room as well as the
-   * directory — the two rooms `archive_doc` writes, in the same order.
-   * Both rooms are re-read here rather than taken from the render's props, for
-   * the reason `togglePin` gives: a remote write that landed between paint and
-   * click is already in the document. `unpinDoc` is a no-op without a visible
-   * pin, so an unpinned document needs no special case — but an unsynchronized
-   * sidebar reads as carrying no pins at all, which is why `synced` is part of
-   * the gate below and not merely `writable`. That gate is this surface's
-   * answer to the pin it cannot see; `archive_doc`, which has no such gate to
-   * refuse behind, raises the unpin count unconditionally instead.
+   * Archive only a live directory stub, with no optimistic state. Re-read the
+   * directory and sidebar at click time, tombstone the directory and then
+   * unpin, matching shared lifecycle room order. Require a synced writable
+   * sidebar so an unseen pin cannot survive the archive.
    */
   const onArchive = useCallback(() => {
     if (
@@ -711,13 +661,9 @@ export function App(): ReactElement {
   }, [directory, doc, sidebar, selected]);
 
   /**
-   * Normalise the address to the one form the app hands out: `/` becomes the
-   * default workspace, a trailing slash or a shouted uuid becomes the canonical
-   * spelling. The workspace segment itself is left exactly as typed — the slug
-   * is display, and rewriting somebody's spelling of their own workspace is a
-   * later question (#160 leaves it alone deliberately). `replace`, never
-   * `push` — a redirect the reader did not ask for must not become a history
-   * entry that Back bounces off.
+   * Canonicalize the default route, trailing slash and document UUID case
+   * while preserving the workspace spelling. Use replace so normalization
+   * adds no Back entry.
    */
   useEffect(() => {
     const canonical = canonicalPath(parseRoute(path, defaultWorkspace));
@@ -725,11 +671,8 @@ export function App(): ReactElement {
   }, [path, navigate, defaultWorkspace]);
 
   /**
-   * The workspaces on the switcher's menu, and going to one.
-   *
-   * Recomputed every render rather than memoised: `workspace` is rebuilt by
-   * `parseRoute` each time anyway, so a memo would be a dependency that always
-   * changed — and the work is splitting a short string.
+   * parseRoute rebuilds workspace each render; splitting its short segment
+   * here avoids a memo with an always-changing dependency.
    */
   const workspaces = workspaceList(configured, workspace);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -746,12 +689,9 @@ export function App(): ReactElement {
   );
 
   /**
-   * Pin a document, or unpin it — one write, two callers: the header's control
-   * for the document on screen, and a row of the corpus listing (#118). Which
-   * group and which position are the drag's business; this only decides that
-   * the document belongs in the sidebar at all.
-   * Wait for the current sidebar state, as Archive does, and re-check at click
-   * time so an unseen group or unpin level cannot turn this into a wrong pin.
+   * Pin membership is shared by header and listing actions; dragging owns
+   * group and position. Recheck the synced writable sidebar at click time so
+   * unseen groups or unpin levels cannot produce a wrong pin.
    */
   const onTogglePinDoc = useCallback(
     (uuid: string) => {
@@ -783,19 +723,10 @@ export function App(): ReactElement {
   );
 
   /**
-   * What an inline document reference resolves against (#444).
-   *
-   * Three things the mark deliberately does not store, assembled where they are
-   * all already known: the address of a document in the workspace the reader is
-   * *in* — the same `docPath` the sidebar and a copied link use, so a reference
-   * never carries an address of its own — the directory room already joined
-   * above, which is what tells a title, an unresolved target and a tombstoned
-   * one apart without opening a single target room, and `onSelect`, so
-   * following a reference is the same navigation as clicking a document in the
-   * list and Back therefore works.
-   *
-   * Memoised on exactly what it closes over: the editor binds to this, so a new
-   * object every render would tear the editor down under the reader's caret.
+   * References derive addresses from the current workspace, titles and
+   * lifecycle from the directory, and navigation from onSelect without
+   * joining target rooms. Keep this object stable: replacing it rebinds the
+   * editor under the caret.
    */
   const docLinks = useMemo<DocLinkContext | null>(
     () =>
@@ -826,12 +757,9 @@ export function App(): ReactElement {
   }, [closeSidebarDrawer, navigate, segment]);
 
   /**
-   * A create needs the new document's Y.Doc *before* React has mounted the
-   * editor pane for it, so the handle is held here until `useRoom` has acquired
-   * the same room. Room connections are refcounted and keyed by room name, so
-   * this handle and the pane's are the same connection — and handing over as
-   * soon as the pane has it is what keeps navigating away from actually closing
-   * the connection instead of leaving it publishing stale awareness.
+   * Hold the new document room until useRoom acquires the same refcounted
+   * connection. Release the creation handle then so later navigation can
+   * close the provider and retire awareness.
    */
   const pending = useRef<{
     room: string;
@@ -940,12 +868,9 @@ export function App(): ReactElement {
   }, [directory, defaultIdentity, onBackToWorkspace, onSelect, workspace]);
 
   /**
-   * The directory stub is a cache; `meta.title` in the document is
-   * authoritative. Repair the stub for as long as the document is open — the
-   * "repaired on write/connect" half of that invariant — and stamp `updatedAt`
-   * on the changes this client makes. Admission alone is not enough: wait for
-   * the current directory state so an unseen tombstone cannot race the repair.
-   * See `collab/directory-stub.ts` for the full rule.
+   * Document meta.title is authoritative; repair the directory cache while
+   * open and stamp local edits. Wait for current directory state so an unseen
+   * tombstone cannot race repair. See collab/directory-stub.ts.
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
@@ -1027,14 +952,10 @@ export function App(): ReactElement {
           settingsOpen={settings}
           settingsPage={route.kind === "settings" ? route.page : null}
         />
-        {/* Workspace modes own the content pane directly. The corpus journey
-            (#406): both addresses that name the workspace
-            rather than a document — `/<workspace>`, the first screen of a
-            session, and `/<workspace>/all` — are the document list. It is the
-            only pane that is about the workspace rather than about one
-            document, so it takes the pane rather than passing four more props
-            through `RoutePane`, which exists to say what a *document* address
-            resolves to. */}
+        {/*
+            * Both workspace addresses render the document list directly; RoutePane
+            * handles document-address resolution.
+         */}
         {settings ? (
           <WorkspaceSettings
             key={route.workspace.uuid}
@@ -1048,13 +969,11 @@ export function App(): ReactElement {
             agentSessions={agentSessions}
           />
         ) : listing ? (
-          /* Keyed by the workspace, because everything the pane holds is
-             about one corpus: a filter typed in workspace A would otherwise
-             survive the switch and make workspace B's first screen look
-             empty. The uuid, not the segment — the slug is cosmetic, and two
-             spellings of one workspace are one corpus — so `/<workspace>` and
-             `/<workspace>/all` keep the query, and only a real switch clears
-             it. */
+          /*
+           * Key filters by workspace UUID: a real switch clears them, while
+           * decorated spellings and the two listing routes retain the same
+           * query.
+           */
           <DocumentList
             key={workspace?.uuid}
             connection={directory}
@@ -1139,9 +1058,10 @@ export function App(): ReactElement {
             )}
           </Popover>
         )}
-        {/* The outline follows the document independently of the comments rail:
-            its compact trigger remains while the document pane scrolls, and no
-            eligible heading means this renders no flex item at all. */}
+        {/*
+            * The outline trigger follows document scrolling independently of the rail.
+            * No eligible headings means no reserved flex item.
+         */}
         <OutlinePane
           key={doc?.room ?? "no-document"}
           connection={doc}

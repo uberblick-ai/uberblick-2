@@ -1,8 +1,8 @@
 /**
- * What a screen reader is told about a list (#227).
+ * What a screen reader is told about a list.
  *
  * The document model is flat: a list is a run of adjacent `list-item` blocks,
- * each rendered as a bare `<li>` among every other block (#59). Nothing in that
+ * each rendered as a bare `<li>` among every other block. Nothing in that
  * DOM says "list" on its own — an `<li>` outside a list has no role, and the
  * marker is generated content — so the run is exposed through ARIA instead:
  * every item carries `role="listitem"` with its level and its place in its set,

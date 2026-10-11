@@ -1,5 +1,5 @@
 /**
- * The code/mermaid copy button (#103).
+ * The code/mermaid copy button.
  *
  * Two things are worth defending. First, what lands on the clipboard is the
  * block's source verbatim — every line, no fence, no trailing decoration.

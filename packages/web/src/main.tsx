@@ -1,17 +1,8 @@
 /**
- * @uberblick/web — browser entry point.
- *
- * The hub endpoint and the workspaces come from a document this origin serves
- * (see config.ts), so the read is started here, before React mounts — the
- * earliest moment there is. It gates the first *connect*, not the render:
- * `useHubEndpoint` holds room acquisition until it settles, because a room
- * acquired early would dial the fallback and stay there.
- *
- * StrictMode is deliberately absent. Its double-invoked effects open every
- * WebSocket and ProseMirror binding twice, which for a
- * live-sync spike means the presence strip and awareness state lie in dev but
- * not in production. Room connections are refcounted (see collab/rooms.ts), so
- * turning StrictMode back on is safe; the noise just is not worth it here.
+ * Start runtime config before React; room acquisition waits for it to prevent
+ * dialing the fallback prematurely. Rendering may proceed during the read.
+ * StrictMode doubles sockets and bindings, adding dev-only awareness noise;
+ * refcounted rooms tolerate it, but this entry mounts without it.
  */
 
 import { createRoot } from "react-dom/client";
@@ -20,10 +11,8 @@ import { App } from "./ui/App.js";
 import { NotificationToaster } from "./ui/shadcn/sonner.js";
 import { applyStoredAppearance } from "./ui/theme.js";
 import "./ui/styles.css";
-// Tailwind styles shadcn and product UI over the tokens above. Web UI system
-// keeps editor content in plain CSS and migrates legacy surfaces when next
-// changed. Its output is layered, so the unlayered legacy `.ub-*` rules still
-// win where they remain — see ui/tailwind.css.
+// Layered Tailwind styles product controls; unlayered .ub-* rules still win.
+// Keep editor content in plain CSS; see ui/tailwind.css.
 import "./ui/tailwind.css";
 
 const container = document.getElementById("root");
@@ -31,15 +20,11 @@ if (!container) {
   throw new Error("uberblick web: #root container is missing from index.html");
 }
 
-// Memoised in config.ts, and it never rejects — the hook below joins this same
-// read rather than starting a second one.
+// Startup and room hooks share config.ts's non-rejecting read.
 void resolveClientConfig();
 
-// Not the first-paint path — this module is deferred, and `index.html`'s
-// blocking snippet is what stamps the attribute before anything is painted
-// (#74). This is the runtime owner catching up with it: one read at startup, so
-// the module's view and the document agree from the first render, and the
-// attribute is still correct if that snippet never ran.
+// index.html stamps before first paint; this deferred module catches runtime
+// state up with it and also handles a missing bootstrap snippet.
 applyStoredAppearance();
 
 createRoot(container).render(<><App /><NotificationToaster /></>);

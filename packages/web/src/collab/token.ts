@@ -1,28 +1,10 @@
 /**
- * Hub auth token minting.
- *
- * The signing and verification logic lives in `@uberblick/schema/token`
- * subpath: it is WebCrypto-only (no Node builtins), so the exact same module
- * runs in the browser to mint and in the hub to verify. Re-implementing it here
- * would be a second definition of the wire format, and the two would drift —
- * they already did once during this spike, over whether the HMAC covers the raw
- * claims JSON or the base64url payload string. It covers the payload string.
- *
- * This module exists as the single import site for the whole package, so if the
- * hosted design lands (server mints per OAuth session, client only *receives* a
- * token) the change is confined to this file.
- *
- * Format, for reference — see @uberblick/schema/token for the authority:
- *
- *     base64url(JSON {typ, sub, workspace, scope, kid, iat, exp}) "." base64url(HMAC-SHA256(key, payloadPart))
- *
- * `iat` defaults to now, so tokens are not byte-stable across calls, and every
- * token expires — `mintToken` takes a `CryptoKey`, which is what
- * `importRootSecret` turns the served secret into.
- *
- * Loopback pages mint from their local signing key in the served configuration.
- * ub open supplies a separate workspace browser key; development supplies the
- * loopback hub's signing secret. Remote pages receive neither and do not mint.
+ * Reuse @uberblick/schema/token's WebCrypto wire format for minting and verification:
+ * base64url(JSON {typ, sub, workspace, scope, kid, iat, exp}) + "." +
+ * base64url(HMAC-SHA256(key, payloadPart)), signing that string, not raw JSON.
+ * iat defaults to now; tokens expire and require an imported CryptoKey.
+ * This is the package's single import site. ub open supplies workspace browser
+ * keys; development supplies its loopback root secret. Remote pages get neither.
  */
 
 export {

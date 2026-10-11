@@ -1,7 +1,7 @@
 /**
  * The list keyboard, asserted end to end: keystrokes in, blocks out.
  *
- * A list here is a run of adjacent `list-item` blocks (#59), so the contracts
+ * A list here is a run of adjacent `list-item` blocks, so the contracts
  * worth defending are all about blocks rather than about a tree:
  *
  * 1. **Typing a list produces separate, identified blocks.** `- a` Enter `b`
@@ -65,7 +65,7 @@ function key(editor: Editor, shortcut: string): boolean {
 }
 
 describe("typing a list", () => {
-  /** The acceptance criterion of #59, start to finish. */
+  /** List keyboard editing, start to finish. */
   it("makes one block per item, each with its own id and depth", () => {
     const { ydoc } = docWith([""]);
     const { editor } = mountEditor(ydoc);

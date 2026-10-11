@@ -1,5 +1,5 @@
 /**
- * The document list (#406): the corpus journey's one surface.
+ * The document list: the corpus journey's one surface.
  *
  * One claim: **the list is the directory doc, rendered.** So the rows are
  * asserted against what a *peer* replica of the `_directory` room holds — the
@@ -157,7 +157,7 @@ function documentTable(host: HTMLElement): HTMLElement {
 }
 
 function openButtons(host: HTMLElement): HTMLButtonElement[] {
-  // Inventories include every mounted row, as the original DOM queries did.
+  // Inventories include every mounted row, including hidden rows.
   return within(documentTable(host)).queryAllByRole("rowheader", { hidden: true }).map(
     (header) => within(header).getByRole<HTMLButtonElement>("button", { hidden: true }),
   );
@@ -398,7 +398,7 @@ describe("the order", () => {
 /**
  * Which scan the list is being read with. Last changed answers *what am I
  * working on*; title answers *what is in here*, which the filter cannot —
- * filtering needs a name you already have (owner feedback, 2026-08-30).
+ * filtering needs a name you already have.
  */
 describe("choosing the order", () => {
   /** The order option that is on, read the way the screen shows it. */
@@ -432,7 +432,7 @@ describe("choosing the order", () => {
     const table = documentTable(host);
     expect(table).not.toBeNull();
     expect(table.tagName).toBe("TABLE");
-    // The semantic queries still verify the original native table structure.
+    // The semantic queries also verify the native table structure.
     expect(table.querySelectorAll("thead th")).toHaveLength(3);
     expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
     expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(3);
@@ -956,12 +956,8 @@ describe("an empty list", () => {
 });
 
 /**
- * The sidebar's "All docs" entry, unchanged by this leaf: the sidebar is
- * curation and stays as it was, and these cases move here with the listing it
- * opens rather than dying with `AllDocsPane`. Where in the column the entry is
- * drawn is the sidebar's own business (#483 moved it into Navigation) and is
- * asserted in `sidebar.test.tsx`; what is asked here is only that it is there,
- * says "All docs", and opens the listing.
+ * The sidebar's "All docs" entry is present, says "All docs", and opens the
+ * listing. Its placement in Navigation is asserted in `sidebar.test.tsx`.
  */
 describe("the sidebar entry", () => {
   it("is there whether anything is pinned or not, and opens the listing", async () => {
@@ -987,7 +983,7 @@ describe("the sidebar entry", () => {
     ).toBe("page");
 
     // And with a pin in the sidebar it is exactly where it was: the entry is
-    // not part of the curation below it (#483).
+    // not part of the curation below it.
     const pin = within(documentTable(host)).getByRole<HTMLButtonElement>("button", { name: "Pin Overview to the sidebar" });
     await act(async () => pin?.click());
     expect(groups()).toHaveLength(1);

@@ -1,26 +1,7 @@
 /**
- * Chrome for the two source-text blocks: a one-click copy button on `code` and
- * `mermaid` (#103).
- *
- * These blocks carry command sequences and diagram source — text people need to
- * take away verbatim. Dragging a selection across a collaboratively edited
- * document to get it is both fiddly and dangerous: a stray keystroke mid-select
- * edits the doc for everyone. So the affordance is a button, and the button
- * lives in the NodeView's chrome rather than in the content:
- *
- * - It is `contenteditable="false"` and its events are stopped before they
- *   reach ProseMirror (`stopEvent`), so clicking it does not focus the editor
- *   or move the caret.
- * - It publishes through the shared notification facility. Nothing here
- *   dispatches a transaction, so there is no undo step to make either.
- *
- * The text copied is `node.textContent`: the block's own text, joined with
- * nothing, newlines intact. Not markdown, not a fence — the source.
- *
- * {@link sourceEditingPlugin} at the foot is the other half a source block that
- * draws itself needs, and it is here for the same reason: `table` and
- * `terminal` decide which representation to show by exactly the same rule, and
- * one copy of that rule is one place for it to be wrong.
+ * Copy verbatim node.textContent, never Markdown fences. Keep chrome outside
+ * contentDOM, noneditable and isolated from PM events; copying must move no
+ * caret and dispatch no transaction or undo step.
  */
 
 import type { NodeViewRenderer, NodeViewRendererProps } from "@tiptap/core";
@@ -32,12 +13,8 @@ import type { NodeView } from "@tiptap/pm/view";
 import { notifyTransient } from "../notifications.js";
 
 /**
- * Put `text` on the clipboard, or report that we could not.
- *
- * `navigator.clipboard` exists only in a secure context. Serving the web client
- * over plain http on a tailnet host is a supported deployment (REMOTE.md), and
- * a copy button that is silently dead there is worse than no button, hence the
- * `execCommand` path behind it.
+ * Try the secure-context Clipboard API, then selection copy for supported plain
+ * HTTP deployments or denied transient activation. Report failure explicitly.
  */
 export async function writeToClipboard(text: string): Promise<boolean> {
   if (navigator.clipboard !== undefined) {
@@ -45,17 +22,15 @@ export async function writeToClipboard(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Permission denied or no transient activation — try the old way.
+      // Permission or activation refusal still permits selection-copy fallback.
     }
   }
   return copyViaSelection(text);
 }
 
 /**
- * The insecure-context fallback. `execCommand("copy")` copies the *selection*,
- * so it needs a real, selectable element: an off-screen textarea, focused just
- * long enough to be copied out of, with focus handed straight back to whatever
- * had it — which for a click on this button is the editor, caret untouched.
+ * execCommand copies selection: focus a selectable offscreen textarea and
+ * restore the prior focus without disturbing the editor caret.
  */
 function copyViaSelection(text: string): boolean {
   const previous = document.activeElement;
@@ -92,9 +67,7 @@ export function copyButton(source: () => string): {
   element.textContent = "copy";
   element.title = "Copy this block's source";
 
-  // mousedown, not click: the browser moves focus and the caret on mousedown, so
-  // preventing the default there is what keeps the editor untouched. By click
-  // time the caret has already moved.
+  // Prevent mousedown: by click time the browser has already moved the caret.
   element.addEventListener("mousedown", (event) => event.preventDefault());
   element.addEventListener("click", (event) => {
     event.preventDefault();
@@ -155,11 +128,8 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
       contentDOM,
       update(updated: PMNode): boolean {
         if (updated.type !== current.type) return false;
-        // The browser's editing engine sometimes rewrites the markup around an
-        // emptied inline element — Chrome drops an empty `<code>` and wraps the
-        // next keystroke in a `<font>`. Patching the node in place then writes
-        // into an element that is no longer in the tree, so hand the whole view
-        // back to ProseMirror to rebuild instead.
+        // Browser editing can detach an emptied code element. Rebuild the view
+        // rather than patching contentDOM outside the live tree.
         if (contentDOM.parentNode !== dom) return false;
         current = updated;
         chrome.sync(current, dom);
@@ -171,10 +141,8 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
       // including the padding around the text — must still place the caret.
       stopEvent: (event: Event): boolean =>
         event.target instanceof Node && (button.element.contains(event.target) || caption?.contains(event.target) === true),
-      // The copy label and caption/picker, and nothing else. Anything wider is a trap:
-      // ignoring a mutation ProseMirror needed to see stops it repairing the
-      // block's DOM at all, and the view then drifts silently away from the
-      // document — every later keystroke lands on screen and nowhere else.
+      // Ignore only chrome mutations; suppressing contentDOM repair can make
+      // later keystrokes visible without storing them in the document.
       ignoreMutation: (mutation: { target: Node }): boolean =>
         button.element.contains(mutation.target) || caption?.contains(mutation.target) === true,
     };
@@ -209,12 +177,8 @@ export const mermaidChrome: SourceBlockChrome = {
 };
 
 /**
- * `<div class="ub-terminal" data-block-type="terminal">…<pre
- * class="ub-terminal-source">…</pre></div>`
- *
- * The content `<pre>` is classed rather than left bare, unlike mermaid's: this
- * block's panel holds `<pre>`s of its own, and a selector that could not tell
- * them apart would style and hide the wrong one.
+ * Class the source pre separately: terminal playback contains other pre nodes
+ * and shared selectors must not hide/style those instead.
  */
 export const terminalChrome: SourceBlockChrome = {
   root: () => {
@@ -250,12 +214,8 @@ export const chartChrome: SourceBlockChrome = {
 /* ------------------------------------------------- the block under the caret */
 
 /**
- * The top-level block of type `typeName` the selection is in, or null.
- *
- * Exported because {@link sourceEditingPlugin} is not the only thing that has
- * to answer this question: a block that decides whether to *do* the expensive
- * drawing has to agree with the stylesheet about which block is open, and two
- * spellings of that rule would eventually disagree (terminal.ts).
+ * Share the selected-block predicate between expensive renderers and CSS source
+ * visibility so playback and the visible representation cannot disagree.
  */
 export function selectedBlock(
   state: EditorState,
@@ -274,13 +234,8 @@ export function selectedBlock(
 }
 
 /**
- * Put `className` on the `typeName` block the selection sits in, so the
- * stylesheet can show that block's source and hide its rendering.
- *
- * The blocks that draw themselves — `table` and `terminal` — share this, and
- * they share the reason: which representation a reader sees is derived from
- * the selection on every draw rather than remembered, because a mode nobody
- * stores cannot get out of step with the document.
+ * Derive source visibility from the current selection on every draw; do not
+ * store a mode that can drift from the document.
  */
 export function sourceEditingPlugin(typeName: string, className: string): Plugin {
   return new Plugin({
