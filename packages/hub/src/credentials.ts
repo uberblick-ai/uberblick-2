@@ -374,9 +374,9 @@ export class CredentialRegistry {
   }
 
   /**
-   * Snapshot and revoke every device row without yielding: committed replacements
-   * are included, and verifying exchanges fail their current-row check. Retain
-   * sign-in history for closure retries; owned revoked devices still return true.
+   * Snapshot and revoke every device row in one transaction without yielding.
+   * Include committed replacements; verifying exchanges fail their current-row check.
+   * Retain sign-in history for closure retries; owned revoked devices still return true.
    */
   revokeDevice(principalId: string, deviceId: string): boolean {
     let ids: string[];

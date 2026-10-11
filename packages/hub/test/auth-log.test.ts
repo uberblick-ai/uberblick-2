@@ -159,8 +159,8 @@ const cases: Case[] = [
       }),
   },
   {
-    // The situation the event was written for: a client that has not been
-    // restarted since the claims-v2 deploy, still minting the old shape.
+    // A parseable legacy payload has sub but no typ; diagnostics identify
+    // malformed claims without trusting them.
     name: "a pre-v2 token from a client that was never restarted",
     cause: "unsupported-claims",
     identity: { typ: null, sub: "pre-v2-client" },
