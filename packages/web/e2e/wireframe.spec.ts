@@ -67,6 +67,10 @@ async function caretEnd(element: Locator): Promise<void> {
     const view = node.closest<HTMLElement>(".ProseMirror");
     if (view === null) throw new Error("e2e: source has no editor");
     view.focus();
+  });
+  // ProseMirror reconciles focus after 20ms; let it finish before replacing the caret.
+  await element.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  await element.evaluate((node) => {
     const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
       acceptNode: (text) => text.parentElement?.closest(".ProseMirror-yjs-cursor") === null
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
@@ -81,15 +85,18 @@ async function caretEnd(element: Locator): Promise<void> {
     selection?.removeAllRanges();
     selection?.addRange(range);
   });
-  // Flush selectionchange into ProseMirror before its delayed focus sync or input.
+  // A native key flushes pending selection work before the following input.
   await element.page().keyboard.press("Shift");
   await expect.poll(() => element.evaluate((node) => {
     const selection = document.getSelection();
     const focus = selection?.focusNode;
-    return selection?.isCollapsed === true && focus?.nodeType === Node.TEXT_NODE && node.contains(focus)
+    const textEnd = selection?.isCollapsed === true && focus?.nodeType === Node.TEXT_NODE && node.contains(focus)
       && focus.parentElement?.closest(".ProseMirror-yjs-cursor") === null
       && selection.focusOffset === focus.textContent?.length;
-  })).toBe(true);
+    return { textEnd, focusType: focus?.nodeName,
+      offset: selection?.focusOffset, focusText: focus?.textContent,
+      active: document.activeElement?.className };
+  })).toEqual(expect.objectContaining({ textEnd: true }));
   await element.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
