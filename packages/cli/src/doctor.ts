@@ -46,8 +46,6 @@ export interface Check {
   reason: string;
   /** How to repair a warning or failure; null for a pass or skip. */
   fix: string | null;
-  /** Listener details when the two local listeners give different verdicts. */
-  listeners?: Check[];
 }
 
 export interface DoctorReport {
@@ -401,13 +399,17 @@ async function webServerCheck(): Promise<Check> {
 }
 
 /** The local hub's configuration and holder are one listener verdict. */
-async function localHubListenerCheck(
-  config: McpConfig,
+async function localHubCheck(
+  config: McpConfig | null,
   endpoint: Endpoint | null,
   env: NodeJS.ProcessEnv,
   dial: Dial,
 ): Promise<Check> {
-  const name = "hub listener";
+  const name = "local hub";
+  if (config === null) return skipped(name, "no workspace is configured");
+  if (config.deviceLogin !== undefined) {
+    return skipped(name, `no local hub is used; this workspace syncs through ${authenticationOrigin(config.hubUrl)}`);
+  }
   const credentials = readCredentials(env);
   if (credentials.exposed) {
     return fail(
@@ -471,32 +473,6 @@ async function localHubListenerCheck(
     );
   }
   return fail(name, `${address} is in use by a process that is not an uberblick hub`, "stop that process, then run ub open");
-}
-
-async function localHubCheck(
-  config: McpConfig | null,
-  endpoint: Endpoint | null,
-  env: NodeJS.ProcessEnv,
-  dial: Dial,
-): Promise<Check> {
-  const web = await webServerCheck();
-  if (config === null || config.deviceLogin !== undefined) {
-    return { ...web, name: "local hub" };
-  }
-  const hub = await localHubListenerCheck(config, endpoint, env, dial);
-  const listeners = [web, hub];
-  // A partly running stack passes unless either listener fails. Skips alone
-  // stay skipped, and the seven-check summary counts the combined verdict once.
-  const status = listeners.some(listener => listener.status === "fail") ? "fail"
-    : listeners.some(listener => listener.status === "pass") ? "pass" : "skipped";
-  const fixes = listeners.flatMap(listener => listener.fix === null ? [] : [listener.fix]);
-  return {
-    name: "local hub",
-    status,
-    reason: listeners.map(listener => `${listener.name}: ${listener.reason}`).join("; "),
-    fix: fixes.length === 0 ? null : fixes.join("; "),
-    ...(web.status === hub.status ? {} : { listeners }),
-  };
 }
 
 const CLIENT_NAMES: Record<TargetName, string> = {
@@ -659,6 +635,7 @@ export async function doctorReport(
     hub.check,
     await clockCheck(config, hub),
     await localHubCheck(config, endpoint, resolvedEnv, dial),
+    await webServerCheck(),
     mcpCheck(resolvedEnv, cwd, config === null ? null : resolved),
   );
 
@@ -685,12 +662,9 @@ export function renderDoctor(report: DoctorReport, env: NodeJS.ProcessEnv = proc
     offset === 0 || /[\s("'=:]/.test(value[offset - 1] ?? "") ? `~${sep}` : prefix);
   let text = `uberblick ${report.version}\n\n`;
   for (const check of report.checks) {
-    for (const line of check.listeners ?? [check]) {
-      const reason = check.listeners === undefined ? line.reason : `${line.name}: ${line.reason}`;
-      text += `${MARKERS[line.status].padEnd(6)}${check.name.padEnd(12)}${humanPath(reason)}\n`;
-      if (line.status === "warn" || line.status === "fail") {
-        text += `${" ".repeat(6)}→ ${humanPath(line.fix ?? "")}\n`;
-      }
+    text += `${MARKERS[check.status].padEnd(6)}${check.name.padEnd(12)}${humanPath(check.reason)}\n`;
+    if (check.status === "warn" || check.status === "fail") {
+      text += `${" ".repeat(6)}→ ${humanPath(check.fix ?? "")}\n`;
     }
   }
   const counts = { pass: 0, warn: 0, fail: 0, skipped: 0 };
