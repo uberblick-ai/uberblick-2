@@ -6,7 +6,7 @@ import {
   type RequestAction,
   importCredentialKey,
   mintRequestProof,
-} from "../src/token.js";
+} from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const databases: HubDatabase[] = [];

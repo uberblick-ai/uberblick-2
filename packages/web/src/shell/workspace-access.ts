@@ -1,7 +1,7 @@
 /** Live access requests use the local browser key; hub credentials stay in ub open. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
-import type { RequestAction } from "@uberblick/hub/token";
-import { sanitizeDeviceName } from "@uberblick/hub/device-name";
+import type { RequestAction } from "@uberblick/schema/token";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 
 export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
 export type AccessRole = "member" | "admin";

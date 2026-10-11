@@ -29,8 +29,8 @@ import {
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
-} from "../src/protocol.js";
-import { MAX_TOKEN_LENGTH } from "../src/token.js";
+} from "@uberblick/schema/protocol";
+import { MAX_TOKEN_LENGTH } from "@uberblick/schema/token";
 import {
   createClient,
   forgeToken,

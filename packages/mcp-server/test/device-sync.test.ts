@@ -1,8 +1,8 @@
 /** Remote clients resume device sync after a later login or grant, keeping local work. */
 import { afterEach, describe, expect, it } from "vitest";
-import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/hub/token";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
 import { createMcpEngine } from "../src/engine.js";

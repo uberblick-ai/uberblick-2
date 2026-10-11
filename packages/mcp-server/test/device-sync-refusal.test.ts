@@ -2,8 +2,8 @@
 import { chmodSync } from "node:fs";
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
 import { caughtUp, client, closeClient, closeDeviceSync, config, environment, hub } from "./device-sync-fixture.js";

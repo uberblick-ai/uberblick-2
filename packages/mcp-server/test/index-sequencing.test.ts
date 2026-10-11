@@ -112,9 +112,8 @@ describe("the index derivation cut", () => {
       .db;
     secondDb.exec("PRAGMA busy_timeout = 0");
 
-    // Pause the clear after its marker delete has executed, at the exact
-    // boundary where the old autocommit script admitted another writer. Under
-    // one transaction that writer is refused until the clear commits; the
+    // Pause the clear after its marker delete. A peer writer must be refused
+    // until the complete clear transaction commits; the
     // rebuild then writes the same cut as one complete generation.
     let attempted = false;
     firstDb.setAuthorizer((action, table) => {

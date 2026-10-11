@@ -28,8 +28,8 @@
  * into a chrome test that needs none of them.
  *
  * `AGENT_CLIENT` is the agent's own constant, held as a literal rather than
- * imported: this package does not depend on `@uberblick/mcp-server`, and an
- * awareness field is a wire format either way. Its other end is
+ * imported: loading the MCP replica for one marker would pull in its Node-only
+ * runtime, and an awareness field is a wire format either way. Its other end is
  * `packages/mcp-server/src/replica.ts`.
  */
 export const WEB_CLIENT = "web";

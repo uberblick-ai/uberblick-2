@@ -42,11 +42,13 @@
  */
 
 import type {
+  Extension,
   Hocuspocus,
   WebSocketLike,
   onAuthenticatePayload,
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
@@ -54,22 +56,9 @@ import {
   DEFAULT_HOST,
   DEFAULT_PORT,
   MAX_PENDING_DOCUMENTS,
-  defaultDatabasePath,
-  validateGithubClientId,
 } from "./config.js";
 import type { HubLogger } from "./log.js";
-import { CredentialRegistry } from "./credentials.js";
-import { CredentialAdmission, type CredentialContext } from "./credential-admission.js";
-import { handleCredentialRenewal } from "./credential-renewal.js";
-import { WorkspaceNameReader } from "./workspace-names.js";
-import { WorkspacePromotions } from "./workspace-promotion.js";
-import { handleAccessManagement } from "./access-management.js";
-import { startAdminSetup } from "./admin-setup.js";
-import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
-import { GithubAccountLookup } from "./github-account-lookup.js";
-import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
-import { MembershipRegistry } from "./memberships.js";
-import { PrincipalRegistry } from "./principals.js";
+import type { CredentialContext } from "./credential-admission.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import {
@@ -77,15 +66,15 @@ import {
   protocolMismatchReason,
   readAuthEnvelope,
   SYNC_PROTOCOL_VERSION,
-} from "./protocol.js";
+} from "@uberblick/schema/protocol";
 import type {
   ClampFailure,
   TokenClaims,
   TokenFailure,
   TokenIdentity,
-} from "./token.js";
-import { clampToken, importRootSecret, inspectToken } from "./token.js";
-import { isLoopbackHost } from "./remote-url.js";
+} from "@uberblick/schema/token";
+import { clampToken, importRootSecret, inspectToken } from "@uberblick/schema/token";
+import { isLoopbackHost } from "@uberblick/schema/loopback";
 
 /**
  * Local connections carry verified claims. Remote connections carry the
@@ -99,10 +88,6 @@ export interface Hub {
   readonly databasePath: string;
   readonly server: Server<HubContext>;
   readonly hocuspocus: Hocuspocus<HubContext>;
-  /** Hub-internal authorities; never exposed through a public route. */
-  readonly credentials?: CredentialRegistry;
-  readonly memberships?: MembershipRegistry;
-  readonly principals?: PrincipalRegistry;
   /**
    * Execute every pending debounced `onStoreDocument` now and await it, so
    * that everything currently in memory is on disk when this resolves.
@@ -137,6 +122,47 @@ export interface Hub {
    * definition holds no client state — so it is not done.
    */
   stop(): Promise<void>;
+}
+
+/** Optional release wiring, created only after the core database is open. */
+export interface HubExtensionContext {
+  database: HubDatabase;
+  server(): Server<HubContext>;
+  deviceCredentials: boolean;
+  protocolVersion: number;
+  log: HubLogger;
+}
+
+export interface HubExtension {
+  extensions: Extension[];
+  admissionConfigured: boolean;
+  signInConfigured: boolean;
+  handleRequest(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/** Preserve the HTTP surface of an embedded hub with no sign-in configured. */
+function handleUnconfiguredAuthRequest(request: IncomingMessage, response: ServerResponse): boolean {
+  const path = request.url ?? "";
+  if (!path.startsWith("/auth/")) return false;
+  let status = 404;
+  let body: unknown = { status: "unknown-request" };
+  const claimState = path === "/auth/claim-state";
+  if (claimState) {
+    const valid = request.method === "GET";
+    status = valid ? 200 : 405;
+    body = valid ? { unclaimed: false, canClaim: false } : { status: "invalid-request" };
+  } else if (["/auth/credential/renew", "/auth/manage", "/auth/github/start", "/auth/github/collect", "/auth/github/cancel"].includes(path)) {
+    status = 503;
+    body = { status: "not-configured" };
+  }
+  response.writeHead(status, {
+    "Content-Type": "application/json", "Cache-Control": "no-store",
+    ...(claimState && status === 405 ? { Allow: "GET" } : {}),
+  });
+  response.end(JSON.stringify(body));
+  return true;
 }
 
 /** Query parameters that would carry a token. Their presence is a rejection. */
@@ -596,12 +622,10 @@ async function listen(
  * a server — which is what makes it usable from tests.
  */
 export async function createHub(config: HubConfig, options: {
-  operatorSetup?: boolean;
-  initializeDefaultWorkspace?: boolean;
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
+  extension?: (context: HubExtensionContext) => HubExtension;
 } = {}): Promise<Hub> {
-  if (config.github !== undefined) validateGithubClientId(config.github.clientId);
   const address = config.address ?? DEFAULT_HOST;
   const deviceCredentials = !isLoopbackHost(address) || options.deviceCredentials === true;
   if (!deviceCredentials && (config.authSecret === undefined || config.authSecret === "")) {
@@ -626,7 +650,10 @@ export async function createHub(config: HubConfig, options: {
     protocolVersion,
     log,
   });
-  const databasePath = config.databasePath ?? defaultDatabasePath();
+  const databasePath = config.databasePath;
+  if (databasePath === undefined || databasePath.trim() === "") {
+    throw new Error("createHub: databasePath must not be empty");
+  }
   const shutdownTimeoutMs = config.shutdownTimeoutMs ?? 10_000;
 
   // Sticky on purpose: once a store has failed, the hub cannot claim that what
@@ -668,33 +695,9 @@ export async function createHub(config: HubConfig, options: {
     log({ event: "hub.database.ephemeral", database: databasePath });
   }
 
-  let signIn: GithubSignIn | undefined;
-  let accounts: GithubAccountLookup | undefined;
-  let credentials: CredentialRegistry | undefined;
-  let principals: PrincipalRegistry | undefined;
-  let memberships: MembershipRegistry | undefined;
-  let claims: HubClaimState | undefined;
-  let admission: CredentialAdmission | undefined;
-  let promotions: WorkspacePromotions | undefined;
-  const workspaceNames = new WorkspaceNameReader(database, room => server.hocuspocus.documents.get(room));
+  let extension: HubExtension | undefined;
   try {
-    // Standalone entry points opt in. ub open's embedded hub never initializes
-    // or claims, even when it offers an explicitly configured GitHub sign-in.
-    if (options.initializeDefaultWorkspace) claims = new HubClaimState(database);
-    if (config.github !== undefined || options.operatorSetup) {
-      principals = new PrincipalRegistry(database);
-      memberships = new MembershipRegistry(database);
-      if (config.github !== undefined) {
-        credentials = new CredentialRegistry(database);
-        promotions = new WorkspacePromotions(database, memberships, workspaceId =>
-          [...server.hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`)));
-        signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
-        accounts = new GithubAccountLookup(config.github.fetch);
-      }
-    }
-    if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
-      admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
-    }
+    extension = options.extension?.({ database, server: () => server, deviceCredentials, protocolVersion, log });
   } catch (error) {
     closeDatabase();
     throw error;
@@ -718,7 +721,7 @@ export async function createHub(config: HubConfig, options: {
     ...(config.maxDebounce === undefined
       ? {}
       : { maxDebounce: config.maxDebounce }),
-    extensions: [database, ...(admission === undefined ? [] : [admission])],
+    extensions: [database, ...(extension?.extensions ?? [])],
 
     /**
      * Stamp the direct peer's address onto the upgrade request, the one place
@@ -731,7 +734,7 @@ export async function createHub(config: HubConfig, options: {
     },
 
     ...(authenticate !== undefined ? { onAuthenticate: authenticate } :
-      admission !== undefined ? {} : {
+      extension?.admissionConfigured === true ? {} : {
         async onAuthenticate({ token }: onAuthenticatePayload<HubContext>): Promise<never> {
           const envelope = readAuthEnvelope(token);
           const reason = envelope === null || envelope.protocolVersion !== protocolVersion
@@ -742,14 +745,9 @@ export async function createHub(config: HubConfig, options: {
       }),
 
     async onRequest({ request, response }) {
-      if (handleHubClaimState(claims, signIn !== undefined, request, response)) return Promise.reject();
-      if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) {
-        return Promise.reject();
-      }
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts)) {
-        return Promise.reject();
-      }
-      if (await handleGithubSignIn(signIn, request, response)) return Promise.reject();
+      if (extension !== undefined
+        ? await extension.handleRequest(request, response)
+        : handleUnconfiguredAuthRequest(request, response)) return Promise.reject();
     },
 
     /**
@@ -794,23 +792,13 @@ export async function createHub(config: HubConfig, options: {
   });
 
   let hocuspocus: Hocuspocus<HubContext>;
-  let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;
   try {
-    if (options.operatorSetup) {
-      if (principals === undefined || memberships === undefined || isEphemeralDatabase(databasePath)) {
-        throw new Error("hub setup: durable hub database required");
-      }
-      adminSetup = await startAdminSetup({ database, principals, memberships, claims,
-        github: config.github, log, hasLiveDocuments: (workspaceId) =>
-          [...server.hocuspocus.documents.keys()].some((name) => name.startsWith(`${workspaceId}/`)) });
-    }
+    await extension?.start();
     hocuspocus = await listen(server);
   } catch (error) {
     // Half a hub is worse than none: release the socket and the handle so the
     // caller sees a rejection and nothing else.
-    signIn?.stop();
-    accounts?.stop();
-    await adminSetup?.stop();
+    await extension?.stop();
     await server.destroy().catch((cleanup: unknown) => {
       log({ event: "hub.start.cleanupFailed", error: String(cleanup) });
     });
@@ -820,7 +808,7 @@ export async function createHub(config: HubConfig, options: {
   const port = server.address.port;
 
   log({ event: "hub.listen", address, port, database: databasePath });
-  if (deviceCredentials && signIn === undefined) {
+  if (deviceCredentials && extension?.signInConfigured !== true) {
     log({ event: "hub.auth.unavailable", reason: "GitHub sign-in is not configured; this remote hub admits no clients" });
   }
 
@@ -846,9 +834,7 @@ export async function createHub(config: HubConfig, options: {
   const runStop = async (): Promise<void> => {
     // Fence asynchronous identity reads before any database teardown. An
     // outstanding HTTP request can complete only with a safe failure now.
-    signIn?.stop();
-    accounts?.stop();
-    await adminSetup?.stop();
+    await extension?.stop();
     // Collected before the rooms are closed, because closing one removes the
     // connection that names its socket. See openSockets.
     const sockets = openSockets(hocuspocus);
@@ -917,9 +903,6 @@ export async function createHub(config: HubConfig, options: {
     databasePath,
     server,
     hocuspocus,
-    ...(credentials === undefined ? {} : { credentials }),
-    ...(memberships === undefined ? {} : { memberships }),
-    ...(principals === undefined ? {} : { principals }),
     flush,
     stop() {
       stopping ??= runStop();

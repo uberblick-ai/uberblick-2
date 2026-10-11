@@ -16,10 +16,10 @@
  */
 
 import { parseArgs } from "node:util";
-import { isGithubUsername } from "@uberblick/hub";
-import { hubDatabasePath } from "@uberblick/hub/config";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { hubDatabasePath } from "./hub-config.js";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { collectSyncStatus, createMcpServer, formatHubFailure, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, UberblickMcpServer } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";

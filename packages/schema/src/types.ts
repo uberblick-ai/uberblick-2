@@ -227,7 +227,7 @@ export interface DocMeta {
   decidedAt?: string;
   /** Where the person's answer was given. */
   decidedWhere?: string;
-  /** Approved title, decision line and ordered block text; a change detector. */
+  /** Approved title, decision line, ordered block text and structured data; a change detector. */
   approvalFingerprint?: string;
   /** Why a person rejected the proposal. */
   rejectionReason?: string;

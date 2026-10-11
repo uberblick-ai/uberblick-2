@@ -11,7 +11,7 @@ import { HubClaimState } from "../src/hub-claim.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
-import { createHub, type Hub } from "../src/server.js";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
 import { silentLogger } from "../src/log.js";
 import { TEST_SECRET, WORKSPACE } from "./helpers.js";
 

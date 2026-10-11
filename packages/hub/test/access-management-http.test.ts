@@ -3,9 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CredentialRegistry, type CredentialRenewal, type IssuedCredential } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
-import { createHub, type Hub } from "../src/server.js";
-import { importCredentialKey, importRootSecret, mintRequestProof, mintToken, type RequestAction } from "../src/token.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
+import { importCredentialKey, importRootSecret, mintRequestProof, mintToken, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 

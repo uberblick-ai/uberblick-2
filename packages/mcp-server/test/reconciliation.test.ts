@@ -1,11 +1,10 @@
 /**
- * Directory reconciliation after a partial cross-room write (#81).
+ * Directory reconciliation after a partial cross-room write.
  *
  * A document and the workspace directory are two rooms with two persistence
  * paths that cannot commit together, so every write touching both has partial
  * outcomes. The contract is that each one lands on a named, observable result
- * rather than on "it depends", and the six results are the issue's table — one
- * test below per row, in the order the table states them:
+ * rather than on "it depends", with one test per partial outcome:
  *
  * 1. create, stub landed, document room did not — the stub stays, `list_docs`
  *    lists it, and `get_doc` answers `doc_not_hydrated` with `inDirectory:

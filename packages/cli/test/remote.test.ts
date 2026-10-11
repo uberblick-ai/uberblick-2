@@ -28,15 +28,10 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
-import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import {
   bridgeConfig,

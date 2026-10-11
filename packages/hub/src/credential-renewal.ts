@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
-import { type AuthEnvelope, protocolMismatchReason, readAuthEnvelope } from "./protocol.js";
+import { type AuthEnvelope, protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { addWorkspaceNames, type WorkspaceNameReader } from "./workspace-names.js";
 
 export async function handleCredentialRenewal(

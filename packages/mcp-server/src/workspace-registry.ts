@@ -48,10 +48,9 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
 }
 
 /**
- * Caller holds the machine init lock. Publish records before replacing a binding,
- * restoring the prior records if that publication fails. The callback is synchronous
- * so another writer cannot enter between publication and restoration.
- * Only verified promotion, fetch or completed init attach may replace an existing workspace's hub.
+ * Caller holds the init lock. Publish records first; restore them if binding publication fails.
+ * Keep the callback synchronous so publication and restoration cannot interleave.
+ * Only verified promotion, fetch or completed init attach may replace an existing hub.
  */
 export function withWorkspaceBindings<T>(
   bindings: readonly ProjectBinding[],
@@ -73,8 +72,7 @@ export function withWorkspaceBindings<T>(
   }
   if (!changed) return action();
   mkdirSync(dirname(current.path), { recursive: true, mode: 0o700 });
-  // Prepare restoration before publication, so a later disk-full error while
-  // writing the project file does not require writing the old map again.
+  // Stage restoration first: disk-full during binding publication must not prevent recovery.
   const restore = current.text === null ? null : writeTempBeside(current.path, current.text);
   try {
     publishOwnerOnly(current.path, `${JSON.stringify(hubs, null, 2)}\n`);

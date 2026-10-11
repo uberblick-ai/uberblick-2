@@ -2,8 +2,9 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { createHub, silentLogger } from "@uberblick/hub";
-import { writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { createMcpEngine, defaultDatabasePath, resolveMcpConfig, type ServingSyncStatus } from "@uberblick/mcp-server";
 import { appendBlock, directoryRoom, editBlock, getBlocks, getDirectoryEntry, initDoc,
   roomForDoc, upsertDirectoryEntry } from "@uberblick/schema";
