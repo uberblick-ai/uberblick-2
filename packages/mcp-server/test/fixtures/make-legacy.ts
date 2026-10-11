@@ -1,19 +1,11 @@
 /**
- * How `better-sqlite3.sqlite` was made. Kept so the fixture is reproducible.
- *
- * It was run once, on the commit that still used better-sqlite3, from the repo
- * root — through `mise exec`, the toolchain entry point, like everything else
- * here:
+ * Regenerate better-sqlite3.sqlite only in a checkout using better-sqlite3;
+ * running with node:sqlite would turn compatibility coverage into a tautology.
+ * From the repo root, the target path is relative to the package:
  *
  *   mise exec -- pnpm --filter @uberblick/mcp-server exec tsx \
  *     test/fixtures/make-legacy.ts test/fixtures/better-sqlite3.sqlite
  *
- * (The target path is relative to the package, which is where `pnpm exec` runs.)
- *
- * Do not re-run it here. `MirrorStore` speaks `node:sqlite` now, so it would
- * overwrite the fixture with bytes from the new binding and quietly turn the
- * back-compat test into a tautology. Regenerate only from a checkout that still
- * has the old binding — the committed file is the artefact, this is its recipe.
  */
 
 import { rmSync } from "node:fs";
@@ -29,15 +21,10 @@ rmSync(target, { force: true });
 
 const UUID = "3f2b0a6c-8b1e-4a55-9c47-0d5d1e6b7a90";
 const OTHER = "9a1c7d2e-4f60-4b18-8f3a-2c5e9b0d6c11";
-// The room key exactly as the old binding wrote it, back when a workspace id
-// was a name. The store treats room keys as opaque, and the committed fixture
-// is a historical artefact: this string must not be modernised, or it would
-// stop reproducing the file it exists to reproduce.
+// Preserve the fixture's opaque room key to reproduce its bytes.
 const ROOM = `main/${UUID}`;
 
-// The workspace as it was spelled then — a name, not a uuid. The committed
-// fixture predates the `meta` row entirely, which is the other thing that makes
-// it a legacy database.
+// Preserve the named workspace and binding without a workspace meta row.
 const store = new MirrorStore(target, "main");
 
 // A snapshot plus a live tail, so the fixture exercises both BLOB columns.

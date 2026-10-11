@@ -714,7 +714,7 @@ describe("the failure contract", () => {
     const malformed = [
       // A field whose value is the wrong shape.
       { uuid: "not-a-uuid", block_id: "b", old_text: "", new_text: "" },
-      // And a field nobody declared, which used to be dropped in silence.
+      // An undeclared field must be refused rather than silently dropped.
       {
         uuid: doc.uuid,
         block_id: doc.blockId,

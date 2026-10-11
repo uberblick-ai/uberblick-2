@@ -3,8 +3,7 @@
  * load-bearing three times: `WORKSPACE_ID` names the rooms this server opens,
  * the workspace claim in its hub token, and the SQLite file it hydrates from.
  * There is no default — a guess would silently open somebody else's corpus or
- * start an empty one — and a workspace id is a uuid, so the path-segment
- * question the old string workspaces raised is answered by construction.
+ * start an empty one — and a workspace id is a uuid, making it path-safe.
  */
 
 import { spawn } from "node:child_process";

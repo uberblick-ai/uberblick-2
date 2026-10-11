@@ -11,7 +11,7 @@
  * The other half of the bargain is authorship: `updatedAt` says when someone
  * changed the document, not when a replica noticed it, so everything a server
  * merely observes — a log replay, an index rebuild, an archive restore — repairs
- * a stub that disagrees without ever restamping it (#544). The hub's own arm of
+ * a stub that disagrees without ever restamping it. The hub's own arm of
  * that rule, a peer's edit arriving over the wire, is in `sync.test.ts`, where
  * the hub and the second client already live. Concurrent authored stamps resolve
  * to the greater number, so a future-skewed clock stands until a later authored
