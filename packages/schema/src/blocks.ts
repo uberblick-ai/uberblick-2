@@ -610,6 +610,7 @@ export function setBlockType(
   attrs: BlockTypeAttrs = {},
 ): void {
   const fragment = getBlocksFragment(ydoc);
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
   ydoc.transact(() => {
     const index = indexOfBlock(fragment, blockId);
     if (index === -1) throw new BlockNotFoundError(blockId);

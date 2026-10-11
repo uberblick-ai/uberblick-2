@@ -76,6 +76,7 @@ function member(value: unknown): Record<string, unknown> {
  * fields and messages never enter its responses, including otherwise-valid
  * responses with credential material beside the public data.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function sanitizeManagementReply(
   action: ManagementAction,
   reply: ManagementReply,

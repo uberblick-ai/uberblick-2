@@ -365,6 +365,7 @@ function tableMapping(oldValues: string[][], newValues: string[][], supplied: Ta
  * cannot distinguish a renamed survivor from a replacement with equal values.
  * Parsed cells decide what changed, preserving stored whitespace and marks.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function editTable(element: Y.XmlElement, oldTable: GfmTable, newTable: GfmTable, mapping?: TableMapping): void {
   if (!isSupportedTable(element)) throw new InvalidTableError();
   const oldValues = [oldTable.header, ...oldTable.rows];

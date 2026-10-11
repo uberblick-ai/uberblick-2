@@ -16,6 +16,7 @@ These instructions apply to interactive sessions and delivery roles alike.
   first record's UUID, retained by successors. How the system works belongs in
   the live corpus document that owns it, when one exists. Comments that tools
   read, such as `biome-ignore` or `@ts-expect-error` with their reason, stay allowed.
+  A new suppression needs a reason the reviewer accepts as justifying the exception.
 - **GitHub:** authorized work scope, maintainer decisions, reviews and evidence.
 
 A discrepancy is a gap to resolve, not permission to silently override another

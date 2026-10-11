@@ -332,6 +332,7 @@ function TldrCallout({
  * A backlog still makes `rawSyncState` busy: one that outlives the calm window
  * reads `syncing…` or `saving here…`. Its count belongs only in Sync details.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function StatusLine({
   connection,
   presence,

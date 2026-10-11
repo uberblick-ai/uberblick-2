@@ -203,6 +203,7 @@ function FormatButton({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function CommentComposer({
   editor,
   contentReadOnly = false,

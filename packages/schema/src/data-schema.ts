@@ -78,6 +78,7 @@ function invalidJSON(path: string, reason: string): never {
  */
 export function assertJSON(value: unknown, maxDepth = MAX_DATA_DEPTH): asserts value is JSONValue {
   const ancestors = new Set<object>();
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
   function visit(current: unknown, path: string, depth: number): void {
     if (current === null || typeof current === "boolean") return;
     if (typeof current === "string") {
@@ -182,6 +183,7 @@ export function validateCollectionSchema(value: unknown): asserts value is Colle
   }
   if (value.version !== 1) schemaError("/version", "unsupported vocabulary version; expected 1");
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
   function visit(node: unknown, path: string): void {
     if (!isObject(node)) schemaError(path, "expected a schema object");
     for (const key of Object.keys(node).sort(compareCodePoints)) {
@@ -263,6 +265,7 @@ export function validateDataRecord(value: unknown, schema: CollectionSchema): as
     throw error;
   }
   if (!isObject(value)) recordError("", "expected a JSON object");
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
   function visit(current: JSONValue, node: DataSchema, path: string): void {
     if (node.type !== undefined) {
       const types: readonly DataType[] = typeof node.type === "string" ? [node.type] : node.type;

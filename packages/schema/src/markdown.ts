@@ -766,6 +766,7 @@ function renderDecision(reference: DecisionReference): string {
  * section, oldest topic first. An empty one emits nothing, so a document without
  * decisions exports exactly as it did before the slot existed.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function exportMarkdown(
   ydoc: Y.Doc,
   options: ExportMarkdownOptions = {},
@@ -1707,6 +1708,7 @@ function advanceColumn(text: string, column: number): number {
  *
  * HTML comments (including exported annotation comments) are skipped.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function importMarkdown(markdown: string): ImportedDoc {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const front = parseFrontmatter(lines);

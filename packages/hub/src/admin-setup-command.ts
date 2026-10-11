@@ -47,6 +47,7 @@ async function main(): Promise<void> {
       socket.write(`${JSON.stringify(status ? { action: "status", setupId: id } : { action: "start", workspaceId: id })}\n`);
     });
     socket.setEncoding("utf8");
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
     socket.on("data", (chunk: string) => {
       input += chunk;
       if (Buffer.byteLength(input) > 65_536) { unknown(); socket.destroy(); return; }

@@ -91,6 +91,7 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
   throw new PromotionRefusal(reasons[String(result.status)] ?? "the hub refused promotion; update the hub and retry");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_PROMOTE_HELP)) return 0;
   let endpoint: string;

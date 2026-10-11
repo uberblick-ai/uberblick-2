@@ -91,6 +91,7 @@ export function TableControls({ editor, host }: {
   return <>{tables.map((tableId) => <TableControlSurface key={tableId} tableId={tableId} editor={editor} host={host} />)}</>;
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 function TableControlSurface({ tableId, editor, host }: {
   tableId: string;
   editor: Editor;
@@ -127,12 +128,14 @@ function TableControlSurface({ tableId, editor, host }: {
     setMenu(target);
   }, []);
 
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   useEffect(() => {
     const frame = host.current;
     if (frame === null) return;
     const dom = editor.view.dom;
     const owner = dom.ownerDocument;
     const win = owner.defaultView;
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
     const read = (): void => {
       if (editor.isDestroyed) return;
       if (drag.current !== null && resolveTableRow(editor, drag.current.target) === null) cancelDrag();

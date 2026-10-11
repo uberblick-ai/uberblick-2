@@ -208,6 +208,7 @@ async function listen(server: Server<HubContext>): Promise<void> {
  * Start the authenticated loopback server for its caller's local replicas.
  * The HTTP callback lets the same port serve the web bundle and websocket.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {

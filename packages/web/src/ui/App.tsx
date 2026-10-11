@@ -349,6 +349,8 @@ export function RoutePane({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function App(): ReactElement {
   const [path, navigate] = useRoutePath();
   // No room before the client configuration is known (#91): the shared

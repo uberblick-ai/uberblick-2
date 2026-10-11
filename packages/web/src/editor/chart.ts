@@ -34,7 +34,9 @@ type Point = { x: number; y: number | null };
 const LIGHT = ["#1d4ed8", "#b91c1c", "#047857", "#7e22ce", "#a16207", "#0e7490", "#be185d", "#334155"];
 const DARK = ["#93c5fd", "#fca5a5", "#6ee7b7", "#d8b4fe", "#fde047", "#67e8f9", "#f9a8d4", "#cbd5e1"];
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
     let instance: Chart<"line", Point[]> | null = null;
@@ -93,6 +95,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
       element.hidden = value === "";
     };
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
     const draw = (data: DocData | null, readError?: unknown): void => {
       if (destroyed) return;
       try {

@@ -154,6 +154,7 @@ function carriesComment(node: ProseMirrorNode): boolean {
  * holding the panel, the pause/play control, the copy button, and the
  * transcript all of it came from.
  */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export const terminalBlockView: NodeViewRenderer = ({
   node,
   editor,
