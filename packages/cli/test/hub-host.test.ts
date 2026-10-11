@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { hubCommand, hubProcessHost } from "../src/hub.js";
 import type { Io } from "../src/io.js";
-import { REPO_ROOT, removeTempDirs, runUb, unboundSandbox } from "./helpers.js";
+import { REPO_ROOT, removeTempDirs, runUbAsync, unboundSandbox } from "./helpers.js";
 
 const directories: string[] = [];
 afterAll(() => {
@@ -205,17 +205,17 @@ describe("hub commands through the real deployment wrapper", () => {
     expect(existsSync(fix.volumes)).toBe(false);
   });
 
-  it("runs outside a project and ignores malformed client configuration", () => {
+  it("runs outside a project and ignores malformed client configuration", async () => {
     const fix = fixture();
     const box = unboundSandbox({
       raw: { userConfig: "{", credentials: "{" },
     });
     const env = { ...fix.env, ...box.env, PATH: fix.env.PATH };
-    const up = runUb(["hub", "up", "--dir", fix.directory], box, env);
+    const up = await runUbAsync(["hub", "up", "--dir", fix.directory], box, env);
     expect(up.status, up.output).toBe(0);
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     writeFileSync(join(box.cwd, ".uberblick.json"), "{", { mode: 0o600 });
-    const down = runUb(["hub", "down", "--dir", fix.directory], box, env);
+    const down = await runUbAsync(["hub", "down", "--dir", fix.directory], box, env);
     expect(down.status, down.output).toBe(0);
     for (const path of [
       join(box.cwd, ".uberblick.json"),
@@ -225,15 +225,15 @@ describe("hub commands through the real deployment wrapper", () => {
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("top-level help lists hub and nested help does not call Docker", () => {
+  it("top-level help lists hub and nested help does not call Docker", async () => {
     const fix = fixture();
     const box = unboundSandbox({ raw: { projectBinding: "{", userConfig: "{", credentials: "{" } });
     const env = { ...fix.env, ...box.env, PATH: fix.env.PATH };
-    const root = runUb(["--help"], box, env);
+    const root = await runUbAsync(["--help"], box, env);
     expect(root.status).toBe(0);
     expect(root.stdout).toMatch(/^ {2}hub \[command\]/m);
     for (const args of [["hub"], ["hub", "up", "--dir", fix.directory, "--help"], ["hub", "upgrade", "--nonsense", "--help"]]) {
-      const help = runUb(args, box, env);
+      const help = await runUbAsync(args, box, env);
       expect(help.status, help.output).toBe(0);
       expect(help.stdout).toContain("usage: ub hub <command>");
       expect(help.stderr).toBe("");
