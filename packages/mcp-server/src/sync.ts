@@ -1,5 +1,6 @@
 /** Background transport for the authoritative local update log. */
 
+import { setTimeout as delay } from "node:timers/promises";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
@@ -217,10 +218,6 @@ export interface HubSyncOptions {
    * Off by default; quarantine logging remains because probes hold no update log.
    */
   silent?: boolean;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class HubSync {
@@ -1034,7 +1031,7 @@ export class HubSync {
       if (this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline) {
         return;
       }
-      await sleep(25);
+      await delay(25);
     }
     if (this.refusedByHub()) {
       return;
@@ -1050,7 +1047,7 @@ export class HubSync {
       ) {
         return;
       }
-      await sleep(25);
+      await delay(25);
     }
   }
 

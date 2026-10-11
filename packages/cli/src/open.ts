@@ -34,6 +34,7 @@ import {
 } from "@uberblick/mcp-server";
 import { budget, resolveMcpConfig } from "./budget.js";
 import { openBrowser } from "./browser.js";
+import { trimmed } from "./strings.js";
 import { ensureLocalSigningSecret, readCredentials, resolveConfig, requireBinding } from "./config.js";
 import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
@@ -57,7 +58,7 @@ import {
  * Runtime configuration lets one prebuilt bundle target any hub.
  * The web client, Caddy and this server must agree on the path and shape.
  */
-export const CONFIG_PATH = "/uberblick-config.json";
+const CONFIG_PATH = "/uberblick-config.json";
 
 /**
  * Keep a stable origin for browser settings, distinct from Vite's defaults.
@@ -87,11 +88,6 @@ suppresses it, like --no-browser.
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function trimmed(value: string | undefined): string | null {
-  const text = value?.trim();
-  return text === undefined || text === "" ? null : text;
 }
 
 const runFile = promisify(execFile);
@@ -267,7 +263,7 @@ function fileFor(root: string, pathname: string): string {
  * configSource refreshes unbound values; servingConfigSource freezes destinations
  * and updates only rebound, keeping browser and replica identities aligned.
  */
-export function configDocument(
+function configDocument(
   hubUrl: string,
   workspace: string | null,
   hubAuthToken: string,

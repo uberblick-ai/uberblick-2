@@ -2,7 +2,7 @@ import { resolveCoreHubConfig, type HubConfig } from "@uberblick/hub/config";
 import { resolveStorage, type StorageOptions } from "@uberblick/mcp-server/storage";
 
 /** The local hub database belongs to the user, independently of installation. */
-export function defaultDatabasePath(options: StorageOptions = {}): string {
+export function defaultHubDatabasePath(options: StorageOptions = {}): string {
   return resolveStorage(options).hubDatabase;
 }
 
@@ -10,7 +10,7 @@ export function defaultDatabasePath(options: StorageOptions = {}): string {
 export function hubDatabasePath(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.HUB_DB_PATH?.trim();
   return configured === undefined || configured === ""
-    ? defaultDatabasePath({ env })
+    ? defaultHubDatabasePath({ env })
     : configured;
 }
 

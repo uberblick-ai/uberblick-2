@@ -233,7 +233,7 @@ function changedMarks(before: InlineMarkSet, after: InlineMarkSet): Record<strin
  * Diff only changed characters and mark keys in the old projection, preserving
  * unexpressible marks, comments and trimmed edge whitespace elsewhere.
  */
-export function spliceTableCell(cell: Y.XmlElement, before: string, after: string): void {
+function spliceTableCell(cell: Y.XmlElement, before: string, after: string): void {
   let text = tableCellText(cell);
   if (text === null) {
     const paragraph = cell.firstChild as Y.XmlElement;

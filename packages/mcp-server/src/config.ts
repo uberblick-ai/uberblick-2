@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { DEFAULT_PORT } from "@uberblick/hub/config";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 export { usesDeviceCredentials as usesDeviceLogin } from "@uberblick/mcp-server/auth-store";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { trimmed } from "./strings.js";
 
 /** Internal fallback; public startup resolves the project's workspace binding. */
-export const DEFAULT_HUB_URL = "ws://localhost:1234";
+export const DEFAULT_HUB_URL = `ws://localhost:${DEFAULT_PORT}`;
 
 /** Hash the session id for a stable colour across its cursors. */
 const AGENT_COLORS = [
@@ -78,7 +80,7 @@ function hashToIndex(value: string, buckets: number): number {
  * one user's workspace share one path-safe database, regardless of slug.
  * Storage uses absolute XDG_DATA_HOME/uberblick, else ~/.local/share/uberblick.
  */
-export function defaultDatabasePath(
+export function defaultWorkspaceDatabasePath(
   workspaceId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -86,11 +88,6 @@ export function defaultDatabasePath(
     resolveStorage({ env }).workspaceDir,
     `${parseWorkspaceId(workspaceId).uuid}.sqlite`,
   );
-}
-
-function trimmed(value: string | undefined): string | null {
-  const text = value?.trim();
-  return text === undefined || text === "" ? null : text;
 }
 
 /** Only the stdio entry consumes the caller's agent session identity. */
@@ -132,7 +129,7 @@ export function resolveMcpConfig(
     authEnv: env,
     databasePath:
       trimmed(env.UBERBLICK_DB) ??
-      defaultDatabasePath(workspaceId, env),
+      defaultWorkspaceDatabasePath(workspaceId, env),
     sessionId,
     color: AGENT_COLORS[hashToIndex(sessionId, AGENT_COLORS.length)] ?? "#7b5ec7",
     connectTimeoutMs: 1_500,

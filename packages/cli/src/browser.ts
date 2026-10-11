@@ -1,13 +1,9 @@
 import { spawn } from "node:child_process";
 import type { Io } from "./io.js";
+import { trimmed } from "./strings.js";
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function trimmed(value: string | undefined): string | null {
-  const text = value?.trim();
-  return text === undefined || text === "" ? null : text;
 }
 
 export function browserCommand(

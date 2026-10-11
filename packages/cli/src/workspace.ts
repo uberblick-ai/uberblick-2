@@ -6,7 +6,7 @@ import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js"
 import { readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
-import { defaultDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
+import { defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
@@ -106,7 +106,7 @@ export function listWorkspaces(
   }
 
   const entries = [...uuids].sort().map((uuid) => {
-    const databasePath = defaultDatabasePath(uuid, env);
+    const databasePath = defaultWorkspaceDatabasePath(uuid, env);
     return {
       uuid,
       name: readWorkspaceName(databasePath, uuid),

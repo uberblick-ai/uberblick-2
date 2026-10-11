@@ -122,7 +122,7 @@ function within(parent: string, child: string): boolean {
  * Require the payload to lie under Homebrew's reported prefix. An archive
  * unpacked elsewhere is not owned by Homebrew and brew upgrade cannot replace it.
  */
-export function classify(host: UpdateHost): Installation {
+function classify(host: UpdateHost): Installation {
   // A payload inside a checkout still belongs to the payload, not its ancestor.
   if (host.installPayload) {
     const prefix = homebrewPrefix(host);

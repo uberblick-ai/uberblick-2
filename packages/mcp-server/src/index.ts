@@ -5,7 +5,7 @@
 
 export {
   DEFAULT_HUB_URL,
-  defaultDatabasePath,
+  defaultWorkspaceDatabasePath,
   resolveMcpConfig,
   usesDeviceLogin,
 } from "./config.js";
