@@ -5,7 +5,8 @@ import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { acquireInitLock } from "../src/init-lock.js";
 import { writeProjectBinding } from "../src/project-binding.js";
 import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { removeTempDirs, sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 vi.mock("@uberblick/mcp-server/safe-write", async (original) => {
   const actual = await original<typeof import("@uberblick/mcp-server/safe-write")>();
@@ -82,7 +83,7 @@ describe("workspace record failure boundaries", () => {
     const config = join(box.configHome, "uberblick", "config.json");
     const bindingBefore = readFileSync(path);
     const settingsBefore = readFileSync(config);
-    const run = runUb(["workspace", "use", selected], box);
+    const run = await runInProcess(["workspace", "use", selected], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("Invalid workspace records");
     expect(run.stderr).not.toContain("misplaced-sensitive-value");

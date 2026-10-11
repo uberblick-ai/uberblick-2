@@ -6,7 +6,8 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   assertPublicOnly, cleanUp, credentialPath, fixture, privateDeviceRows, rig, savedLogin, serve,
 } from "./auth-fixtures.js";
-import { removeTempDirs, runUbAsync, sandbox, UB_BIN, waitUntil, type Run } from "./helpers.js";
+import { removeTempDirs, sandbox, UB_BIN, waitUntil, type Run } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterEach(cleanUp);
 afterAll(removeTempDirs);
@@ -23,7 +24,7 @@ describe("CLI sign-in checks sync protocol compatibility", () => {
       for (const stored of [false, true]) {
         const box = sandbox(stored ? { credentials: { hubLogins: { [remote.origin]: fixture() } } } : {});
         const before = stored ? readFileSync(credentialPath(box)) : undefined;
-        const run = await runUbAsync(["auth", "login", remote.origin], box);
+        const run = await runInProcess(["auth", "login", remote.origin], box);
         expect(run.status).toBe(1);
         expect(run.stderr).toContain(protocolSkew(hubVersion, SYNC_PROTOCOL_VERSION));
         expect(run.stdout).not.toMatch(/^open|^code|waiting for approval|approve only/m);
@@ -95,7 +96,7 @@ describe("CLI sign-in checks sync protocol compatibility", () => {
     remote.controls.transform = (path, status, result) => path === "/auth/credential/renew"
       ? { status: code, result: probeResult } : { status, result };
     const box = sandbox();
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toBe("");
     expect(run.stdout).toContain("code       ABCD-EFGH");

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterAll, expect, it } from "vitest";
-import { removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
+import { removeTempDirs, sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterAll(removeTempDirs);
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
@@ -18,12 +19,12 @@ it("reports up to date after a real hub acknowledges the named local changes", a
   });
   try {
     writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${hub.port}` }));
-    const shown = await runUbAsync(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret, UB_TEST_MAX_WAIT_MS: "5000" });
+    const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret, UB_TEST_MAX_WAIT_MS: "5000" });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain("workspace  Synced notes\n");
     expect(shown.stdout).toContain("sync       up to date\n");
     await hub.stop();
-    const offline = await runUbAsync(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret });
+    const offline = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret });
     expect(offline.status, offline.output).toBe(0);
     expect(offline.stdout).not.toContain("up to date");
     expect(offline.stdout).toMatch(/sync\s+.+/);

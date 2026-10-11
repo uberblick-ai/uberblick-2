@@ -7,7 +7,8 @@ import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store"
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";
 
 afterAll(removeTempDirs);
@@ -35,12 +36,12 @@ function withDatabase(box: Sandbox, uuid: string): void {
 }
 
 describe("ub workspace status", () => {
-  it("shows the project binding from a descendant directory and its origin", () => {
+  it("shows the project binding from a descendant directory and its origin", async () => {
     const box = sandbox();
     bind(box);
     const nested = join(box.cwd, "packages", "app");
     mkdirSync(nested, { recursive: true });
-    const shown = runUb(["workspace", "status"], { ...box, cwd: nested });
+    const shown = await runInProcess(["workspace", "status"], { ...box, cwd: nested });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(WORKSPACE);
     expect(shown.stdout).toContain(`chosen by  project config in ${box.cwd}`);
@@ -48,9 +49,9 @@ describe("ub workspace status", () => {
     expect(shown.stdout).toContain(HUB);
   });
 
-  it("ignores a legacy machine default without an explicit project binding", () => {
+  it("ignores a legacy machine default without an explicit project binding", async () => {
     const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
-    const shown = runUb(["workspace", "status"], box);
+    const shown = await runInProcess(["workspace", "status"], box);
     expect(shown.status).toBe(1);
     expect(shown.stderr).toContain("No workspace selected");
     expect(shown.stderr).toContain("ub workspace create <name>");
@@ -58,21 +59,21 @@ describe("ub workspace status", () => {
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("reports a complete environment override", () => {
+  it("reports a complete environment override", async () => {
     const box = sandbox();
     bind(box);
-    const shown = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" });
+    const shown = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(OTHER);
     expect(shown.stdout).toContain("environment");
     expect(shown.stdout).toContain("local (this computer)");
   });
 
-  it("shows a local name, canonical id, custom replica path and the doc's line order", () => {
+  it("shows a local name, canonical id, custom replica path and the doc's line order", async () => {
     const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
     const databasePath = join(box.cwd, "custom.sqlite");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE, UBERBLICK_DB: databasePath }), "Project notes");
-    const shown = runUb(["workspace", "status"], box, { UBERBLICK_DB: databasePath });
+    const shown = await runInProcess(["workspace", "status"], box, { UBERBLICK_DB: databasePath });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toBe(
       `workspace  Project notes\nid         ${WORKSPACE}\nhub        local (this computer)\n` +
@@ -80,14 +81,14 @@ describe("ub workspace status", () => {
     );
   });
 
-  it("still identifies a selected workspace whose replica has no name", () => {
+  it("still identifies a selected workspace whose replica has no name", async () => {
     const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
-    const shown = runUb(["workspace", "status"], box);
+    const shown = await runInProcess(["workspace", "status"], box);
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(`workspace  notes-${WORKSPACE}\nid         ${WORKSPACE}\n`);
   });
 
-  it.each([false, true])("reports the stored account for shared-secret admission: login present %s", (signedIn) => {
+  it.each([false, true])("reports the stored account for shared-secret admission: login present %s", async (signedIn) => {
     const endpoint = "ws://127.0.0.1:1";
     const login = fixture([WORKSPACE]);
     const box = sandbox({
@@ -95,7 +96,7 @@ describe("ub workspace status", () => {
       credentials: { signingSecret: "synthetic-status-secret", ...(signedIn
         ? { hubLogins: { "http://127.0.0.1:1": login } } : {}) },
     });
-    const shown = runUb(["workspace", "status"], box);
+    const shown = await runInProcess(["workspace", "status"], box);
     expect(shown.status, shown.output).toBe(0);
     const account = signedIn ? "@previous-user (GitHub)" : "not signed in, run ub auth login http://127.0.0.1:1";
     expect(shown.stdout).toContain(`hub        ${endpoint}\naccount    ${account}\nchosen by  `);
@@ -104,30 +105,30 @@ describe("ub workspace status", () => {
     expect(shown.output).not.toContain(login.credential.key);
   });
 
-  it("reports a stored device login even when the hub cannot be reached", () => {
+  it("reports a stored device login even when the hub cannot be reached", async () => {
     const login = fixture([WORKSPACE]);
     const box = sandbox({
       projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
       credentials: { hubLogins: { "https://hub.example.test": login } },
     });
-    const shown = runUb(["workspace", "status"], box);
+    const shown = await runInProcess(["workspace", "status"], box);
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain("account    @previous-user (GitHub)\n");
     expect(shown.stdout).not.toContain("up to date");
   });
 
-  it("names pending rooms when the hub cannot acknowledge local changes", () => {
+  it("names pending rooms when the hub cannot acknowledge local changes", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:1" } });
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Pending notes");
-    const shown = runUb(["workspace", "status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
+    const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toMatch(/sync\s+\d+ rooms? with unacknowledged local changes/);
     expect(shown.stdout).not.toContain("up to date");
   });
 
-  it.each([["--json"], ["extra"]])("refuses unsupported status arguments %j before opening anything", (args) => {
+  it.each([["--json"], ["extra"]])("refuses unsupported status arguments %j before opening anything", async (args) => {
     const box = unboundSandbox();
-    const shown = runUb(["workspace", "status", ...args], box);
+    const shown = await runInProcess(["workspace", "status", ...args], box);
     expect(shown.status, shown.output).toBe(2);
     expect(shown.stdout).toBe("");
     expect(existsSync(box.dataHome)).toBe(false);
@@ -145,13 +146,13 @@ it("workspace use remembers device admission after logout and never clears anoth
   }, box.env);
   record(box, WORKSPACE, endpoint);
   record(box, OTHER, otherEndpoint);
-  const selected = runUb(["workspace", "use", WORKSPACE], box);
+  const selected = await runInProcess(["workspace", "use", WORKSPACE], box);
   expect(selected.status, selected.output).toBe(0);
   await removeHubLogin("http://localhost:8080", box.env);
   const resolved = resolveConfig({ env: box.env, cwd: box.cwd });
   expect(resolved.env.HUB_ADMISSION).toBe("device");
   expect(resolved.env.HUB_AUTH_TOKEN).toBeUndefined();
-  const next = runUb(["workspace", "use", OTHER], box);
+  const next = await runInProcess(["workspace", "use", OTHER], box);
   expect(next.status, next.output).toBe(0);
   expect(resolveConfig({ env: box.env, cwd: box.cwd }).env.HUB_ADMISSION).toBeUndefined();
   const previous = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: endpoint }, cwd: box.cwd });
@@ -160,11 +161,11 @@ it("workspace use remembers device admission after logout and never clears anoth
 });
 
 describe("ub workspace list", () => {
-  it("unions database IDs with the explicitly selected workspace", () => {
+  it("unions database IDs with the explicitly selected workspace", async () => {
     const box = sandbox();
     bind(box);
     withDatabase(box, UNRELATED);
-    const run = runUb(["workspace", "list", "--json"], box);
+    const run = await runInProcess(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual([
       { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
@@ -173,7 +174,7 @@ describe("ub workspace list", () => {
     expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
 
-  it("shows local names beside full IDs and preserves JSON parity and selection", () => {
+  it("shows local names beside full IDs and preserves JSON parity and selection", async () => {
     const box = sandbox({ userConfig: { displayName: "Synthetic operator" } });
     bind(box);
     const named = [[WORKSPACE, "Project notes"], [OTHER, "Research notes"]] as const;
@@ -201,12 +202,12 @@ Socket.prototype.connect = () => { throw new Error("list must stay local"); };
 globalThis.fetch = () => { throw new Error("list must stay local"); };
 `);
     const env = { NODE_OPTIONS: `--import=${preload}` };
-    const text = runUb(["workspace", "list"], box, env);
+    const text = await runInProcess(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
       `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | hub unknown\n`,
     );
-    const json = runUb(["workspace", "list", "--json"], box, env);
+    const json = await runInProcess(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)).toEqual([
       { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },
@@ -224,16 +225,16 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     ["wss://Hub.Example.test:443/ws", "https://hub.example.test"],
     ["ws://localhost:8080/proxy//ws", "http://localhost:8080/proxy//ws"],
     [null, "local"],
-  ] as const)("shows the active workspace's recorded %s hub independently of selection", (hub, display) => {
+  ] as const)("shows the active workspace's recorded %s hub independently of selection", async (hub, display) => {
     const box = sandbox();
     bind(box, `notes-${WORKSPACE}`);
     record(box, WORKSPACE, hub);
     const before = readFileSync(workspaceRegistryPath(box.env));
     for (const env of [{}, { UB_WORKSPACE_ID: `notes-${WORKSPACE}`, UB_HUB_URL: "wss://override.example.test/ws" }]) {
-      const text = runUb(["workspace", "list"], box, env);
+      const text = await runInProcess(["workspace", "list"], box, env);
       expect(text.status, text.output).toBe(0);
       expect(text.stdout).toBe(`* ${WORKSPACE} | ${display}\n`);
-      const json = runUb(["workspace", "list", "--json"], box, env);
+      const json = await runInProcess(["workspace", "list", "--json"], box, env);
       expect(json.status, json.output).toBe(0);
       expect(JSON.parse(json.stdout)).toEqual([
         { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: hub ?? "local" },
@@ -243,10 +244,10 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("lists the configured workspace without creating a data directory", () => {
+  it("lists the configured workspace without creating a data directory", async () => {
     const box = sandbox();
     bind(box);
-    const run = runUb(["workspace", "list"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
+    const run = await runInProcess(["workspace", "list"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toBe(`* ${WORKSPACE} | hub unknown\n`);
     expect(existsSync(box.dataHome)).toBe(false);
@@ -255,7 +256,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
 
   it.each(["unnamed", "empty", "old schema", "unreadable"])(
     "keeps a %s replica in the list and workspace use prefix resolution",
-    (kind) => {
+    async (kind) => {
       const box = sandbox();
       bind(box);
       withDatabase(box, OTHER);
@@ -273,7 +274,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
         }
       }
       const before = readFileSync(path);
-      const list = runUb(["workspace", "list", "--json"], box);
+      const list = await runInProcess(["workspace", "list", "--json"], box);
       expect(list.status, list.output).toBe(0);
       expect(JSON.parse(list.stdout)).toEqual([
         { uuid: OTHER, name: null, active: false, databasePath: path, hub: "unknown" },
@@ -281,13 +282,13 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       ]);
       expect(readFileSync(path)).toEqual(before);
       record(box, OTHER, null);
-      const selected = runUb(["workspace", "use", OTHER.slice(0, 8)], box);
+      const selected = await runInProcess(["workspace", "use", OTHER.slice(0, 8)], box);
       expect(selected.status, selected.output).toBe(0);
       expect(binding(box).workspaceId).toBe(OTHER);
     },
   );
 
-  it.each(["malformed JSON", "invalid hub", "unreadable"])("refuses %s records before stdout, even with no workspaces", (kind) => {
+  it.each(["malformed JSON", "invalid hub", "unreadable"])("refuses %s records before stdout, even with no workspaces", async (kind) => {
     for (const configured of [false, true]) {
       const box = unboundSandbox({ userConfig: { displayName: "Synthetic operator" } });
       const protectedPaths = [join(box.configHome, "uberblick", "config.json")];
@@ -308,7 +309,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       }
       const before = protectedPaths.map(path => readFileSync(path));
       for (const args of [[], ["--json"]]) {
-        const run = runUb(["workspace", "list", ...args], box);
+        const run = await runInProcess(["workspace", "list", ...args], box);
         expect(run.status, run.output).toBe(1);
         expect(run.stdout).toBe("");
         expect(run.stderr).toBe(kind === "unreadable"
@@ -319,13 +320,13 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     }
   });
 
-  it("prints a plain install entry independently of invalid workspace records", () => {
+  it("prints a plain install entry independently of invalid workspace records", async () => {
     const box = sandbox();
     withDatabase(box, OTHER);
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{invalid");
-    const installed = runUb([
+    const installed = await runInProcess([
       "mcp", "install", "claude", "--print",
     ], box);
     expect(installed.status, installed.output).toBe(0);
@@ -335,12 +336,12 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     expect(readFileSync(registry, "utf8")).toBe("{invalid");
   });
 
-  it("explains recorded, local and unknown hubs without reading records for help", () => {
+  it("explains recorded, local and unknown hubs without reading records for help", async () => {
     const box = sandbox();
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{invalid");
-    const run = runUb(["workspace", "list", "--help"], box);
+    const run = await runInProcess(["workspace", "list", "--help"], box);
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("hub this machine recorded");
     expect(run.stdout).toContain("local for an explicit local");
@@ -349,22 +350,22 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     expect(run.stderr).toBe("");
   });
 
-  it("refuses an unreadable database directory instead of resolving against a short list", () => {
+  it("refuses an unreadable database directory instead of resolving against a short list", async () => {
     const box = sandbox();
     mkdirSync(box.dataHome, { recursive: true });
     writeFileSync(join(box.dataHome, "uberblick"), "not a directory");
-    const run = runUb(["workspace", "list"], box);
+    const run = await runInProcess(["workspace", "list"], box);
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain(join(box.dataHome, "uberblick"));
   });
 });
 
 describe("ub workspace use", () => {
-  it("never saves an environment hub when only changing project workspace spelling", () => {
+  it("never saves an environment hub when only changing project workspace spelling", async () => {
     const box = sandbox();
     bind(box);
     record(box, WORKSPACE, HUB);
-    const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box, {
+    const run = await runInProcess(["workspace", "use", `docs-${WORKSPACE}`], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "wss://override.example.test/ws",
     });
     expect(run.status, run.output).toBe(0);
@@ -372,10 +373,10 @@ describe("ub workspace use", () => {
     expect(run.stderr).toContain("takes precedence");
   });
 
-  it("requires a record even when the requested UUID matches a complete environment override", () => {
+  it("requires a record even when the requested UUID matches a complete environment override", async () => {
     const box = sandbox();
     bind(box);
-    const run = runUb(["workspace", "use", `docs-${OTHER}`], box, {
+    const run = await runInProcess(["workspace", "use", `docs-${OTHER}`], box, {
       UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "wss://override.example.test/ws",
     });
     expect(run.status, run.output).toBe(1);
@@ -383,11 +384,11 @@ describe("ub workspace use", () => {
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
-  it("requires a record even if the requested workspace has a local database", () => {
+  it("requires a record even if the requested workspace has a local database", async () => {
     const box = sandbox();
     bind(box);
     withDatabase(box, OTHER);
-    const run = runUb(["workspace", "use", OTHER], box);
+    const run = await runInProcess(["workspace", "use", OTHER], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("ub workspace use <link>");
     expect(run.stderr).toContain(`UB_WORKSPACE_ID=${OTHER} UB_HUB_URL=local ub mcp serve`);
@@ -395,12 +396,12 @@ describe("ub workspace use", () => {
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
-  it("updates both fields together and preserves the unrelated user configuration", () => {
+  it("updates both fields together and preserves the unrelated user configuration", async () => {
     const userConfig = { workspace: WORKSPACE, hubUrl: HUB, displayName: "Synthetic operator" };
     const box = sandbox({ userConfig });
     bind(box);
     record(box, OTHER, "wss://other.example.test/ws");
-    const run = runUb(["workspace", "use", OTHER], box);
+    const run = await runInProcess(["workspace", "use", OTHER], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: "wss://other.example.test/ws" });
     expect(JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"))).toEqual({
@@ -409,11 +410,11 @@ describe("ub workspace use", () => {
     });
   });
 
-  it("retains the selected destination when only changing its decorated spelling", () => {
+  it("retains the selected destination when only changing its decorated spelling", async () => {
     const box = sandbox();
     bind(box);
     record(box, WORKSPACE, HUB);
-    const run = runUb(["workspace", "use", `docs-${WORKSPACE}`], box);
+    const run = await runInProcess(["workspace", "use", `docs-${WORKSPACE}`], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: `docs-${WORKSPACE}`, hubUrl: HUB });
     expect(run.stdout).toBe(
@@ -424,10 +425,10 @@ describe("ub workspace use", () => {
     expect(run.stdout).not.toContain("switch back with:");
   });
 
-  it("uses a recorded local workspace even without a database", () => {
+  it("uses a recorded local workspace even without a database", async () => {
     const box = unboundSandbox();
     record(box, UNRELATED, null);
-    const run = runUb(["workspace", "use", UNRELATED.slice(0, 8)], box);
+    const run = await runInProcess(["workspace", "use", UNRELATED.slice(0, 8)], box);
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: UNRELATED, hubUrl: null });
     expect(run.stdout).toBe(
@@ -436,14 +437,14 @@ describe("ub workspace use", () => {
     expect(run.stderr).toBe("");
   });
 
-  it("prints the named selections and an id command that restores the previous binding", () => {
+  it("prints the named selections and an id command that restores the previous binding", async () => {
     const box = sandbox();
     bind(box);
     record(box, OTHER, null);
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Project notes");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: OTHER }), "Research notes");
 
-    const selected = runUb(["workspace", "use", OTHER.slice(0, 8)], box);
+    const selected = await runInProcess(["workspace", "use", OTHER.slice(0, 8)], box);
     expect(selected.status, selected.output).toBe(0);
     expect(selected.stdout).toBe(
       `using      Research notes (${OTHER}, local)\n` +
@@ -458,19 +459,19 @@ describe("ub workspace use", () => {
     const registryBeforeRecovery = readFileSync(workspaceRegistryPath(box.env));
     const command = selected.stdout.split("switch back with: ub ")[1]?.trim();
     expect(command).toBeDefined();
-    const recovered = runUb(command!.split(" "), box);
+    const recovered = await runInProcess(command!.split(" "), box);
     expect(recovered.status, recovered.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registryBeforeRecovery);
   });
 
-  it("writes the nearest binding and reports that path from a descendant directory", () => {
+  it("writes the nearest binding and reports that path from a descendant directory", async () => {
     const box = sandbox();
     bind(box, WORKSPACE, null);
     record(box, OTHER, null);
     const nested = join(box.cwd, "packages", "app");
     mkdirSync(nested, { recursive: true });
-    const selected = runUb(["workspace", "use", OTHER], { ...box, cwd: nested });
+    const selected = await runInProcess(["workspace", "use", OTHER], { ...box, cwd: nested });
     expect(selected.status, selected.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
     expect(selected.stdout).toBe(
@@ -484,7 +485,7 @@ describe("ub workspace use", () => {
 
   it.each(["unbound", "different", "unchanged"])(
     "reports only the binding and actual previous binding as JSON when %s",
-    (selection) => {
+    async (selection) => {
       const box = unboundSandbox();
       const previous = selection === "unbound" ? null : {
         workspaceId: selection === "unchanged" ? OTHER : WORKSPACE,
@@ -492,7 +493,7 @@ describe("ub workspace use", () => {
       };
       if (previous !== null) bind(box, previous.workspaceId, previous.hubUrl);
       record(box, OTHER, null);
-      const selected = runUb(["workspace", "use", OTHER, "--json"], box);
+      const selected = await runInProcess(["workspace", "use", OTHER, "--json"], box);
       expect(selected.status, selected.output).toBe(0);
       expect(JSON.parse(selected.stdout)).toEqual({
         binding: { workspaceId: OTHER, hubUrl: null },
@@ -503,17 +504,17 @@ describe("ub workspace use", () => {
     },
   );
 
-  it("resolves unique prefixes and refuses ambiguous, missing, and invalid IDs without changing selection", () => {
+  it("resolves unique prefixes and refuses ambiguous, missing, and invalid IDs without changing selection", async () => {
     const box = unboundSandbox();
     for (const id of [WORKSPACE, OTHER, UNRELATED]) {
       withDatabase(box, id);
       record(box, id, null);
     }
-    expect(runUb(["workspace", "use", "b7c"], box).status).toBe(0);
+    expect((await runInProcess(["workspace", "use", "b7c"], box)).status).toBe(0);
     const bindingBefore = readFileSync(join(box.cwd, ".uberblick.json"));
     const registryBefore = readFileSync(workspaceRegistryPath(box.env));
     for (const [id, message] of [["4d8e", "matches 2"], ["ffff", "no workspace"], ["my-notes", "not a workspace id"]]) {
-      const run = runUb(["workspace", "use", id!], box);
+      const run = await runInProcess(["workspace", "use", id!], box);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
       expect(run.stderr).toContain(message);
@@ -528,21 +529,21 @@ describe("ub workspace use", () => {
     }
   });
 
-  it("refuses malformed project configuration without replacing it", () => {
+  it("refuses malformed project configuration without replacing it", async () => {
     const box = sandbox();
     const path = join(box.cwd, ".uberblick.json");
     const broken = '{"workspaceId":';
     writeFileSync(path, broken);
     record(box, WORKSPACE, null);
-    const run = runUb(["workspace", "use", WORKSPACE], box);
+    const run = await runInProcess(["workspace", "use", WORKSPACE], box);
     expect(run.status).not.toBe(0);
     expect(readFileSync(path, "utf8")).toBe(broken);
   });
 
-  it("warns when environment selection still overrides the written project binding", () => {
+  it("warns when environment selection still overrides the written project binding", async () => {
     const box = sandbox();
     record(box, OTHER, null);
-    const run = runUb(["workspace", "use", OTHER], box, {
+    const run = await runInProcess(["workspace", "use", OTHER], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: HUB,
     });
     expect(run.status, run.output).toBe(0);
@@ -567,9 +568,9 @@ describe("ub workspace use", () => {
     expect(existsSync(lock)).toBe(false);
   });
 
-  it("rejects the removed hub flag as usage without any writes", () => {
+  it("rejects the removed hub flag as usage without any writes", async () => {
     const box = unboundSandbox();
-    const run = runUb(["workspace", "use", WORKSPACE, "--hub", "local"], box);
+    const run = await runInProcess(["workspace", "use", WORKSPACE, "--hub", "local"], box);
     expect(run.status).toBe(2);
     expect(run.stderr).toContain("Unknown option '--hub'");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
@@ -577,9 +578,9 @@ describe("ub workspace use", () => {
     expect(existsSync(box.dataHome)).toBe(false);
   });
 
-  it("refuses a full UUID this machine never recorded with no files written", () => {
+  it("refuses a full UUID this machine never recorded with no files written", async () => {
     const box = unboundSandbox();
-    const run = runUb(["workspace", "use", WORKSPACE], box);
+    const run = await runInProcess(["workspace", "use", WORKSPACE], box);
     expect(run.status).toBe(1);
     expect(run.stdout).toBe("");
     expect(run.stderr).toContain("ub workspace use <link>");
@@ -590,12 +591,12 @@ describe("ub workspace use", () => {
 
   it.each(["different workspace", "same workspace"])(
     "prints the previous hub's link when its recorded hub differs for the %s",
-    (selection) => {
+    async (selection) => {
       const box = sandbox();
       bind(box);
       record(box, WORKSPACE, "wss://remembered.example.test/ws");
       record(box, OTHER, null);
-      const selected = runUb(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
+      const selected = await runInProcess(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
       expect(selected.status, selected.output).toBe(0);
       expect(selected.stdout).toContain(`previous   ${WORKSPACE} (https://hub.example.test)\n`);
       expect(selected.stdout).toContain(`switch back with: ub workspace use ${HUB}/${WORKSPACE}\n`);
@@ -603,7 +604,7 @@ describe("ub workspace use", () => {
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
       // An id selects what this machine recorded; it cannot replace that record
       // with the former project's hub. Recovery must fetch the printed link.
-      expect(runUb(["workspace", "use", WORKSPACE], box).status).toBe(0);
+      expect((await runInProcess(["workspace", "use", WORKSPACE], box)).status).toBe(0);
       expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: "wss://remembered.example.test/ws" });
       expect(readWorkspaceHub(WORKSPACE, box.env)).toBe("wss://remembered.example.test/ws");
     },
@@ -611,12 +612,12 @@ describe("ub workspace use", () => {
 
   it.each(["different workspace", "same workspace"])(
     "prints a local session override when the previous local binding is recorded on a hub for the %s",
-    (selection) => {
+    async (selection) => {
       const box = sandbox();
       bind(box, WORKSPACE, null);
       record(box, WORKSPACE, HUB);
       record(box, OTHER, null);
-      const selected = runUb(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
+      const selected = await runInProcess(["workspace", "use", selection === "same workspace" ? WORKSPACE : OTHER], box);
       expect(selected.status, selected.output).toBe(0);
       expect(selected.stdout).toContain(`previous   ${WORKSPACE} (local)\n`);
       expect(selected.stdout).toContain(

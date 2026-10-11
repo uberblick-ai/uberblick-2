@@ -1,0 +1,35 @@
+import { runCli } from "../src/cli.js";
+import type { Io } from "../src/io.js";
+import type { Run, Sandbox } from "./helpers.js";
+
+let running = false;
+
+/** Commands read process configuration; each worker restores it before the next assertion. */
+export async function runInProcess(
+  argv: string[],
+  box: Sandbox,
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<Run> {
+  if (running) throw new Error("Concurrent CLI invocations require the subprocess helper");
+  running = true;
+  const previousDirectory = process.cwd();
+  const previousEnvironment = { ...process.env };
+  let stdout = "";
+  let stderr = "";
+  const io: Io = {
+    out: (text) => { stdout += text; },
+    err: (text) => { stderr += text; },
+  };
+  try {
+    process.chdir(box.cwd);
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, box.env, extraEnv);
+    const status = await runCli(argv, io);
+    return { status, stdout, stderr, output: stdout + stderr };
+  } finally {
+    process.chdir(previousDirectory);
+    for (const key of Object.keys(process.env)) delete process.env[key];
+    Object.assign(process.env, previousEnvironment);
+    running = false;
+  }
+}
