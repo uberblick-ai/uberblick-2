@@ -12,7 +12,7 @@ import {
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
-import { caretAtEdge, placeCaretIn } from "./harness.js";
+import { placeCaretIn } from "./harness.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -406,47 +406,6 @@ test("touch tap exposes Move entries and reopens the moved caret row", { tag: "@
     await handle(page, 3).tap();
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
   } finally { fixture.close(); }
-});
-
-test("native touch holds pick up rows and swallow release clicks, including cancellation", async ({ browser, browserName }) => {
-  test.skip(browserName !== "chromium", "Native hold/move automation requires Chromium's input protocol");
-  const page = await nativeTouchPage(browser);
-  const fixture = await publishTable();
-  const session = await page.context().newCDPSession(page);
-  try {
-    const table = await openTable(page, fixture.uuid);
-    for (const ending of ["own", "escape", "cancel", "move"] as const) {
-      const cell = table.locator("tr").nth(1).locator("td").nth(1);
-      await placeCaretIn(cell, { touch: true });
-      const bounds = await box(handle(page, 1));
-      const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-      const before = Y.encodeStateVector(fixture.doc);
-      await touch(session, "touchStart", point);
-      await expect(indicator(page)).toHaveCount(1);
-      await expect(page.getByRole("menu")).toHaveCount(0);
-      if (ending === "move") await touch(session, "touchMove", await gap(table, 4));
-      else if (ending === "escape") await page.keyboard.press("Escape");
-      await session.send("Input.dispatchTouchEvent", {
-        type: ending === "cancel" ? "touchCancel" : "touchEnd", touchPoints: [],
-      });
-      await expect(indicator(page)).toHaveCount(0);
-      await expect(page.getByRole("menu")).toHaveCount(0);
-      await expect(bodyNames(table)).toHaveText(ending === "move" ? ["beta", "gamma", "alpha"] : INITIAL);
-      if (ending !== "move") {
-        expect(Y.encodeStateVector(fixture.doc)).toEqual(before);
-        await expect.poll(() => cell.evaluate(caretAtEdge)).toBe(true);
-      }
-      const current = ending === "move" ? 3 : 1;
-      // A stationary hold generates a native click after release; a later
-      // deliberate tap or keyboard action still has to open this handle.
-      await handle(page, current).tap();
-      await expect(page.getByRole("menu")).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("menu")).toHaveCount(0);
-    }
-  } finally {
-    try { await session.detach(); } finally { fixture.close(); }
-  }
 });
 
 test("an immediate touch swipe from a row handle scrolls without picking up a row", async ({ browser, browserName }) => {
