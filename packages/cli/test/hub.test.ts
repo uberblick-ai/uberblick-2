@@ -5,6 +5,11 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { type HubHost, hubCommand, hubProcessHost } from "../src/hub.js";
 import type { Io } from "../src/io.js";
 
+vi.mock("node:fs", async (original) => {
+  const fs = await original<typeof import("node:fs")>();
+  return { ...fs, renameSync: vi.fn(fs.renameSync) };
+});
+
 const roots: string[] = [];
 afterEach(() => vi.useRealTimers());
 afterAll(() => {
@@ -243,6 +248,24 @@ describe("ub hub setup", () => {
     mkdirSync(state.directory);
     expect((await invoke(["setup"], state)).code).toBe(1);
     expect(readdirSync(state.directory)).toEqual([]);
+  });
+
+  it.each([false, true])("removes partial publication after a later file move fails (pre-created=%s)", async (existing) => {
+    const state = scenario();
+    if (existing) mkdirSync(state.directory);
+    const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    let moves = 0;
+    vi.mocked(renameSync).mockImplementation((from, to) => {
+      if (++moves === 2) throw new Error("injected publication failure");
+      fs.renameSync(from, to);
+    });
+    try {
+      const { code, io } = await invoke(["setup"], state);
+      expect(code).toBe(1);
+      expect(io.stderr).toContain("injected publication failure");
+      expect(existsSync(state.directory)).toBe(existing);
+      if (existing) expect(readdirSync(state.directory)).toEqual([]);
+    } finally { vi.mocked(renameSync).mockImplementation(fs.renameSync); }
   });
 
   it.each(["setup", "upgrade"])("%s works in a writable deployment beneath a non-writable parent", async (command) => {
