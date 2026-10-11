@@ -26,10 +26,10 @@ a partial release by moving tags. Delivery roles have no release authority.
    unreadable mandatory input prevents release. Do not reset a dirty checkout.
 
 2. Read the candidate's GitHub CI result: for each required check,
-   `lint, typecheck and tests` and `macOS tests`, the newest run from GitHub
-   Actions on this exact SHA, not a PR head's run and not an older attempt.
-   No emitted line for a check means it has not run. For example, substitute
-   the full SHA:
+   `lint, typecheck and tests`, `macOS tests` and `browser e2e`, the newest run
+   from GitHub Actions on this exact SHA, not a PR head's run and not an older
+   attempt. No emitted line for a check means it has not run. For example,
+   substitute the full SHA:
 
    ```sh
    gh api --paginate 'repos/uberblick-ai/uberblick-2/commits/CANDIDATE_SHA/check-runs?per_page=100' --jq '.check_runs[] | select(.app.slug == "github-actions") | {id, name, status, conclusion, html_url} | @json'
@@ -37,9 +37,8 @@ a partial release by moving tags. Delivery roles have no release authority.
 
    Main's CI lets a newer push cancel a waiting run, so the candidate may have
    none. Then start one with `gh workflow run ci.yml --ref main` while main is
-   still the candidate, wait for it, and read again. A failed, cancelled or
-   pending required check is a no-go. The `browser e2e` check is separate and
-   advisory.
+   still the candidate, wait for it, and read again. A missing, failed, cancelled
+   or pending required check is a no-go, even when its failure is known red.
 
 3. Collect the PRs merged into main in the Git range from the previous release
    through this SHA, with titles and numbers. Associate range commits with PRs

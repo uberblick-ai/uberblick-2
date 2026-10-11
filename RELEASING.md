@@ -14,7 +14,8 @@ tag, trusted authors' open PRs marked `ready-to-merge` or `needs-review`, and ea
 failing e2e spec. Known-red specs need an open tracking issue or evidence that
 the same spec fails at the previous release; an absent or newly failing spec
 is new. The skill waits for the maintainer's go before tagging. A no-go names
-the blocking items and stops before creating tags.
+the blocking items and stops before creating tags. A known-red failure of a
+required CI check is still a no-go.
 
 On the maintainer's go, run the single release command:
 
@@ -31,8 +32,9 @@ runs the `linux/amd64` dry-run images under emulation.
 Before creating a tag, the task fetches `origin/main`, checks that both tags
 are unused on origin, that the candidate is that main commit and that the newest
 GitHub Actions run of each required CI check (`lint, typecheck and tests`,
-`macOS tests`) on it concluded `success`. It installs dependencies and runs both existing
-publisher dry runs in a detached worktree at that SHA, so dirty or untracked
+`macOS tests`, `browser e2e`) on it concluded `success`. It installs dependencies
+and runs both existing publisher dry runs in a detached worktree at that SHA,
+so dirty or untracked
 files in the maintainer's checkout cannot supply release evidence. A failed
 check stops the task and names the condition. It rechecks main, tags and CI
 before the push, then pushes both tag refs atomically at that one SHA.

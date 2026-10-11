@@ -20,9 +20,8 @@ function fail(message) {
   throw new Error(`release: ${message}`);
 }
 
-// The merge gate's GitHub CI checks (CONTRIBUTING.md, "CI"). Browser e2e is
-// advisory there and here.
-export const REQUIRED_CHECKS = ["lint, typecheck and tests", "macOS tests"];
+// The merge gate's GitHub CI checks (CONTRIBUTING.md, "CI").
+export const REQUIRED_CHECKS = ["lint, typecheck and tests", "macOS tests", "browser e2e"];
 
 /** Each required check whose newest GitHub Actions run on the commit is not a
  * completed success, as "name: state". A re-run supersedes earlier attempts;
