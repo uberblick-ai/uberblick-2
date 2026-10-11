@@ -1,11 +1,6 @@
 /**
- * The MCP server's replica engine without an MCP transport.
- *
- * `ub open` needs the same local store, replicas, hub sync and tag-catalog seed
- * as an MCP process, but it has no MCP tool call to drive `settle`. This
- * entry replaces those calls with hub-free refresh ticks. Same-process appends
- * wake it directly; commits from another process are found through SQLite's
- * `data_version` on the short periodic poll.
+ * Without MCP calls to drive settle, refresh without hub waits. Local appends
+ * wake directly; poll SQLite data_version for other processes' commits.
  */
 
 import type { McpConfig } from "./config.js";

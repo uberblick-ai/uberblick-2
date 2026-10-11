@@ -40,9 +40,11 @@ is a finding under the existing P1/P2/P3 scale, grounded in its consequence.
 
 Product intent is read, not inferred from the issue text: read the corpus the
 issue's Pointers cite wherever the change touches its product meaning, under
-[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
-rewrite for a claim the change makes wrong, or one that misstates the change,
-is a finding.
+[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: search the corpus
+for each changed command, tool or screen by name; a missing rewrite for a claim
+the change makes wrong or for behavior no page describes, one that misstates
+the change, or one that removes intent the code does not yet deliver, is a
+finding.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's

@@ -28,15 +28,10 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Hub } from "@uberblick/hub";
-import {
-  createHub,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-  silentLogger,
-} from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/hub/protocol";
-import { writeHubLogin, removeHubLogin } from "@uberblick/hub/auth-store";
+import { createHub, silentLogger } from "@uberblick/hub";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import {
   bridgeConfig,
@@ -90,9 +85,8 @@ const LARGE_CORPUS_JOIN_ATTEMPT_TIMEOUT_MS = 115_000;
 const LARGE_CORPUS_JOIN_RECOVERY_TIMEOUT_MS = 195_000;
 
 /**
- * The slowest observed seed took roughly 25 s. This stays another ten seconds
- * above that seed plus the recovery bound, so a command or harness diagnostic
- * wins before Vitest's generic timeout.
+ * Allow 35 s for corpus seeding and scheduling beyond the recovery bound, so
+ * a command or harness diagnostic wins before Vitest's generic timeout.
  */
 const LARGE_CORPUS_TEST_TIMEOUT_MS = 230_000;
 
@@ -1470,9 +1464,7 @@ describe("ub workspace use <link>", () => {
     expect(run.stderr).toContain("update this client");
     expect(run.stderr).toContain("Nothing was written");
     expect(run.stderr).not.toContain("did not answer");
-    // A different credential cannot fix a version skew, so `join` must not
-    // suggest one: that is `credentialCouldFix` answering false for the new
-    // status, read here through the sentence it gates.
+    // A different credential cannot fix a version skew; do not suggest one.
     expect(run.stderr).not.toContain("--secret-file");
     // Zero writes on this side; nothing on the remote either, because `join`
     // reads it as a fresh client and never got past the refusal.

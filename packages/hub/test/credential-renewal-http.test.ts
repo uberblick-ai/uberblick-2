@@ -6,9 +6,9 @@ import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
-import { SYNC_PROTOCOL_VERSION } from "../src/protocol.js";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { Hub } from "../src/server.js";
-import { importCredentialKey, mintRequestProof } from "../src/token.js";
+import { importCredentialKey, mintRequestProof } from "@uberblick/schema/token";
 import { WorkspaceNameReader } from "../src/workspace-names.js";
 import { OTHER_WORKSPACE, removeTempDatabases, startHub, tempDatabasePath, WORKSPACE } from "./helpers.js";
 

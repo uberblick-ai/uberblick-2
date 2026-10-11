@@ -18,7 +18,7 @@
  *   inside it — jsdom measures every one of them as zero.
  *
  * The annotated slash-heading scenario and the table source/drawing proof are
- * retained under their separate contracts (#668 and #1095).
+ * retained under their separate contracts.
  */
 
 import { expect, test } from "@playwright/test";
@@ -86,9 +86,8 @@ test("hovering a block reveals the gutter + without moving the prose", async ({
 /**
  * Drag the pointer along the ground rather than lifting it: one `mousemove` per
  * pixel, so no gap between two elements can be stepped over. That is the whole
- * point of this test — the button used to hide in the few pixels between the
- * prose and itself, and any pointer that jumped, or strode, never saw them
- * (#507).
+ * point of this test: a reveal gap between the prose and button would be
+ * missed by a pointer that jumped or strode across it.
  */
 async function walk(
   page: Page,
@@ -291,9 +290,8 @@ function visibleSelection(geometry: Geometry): void {
 /**
  * Arrow keys through a list too long to show at once.
  *
- * The bug this pins: the highlight moved to an entry below the fold and the
- * list stayed where it was, so the reader could no longer see what Enter would
- * choose. What makes it a browser test is that every term in it — the
+ * Moving the highlight below the fold must scroll the list so the reader can
+ * see what Enter would choose. What makes it a browser test is that every term — the
  * viewport, the entry boxes, the scroll offset — exists only where there is
  * layout.
  */

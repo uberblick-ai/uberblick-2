@@ -1,38 +1,10 @@
 /**
- * The list's behaviour: its keyboard, and what a run of items is rendered as.
+ * Lists are flat item blocks: depth is an attribute, not reparenting. Commands
+ * must return false outside lists so core keys keep working. At indent limits,
+ * Tab is consumed to keep focus in the editor.
  *
- * The keyboard is Tab and Shift-Tab to change depth, Enter to continue the
- * list, Backspace at the start of an item to leave it. The markers on screen
- * and the list a screen reader hears are both decoration — see
- * {@link listStructurePlugin}.
- *
- * Four bindings, and every one of them is a rule about *one block*, because a
- * list here is a run of adjacent `list-item` blocks rather than a tree (#59).
- * Nothing lifts, sinks or re-parents anything: indenting is an attribute, and
- * continuing a list is a split that keeps the attributes it split from.
- *
- * ## Why plain ProseMirror commands
- *
- * Each binding is a `Command`, so it can be exercised against a real editor
- * state with no keyboard and no DOM — and refusing is a first-class answer. A
- * command that is not about a list item returns false, which is what lets the
- * key fall through to the chain behind it: Enter still splits a paragraph,
- * Backspace still deletes a character, Tab still does whatever the browser does
- * outside a list.
- *
- * The one deliberate exception is Tab *inside* a list at the edge of the range:
- * it returns true having changed nothing, because letting Tab through there
- * would move focus out of the editor mid-list, which is not what a reader
- * pressing it in a list can possibly mean.
- *
- * ## Why the split carries a null id
- *
- * `Transaction.split` copies the node's attributes onto both halves, id
- * included, and duplicate ids break every id-addressed operation in the system.
- * So the new half is given `id: null` and the block-id plugin (block-ids.ts)
- * assigns it a fresh one in the same gesture — the same contract an Enter-split
- * paragraph has always had, stated explicitly rather than relying on the
- * plugin's duplicate repair.
+ * Splits give the new half id: null for BlockIds to fill; copied duplicate ids
+ * would break id-addressed operations. Decorations never write list structure.
  */
 
 import { Extension } from "@tiptap/core";
@@ -76,11 +48,8 @@ export function changeListIndent(delta: number): Command {
 }
 
 /**
- * Enter inside a list item: a new item below it, same marker, same depth.
- *
- * ProseMirror's own `splitBlock` would hand the second half the document's
- * *default* block type — a paragraph — which is the one thing a reader pressing
- * Enter in a list does not want.
+ * Continue with the same list style/depth; core splitBlock would create a
+ * paragraph for the new half.
  */
 export const splitListItem: Command = (state, dispatch) => {
   const item = listItemAt(state);
@@ -97,12 +66,8 @@ export const splitListItem: Command = (state, dispatch) => {
 };
 
 /**
- * Backspace at the very start of a list item turns it back into a paragraph —
- * the way out of a list, and the undo of the `- ` that made it one.
- *
- * The re-type goes through the sanctioned path (`setNodeMarkup`, id carried
- * over): the block a reader is leaving keeps every annotation and backlink
- * pointing at it.
+ * At an item's start, retype through setNodeMarkup to preserve its id,
+ * annotations and backlinks.
  */
 export const liftListItem: Command = (state, dispatch) => {
   const item = listItemAt(state);
@@ -145,16 +110,8 @@ interface ItemStructure {
 }
 
 /**
- * Read the shape of every list in the document off its blocks: `null` for each
- * block that is not a list item, and where the item sits for each one that is.
- *
- * The sets come from the schema package's {@link listNumbers}, called twice.
- * The first call numbers the ordered items; the second, with the two styles
- * swapped, numbers exactly the ones the first left null. Swapping flips the
- * comparison that opens a new set on both sides at once, so the two calls agree
- * about where every set begins — which is what lets the rule stay in the schema
- * package, where the markdown writer reads it, instead of being written a
- * second time here.
+ * Use schema listNumbers for both styles, swapping them for the second pass.
+ * The passes must agree on set boundaries and match Markdown numbering.
  */
 function listStructure(
   blocks: readonly ListMarkerInput[],
@@ -170,10 +127,8 @@ function listStructure(
     (_block, index) => numbers[index] ?? swapped[index] ?? null,
   );
 
-  // Backwards, so the first item met at a depth is its set's *last* one — and
-  // therefore its size. The set is finished once the item numbered 1 is
-  // reached, and a shallower item ends every deeper set below it, because a
-  // deeper set can only belong to the items that follow it.
+  // Walk backward to read each set's size from its last item. Position 1 closes
+  // that set; shallower items close all deeper sets.
   const sizes: Array<number | null> = positions.map(() => null);
   const open = new Map<number, number>();
   for (let index = positions.length - 1; index >= 0; index -= 1) {
@@ -209,26 +164,9 @@ interface ListSet {
 }
 
 /**
- * The list itself: an empty `<ul>`/`<ol>`, off screen, that claims a set's
- * items with `aria-owns`.
- *
- * There is no element to wrap the items in. They are siblings of every other
- * block and the document has no nesting to build a wrapper from (#59), so the
- * container is *asserted* rather than drawn: `aria-owns` re-parents the items
- * in the accessibility tree only, and on screen nothing moves. It addresses
- * them by the ids already on the `<li>`s — a block id, unique and stable for
- * the life of the block — so the reference cannot drift onto another block. A
- * set holding an item without an id yet gets no container at all: a dangling
- * `aria-owns` reference is worse than none.
- *
- * One container per *set*, not per run: a set is the one grouping in which
- * every item shares a style and a depth, so a nested set — or a bulleted one
- * following a numbered one — is a list of its own with its own tag. Anything
- * coarser would announce items as numbered that are bulleted, or the other way
- * round, because `ol` versus `ul` is the one thing ARIA has no word for.
- *
- * A widget decoration, keyed on the set, so the element is left alone while the
- * set is unchanged and replaced the moment its membership changes.
+ * Flat item siblings cannot have a DOM list wrapper. Use one offscreen ul/ol
+ * per style/depth set with aria-owns and stable item ids; omit the container if
+ * any id is missing. The keyed widget changes only when membership changes.
  */
 function listContainer(set: ListSet): Decoration | null {
   const first = set.items[0];
@@ -244,9 +182,7 @@ function listContainer(set: ListSet): Decoration | null {
     first.offset,
     () => {
       const dom = document.createElement(tag);
-      // Spelled out rather than left to the tag, because a list styled without
-      // markers — which is exactly how the items are styled — is a list some
-      // browsers stop reporting as one.
+      // Some browsers drop list semantics when markers are hidden.
       dom.setAttribute("role", "list");
       dom.setAttribute("aria-owns", owns);
       dom.className = "ub-sr-only";
@@ -272,11 +208,8 @@ function listDecorations(doc: ProseMirrorNode): Decoration[] {
 
   const decorations: Decoration[] = [];
   const sets: ListSet[] = [];
-  // The set currently open at each depth. An item is the first of a new set
-  // exactly when it is the one numbered 1 — that is what {@link listStructure}
-  // restarting the count means — and an item ends every set deeper than
-  // itself, since a deeper set belongs to the items that follow it. Anything
-  // that is not a list item ends them all.
+  // Position 1 opens a set; shallower items close deeper sets, and non-items
+  // close all sets. Keep this aligned with listStructure numbering.
   const open = new Map<number, ListSet>();
 
   for (const [index, block] of blocks.entries()) {
@@ -314,27 +247,10 @@ function listDecorations(doc: ProseMirrorNode): Decoration[] {
 }
 
 /**
- * What a list is, said twice: to the eye as the marker on each item, and to a
- * screen reader as a list that contains them.
- *
- * The marker is `data-number` on an ordered item, which the stylesheet draws.
- * The number comes from the schema package's {@link listNumbers} — the same
- * call the markdown writer makes — so what a reader sees and what an export
- * writes cannot disagree. Doing it in CSS instead was tried and is wrong: a
- * counter can only be reset by a rule matching some block, and no selector can
- * say "a bullet nested *inside* an ordered item", so a nested bullet restarted
- * the enclosing list's numbering while the export carried on counting.
- *
- * The screen reader's half is the same facts as ARIA: `role="listitem"` with
- * `aria-level`, `aria-posinset` and `aria-setsize` on every item, and a list
- * container per set (see {@link listContainer}). Without it a bare `<li>`
- * outside a list is not a list item at all — HTML gives it no role there, and
- * the marker, being generated content, is the only thing left saying otherwise.
- *
- * Decorations, so nothing is written to the document: this is all display, and
- * it is recomputed from the document on every draw — including for a peer's
- * edit or an agent's, which is what keeps a live list numbered, counted and
- * announced correctly.
+ * Use schema listNumbers for markers and ARIA so live rendering and Markdown
+ * export agree. CSS counters cannot distinguish a nested bullet from a new
+ * numbered set. Bare li nodes also need explicit listitem roles and per-set
+ * containers; recompute decorations for local and remote edits without writes.
  */
 export function listStructurePlugin(): Plugin {
   return new Plugin({

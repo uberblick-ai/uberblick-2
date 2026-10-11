@@ -1,12 +1,7 @@
 /**
- * Live rendering for comment anchors whose resolved state lives outside the
- * editor's blocks fragment.
- *
- * The `comment` mark stores only a thread id. Whether that thread is resolved
- * lives in the document's annotations map, so the schema-level mark view cannot
- * put the current state in its static HTML. A ProseMirror mark view can: it owns
- * the span, repaints when annotations change, and is recreated with the same
- * live read whenever ProseMirror redraws the marked text.
+ * Resolved state lives in annotations, not the comment mark's thread id.
+ * Repaint live spans on annotation changes and recreate them from current state;
+ * never copy presentation state into block content.
  */
 
 import { Extension } from "@tiptap/core";

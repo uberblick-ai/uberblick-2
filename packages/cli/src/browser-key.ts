@@ -9,7 +9,7 @@ import {
   readFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { resolveStorage } from "@uberblick/hub/storage";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { describeFsError, publishStaged, writeTempBeside } from "./safe-write.js";
 

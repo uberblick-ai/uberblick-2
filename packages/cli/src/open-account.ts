@@ -1,6 +1,6 @@
-import { isGithubUsername } from "@uberblick/hub";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
-import { manageRequest, sanitizeManagementReply } from "@uberblick/hub/management-client";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import type { AccessBinding } from "./open-access.js";
 

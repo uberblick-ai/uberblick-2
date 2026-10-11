@@ -1,7 +1,7 @@
 /** The account projection is read-only, live, and contains no private fields. */
 import { chmodSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
+import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requestAccount } from "../src/open-account.js";

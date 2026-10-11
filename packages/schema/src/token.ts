@@ -45,7 +45,7 @@
  * the shared local secret.
  */
 
-import { parseWorkspaceId } from "@uberblick/schema";
+import { parseWorkspaceId } from "./workspace.js";
 import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
 
 /** What a token is allowed to do. Read-only connections can sync down only. */

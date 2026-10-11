@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * The appearance stamp that runs before first paint (#74).
+ * The appearance stamp that runs before first paint.
  *
  * `src/ui/theme.ts` owns the theme for the life of the session, but it cannot
  * own the *first paint*: it arrives on a deferred module script, and the page

@@ -1,10 +1,6 @@
 /**
- * Presentation-only syntax colouring for the schema-owned `code` block.
- *
- * Lowlight returns a HAST tree whose leaves are the original source text. We
- * turn only its token classes into ProseMirror inline decorations: no node,
- * mark or attribute is written, and serialization continues to see the same
- * document it did before highlighting existed.
+ * Use Lowlight token classes as decorations only. Keep source and serialization
+ * unchanged; never persist a syntax node, mark or attribute.
  */
 
 import { Extension } from "@tiptap/core";

@@ -32,6 +32,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@hocuspocus/server':
+        specifier: 4.6.0
+        version: 4.6.0(patch_hash=dc22e08a34146c988996917f96b130e3a4ad785c126f874c846e07005181029d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -44,6 +47,12 @@ importers:
       smol-toml:
         specifier: 1.9.0
         version: 1.9.0
+      y-protocols:
+        specifier: 1.0.7
+        version: 1.0.7(yjs@13.6.32)
+      yjs:
+        specifier: 13.6.32
+        version: 13.6.32
     devDependencies:
       '@hocuspocus/provider':
         specifier: 4.6.0
@@ -66,9 +75,6 @@ importers:
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@26.2.0)(jsdom@30.0.1)(vite@8.2.2(@types/node@26.2.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
-      yjs:
-        specifier: 13.6.32
-        version: 13.6.32
 
   packages/hub:
     dependencies:
@@ -201,6 +207,9 @@ importers:
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
+      '@uberblick/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@uberblick/schema':
         specifier: workspace:*
         version: link:../schema

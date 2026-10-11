@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
-import { isGithubAccountId, isGithubUsername } from "@uberblick/hub";
-import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "./access-management.js";
 import type { ManagementAction } from "./access-management.js";

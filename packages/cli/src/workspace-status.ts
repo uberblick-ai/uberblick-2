@@ -1,6 +1,6 @@
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { displayUsername } from "./auth.js";
 import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";

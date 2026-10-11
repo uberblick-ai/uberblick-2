@@ -2,11 +2,8 @@
  * An MCP server whose stdin is already at EOF exits, rather than hanging
  * forever with nobody left to talk to.
  *
- * A client that spawns the server over a pipe closes it, and the server has
- * always shut down on that. Redirected stdin — `< /dev/null`, a regular file,
- * anything that is not a pipe — ends without ever closing, so the process used
- * to sit there holding its SQLite file open (#102). Both events must reach the
- * same shutdown path.
+ * Pipes report close; redirected stdin can report end without close. Both
+ * events must reach the shutdown path and release the SQLite file.
  *
  * The other half of the invariant is the transport itself: stdout carries
  * JSON-RPC and nothing else, so a shutdown that logs to stdout would corrupt
@@ -45,7 +42,7 @@ it("shuts down cleanly when redirected stdin is already at EOF", async () => {
       WORKSPACE_ID: WORKSPACE,
       XDG_DATA_HOME: tempDir(),
     },
-    // `ignore` connects stdin to /dev/null, the non-pipe EOF case from #102.
+    // `ignore` connects stdin to /dev/null to exercise non-pipe EOF.
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);

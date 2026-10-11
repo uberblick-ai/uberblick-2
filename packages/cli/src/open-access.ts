@@ -1,8 +1,8 @@
 import type { IncomingMessage } from "node:http";
-import { readDeviceLogin, ensureDeviceLogin } from "@uberblick/hub/device-login";
-import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "@uberblick/hub/management-client";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
-import { readRequestAction } from "@uberblick/hub/token";
+import { readDeviceLogin, ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "@uberblick/mcp-server/management-client";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { readRequestAction } from "@uberblick/schema/token";
 
 const MAX_INPUT_BYTES = 4096;
 const INPUT_TIMEOUT_MS = 10_000;

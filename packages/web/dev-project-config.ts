@@ -1,5 +1,5 @@
 /** Node-only configuration shared by the checkout's web and cursor processes. */
-import { requireBinding, resolveConfig, type ResolveOptions } from "@uberblick/hub/project-config";
+import { requireBinding, resolveConfig, type ResolveOptions } from "@uberblick/mcp-server/project-config";
 
 export function resolveDevProjectConfig(options: ResolveOptions = {}) {
   const resolved = resolveConfig(options);

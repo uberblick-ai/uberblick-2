@@ -1,6 +1,6 @@
-import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/hub/device-login";
-import { isGithubUsername } from "@uberblick/hub";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/mcp-server/device-login";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,8 +9,8 @@ import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
   REQUEST_PROOF_LIFETIME_SECONDS,
-} from "@uberblick/hub/token";
-import { protocolSkew } from "@uberblick/hub/protocol";
+} from "@uberblick/schema/token";
+import { protocolSkew } from "@uberblick/schema/protocol";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { formatHubFailure, inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";

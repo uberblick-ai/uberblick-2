@@ -22,10 +22,9 @@
  * writers would meet each other's locks.
  */
 
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { createDataDirectory } from "./storage.js";
 import type {
   Extension,
   onLoadDocumentPayload,
@@ -130,7 +129,7 @@ export class HubDatabase implements Extension {
     const durable = !isEphemeralDatabase(this.databasePath);
     const fresh = durable && !existsSync(this.databasePath);
     if (durable) {
-      createDataDirectory(dirname(this.databasePath));
+      mkdirSync(dirname(this.databasePath), { recursive: true, mode: 0o700 });
     }
 
     const db = new DatabaseSync(this.databasePath, {

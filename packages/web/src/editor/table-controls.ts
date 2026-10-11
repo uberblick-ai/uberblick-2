@@ -1,3 +1,4 @@
+// Decision: 211465cd-c58b-44ad-b711-88b5eae825b0
 /** Table controls act on the live shared row, with independent undo steps. */
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -69,10 +70,9 @@ export function resolveTableRow(editor: Editor, target: TableRowTarget): Resolve
 }
 
 /**
- * Move to a gap in the current table (1 is below the header; length is last).
- * Only the source row is replaced: a PM-level reorder would rewrite every row
- * it passes through y-prosemirror's same-type node matching. Cloning retains
- * formatting and comment marks, with the owner-accepted delete/copy merge limits.
+ * Move only the source row: PM reordering rewrites intervening same-type rows.
+ * Cloning preserves text, formatting and comments; delete/copy merge limits
+ * remain those described in How to Use It. Gaps range from below header to end.
  */
 export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number): boolean {
   const live = resolveTableRow(editor, target);

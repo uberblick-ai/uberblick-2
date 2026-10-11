@@ -1,10 +1,6 @@
 /**
- * The "on this page" outline: a pure derivation of the document's heading
- * blocks, plus its subscription.
- *
- * Nothing is stored for the outline. It is `getBlocks()` filtered to headings of
- * level 1-2, in document order, which is why a remote edit needs no extra
- * plumbing to show up — the document is the model.
+ * Derive headings at levels 1–2 in document order; the outline stores no
+ * separate state.
  */
 
 import type * as Y from "yjs";
@@ -34,12 +30,8 @@ export function outlineFromDoc(ydoc: Y.Doc): OutlineEntry[] {
 }
 
 /**
- * Call `onChange` with a fresh outline whenever it could have changed. Returns
- * the unsubscribe.
- *
- * Deep, not shallow: a heading's text lives in the Y.XmlText one level below the
- * fragment, so a shallow observer sees a heading being added but never a heading
- * being retitled — including by a remote client.
+ * Observe deeply so nested heading text edits, including remote renames,
+ * refresh the outline. Return the unsubscribe.
  */
 export function observeOutline(
   ydoc: Y.Doc,

@@ -21,9 +21,9 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/hub";
-import { writeHubLogin } from "@uberblick/hub/auth-store";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
+import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";

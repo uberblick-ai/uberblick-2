@@ -6,22 +6,18 @@ import { userInfo } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import type { Hub, LocalBrowserServer } from "@uberblick/hub";
-import {
-  createHub,
-  createLocalBrowserServer,
-  importRootSecret,
-  resolveHubConfig,
-  verifyToken,
-} from "@uberblick/hub";
+import { createHub, type Hub } from "@uberblick/hub";
+import { createLocalBrowserServer, type LocalBrowserServer } from "./local-browser-server.js";
+import { importRootSecret, verifyToken } from "@uberblick/schema/token";
+import { resolveHubConfig } from "./hub-config.js";
 import {
   SYNC_PROTOCOL_VERSION,
   isProtocolVersion,
   readAuthEnvelope,
-} from "@uberblick/hub/protocol";
-import { clampToken } from "@uberblick/hub/token";
-import { isLoopbackHost } from "@uberblick/hub/remote-url";
-import { readDeviceLogin } from "@uberblick/hub/device-login";
+} from "@uberblick/schema/protocol";
+import { clampToken } from "@uberblick/schema/token";
+import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   DIRECTORY_SUFFIX,
   SIDEBAR_SUFFIX,

@@ -1,5 +1,5 @@
 /**
- * The `@` picker (#532).
+ * The `@` picker.
  *
  * What is worth defending is the document and the trigger, not the pixels. Four
  * contracts:

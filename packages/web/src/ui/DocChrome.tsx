@@ -61,14 +61,9 @@ function tagLabel(entry: TagCatalogEntry): string {
 }
 
 /**
- * How many entries the panel lists before it offers a search field (#958).
- *
- * Below it the whole vocabulary is on screen already, and a field would only
- * stand between the reader and the first option — so the list is the panel,
- * and the keyboard enters it directly. The count is the live one: it includes
- * the retired entries this document still carries, and it is read again on
- * every render, so removing the tenth takes the field away with it rather than
- * leaving a filter nobody can see.
+ * Offer search only at the live entry threshold, including assigned retired
+ * tags. Below it, keyboard entry goes directly to the list; a changing count
+ * must also remove any hidden filter.
  */
 const TAG_SEARCH_THRESHOLD = 10;
 
@@ -143,9 +138,8 @@ function TagStrip({
   }, [arrived, readOnly]);
 
   /**
-   * The way into the open panel, as the panel currently is: the search field
-   * where there is one, otherwise the first option — and the trigger where
-   * there is neither, so the keyboard never falls through to the page body.
+   * Enter the search field, otherwise the first option, otherwise the
+   * trigger; never strand keyboard focus on the page body.
    */
   const focusPanelEntry = (): void => {
     if (showSearch) {
@@ -157,10 +151,9 @@ function TagStrip({
     else trigger.current?.focus();
   };
 
-  // Removing an assigned retired entry unmounts the option holding focus, and
-  // may take the search field with it. Repair after the render that dropped it.
-  // Deliberately unkeyed and guarded by the ref: what this must run after is
-  // *that* render, whichever one it turns out to be.
+  // A retired-tag removal may unmount the focused option and search field.
+  // Repair focus after that render, using the one-shot ref rather than a
+  // keyed effect.
   useEffect(() => {
     if (!repairFocus.current) return;
     repairFocus.current = false;
@@ -294,34 +287,10 @@ function TagStrip({
 }
 
 /**
- * Copy this document's shareable link (#68).
- *
- * It used to be the room key under the title, which was both the label and the
- * affordance. The key itself is gone from the header (#535) — the sync panel is
- * where a `<workspaceId>/<docUuid>` belongs — so what is left is a control that
- * says what it does, beside the identity it is about.
- *
- * Exported because the identity line is not the only place a reader is looking
- * at a document's address. A document that has not reached this replica yet
- * draws the waiting notice instead of this line, and that is a state a link is
- * *more* worth sending from, not less — it can last as long as the hub is away.
- * `RoutePane` renders the same control there.
- *
- * The link is built from `segment` — the workspace as the *address* spells it —
- * rather than from the room key, which carries the bare uuid. The two are the
- * same string for an undecorated workspace and differ for `<slug>-<uuid>`, and
- * a copy that quietly handed back the undecorated form would rewrite somebody's
- * link on its way out of their own address bar. What is copied is the address
- * this document is open at, and the accessible name names it.
- *
- * The copy goes through `writeToClipboard`, not `navigator.clipboard`: that API
- * exists only in a secure context, and serving this client over plain http on a
- * tailnet host is a supported deployment (REMOTE.md). The shared helper falls
- * back to `execCommand`, and reports whether either worked — so a failure is
- * said out loud rather than swallowed into a button that quietly does nothing.
- *
- * The hydrated identity line supplies its short uuid as the visible label. The
- * waiting screen has no identity line yet, so it keeps the explicit label.
+ * Share this copy control with the waiting screen. Keep the workspace
+ * spelling from the URL, and use writeToClipboard for supported plain-HTTP
+ * deployments. Announce failure; hydrated chrome supplies a short UUID label,
+ * while waiting keeps the explicit label.
  */
 export function CopyLink({
   room,
@@ -335,8 +304,7 @@ export function CopyLink({
   const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
   const identity = shortUuid !== undefined;
 
-  // The one address this button is about: what it copies, and what it says it
-  // copies. Two derivations of that would be two chances for them to disagree.
+  // Derive the copied address and its accessible name from the same value.
   const address = `${segment}/${parseRoom(room).uuid}`;
 
   const copy = async (): Promise<void> => {
@@ -367,32 +335,11 @@ export function CopyLink({
 }
 
 /**
- * The document's identity, above its prose: what kind of document this is, its
- * tags, the two machine facts that identify the thing on screen, and the link
- * to it.
- *
- * **Above the prose and above the title** (owner, design surface 1a): the
- * eyebrow line sits over the H1, and the tag picker sits in it. The picker is a
- * fixed-height single control whose selected labels scroll inside their own
- * box rather than wrapping. The uuid and rev are pinned to the row's end, so a
- * changed assignment moves neither them nor the title.
- *
- * **The row is drawn before there is anything to put in it**, and that is the
- * same rule rather than a second one. `meta` is null for the first paint after
- * a document is opened or switched to — the observer reads it an effect later —
- * so a row that appeared with its contents would push the title down one frame
- * after every navigation, which is the jump the whole layout is built to avoid.
- * The shell is unconditional and its height comes from `min-height`; the words
- * arrive into a space that was already reserved for them.
- *
- * The uuid is shortened because identity is the uuid but *recognition* is its
- * first few characters. The full one is not in the header at all any more
- * (#535): the room key that carried it under the title said the same thing a
- * third time, and the sync panel is where a reader who wants it goes. The rev
- * is the whole document's, folded from its block revs
- * (`docRev`), so it moves on every edit; it sits in a fixed-width monospace slot
- * for that reason, since a rev that changed the width of this line would drag
- * the line around while somebody types.
+ * Reserve the identity row above the title before metadata arrives,
+ * preventing navigation jumps. Selected tags scroll within one fixed-height
+ * control; UUID and revision stay at the end. The short UUID supports
+ * recognition, the sync panel exposes full identity, and docRev folds block
+ * revisions into a fixed-width slot.
  */
 export function DocMetaLine({
   connection,
@@ -474,12 +421,9 @@ export function DocMetaLine({
 }
 
 /**
- * Why Archive is refused, in the menu and inside an already-open confirmation.
- *
- * One sentence for both, because they are one refusal: the rooms this action
- * writes can stop being ready between opening the menu and confirming, and a
- * dialog that closed silently on that click would be indistinguishable from an
- * archive that happened.
+ * Use one Archive refusal in the menu and open confirmation. Readiness can
+ * disappear before confirmation; refusing in place must preserve the dialog
+ * and explain why nothing was written.
  */
 const ARCHIVE_UNAVAILABLE =
   "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document";
@@ -607,10 +551,9 @@ function DocumentActions({
               variant="destructive"
               disabled={onArchive === null}
               onClick={(event) => {
-                // Readiness can be lost while this dialog is open, and then
-                // closing on the click would look exactly like a successful
-                // archive. Refuse in place instead: the dialog stays, saying
-                // why, and Cancel is still the way out.
+                // Lost readiness refuses Archive in place; keep the reason
+                // and Cancel visible instead of closing as though the archive
+                // succeeded.
                 if (onArchive === null) {
                   event.preventDefault();
                   return;
