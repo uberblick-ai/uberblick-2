@@ -1,49 +1,4 @@
-/**
- * Hub auth tokens, and the credential a client mints them with.
- *
- * A token is claims-shaped, not an opaque shared string:
- *
- *     base64url(payloadJson) "." base64url(hmacSha256(key, payloadPart))
- *
- * with payload `{typ, sub, workspace, scope, kid, iat, exp}`. The signature
- * covers the base64url payload *string* (not the raw JSON), so verification
- * never has to re-serialise and canonicalisation questions never arise.
- *
- * Why claims and not a shared secret compare: the hub is headed for a hosted
- * life with several workspaces and several accounts, and the room key already
- * carries the workspace (`<workspaceId>/<docUuid>`). A token that says *who*,
- * *which workspace*, *under which key* and *for how long* lets the hub scope
- * and bound a connection from day one, so nothing has to be migrated later.
- *
- * **The key type is the contract.** {@link mintToken} and {@link verifyToken}
- * take a `CryptoKey` and nothing else: there is no overload accepting a
- * credential string, a root secret or raw bytes, so no caller can confuse the
- * three. A key reaches them one of two ways:
- *
- *   - {@link importRootSecret} — the hub's root secret, the UTF-8 bytes of the
- *     configured string. Today the hub verifies with it and three clients mint
- *     with it — `mcp-server/src/sync.ts`, `web/src/collab/rooms.ts` and the
- *     web demo script — which is not a boundary but the "Known limits" note
- *     below, stated as code: one dev secret, held by everyone. (`ub` itself
- *     never calls this; it mints through `HubSync`.) The ladder that ends this
- *     replaces those three call sites with credential keys.
- *   - {@link importCredentialKey} — the 32 raw bytes of a device's credential
- *     key. Credential keys are independent random bytes issued by the hub's
- *     registry; neither the root secret nor another device's key can derive
- *     them.
- *
- * Why WebCrypto and not `node:crypto`: the same module runs in the browser
- * client and in Node (hub, MCP server), so it must not import a Node builtin.
- * `globalThis.crypto.subtle` exists in both.
- *
- * **There is no v1 compatibility branch.** A token without `typ` and `exp` is
- * refused. Every client in the repo mints the v2 shape; a long-running MCP
- * server or a deployed bundle from before this change must be restarted or
- * redeployed.
- *
- * Remote admission uses independent device keys. Loopback admission retains
- * the shared local secret.
- */
+/** Browser and Node callers share this module; cryptography must use WebCrypto, not Node builtins. */
 
 import { parseWorkspaceId } from "@uberblick/schema";
 import { isGithubAccountId, isGithubUsername } from "./github-identity.js";
@@ -53,47 +8,23 @@ export type TokenScope = "read-write" | "read-only";
 
 export const TOKEN_SCOPES: readonly TokenScope[] = ["read-write", "read-only"];
 
-/**
- * What a room token authorises. HTTP request proofs use a separate claims
- * shape and cannot authenticate a room.
- */
+/** HTTP request proofs use separate claims and cannot authenticate a room. */
 export type TokenType = "room";
 
-/**
- * The longest life the hub will honour, whatever the minter claimed.
- *
- * Every MCP server and every `ub` mints locally — offline-first requires it —
- * so without a hub-side ceiling a compromised machine mints a decade-long token
- * and exfiltrates *that* instead of the key, leaving revocation as the only
- * remaining lever. Token lifetime is a hub property, not a minter's courtesy.
- */
+/** The hub enforces this ceiling even when a compromised local minter claims a longer lifetime. */
 export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
 
-/**
- * How far ahead of the hub a client's clock may be and still be believed.
- *
- * Applied to `iat` only. Grace at both ends would compound — a token issued 60 s
- * ahead and honoured 60 s past its expiry lives 1020 s against a 900 s ceiling —
- * and it would buy nothing: a room token is minted per connect, so it is
- * seconds old when the hub reads it and needs no slack at the far end. A clock
- * skewed further than this is a configuration fault, and `ub doctor` names it.
- */
+/** Grace applies only to `iat`; adding expiry grace would compound the lifetime allowance. */
 export const CLOCK_SKEW_SECONDS = 60;
 
 /** Lifetime of the per-request device sign-in proofs minted by clients. */
 export const REQUEST_PROOF_LIFETIME_SECONDS = 60;
 
-/**
- * The longest a token may be — 4096 characters, which for a base64url token is
- * 4 KiB. A real one is a few hundred bytes.
- *
- * Both ends hold it. {@link inspectToken} refuses anything longer before it
- * decodes or parses, so an unauthenticated caller cannot choose how much work
- * the hub does; {@link mintToken} refuses to produce one, because the hub must
- * not sign what it will not accept.
- */
+/** Bound unauthenticated parsing work; minting must reject what verification will not accept. */
 export const MAX_TOKEN_LENGTH = 4096;
 
+// Bind each room's identity, workspace, scope, key and lifetime with signed claims;
+// a shared bearer-string comparison cannot express those bounds.
 export interface TokenClaims {
   typ: TokenType;
   /** Who the token was issued to — a user or agent session identifier. */
@@ -101,11 +32,7 @@ export interface TokenClaims {
   /** The workspace whose rooms this token may open. */
   workspace: string;
   scope: TokenScope;
-  /**
-   * Which key signed this, as a lookup hint the hub may read *before* it has
-   * verified anything — never as authority. `null` means the root secret; a
-   * credential id means that credential's independently issued key.
-   */
+  /** Unverified lookup hint, never authority: null is the root secret, otherwise a credential ID. */
   kid: string | null;
   /** Issued at, whole seconds since the epoch. */
   iat: number;
@@ -113,13 +40,7 @@ export interface TokenClaims {
   exp: number;
 }
 
-/**
- * Claims to mint. `iat` defaults to now; everything else is explicit.
- *
- * `lifetimeSeconds` has no default on purpose: a minting site that forgets it
- * fails to compile rather than quietly inheriting somebody else's idea of how
- * long a token should live.
- */
+/** Lifetime is explicit at every minting site; only `iat` defaults to now. */
 export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
   lifetimeSeconds: number;
   iat?: number;
@@ -178,19 +99,9 @@ function base64urlEncode(bytes: Uint8Array): string {
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
 /**
- * Decode **canonical** unpadded base64url, or throw. Callers treat a throw as
- * "not a token" and "not a credential" respectively.
- *
- * Strict rather than forgiving, in both directions. `atob` implements WHATWG
- * forgiving-base64: it accepts the standard alphabet, padding and interior
- * whitespace, and it silently drops the unused bits of the final character — so
- * several different strings decode to the same bytes. Every one of those
- * spellings would otherwise be accepted as the same token or credential.
- *
- * The alphabet check rejects the first three; re-encoding rejects the fourth,
- * which is the only cheap way to insist on exactly one spelling. The
- * consequence worth naming: **a token string is canonical**, so a replay cache
- * (#242) may key on the string itself rather than on its decoded claims.
+ * Reject alphabet, padding, whitespace and unused-bit aliases that `atob` accepts.
+ * Re-encoding enforces one spelling, so replay caches can key on the token string.
+ * Callers treat a decoding error as an invalid token or credential.
  */
 function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
   if (!BASE64URL.test(value)) {
@@ -210,8 +121,7 @@ function base64urlDecode(value: string): Uint8Array<ArrayBuffer> {
 function hmacKey(bytes: Uint8Array): Promise<CryptoKey> {
   return globalThis.crypto.subtle.importKey(
     "raw",
-    // Copied into a fresh buffer: `importKey` will not take a view over a
-    // `SharedArrayBuffer`, and a caller's `Uint8Array` may be one.
+    // `importKey` rejects SharedArrayBuffer views; callers may supply one.
     new Uint8Array(bytes),
     { name: "HMAC", hash: "SHA-256" },
     false,
@@ -219,12 +129,7 @@ function hmacKey(bytes: Uint8Array): Promise<CryptoKey> {
   );
 }
 
-/**
- * The hub's root secret as a signing key: the **UTF-8 bytes of the string**.
- *
- * The encoding is the wire format — change it and every token minted anywhere
- * stops verifying — so it is stated once, here, and reproduced nowhere.
- */
+/** Root secrets use the string's UTF-8 bytes; changing the encoding breaks token verification. */
 export async function importRootSecret(secret: string): Promise<CryptoKey> {
   if (secret === "") {
     throw new Error("importRootSecret: the root secret must not be empty");
@@ -232,18 +137,13 @@ export async function importRootSecret(secret: string): Promise<CryptoKey> {
   return hmacKey(textEncoder.encode(secret));
 }
 
-// --- the credential key ------------------------------------------------------
-
 /** A credential key's independent random bytes. */
 const CREDENTIAL_KEY_BYTES = 32;
 
 /** A credential id, and the same 8-4-4-4-12 lowercase spelling as a uuid. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/**
- * The 32 raw bytes of a credential key as a signing key — what a device does
- * with the key the hub's registry issued it.
- */
+/** Import 32 independently issued random bytes, never derived from a root secret or another device. */
 export async function importCredentialKey(
   keyBytes: Uint8Array,
 ): Promise<CryptoKey> {
@@ -254,8 +154,6 @@ export async function importCredentialKey(
   }
   return hmacKey(keyBytes);
 }
-
-// --- minting and verification ------------------------------------------------
 
 function assertClaims(claims: TokenRequest): void {
   if (claims.typ !== "room") {
@@ -284,9 +182,7 @@ function assertClaims(claims: TokenRequest): void {
     claims.lifetimeSeconds <= 0 ||
     claims.lifetimeSeconds > MAX_TOKEN_LIFETIME_SECONDS
   ) {
-    // The hub must not sign what it will not accept: the ceiling applies to the
-    // mint as well as to the clamp, so a caller learns at the call site rather
-    // than from a refused connection.
+    // Minting and admission must enforce the same lifetime ceiling.
     throw new Error(
       `mintToken: lifetimeSeconds must be a positive integer no greater than ${MAX_TOKEN_LIFETIME_SECONDS}`,
     );
@@ -298,12 +194,7 @@ function isSubject(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }
 
-/**
- * Whole seconds since the epoch. The same rule on both sides of a token.
- *
- * `isSafeInteger`, not `isInteger`: past 2^53 integer arithmetic stops being
- * exact, so `exp - iat` would no longer mean what the clamp reads it as.
- */
+/** Safe whole epoch seconds keep `exp - iat` exact on both sides of a token. */
 function isEpochSeconds(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -313,16 +204,7 @@ function isKeyId(value: unknown): value is string | null {
   return value === null || (typeof value === "string" && UUID.test(value));
 }
 
-/**
- * A workspace claim is the workspace's **bare uuid** — never a decorated
- * `<slug>-<uuid>` spelling of it.
- *
- * `onAuthenticate` compares this claim against the room's workspace segment as
- * a string, and room names carry the bare uuid, so a decorated claim would sign
- * a token the hub then refuses on every room in the workspace it names. Mint
- * and verify apply the same rule: the hub must not sign what it will not
- * accept.
- */
+/** Mint and verify require the bare UUID that admission compares with the room's workspace segment. */
 function isWorkspace(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
@@ -334,13 +216,7 @@ function isWorkspace(value: unknown): value is string {
   }
 }
 
-/**
- * Mint a signed token under `key` — a root secret imported with
- * {@link importRootSecret}, or a credential key imported with
- * {@link importCredentialKey}. There is no overload taking either of those in
- * its unimported form: the key type is what keeps a credential string from
- * being mistaken for a secret.
- */
+/** Accept only an imported CryptoKey, so credential strings and root secrets cannot be confused. */
 export async function mintToken(
   key: CryptoKey,
   claims: TokenRequest,
@@ -350,8 +226,7 @@ export async function mintToken(
   const iat = claims.iat ?? Math.floor(Date.now() / 1000);
   const exp = iat + claims.lifetimeSeconds;
   if (!isEpochSeconds(exp)) {
-    // Reachable only from an `iat` near the end of the safe integers, which
-    // passed its own check while their sum does not.
+    // A safe `iat` may overflow when the lifetime is added.
     throw new Error("mintToken: iat + lifetimeSeconds is not a whole second");
   }
   const payload: TokenClaims = {
@@ -366,11 +241,7 @@ export async function mintToken(
   return signClaims(key, payload, "mintToken");
 }
 
-/**
- * Prove possession of a credential key for one HTTP operation and its targets.
- * The hub still decides authority from its own current credential and
- * membership records; signed targets confer no authority themselves.
- */
+/** Signed targets prove key possession; current hub credential and membership records decide authority. */
 export async function mintRequestProof(
   key: CryptoKey,
   claims: RequestProofRequest,
@@ -411,6 +282,8 @@ async function signClaims(
   payload: TokenClaims | RequestProofClaims,
   source: "mintToken" | "mintRequestProof",
 ): Promise<string> {
+  // Wire format: base64url(JSON) "." base64url(HMAC-SHA256(key, payloadPart)).
+  // Sign the encoded payload string so verification never reserializes JSON.
   const payloadPart = base64urlEncode(
     textEncoder.encode(JSON.stringify(payload)),
   );
@@ -421,8 +294,7 @@ async function signClaims(
   );
 
   const minted = `${payloadPart}${SEPARATOR}${base64urlEncode(new Uint8Array(signature))}`;
-  // The hub must not sign what it will not accept: `verifyToken` refuses a
-  // token past this length, and `sub` is the one claim long enough to reach it.
+  // Long claims must not produce a token verification would refuse.
   if (minted.length > MAX_TOKEN_LENGTH) {
     throw new Error(
       `${source}: the token would be ${minted.length} characters, past the ${MAX_TOKEN_LENGTH} a token may be`,
@@ -439,8 +311,7 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
-      // Renewal predates management and has no targets; its existing proof
-      // contract ignores extra payload fields.
+      // Renewal has no targets and accepts extra proof fields.
       return { operation };
     case "promote-workspace":
       if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
@@ -510,8 +381,7 @@ function parseRequestProofClaims(
 
 function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
   const { typ, sub, workspace, scope, kid, iat, exp } = payload;
-  // `typ` and `exp` are also what refuses a v1 token: it carries neither, so it
-  // is not a token, whoever signed it. There is no compatibility branch.
+  // Missing `typ` or `exp` is unsupported regardless of the signature.
   if (typ !== "room") {
     return null;
   }
@@ -533,38 +403,18 @@ function parseClaims(payload: Record<string, unknown>): TokenClaims | null {
   return { typ, sub, workspace, scope, kid, iat, exp };
 }
 
-/**
- * Why a token did not verify. The hub's **log** vocabulary, never a wire
- * reason: whoever presented the token still learns only `invalid-token`, so a
- * forged token and a stale one are the same refusal to their sender.
- */
+/** Log vocabulary only: every token refusal uses `invalid-token` on the wire. */
 export type TokenFailure =
-  /**
-   * Not a token at all: not two segments, not canonical base64url, or a payload
-   * that is not a JSON object. Nothing about it can be believed or reported.
-   */
+  /** No readable identity: malformed segments, encoding or JSON payload. */
   | "unparseable"
   /** A readable payload signed by some key that is not the one presented here. */
   | "bad-signature"
-  /**
-   * Correctly signed, but no mint could have produced these claims — a pre-v2
-   * token carrying no `typ`/`exp`, an unknown scope, a slug-decorated
-   * workspace. This is what a client from before the claims-v2 deploy looks
-   * like, which is why it is its own cause and not "invalid".
-   */
+  /** Correctly signed claims that the minter would reject, including missing `typ`/`exp`. */
   | "unsupported-claims";
 
-/**
- * What a rejected token says about itself — **unverified, for logs only.**
- *
- * The point is precisely the token that did *not* verify: an operator hunting
- * the machine that keeps presenting a stale token needs a name, and by
- * definition cannot have an authenticated one. Never treat these as facts, and
- * never widen this: the signature and the token string stay out, so that what a
- * log line can carry is decided here rather than at each logging site.
- */
+/** Unverified diagnostic hints only; never log the signature or token string. */
 export interface TokenIdentity {
-  /** The `typ` claim when the payload carries one as a string; `null` otherwise — a pre-v2 token has none. */
+  /** The string `typ` claim, or null when absent or unusable. */
   typ: string | null;
   /** The `sub` claim when the payload carries one as a string; `null` otherwise. */
   sub: string | null;
@@ -576,10 +426,7 @@ export interface TokenRejection {
   identity: TokenIdentity | null;
 }
 
-/**
- * A claim value's length in a log line. A rejected token is unauthenticated
- * input from anywhere, and the hub's log is not its megaphone.
- */
+/** Bound unauthenticated claim text before logging it. */
 const LOG_FIELD_LIMIT = 128;
 
 function logString(value: unknown): string | null {
@@ -615,10 +462,7 @@ function parseToken(token: string): ParsedToken | null {
   }
 }
 
-/**
- * Read only an unverified key lookup hint. It grants no authority: the caller
- * still verifies the signature and every claim under the selected key.
- */
+/** Unverified lookup hint only; callers must verify the signature and claims under the selected key. */
 export function readTokenKeyId(
   token: string,
 ): { kid: string | null } | TokenRejection {
@@ -637,16 +481,8 @@ export function readTokenKeyId(
 }
 
 /**
- * Verify a token, returning its claims or **why it was refused** — the same
- * decision {@link verifyToken} makes, with the reason kept instead of dropped.
- *
- * For diagnostics, and nothing else: an admission decision reads the claims or
- * refuses, and every failure is the same refusal. What the reason is *for* is
- * the hub's rejection log, where "a fleet of pre-v2 clients" and "somebody
- * signing with the wrong secret" have to read differently.
- *
- * Never throws, and the signature is still checked before the claims are
- * believed — an unverified payload is only ever read for {@link TokenIdentity}.
+ * Never throws. Verify the signature before trusting claims; unverified identity
+ * and failure causes are for logs only, with identical admission refusals.
  */
 export async function inspectToken(
   key: CryptoKey,
@@ -684,10 +520,8 @@ async function verifySignature(
 }
 
 /**
- * Verify a request proof bound to its operation and exact targets, using the
- * same bounded canonical wire format as room tokens. Time is checked separately
- * with clampToken.
- * Rejections reflect no caller-supplied claims or key material.
+ * Use room-token parsing and bind exact operation targets; clampToken checks time.
+ * Refusals expose no claims or key material.
  */
 export async function inspectRequestProof(
   key: CryptoKey,
@@ -709,18 +543,9 @@ export async function inspectRequestProof(
 }
 
 /**
- * Verify a token and return its claims, or `null` for anything that is not a
- * well-formed, correctly signed token whose claims {@link mintToken} could have
- * produced — the two apply the same rules, so a signed payload with a
- * slug-decorated workspace, a fractional `iat` or no `exp` at all is not a
- * token. Never throws: every rejection reason collapses to `null` so callers
- * cannot accidentally distinguish "bad signature" from "bad shape". A caller
- * that wants the distinction has to ask for it by name — {@link inspectToken} —
- * and the only caller that may is a log line.
- *
- * Time is *not* checked here. Whether a well-signed token is fresh enough to
- * admit is the hub's decision against the hub's clock — {@link clampToken} —
- * and a client verifying its own token has no business making it.
+ * Accept only signed claims the minter can produce; never throws, and all failures return null.
+ * Only logging uses inspectToken's distinction. Admission checks time separately
+ * with clampToken against the hub's clock.
  */
 export async function verifyToken(
   key: CryptoKey,
@@ -738,14 +563,7 @@ export type ClampFailure =
   | "not-yet-issued"
   | "expired";
 
-/**
- * The hub's ceiling on a verified token, applied **regardless of what the
- * minter claimed**, and the reason a compromised local minter cannot mint
- * itself a decade.
- *
- * Returns `null` when the token is admissible. Signature verification comes
- * first: this decides freshness, not authenticity.
- */
+/** Apply hub lifetime and clock limits only after signature verification; null means admissible. */
 export function clampToken(
   claims: Pick<TokenClaims, "iat" | "exp">,
   nowSeconds: number,

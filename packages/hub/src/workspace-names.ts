@@ -1,4 +1,4 @@
-/** Optional credential display data; reading names never opens or stores rooms. */
+/** Decision: f80c8445-03d1-47ed-9d95-d8004f7039f4. */
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import { sanitizeWorkspaceNames } from "./auth-store.js";
@@ -22,8 +22,7 @@ export class WorkspaceNameReader {
         ? this.database.connection.prepare('SELECT data FROM documents WHERE name = ?').get(room)?.data
         : Y.encodeStateAsUpdate(loaded);
       if (!(bytes instanceof Uint8Array)) return null;
-      // getWorkspaceName may create a missing root in its Y.Doc. Read an
-      // isolated copy so even a loaded room stays entirely untouched.
+      // getWorkspaceName may create a missing root; isolate its reads so loaded rooms stay untouched.
       settings = new Y.Doc();
       Y.applyUpdate(settings, bytes);
       return getWorkspaceName(settings);

@@ -1,57 +1,20 @@
-/**
- * The sync protocol version, and the envelope that carries it.
- *
- * One integer, exchanged before sign-in and at connect for **exact equality** —
- * not a build identity and not a capability negotiation. It answers only "do these
- * two processes speak the same sync language", so a client that has not been
- * updated is refused with a message saying so instead of silently diverging.
- *
- * It lives in `packages/hub` because the wire it rides on is the hub's (the
- * Hocuspocus auth message, defined by `./token.ts`) and the hub is lowest in the
- * dependency graph: web, MCP server and cli all reach it on the leaf subpath
- * `@uberblick/hub/protocol`. One definition, never a local copy.
- */
-
 import { MAX_TOKEN_LENGTH } from "./token.js";
 
 /**
- * The sync language this build speaks.
- *
- * **Bump policy.** Increment it, in the same PR as the change, when a client of
- * the previous version can no longer sync *correctly* against this hub: a
- * different Yjs update encoding, a changed room key, a change in what the auth
- * message means, a document shape one side would apply wrongly. Incompatible
- * changes to `/auth/github/start`, `/auth/github/collect`, `/auth/github/cancel`
- * or `/auth/claim-state` also bump this same version. Do **not** bump for
- * anything a mismatched pair survives — a new MCP tool, a UI change, a new
- * claim the far side ignores, a bug fix.
- *
- * Login probes `/auth/credential/renew` with an empty token before sign-in.
- * Across versions, keep that envelope and its credential-free replies stable:
- * configured sign-in hubs check version before token, return 409 with
- * `status: "protocol-mismatch"` and `reason: "protocol-mismatch:<hubVersion>"`
- * on skew, or 401 with
- * `status: "sign-in-required"` on equality, without changing hub state.
- *
- * Every bump is a flag day: the comparison is exact and nothing negotiates, so
- * a bump nobody needed costs a hand update of every machine, and one that was
- * needed and skipped costs the silent divergence this replaces.
+ * One shared version, compared for exact equality before sign-in and at connect.
+ * Bump with incompatible Yjs encoding, room keys, auth meaning, document shapes,
+ * or GitHub start/collect/cancel and claim-state APIs; compatible additions need no bump.
+ * Keep the empty-token renewal probe stable across versions: check version first,
+ * return 409 status:protocol-mismatch with reason:protocol-mismatch:<hubVersion>
+ * on skew or 401 status:sign-in-required on equality, with no state change.
+ * Exact comparison requires all peers to update.
  */
-// Structured table cells are incompatible with the shipped protocol-2 clients.
 export const SYNC_PROTOCOL_VERSION = 3;
 
 /** Room for the JSON around the token — `{"protocolVersion":1,"token":""}` is 32 characters. */
 const ENVELOPE_ALLOWANCE = 128;
 
-/**
- * The longest auth string the hub will look at — **checked before any parse.**
- *
- * {@link MAX_TOKEN_LENGTH} exists so an unauthenticated caller cannot choose how
- * much work the hub does. Parsing the envelope first would hand `JSON.parse` an
- * unbounded string ahead of that check and give the property away; bounding here
- * keeps it, and the token inside is still held to {@link MAX_TOKEN_LENGTH}, so
- * wrapping neither shrinks nor widens the effective ceiling.
- */
+/** Bound before parsing; the wrapped token still has its own MAX_TOKEN_LENGTH ceiling. */
 export const MAX_AUTH_MESSAGE_LENGTH = MAX_TOKEN_LENGTH + ENVELOPE_ALLOWANCE;
 
 /** What a client puts in the auth message: its protocol version and its token. */
@@ -68,17 +31,7 @@ export function wrapToken(
   return JSON.stringify({ protocolVersion, token } satisfies AuthEnvelope);
 }
 
-/**
- * Read an auth string as an envelope, or `null` when it is not one.
- *
- * One answer for every unreadable case — over-long, not JSON, not an object, no
- * usable version or token — because the hub refuses them all the same way, and
- * a bare pre-envelope token is deliberately one of them: the flag day's first
- * deploy refuses every client that has not been updated.
- *
- * Never throws, and the length bound is applied before `JSON.parse` sees the
- * string. See {@link MAX_AUTH_MESSAGE_LENGTH}.
- */
+/** Never throws; bound before JSON.parse and refuse malformed envelopes or bare tokens alike. */
 export function readAuthEnvelope(raw: string): AuthEnvelope | null {
   if (raw.length > MAX_AUTH_MESSAGE_LENGTH) {
     return null;
@@ -103,15 +56,7 @@ export function readAuthEnvelope(raw: string): AuthEnvelope | null {
   return { protocolVersion: protocolVersion as number, token };
 }
 
-/**
- * The refusal sentinel, and the only shape a client will read one from.
- *
- * Hocuspocus forwards a single server-chosen string to a refused client, and the
- * standing rule is that a client never *renders* the hub's text. Strict matching
- * satisfies both: a match yields one validated integer, anything else is today's
- * token rejection. No zero, no leading zeros, at most six digits — the same
- * range {@link isProtocolVersion} accepts.
- */
+/** Parse only a canonical 1..999999 sentinel; never render arbitrary hub refusal text. */
 const MISMATCH = /^protocol-mismatch:([1-9]\d{0,5})$/;
 
 /** The largest version the wire can carry, which is what the sentinel bounds. */
@@ -126,26 +71,14 @@ export function isProtocolVersion(value: unknown): value is number {
   );
 }
 
-/**
- * What the hub sends a client whose protocol version is not this hub's.
- *
- * Accepted and recorded: this states the hub's protocol version to anyone who
- * connects. It discloses one small integer and nothing else.
- */
+/** Public refusal exposes only the hub's protocol integer. */
 export function protocolMismatchReason(
   hubVersion: number = SYNC_PROTOCOL_VERSION,
 ): string {
   return `protocol-mismatch:${hubVersion}`;
 }
 
-/**
- * The hub's protocol version when a refusal is the sentinel naming a version
- * other than ours; `null` otherwise, meaning "handle as an ordinary rejection".
- *
- * A sentinel carrying *our own* integer takes the `null` path: no honest hub
- * sends one — it would be refusing a version it accepts — so believing it would
- * let an endpoint talk this client into an update it does not need.
- */
+/** Treat malformed or same-version sentinels as ordinary rejections, avoiding a false update. */
 export function readProtocolMismatch(
   reason: string,
   ourVersion: number = SYNC_PROTOCOL_VERSION,
@@ -166,18 +99,9 @@ export function protocolSkew(hubVersion: number, ourVersion: number): string {
 }
 
 /**
- * What every surface says when the hub refuses a token — MCP's `hub.reason`,
- * the web status line, `ub status`, `ub workspace join` and `ub doctor`.
- *
- * Composed locally and shared so the surfaces cannot drift, and never the hub's
- * own words: the thing being rejected is a token we just sent, so an endpoint
- * that is hostile or merely careless must not get to put text on a status line.
- *
- * It names two causes because the hub cannot tell them apart: an *older* hub
- * reads this client's envelope as unparseable and answers `invalid-token`,
- * byte-identical to what a wrong secret produces. That direction is surfaced by
- * wording rather than detection — a credential-free bare retry to tell them
- * apart was declined, being a second auth attempt in the sync path.
+ * Shared locally composed status text: a wrong secret and an older hub's
+ * invalid-token reply are indistinguishable. Do not retry bare tokens to detect
+ * the cause or let arbitrary hub text reach a status surface.
  */
 export const AUTH_REJECTED =
   "the hub rejected this client's token: the secret is wrong, or this hub is " +

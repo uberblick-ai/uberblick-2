@@ -1,12 +1,3 @@
-/**
- * The loopback Hocuspocus server `ub open` puts in front of its local store.
- *
- * The browser-facing server owns protocol mechanics; its caller owns the
- * store. The only bridge between this server and the full upstream replica is
- * therefore the callbacks below: read a room from the update log, append a
- * browser update before Hocuspocus may apply or ack it, and pair the room's
- * awareness with its full upstream replica.
- */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
@@ -57,13 +48,9 @@ interface AwarenessChange {
 }
 
 /**
- * Relay presence between one served room and the full replica of that room.
- *
- * The served client ids stay owned for the bridge's lifetime, even after a
- * removal. The upstream provider clears every remote awareness state when its
- * socket closes; replaying those removals into the served room would otherwise
- * erase a live tab's own state and make its cursor flicker. The tab's periodic
- * awareness renewal re-adds it to the replica once the hub is reachable again.
+ * Retain served client IDs even after removal: an upstream disconnect clears
+ * remote awareness and must not erase live tabs here. Their periodic renewals
+ * restore presence upstream when the hub returns.
  */
 export function bridgeAwareness(served: Awareness, replica: Awareness): () => void {
   const servedClients = new Set<number>();
@@ -136,7 +123,9 @@ export interface LocalBrowserServerConfig {
   log?: HubLogger;
   /** Prepare an authenticated room's replica before reading its store. */
   prepareRoom?(room: string): Promise<void>;
+  /** The caller owns the update log and full replica; the server uses callbacks. */
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
+  /** Commit raw bytes before Hocuspocus applies or acknowledges the update. */
   appendUpdate(room: string, payload: Uint8Array): void;
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
@@ -204,10 +193,6 @@ async function listen(server: Server<HubContext>): Promise<void> {
   }
 }
 
-/**
- * Start the authenticated loopback server for its caller's local replicas.
- * The HTTP callback lets the same port serve the web bundle and websocket.
- */
 export async function createLocalBrowserServer(
   config: LocalBrowserServerConfig,
 ): Promise<LocalBrowserServer> {
@@ -434,10 +419,8 @@ export async function createLocalBrowserServer(
         server.httpServer.closeAllConnections();
         await server.destroy();
 
-        // Node's HTTP close helpers deliberately exclude upgraded sockets, and
-        // Hocuspocus only enumerates sockets that already own a loaded room.
-        // Destroy the accepted remainder after its graceful document closes,
-        // then wait for the raw handles to leave the process.
+        // HTTP close excludes upgrades; Hocuspocus sees only loaded rooms.
+        // After graceful closes, destroy and await every remaining upgrade.
         const remaining = [...upgradedSockets];
         const closed = remaining.map(
           (socket) =>

@@ -72,9 +72,8 @@ function member(value: unknown): Record<string, unknown> {
 }
 
 /**
- * A local browser bridge projects only the delivered contract. Upstream extra
- * fields and messages never enter its responses, including otherwise-valid
- * responses with credential material beside the public data.
+ * Project public fields only: even valid upstream responses can carry credentials
+ * or private messages beside the public data.
  */
 export function sanitizeManagementReply(
   action: ManagementAction,

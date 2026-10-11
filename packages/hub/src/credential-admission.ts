@@ -1,8 +1,3 @@
-/**
- * Remote device admission, composed by createHub with the same registries as
- * sign-in and renewal. Loopback and ub open retain their local admission.
- * This extension never accepts the shared root key.
- */
 import type {
   Connection,
   Extension,
@@ -36,6 +31,8 @@ class CredentialRefusal extends Error {
 }
 
 export class CredentialAdmission implements Extension<CredentialContext> {
+  // Share sign-in/renewal authority; remote admission never accepts the root key.
+  // Loopback and ub open use their separate local admission paths.
   private readonly instances = new Set<Hocuspocus<CredentialContext>>();
   private readonly connections = new Set<Connection<CredentialContext>>();
   private readonly unsubscribe: () => void;
@@ -148,11 +145,9 @@ export class CredentialAdmission implements Extension<CredentialContext> {
   };
 
   /**
-   * Close selected admitted rooms, reusable for workspace membership removal.
-   * Callers must first change the backing authority so authentication and
-   * message checks refuse that access, including admissions still in flight.
-   * The latch and readOnly flag are set synchronously before closing any room;
-   * closing alone leaves in-flight loops and queued frames alive.
+   * Change backing authority first to refuse in-flight admissions. Fence all
+   * selected rooms synchronously before closing; closure alone leaves queued
+   * frames and message loops able to apply updates.
    */
   closeWhere(predicate: (context: CredentialContext) => boolean): void {
     const candidates = new Set(this.connections);

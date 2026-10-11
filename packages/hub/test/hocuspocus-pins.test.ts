@@ -2,12 +2,9 @@
  * Hocuspocus is pinned to exactly 4.6.0, and this is the check that keeps it
  * there.
  *
- * Keeping the dependency is a decision (#394), and the decision is for one
- * version: the hub's auth boundary and its shutdown path read library
- * internals — the seams characterized in `hocuspocus-seams.test.ts` — so a
- * patch bump has to be a reviewed act rather than something a resolver does on
- * a Tuesday. A range specifier is what would make that silent, which is why a
- * range is what fails here.
+ * The hub's auth and shutdown paths read library internals characterized in
+ * `hocuspocus-seams.test.ts`. Keep the exact version pinned: any bump needs
+ * review and re-characterization of those seams, including patch releases.
  *
  * Three packages, two places to state the pin:
  *
@@ -27,9 +24,8 @@
  * shipped content is two independent copies of one rule, and text cannot tell
  * a live patched line from a dead one. A line that names an identifier the
  * bundle it was pasted into does not bind is syntactically fine, passes every
- * assertion above, and throws on the first frame of every document — which is
- * exactly what shipped in the CJS build under #944 and reached review. So that
- * block executes both installed builds instead of reading them.
+ * assertion above, and throws on the first frame of every document. Execute
+ * both installed builds to catch that failure.
  */
 
 import { readFileSync } from "node:fs";
@@ -41,11 +37,11 @@ import { describe, expect, it } from "vitest";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
-/** The one version the decision names. */
+/** The exact version the auth/shutdown seam probes characterize. */
 const PINNED = "4.6.0";
 const SERVER_PATCH = `patches/@hocuspocus__server@${PINNED}.patch`;
 
-/** The packages the decision covers. */
+/** Server, provider and their shared transitive dependency must agree. */
 const PINNED_PACKAGES = [
   "@hocuspocus/server",
   "@hocuspocus/provider",

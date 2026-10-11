@@ -1,4 +1,4 @@
-/** Machine knowledge of replicas, independent of project selection and settings. */
+// Decision: a5e7cea9-7702-4ff4-880a-cc82256d8a55
 import { lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { normalizeRemoteUrl } from "./remote-url.js";
@@ -48,10 +48,8 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
 }
 
 /**
- * Caller holds the machine init lock. Publish records before replacing a binding,
- * restoring the prior records if that publication fails. The callback is synchronous
- * so another writer cannot enter between publication and restoration.
- * Only verified promotion, fetch or completed init attach may replace an existing workspace's hub.
+ * Caller holds the init lock through synchronous binding publication and rollback.
+ * Only verified promotion, fetch or completed init attach may replace a known hub.
  */
 export function withWorkspaceBindings<T>(
   bindings: readonly ProjectBinding[],
@@ -73,8 +71,7 @@ export function withWorkspaceBindings<T>(
   }
   if (!changed) return action();
   mkdirSync(dirname(current.path), { recursive: true, mode: 0o700 });
-  // Prepare restoration before publication, so a later disk-full error while
-  // writing the project file does not require writing the old map again.
+  // Stage rollback before publication so a later disk-full error needs no new write.
   const restore = current.text === null ? null : writeTempBeside(current.path, current.text);
   try {
     publishOwnerOnly(current.path, `${JSON.stringify(hubs, null, 2)}\n`);

@@ -112,8 +112,7 @@ export function resolveProjectBinding(options: BindingOptions = {}): ResolvedBin
       path: null,
     };
   }
-  // Old named MCP entries pinned WORKSPACE_ID only. Ignoring that pin while
-  // adopting a project file would silently send that entry to another corpus.
+  // Ignoring a legacy pin while adopting a project file could silently select another corpus.
   if (env.WORKSPACE_ID?.trim() || env.HUB_URL?.trim()) {
     throw new Error("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported. Replace it with UB_WORKSPACE_ID (add UB_HUB_URL until this machine has its record), or remove both legacy variables and explicitly select a .uberblick.json binding. No workspace was opened.");
   }

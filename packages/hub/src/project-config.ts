@@ -1,6 +1,4 @@
-/** Shared project configuration: an atomic project/environment binding plus private credentials.
- * Machine settings retain identity, endpoint admission, and migration information; never selection.
- */
+/** Machine settings retain identity, endpoint admission and migration data, never workspace selection. */
 
 import { normalizeRemoteUrl } from "./remote-url.js";
 import { usesDeviceCredentials } from "./auth-store.js";
@@ -39,19 +37,13 @@ export interface ShadowedLayer {
 }
 
 export interface ResolvedConfig {
-  /**
-   * The environment the MCP server is handed: the process environment with what
-   * we resolved written over it. Feed it to `resolveMcpConfig`, or to a spawn.
-   */
+  /** Resolved process environment for MCP configuration and child processes. */
   env: NodeJS.ProcessEnv;
   binding: ProjectBinding | null;
   origins: {
     workspace: Origin;
     hubUrl: Origin;
-    /**
-     * Null when no signing secret is in force — none configured, or the file
-     * holding it refused for its mode. Either way: local-only, by design.
-     */
+    /** Null when no signing secret is configured or its file is refused. */
     credential: CredentialOrigin | null;
   };
   /** The files consulted, whether or not they exist. */
@@ -60,15 +52,9 @@ export interface ResolvedConfig {
     credentials: string;
     projectConfig: string | null;
   };
-  /**
-   * The roots those paths came out of, and the hub and workspace database
-   * directories that go with them.
-   */
+  /** Common roots for configuration, hub and workspace database paths. */
   storage: StoragePaths;
-  /**
-   * Layers a higher one overrode with a different value. Empty is the norm —
-   * agreeing layers, and a layer nothing competes with, are not a conflict.
-   */
+  /** Report only overridden layers with different values, never agreeing layers. */
   shadowed: ShadowedLayer[];
   /** Everything questionable about the configuration. For stderr, never stdout. */
   warnings: string[];
@@ -82,12 +68,7 @@ export function exposedSigningSecretRemedy(path: string): string {
 
 export class SigningSecretExposureError extends Error {}
 
-/**
- * The directory `ub`'s own files live in: `$XDG_CONFIG_HOME/uberblick`, or
- * `~/.config/uberblick`. `@uberblick/hub/storage` resolves that, for the hub
- * and the MCP server as well as for this one — one layout, decided in one
- * place.
- */
+/** Share storage's XDG_CONFIG_HOME/uberblick or ~/.config/uberblick layout with hub and MCP. */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return resolveStorage({ env }).configDir;
 }
@@ -106,18 +87,8 @@ function trimmed(value: string | undefined): string | null {
 }
 
 /**
- * Read a JSON object, or nothing. A missing file is silent; anything else wrong
- * with it is a warning and the layer is skipped — one broken file must not stop
- * `ub` from running with the layers below it.
- *
- * No parser output reaches a warning, for any of these files. Node's
- * `JSON.parse` errors quote the source around the syntax error, so the message
- * for a file someone pasted a bare secret into *is* the secret — and that is not
- * only `credentials.json`: a secret misplaced in `config.json` is exactly the
- * mistake {@link warnAboutMisplacedSecret} exists to catch, and a file that does
- * not parse never reaches it. An `ub` warning may
- * land in an MCP client's log, a screen-shared terminal or a CI transcript, so
- * the file's name is the whole of what is said about it.
+ * Skip missing or broken layers; only broken ones warn.
+ * Parser errors may quote secrets misplaced in any file, so never report them.
  */
 function readJsonObject(
   path: string,
@@ -167,8 +138,7 @@ function stringField(
 
 /** Per-user identity plus legacy workspace fields, preserved for explicit migration. */
 export interface UserConfig {
-  // `| undefined` explicitly, under `exactOptionalPropertyTypes`: a field the
-  // file does not carry reads as undefined rather than being absent.
+  // Parsed objects include undefined values for absent fields under exactOptionalPropertyTypes.
   workspace?: string | undefined;
   hubUrl?: string | undefined;
   /** Legacy admission marker, valid only for its associated hubUrl. */
@@ -201,8 +171,7 @@ function hubAdmissions(
     if (admission !== "device") warnings.push(`unsupported hub admission in ${path}; using device credentials`);
     result[normalized] = "device";
   }
-  // Older clients stored one endpoint and mode together. Preserve only that
-  // validated association, never apply its mode to the current selection.
+  // Preserve only the legacy mode's validated endpoint association, never the current selection.
   if (source?.hubAdmission !== undefined && typeof source.hubUrl === "string") {
     try {
       const normalized = normalizeRemoteUrl(source.hubUrl);
@@ -244,28 +213,19 @@ export function writeHubAdmission(
   const warnings = [...current.warnings];
   const admissions = hubAdmissions(current.raw, path, warnings);
   if ((admissions[normalized] === "device") === device) {
-    // An already-correct mode may still be held only in the legacy single-hub
-    // fields. Materialize the map before the owner removes those old keys.
+    // Materialize legacy admission in the map before migration removes its selector keys.
     return migrateHubAdmissions(env);
   }
   if (device) admissions[normalized] = "device";
   else delete admissions[normalized];
   const updated: Record<string, unknown> = { ...current.raw, hubAdmissions: admissions };
-  // The map carries all valid older admission metadata now. Leaving the
-  // legacy field would resurrect a mode explicitly cleared for that endpoint.
+  // Keeping the legacy field would resurrect a mode explicitly cleared for its endpoint.
   delete updated.hubAdmission;
   writeUserConfig(updated, env);
   return { written: [path], warnings };
 }
 
-/**
- * Read `config.json` for editing rather than for resolution.
- *
- * Configuration writers preserve what they did not ask about — a `hubUrl` from
- * `ub workspace use`, a field a later version writes — so it gets the raw object
- * back as well as the fields it understands. Resolution stays in
- * {@link resolveConfig}, which needs origins and per-layer labels this does not.
- */
+/** Return raw fields for writers to preserve unrelated and unknown settings; resolution stays separate. */
 export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
   /** The file as parsed, or null when it is absent or unusable. */
   raw: Record<string, unknown> | null;
@@ -288,17 +248,7 @@ export function readUserConfig(env: NodeJS.ProcessEnv = process.env): {
   };
 }
 
-/**
- * Write `config.json`, and return its path.
- *
- * Owner-only, like `credentials.json` beside it: nothing in here is a secret,
- * but it is one user's configuration and no other account has business reading
- * or — the part that matters — writing the hub URL a signed token is sent to.
- *
- * Written by {@link publishOwnerOnly}, exactly like `credentials.json` beside it:
- * one rule for how this CLI puts a file on disk, rather than a weaker one for
- * the file that happens not to hold the secret.
- */
+/** Use owner-only publication: another account must not change the endpoint receiving signed tokens. */
 export function writeUserConfig(
   config: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env,
@@ -309,11 +259,7 @@ export function writeUserConfig(
   return path;
 }
 
-/**
- * A signing secret in a file that is not `credentials.json` is a mistake worth
- * naming: `config.json` is the file `ub` will happily print fields from, and it
- * is not written with the mode a secret needs.
- */
+/** Configuration diagnostics may print fields; misplaced signing secrets must be ignored. */
 function warnAboutMisplacedSecret(
   source: Record<string, unknown> | null,
   path: string,
@@ -336,15 +282,7 @@ export function isOwnerOnly(path: string): boolean {
   }
 }
 
-/**
- * The signing secret is the one value in this layout another user on the machine
- * must not be able to read, so a file anyone else can read is refused, not
- * merely complained about — ssh's contract for a private key. Warning and then
- * using the secret anyway would leave the exposure in place and call it handled.
- *
- * Refusing is only the file layer: `HUB_AUTH_TOKEN` still wins and still works,
- * and with neither this machine is local-only, which is a supported state.
- */
+/** Refuse exposed file secrets; an explicit HUB_AUTH_TOKEN still works, and absent secrets stay local-only. */
 function credentialsAreExposed(path: string, warnings: string[]): boolean {
   let mode: number;
   try {
@@ -365,13 +303,8 @@ function credentialsAreExposed(path: string, warnings: string[]): boolean {
 }
 
 /**
- * Read `credentials.json`.
- *
- * **`signingSecret` is the file's value whether or not the file is exposed.**
- * Anything *resolving* configuration must treat an exposed file as absent — see
- * {@link credentialsAreExposed} and how {@link resolveConfig} uses this. The
- * raw fields are still returned so writers can preserve unrelated credentials;
- * signing-secret creation refuses an exposed file without rewriting it.
+ * Return raw fields even from exposed files so writers preserve unrelated credentials.
+ * Resolution ignores exposed secrets; creation refuses them without rewriting the file.
  */
 export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
   path: string;
@@ -424,10 +357,8 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     warnings.push(`Legacy machine workspace/endpoint settings are not used. ${NO_BINDING}`);
   }
 
-  // Credentials are read last and from one file only: every layer above is one
-  // the user set on their own machine, so the secret applies to whichever
-  // endpoint they chose. An exposed file is refused outright — its one
-  // actionable message is the mode.
+  // The single credentials.json secret applies to the selected endpoint.
+  // Exclude exposed secrets before precedence and diagnostics.
   const credentials = readCredentials(env);
   warnings.push(...credentials.warnings);
   const secretFromFile = credentials.exposed ? null : credentials.signingSecret;
@@ -437,9 +368,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   delete admissionEnv.HUB_ADMISSION;
   if (hubUrl.value !== null && admissions[hubUrl.value] === "device") admissionEnv.HUB_ADMISSION = "device";
   const device = hubUrl.value !== null && usesDeviceCredentials(hubUrl.value, admissionEnv);
-  // **That** they differ, and nothing else: not either value, not a length, not
-  // a prefix. Compared after the exposure refusal above, so a file nobody may
-  // read costs one warning — its mode — rather than two.
+  // Report only the difference, never values, lengths or prefixes; exposure gets one warning.
   if (
     !device &&
     secretFromEnv !== null &&
@@ -471,10 +400,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
     delete resolvedEnv.UB_WORKSPACE_ID;
     delete resolvedEnv.UB_HUB_URL;
   }
-  // Written when there is one and *removed* when there is not: this map is
-  // handed to every workspace-dependent child `ub` spawns, and leaving an
-  // inherited `HUB_URL` in it would smuggle the ambient endpoint back in
-  // through the child that reads it.
+  // Remove inherited HUB_URL for local operation so children cannot restore an ambient endpoint.
   if (hubUrl.value === null) {
     delete resolvedEnv.HUB_URL;
   } else {
@@ -512,16 +438,7 @@ function serialize(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-/**
- * Write `credentials.json` with mode 0600, and return its path.
- *
- * The writer lives next to the reader because the mode is the point: this file
- * holds the secret every hub token is signed with, so it must never be readable
- * by another user on the machine. Every guarantee about how that is done — the
- * descriptor tightened before anything is written, symlinks refused rather than
- * followed — belongs to {@link publishOwnerOnly}, which is also what writes
- * `config.json`.
- */
+/** publishOwnerOnly enforces mode 0600 before writing and refuses symlinks, as for config.json. */
 export function writeCredentials(
   credentials: Credentials,
   env: NodeJS.ProcessEnv = process.env,
@@ -533,29 +450,9 @@ export function writeCredentials(
 }
 
 /**
- * Put a signing secret in `credentials.json` and return the one now on disk —
- * which is not necessarily the candidate.
- *
- * Two fresh workspace creators starting at the same moment would each generate a
- * secret, and last-write-wins leaves one of them convinced of a value that is no
- * longer there. So the claim is exclusive: exactly one process can publish the
- * file, and every loser adopts the winner's secret rather than its own.
- *
- * **Written first, published second.** The mechanism is `link`, not an exclusive
- * `open`. `open(O_CREAT|O_EXCL)` is atomic about the *name* but not about the
- * contents: between the create and the write there is an instant where the file
- * exists and is empty, and a loser that reads it then finds no secret and
- * concludes there is none — which is the whole bug, one syscall further along.
- * `link` publishes a name and complete contents in a single atomic step, and
- * fails with EEXIST if anything already holds that name. There is therefore no
- * moment at which `credentials.json` exists and is not readable, and no lock
- * file is needed to say so.
- *
- * The remaining case is a `credentials.json` that already exists *without* a
- * signing secret in it (a remote token from #84, say). Adding one there is an
- * ordinary read-modify-write. Callers must hold the shared configuration lock
- * through this claim, so both secret creators and hub-login writers preserve
- * the winning secret and unrelated credential fields.
+ * Publish complete contents exclusively with a link, avoiding exclusive open's empty-file window.
+ * Losing creators adopt the winner's secret. Callers hold the shared configuration
+ * lock so adding a secret to an existing store preserves logins and unrelated fields.
  */
 export function claimSigningSecret(
   candidate: string,
@@ -572,8 +469,7 @@ export function claimSigningSecret(
     return candidate;
   }
 
-  // Somebody else holds the name. Their secret is the one every other client on
-  // this machine will use, so it becomes ours.
+  // Concurrent creators must adopt the same published secret.
   const existing = readCredentials(env);
   if (existing.exposed) {
     throw new SigningSecretExposureError(existing.warnings[0]);
@@ -581,9 +477,7 @@ export function claimSigningSecret(
   if (existing.signingSecret !== null) {
     return existing.signingSecret;
   }
-  // `link` leaves no empty window, so a file with no secret in it genuinely has
-  // none. One re-read anyway, and only when the file did not parse at all — the
-  // shape a half-written file would have if some other writer ever produced one.
+  // Reread unusable JSON once in case a different writer published incomplete contents.
   if (existing.raw === null) {
     const second = readCredentials(env);
     if (second.signingSecret !== null) {

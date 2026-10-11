@@ -161,10 +161,9 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
     let body = await readRenewalReply(response);
     if (body === null) return invalid();
     if (ifWorkspacesChanged && response.status === 400 && body.status === "invalid-request" && Object.keys(body).length === 1) {
-      // A pre-switch hub rejects the conditional field before checking version.
-      // One credential-free envelope diagnoses that version within this request's
-      // deadline. No proof is retried: even a same-version hub cannot retire the
-      // working credential, and only a protocol mismatch is read from this probe.
+      // Hubs may reject the conditional field before checking version. Probe once
+      // without a credential under the same deadline; never retry a proof that
+      // could retire the working key, and accept only a protocol mismatch.
       response = await request(wrapToken(""));
       body = await readRenewalReply(response);
       if (body === null || response.status !== 409 || body.status !== "protocol-mismatch") return invalid();
@@ -195,9 +194,8 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
 }
 
 /**
- * One exchange for a machine's need. The separate origin lock spans the bounded
- * network request; the config writers' lock spans only conditional publication.
- * Rereading after either lock preserves another process's renewal/login/logout.
+ * The origin lock spans the bounded exchange; the config lock spans conditional publication.
+ * Reread after either lock so concurrent renewal, login and logout win.
  */
 export async function ensureDeviceLogin(endpoint: string, workspace: string, options: DeviceLoginOptions = {}): Promise<DeviceLoginResult> {
   const env = options.env ?? process.env;
@@ -227,9 +225,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
     if (cached !== null && cached.retryAt > Date.now() &&
         !(options.membershipGranted && !current.login.credential.record.workspaces.includes(workspace))) {
-      // A replacement with workspace access is ready for an old refused
-      // connection. A refusal of the newly issued credential waits, rather than
-      // repeatedly retiring every process's working credential.
+      // Reuse replacements for old refusals; cool down refusals of the new key
+      // instead of repeatedly retiring every process's working credential.
       if (cached.status === "renewed" && options.rejected !== undefined &&
         sameCredential(current.login, options.rejected) && current.login.credential.record.workspaces.includes(workspace)) return offline(origin);
       return cachedResult(cached, origin, workspace, current.login);
@@ -240,8 +237,8 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       (options.rejected === undefined || !sameCredential(expected, options.rejected)), options.signal);
     if (typeof result === "object" && "identity" in result) {
       try {
-        // Once issued, the old key is retired. Finish bounded, conditional
-        // publication even if the caller stops; login/logout still wins.
+        // Issuance retires the old key: finish bounded conditional publication
+        // even after cancellation; concurrent login/logout still wins.
         await replaceHubLogin(origin, expected, result, env);
       } catch {
         options.signal?.throwIfAborted();
@@ -249,8 +246,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
       }
       current = readDeviceLogin(endpoint, workspace, env);
       if (current.status !== "ready") return current;
-      // If login changed concurrently, this exchange's result does not describe
-      // its authority. Use that newer login; its next need may renew it.
+      // A concurrent login supersedes this exchange's authority; use its newer credential.
       if (!sameCredential(current.login, result)) return current.login.credential.record.workspaces.includes(workspace) ? current : offline(origin);
       publishOwnerOnly(path.outcome, JSON.stringify({ fingerprint: fingerprint(result), retryAt: Date.now() + cooldownMs,
         status: "renewed" } satisfies Outcome));

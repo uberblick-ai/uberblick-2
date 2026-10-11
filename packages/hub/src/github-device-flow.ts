@@ -1,6 +1,3 @@
-/** Bounded GitHub device approval, shared by sign-in and host-only setup.
- * Requests/tokens stay in memory; the caller owns the synchronous completion.
- */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { type HubLogger, stderrLogger } from "./log.js";
 
@@ -57,6 +54,7 @@ function providerFailure(error: unknown): GithubFailure {
   return new GithubFailure(code);
 }
 
+/** Requests/tokens stay in memory; sign-in and host setup complete synchronously. */
 export class GithubDeviceFlow<Result extends object> {
   private readonly requests = new Map<string, SignInRequest>();
   private readonly closed = new AbortController();
