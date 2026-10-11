@@ -102,7 +102,7 @@ it("keeps the connect grace while the WebSocket upgrade is pending", async () =>
   expect(Date.now() - started).toBeGreaterThanOrEqual(500);
   expect(Date.now() - started).toBeLessThan(2_000);
   expect(endpoint.sockets.size).toBeGreaterThan(0);
-  expect(instance.state().status).toBe("hub-down");
+  await waitUntil("the pending upgrade's connect grace to expire", () => instance.state().status === "hub-down");
   expect(instance.state()).toMatchObject({ cause: "timeout", detail: `0.5 127.0.0.1:${endpoint.port}` });
 });
 
