@@ -23,7 +23,7 @@
  * is `e2e/doc-link.spec.ts`.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
@@ -32,11 +32,17 @@ import {
   deleteBlock,
   editBlock,
   getBlocks,
+  getBlocksFragment,
   initDoc,
+  tableCellText,
+  tableRows,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
+  writeGfmTable,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { Fragment } from "@tiptap/pm/model";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { redo, undo } from "y-prosemirror";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
@@ -45,6 +51,7 @@ import {
   mentionTriggerAt,
 } from "../src/editor/mention-menu.js";
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
+import { moveTableRow, tableRowTarget } from "../src/editor/table-controls.js";
 import { MentionMenu } from "../src/ui/MentionMenu.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
@@ -71,15 +78,11 @@ function directory(): { ydoc: Y.Doc; context: DocLinkContext; opened: string[] }
 }
 
 function docWith(
-  blocks: Array<{ type: "paragraph" | "code"; text: string }>,
+  blocks: Array<{ type: "paragraph" | "code" | "mermaid" | "terminal" | "chart"; text: string }>,
 ): { ydoc: Y.Doc; ids: string[] } {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: DOC, title: "References" });
-  const ids = blocks.map((block) =>
-    block.type === "code"
-      ? appendBlock(ydoc, { type: "code", text: block.text })
-      : appendBlock(ydoc, { type: "paragraph", text: block.text }),
-  );
+  const ids = blocks.map((block) => appendBlock(ydoc, block));
   return { ydoc, ids };
 }
 
@@ -190,6 +193,35 @@ function peerOf(local: Y.Doc): Y.Doc {
   remote.on("update", (update: Uint8Array) => Y.applyUpdate(local, update));
   local.on("update", (update: Uint8Array) => Y.applyUpdate(remote, update));
   return remote;
+}
+
+function tableDoc(rows: string[][] = [["", "Header"], ["", "Body"]]): Y.Doc {
+  const ydoc = new Y.Doc();
+  initDoc(ydoc, { uuid: DOC, title: "References" });
+  appendBlock(ydoc, { type: "table", text: writeGfmTable(rows) });
+  return ydoc;
+}
+
+/** Positions are read from the live table, never saved row or column offsets. */
+function cellPosition(editor: Editor, row: number, column: number): number {
+  const table = editor.state.doc.firstChild!;
+  let position = 1;
+  for (let index = 0; index < row; index += 1) position += table.child(index).nodeSize;
+  position += 1;
+  for (let index = 0; index < column; index += 1) position += table.child(row).child(index).nodeSize;
+  return position + 2;
+}
+
+function cellCaret(editor: Editor, row: number, column: number, offset = 0): void {
+  act(() => editor.commands.setTextSelection(cellPosition(editor, row, column) + offset));
+}
+
+function cell(ydoc: Y.Doc, row: number, column: number): Y.XmlElement {
+  return tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement)[row]![column]!;
+}
+
+function cellDelta(ydoc: Y.Doc, row: number, column: number): unknown[] {
+  return tableCellText(cell(ydoc, row, column))?.toDelta() ?? [];
 }
 
 describe("the picker", () => {
@@ -344,22 +376,17 @@ describe("the picker", () => {
     }
   });
 
-  /**
-   * `code`, `mermaid`, `table` and `terminal` are source text: the schema gives
-   * them no `docLink`, so offering one there would be offering something the
-   * block cannot hold.
-   */
-  it("never opens in a source block", () => {
+  /** Source blocks cannot hold the picked `docLink` mark. */
+  it.each(["code", "mermaid", "terminal", "chart"] as const)("never opens in a %s source block", (source) => {
     const { context } = directory();
-    const { ydoc } = docWith([{ type: "code", text: "const a = 1;" }]);
+    const { ydoc } = docWith([{ type: source, text: "" }]);
     const mounted = mountPicker(ydoc, context);
     try {
-      caret(mounted.editor, 0, 12);
-      type(mounted.editor, " ");
+      caret(mounted.editor, 0, 0);
       type(mounted.editor, "@");
       expect(mentionTriggerAt(mounted.editor)).toBeNull();
       expect(mounted.card()).toBeNull();
-      expect(getBlocks(ydoc)[0]?.text).toBe("const a = 1; @");
+      expect(getBlocks(ydoc)[0]?.text).toBe("@");
     } finally {
       mounted.unmount();
     }
@@ -634,5 +661,333 @@ describe("the picker", () => {
     } finally {
       mounted.unmount();
     }
+  });
+});
+
+describe("the picker in editable table cells", () => {
+  it.each([0, 1])("writes the shared link in row %i, syncs and reloads it, and undoes the pick once", (row) => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const peer = peerOf(ydoc);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, row, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      expect(mounted.labels()).toEqual(["The hub"]);
+      if (row === 0) mounted.pick("The hub");
+      else expect(mounted.press("Enter").defaultPrevented).toBe(true);
+
+      const expected = [{ insert: "The hub", attributes: { docLink: { docId: HUB } } }];
+      expect(cellDelta(ydoc, row, 0)).toEqual(expected);
+      expect(cellDelta(peer, row, 0)).toEqual(expected);
+      expect(getBlocks(ydoc)[0]?.text).toContain(`[The hub](${HUB})`);
+      expect(cellDelta(ydoc, row, 1)).toEqual([{ insert: row === 0 ? "Header" : "Body" }]);
+      expect(mounted.card()).toBeNull();
+
+      const restored = new Y.Doc();
+      Y.applyUpdate(restored, Y.encodeStateAsUpdate(ydoc));
+      const reloaded = mountEditor(restored, { docLinks: context }).editor;
+      try {
+        expect(reloaded.view.dom.querySelector(`${row === 0 ? "th" : "td"} .ub-doclink`)?.textContent).toBe("The hub");
+        expect(getBlocks(restored)).toEqual(getBlocks(ydoc));
+      } finally {
+        reloaded.destroy();
+        restored.destroy();
+      }
+
+      act(() => { mounted.editor.commands.keyboardShortcut("Mod-z"); });
+      expect(cellDelta(ydoc, row, 0)).toEqual([{ insert: "@hub" }]);
+      expect(mounted.card()).toBeNull();
+    } finally {
+      mounted.unmount();
+      peer.destroy();
+      ydoc.destroy();
+    }
+  });
+
+  it("shares directory filtering and keyboard highlights with prose while documents arrive", () => {
+    const { ydoc: dir, context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      tombstoneDirectoryEntry(dir, HUB);
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      expect(mounted.labels()).toEqual(["Editing and blocks"]);
+      const arrived = "9a1b2c3d-4444-4555-8666-777788889999";
+      act(() => upsertDirectoryEntry(dir, { uuid: arrived, title: "Thé hub" }));
+      expect(mounted.labels()).toEqual(["Editing and blocks", "Thé hub"]);
+      mounted.press("ArrowDown");
+      expect(screen.getByRole("option", { name: "Thé hub" }).getAttribute("aria-selected")).toBe("true");
+      mounted.press("ArrowUp");
+      expect(screen.getByRole("option", { name: "Editing and blocks" }).getAttribute("aria-selected")).toBe("true");
+      type(mounted.editor, "THE");
+      expect(mounted.labels()).toEqual(["Thé hub"]);
+      mounted.press("Enter");
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: "Thé hub", attributes: { docLink: { docId: arrived } } }]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it("folds a multiline directory title into valid single-line cell text", () => {
+    const { ydoc: dir, context } = directory();
+    upsertDirectoryEntry(dir, { uuid: HUB, title: "The\r\nhub\nroom" });
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      mounted.press("Enter");
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: "The hub room", attributes: { docLink: { docId: HUB } } }]);
+      expect(getBlocks(ydoc)[0]?.text).toContain(`[The hub room](${HUB})`);
+      act(() => { mounted.editor.commands.keyboardShortcut("Mod-z"); });
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: "@hub" }]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["", "word ", "ben", "("])("keeps the prose boundary rule after %j", (prefix) => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      if (prefix !== "") type(mounted.editor, prefix);
+      type(mounted.editor, "@");
+      expect(mounted.card() !== null).toBe(prefix === "" || prefix.endsWith(" "));
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: `${prefix}@` }]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["Escape", "space", "caret"])("dismisses a cell session on %s without altering the query", (gesture) => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      expect(mounted.card()).not.toBeNull();
+      if (gesture === "Escape") mounted.press("Escape");
+      else if (gesture === "space") type(mounted.editor, " ");
+      else cellCaret(mounted.editor, 1, 1);
+      expect(mounted.card()).toBeNull();
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: gesture === "space" ? "@hub " : "@hub" }]);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["paste", "drop"])("does not open from a %s or its undo and redo", (uiEvent) => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      act(() => mounted.editor.view.dispatch(mounted.editor.state.tr.insertText("@").setMeta("uiEvent", uiEvent)));
+      expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "" });
+      expect(mounted.card()).toBeNull();
+      act(() => { undo(mounted.editor.state); });
+      expect(mounted.card()).toBeNull();
+      act(() => { redo(mounted.editor.state); });
+      expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "" });
+      expect(mounted.card()).toBeNull();
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it("does not open from a peer insertion or deleting back to a stored @", () => {
+    const { context } = directory();
+    const ydoc = tableDoc([["Header", ""], ["@notes", ""]]);
+    const peer = peerOf(ydoc);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0, 6);
+      for (let index = 0; index < 5; index += 1) backspace(mounted.editor);
+      expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "" });
+      expect(mounted.card()).toBeNull();
+      cellCaret(mounted.editor, 1, 1);
+      act(() => tableCellText(cell(peer, 1, 1))!.insert(0, "@"));
+      expect(mounted.card()).toBeNull();
+      expect(cellDelta(ydoc, 1, 1)).toEqual([{ insert: "@" }]);
+    } finally { mounted.unmount(); peer.destroy(); ydoc.destroy(); }
+  });
+
+  it("refuses both a locked editor and a pick saved before it became locked", () => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      const trigger = mentionTriggerAt(mounted.editor)!;
+      act(() => mounted.editor.setEditable(false));
+      expect(mentionTriggerAt(mounted.editor)).toBeNull();
+      expect(mounted.card()).toBeNull();
+      expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: "@hub" }]);
+      cellCaret(mounted.editor, 0, 0);
+      type(mounted.editor, "@");
+      expect(mounted.card()).toBeNull();
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["closed", "empty"])("preserves TableKit keys when the picker is %s", (session) => {
+    const { context } = directory();
+    const ydoc = tableDoc();
+    const mounted = mountPicker(ydoc, context);
+    // jsdom has no text layout. These calls only matter after the picker has
+    // yielded the keys to TableKit; browser tests cover physical arrow motion.
+    const edge = vi.spyOn(mounted.editor.view, "endOfTextblock").mockReturnValue(false);
+    const coords = vi.spyOn(mounted.editor.view, "coordsAtPos").mockReturnValue({ left: 0, right: 0, top: 0, bottom: 0 });
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "zzz");
+      if (session === "closed") mounted.press("Escape");
+      expect(mounted.labels()).toEqual([]);
+      const before = getBlocks(ydoc);
+      const at = mounted.editor.state.selection.from;
+      mounted.press("ArrowUp");
+      mounted.press("ArrowDown");
+      mounted.press("Enter");
+      expect(getBlocks(ydoc)).toEqual(before);
+      expect(mounted.editor.state.selection.from).toBe(at);
+      mounted.press("Tab");
+      expect(mounted.editor.state.selection.from).toBe(cellPosition(mounted.editor, 1, 1));
+      expect(getBlocks(ydoc)).toEqual(before);
+      expect(mounted.card()).toBeNull();
+    } finally { edge.mockRestore(); coords.mockRestore(); mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it("does not re-aim a saved pick at the same query in another cell or occurrence", () => {
+    const { context } = directory();
+    const ydoc = tableDoc([["Header", ""], ["", "@hub"]]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "earlier @hub ");
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      const trigger = mentionTriggerAt(mounted.editor)!;
+      for (const [row, column, offset] of [[1, 0, 12], [1, 1, 4]] as const) {
+        cellCaret(mounted.editor, row, column, offset);
+        expect(mentionTriggerAt(mounted.editor)).toMatchObject({ query: "hub" });
+        expect(mounted.card()).toBeNull();
+        const before = getBlocks(ydoc);
+        expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
+        expect(getBlocks(ydoc)).toEqual(before);
+      }
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["caret", "edit", "peer"])("refuses a rendered pointer callback before React commits the %s change", (change) => {
+    const { context } = directory();
+    const ydoc = tableDoc([["Header", ""], ["", "@hub"]]);
+    const peer = peerOf(ydoc);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      const option = screen.getByRole("option", { name: "The hub" });
+      act(() => {
+        if (change === "caret") mounted.editor.commands.setTextSelection(cellPosition(mounted.editor, 1, 1) + 4);
+        else if (change === "edit") {
+          const trigger = mentionTriggerAt(mounted.editor)!;
+          mounted.editor.view.dispatch(mounted.editor.state.tr.insertText("@hub", trigger.from, trigger.to));
+        }
+        else peer.transact(() => {
+          const text = tableCellText(cell(peer, 1, 0))!;
+          text.delete(0, 4);
+          text.insert(0, "@hub");
+        });
+        // The old option and its callback still exist until this act commits.
+        option.click();
+      });
+      expect(mounted.card()).toBeNull();
+      expect(cellDelta(ydoc, 1, 0)).toEqual([{ insert: "@hub" }]);
+      expect(cellDelta(ydoc, 1, 1)).toEqual([{ insert: "@hub" }]);
+    } finally { mounted.unmount(); peer.destroy(); ydoc.destroy(); }
+  });
+
+  it.each(["addRowBefore", "deleteRow", "addColumnBefore", "deleteColumn"] as const)(
+    "a %s cannot send a saved pick to an identical query in another cell",
+    (command) => {
+      const { context } = directory();
+      const ydoc = tableDoc([["@hub", "@hub"], ["", "@hub"], ["@hub", "@hub"]]);
+      const mounted = mountPicker(ydoc, context);
+      try {
+        cellCaret(mounted.editor, 1, 0);
+        type(mounted.editor, "@");
+        type(mounted.editor, "hub");
+        const trigger = mentionTriggerAt(mounted.editor)!;
+        const original = cell(ydoc, 1, 0);
+        act(() => { expect(mounted.editor.commands[command]()).toBe(true); });
+        const before = getBlocks(ydoc);
+        expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
+        expect(getBlocks(ydoc)).toEqual(before);
+        if (mounted.card() !== null) {
+          mounted.press("Enter");
+          expect(tableCellText(original)?.toDelta()).toEqual([
+            { insert: "The hub", attributes: { docLink: { docId: HUB } } },
+          ]);
+        }
+        for (const candidate of tableRows(getBlocksFragment(ydoc).get(0) as Y.XmlElement).flat()) {
+          if (candidate !== original) expect(tableCellText(candidate)?.toDelta()).not.toEqual([
+            { insert: "The hub", attributes: { docLink: { docId: HUB } } },
+          ]);
+        }
+      } finally { mounted.unmount(); ydoc.destroy(); }
+    },
+  );
+
+  it.each(["row", "column"])("closes on %s reordering rather than following an identical query", (axis) => {
+    const { context } = directory();
+    const ydoc = tableDoc([["Header", "Header"], ["", "@hub"], ["@hub", "@hub"]]);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      const trigger = mentionTriggerAt(mounted.editor)!;
+      act(() => {
+        if (axis === "row") {
+          const target = tableRowTarget(mounted.editor, getBlocks(ydoc)[0]!.id, 1)!;
+          expect(moveTableRow(mounted.editor, target, 3)).toBe(true);
+        } else {
+          const { state } = mounted.editor;
+          const table = state.doc.firstChild!;
+          const rows: ProseMirrorNode[] = [];
+          table.forEach((row) => { rows.push(row.copy(Fragment.fromArray([row.child(1), row.child(0)]))); });
+          mounted.editor.view.dispatch(state.tr.replaceWith(0, table.nodeSize, table.copy(Fragment.fromArray(rows))));
+        }
+      });
+      expect(mounted.card()).toBeNull();
+      const before = getBlocks(ydoc);
+      expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
+      expect(getBlocks(ydoc)).toEqual(before);
+    } finally { mounted.unmount(); ydoc.destroy(); }
+  });
+
+  it.each(["delete", "replace"])("closes when a peer %ss the occurrence even if the query remains identical", (edit) => {
+    const { context } = directory();
+    const ydoc = tableDoc([["Header", ""], ["", "@hub"]]);
+    const peer = peerOf(ydoc);
+    const mounted = mountPicker(ydoc, context);
+    try {
+      cellCaret(mounted.editor, 1, 0);
+      type(mounted.editor, "@");
+      type(mounted.editor, "hub");
+      const trigger = mentionTriggerAt(mounted.editor)!;
+      act(() => peer.transact(() => {
+        const text = tableCellText(cell(peer, 1, 0))!;
+        text.delete(0, 4);
+        if (edit === "replace") text.insert(0, "@hub");
+      }));
+      expect(mounted.card()).toBeNull();
+      const before = getBlocks(ydoc);
+      expect(linkMentionAtTrigger(mounted.editor, trigger, HUB, context)).toBe(false);
+      expect(getBlocks(ydoc)).toEqual(before);
+      expect(cellDelta(ydoc, 1, 1)).toEqual([{ insert: "@hub" }]);
+    } finally { mounted.unmount(); peer.destroy(); ydoc.destroy(); }
   });
 });

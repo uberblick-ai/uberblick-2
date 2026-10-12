@@ -17,6 +17,7 @@ import { Plugin } from "@tiptap/pm/state";
 import type { Mark, Schema } from "@tiptap/pm/model";
 import type { MarkView, ViewMutationRecord } from "@tiptap/pm/view";
 import type * as Y from "yjs";
+import { singleLine } from "./table-text.js";
 import {
   decisionTopicArchived,
   canonicalDocumentUuid,
@@ -143,11 +144,15 @@ export function replaceWithDocLink(
   const docId = canonicalDocumentUuid(target);
   const type = schema.marks.docLink;
   if (docId === null || type === undefined) return false;
+  const $from = tr.doc.resolve(range.from);
+  const title = labelFor(docId, label, context);
+  // Table cells store one line, including titles borrowed from the directory.
+  const text = $from.depth > 1 && $from.node(1).type.name === "table" ? singleLine(title) : title;
   tr.replaceWith(
     range.from,
     range.to,
     // Directory titles enter as text, never markup.
-    schema.text(labelFor(docId, label, context), [type.create({ docId })]),
+    schema.text(text, [type.create({ docId })]),
   );
   return true;
 }

@@ -7,6 +7,7 @@
 
 import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { endUndoCapture, isTypedHere } from "./block-menu.js";
 import { replaceWithDocLink } from "./doc-links.js";
 import type { DocLinkCandidate, DocLinkContext } from "./doc-links.js";
@@ -15,6 +16,10 @@ import { foldForTitleMatch } from "../title-fold.js";
 /** An open mention session: the block it belongs to, what was typed, and where. */
 export interface MentionTrigger {
   blockId: string;
+  /** The document in which this range was validated; stale picks never write. */
+  doc: ProseMirrorNode;
+  /** Cell boundaries carried through steps; prose uses its block id. */
+  cell: { from: number; to: number } | null;
   /** What was typed after the `@`. */
   query: string;
   /** The `@` itself, in current document positions. */
@@ -37,23 +42,28 @@ const MENTION_QUERY = /(?:^|\s)@([^\s@]*)$/;
 export const MENTION_LIMIT = 8;
 
 /**
- * Require an identified top-level prose block. Recompute the live range so edits
- * above the block cannot redirect an insertion. Space, caret departure or a
- * rewritten trigger closes the session rather than retaining a saved mode.
+ * Admit identified prose blocks and paragraphs in editable table cells.
+ * Recompute the live range so edits cannot redirect an insertion. Space, caret
+ * departure or a rewritten trigger closes the session rather than retaining a
+ * saved mode.
  */
 export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
+  if (!editor.isEditable) return null;
   const { selection } = editor.state;
   if (!selection.empty) return null;
 
   const { $head } = selection;
-  // Depth 1 is a top-level block; this schema nests nothing, so anything else is
-  // not a block a reference can be written into.
-  if ($head.depth !== 1) return null;
+  const inCell = $head.depth === 4 && $head.node(1).type.name === "table"
+    && $head.node(2).type.name === "tableRow"
+    && ($head.node(3).type.name === "tableCell" || $head.node(3).type.name === "tableHeader")
+    && $head.parent.type.name === "paragraph";
+  if ($head.depth !== 1 && !inCell) return null;
 
   const block = $head.parent;
   // Read the source-text spec so picker admission stays aligned with its marks.
   if (block.type.spec.code === true) return null;
-  if (typeof block.attrs.id !== "string" || block.attrs.id === "") return null;
+  const blockId = $head.node(1).attrs.id;
+  if (typeof blockId !== "string" || blockId === "") return null;
 
   // Count leaf nodes as one U+FFFC so text offsets track document positions.
   const before = block.textBetween(0, $head.parentOffset, undefined, "￼");
@@ -62,7 +72,9 @@ export function mentionTriggerAt(editor: Editor): MentionTrigger | null {
 
   const query = match[1] ?? "";
   return {
-    blockId: block.attrs.id,
+    blockId,
+    doc: editor.state.doc,
+    cell: inCell ? { from: $head.before(3), to: $head.after(3) } : null,
     query,
     from: $head.pos - query.length - 1,
     to: $head.pos,
@@ -134,10 +146,12 @@ export function linkMentionAtTrigger(
 ): boolean {
   const live = mentionTriggerAt(editor);
   if (live === null) return false;
-  // MentionMenu watches occurrence changes. Compare id/query here, allowing
-  // remote edits above this block to shift the live range.
+  // The UI carries a session through transactions before rendering. A callback
+  // from an older render must not borrow a new, identical occurrence.
+  if (live.doc !== trigger.doc || live.from !== trigger.from || live.to !== trigger.to) return false;
   if (live.blockId !== trigger.blockId) return false;
   if (live.query !== trigger.query) return false;
+  if (live.cell?.from !== trigger.cell?.from || live.cell?.to !== trigger.cell?.to) return false;
 
   // Undo restores @query separately from the preceding typing.
   endUndoCapture(editor.state);

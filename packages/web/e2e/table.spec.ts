@@ -1,5 +1,5 @@
 /** Composed TableKit surface: direct input, contained overflow and caret reveal. */
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -8,8 +8,8 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import { appendBlock, directoryRoom, getBlocksFragment, initDoc, roomForDoc, tableCellText, tableRows, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
-import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { activateControl, createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, openApp, ws } = setupHarness();
 
@@ -181,6 +181,119 @@ test("a document link typed in a table cell opens its target and Back restores t
   await expect(page).toHaveURL(new RegExp(`/${ws()}/${source}$`));
   await expect(page.locator(".ub-table th").first().locator("a.ub-doclink")).toHaveText("the target");
 });
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`the cell @ picker takes keyboard and pointer or iPad touch picks through scrolling and sync — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+    const touch = browserName === "webkit";
+    // The supported touch proof needs an iPad cell surface, independent of the
+    // phone project used for the rest of the tagged browser suite.
+    const page = await openApp(browser, "/", {
+      contextOptions: {
+        ...(browserName === "webkit" ? devices["iPad Pro 11"] : devices["Desktop Chrome"]),
+        colorScheme,
+      },
+    });
+    const author = await openApp(browser, "/", {
+      upstream: true,
+      contextOptions: {
+        ...(browserName === "webkit" ? devices["Desktop Safari"] : devices["Desktop Chrome"]),
+        viewport: { width: 1280, height: 800 }, colorScheme,
+      },
+    });
+    const prefix = docTitle("table-pick");
+    const firstTitle = `${prefix} Alpha`;
+    const secondTitle = `${prefix} Beta`;
+    const first = await createDoc(author, firstTitle);
+    const second = await createDoc(author, secondTitle);
+    if ((page.viewportSize()?.width ?? 1280) < 1280) {
+      await activateControl(page.getByRole("button", { name: "Show document list", exact: true }), { touch });
+    }
+    const source = await createDoc(page, docTitle("picker table"));
+    await placeCaret(page);
+    await page.keyboard.type("| Name | Amount | Date | Status | Owner | Notes | Source | Last column |");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    const table = page.locator(".ub-table");
+    await expect(table.locator("th")).toHaveCount(8);
+    const header = table.locator("th").last();
+    const wrapper = table.locator("..");
+    await placeCaretIn(header, { touch });
+    await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await page.keyboard.type(` @${prefix}`);
+    const picker = page.getByRole("listbox", { name: "Documents" });
+    await expect(picker.getByRole("option", { name: firstTitle, exact: true })).toBeVisible();
+    await expect(picker.getByRole("option", { name: secondTitle, exact: true })).toBeVisible();
+    const arrivedTitle = `${prefix} Gamma`;
+    await createDoc(author, arrivedTitle);
+    await expect(picker.getByRole("option", { name: arrivedTitle, exact: true })).toBeVisible();
+
+    // The portalled card remains attached to the visible caret inside the
+    // horizontally scrolled table, and stays within its document pane.
+    const card = page.locator('[data-slot="caret-menu-content"]').filter({ has: picker });
+    await expect.poll(() => card.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const pane = document.querySelector(".ub-document-pane")?.getBoundingClientRect();
+      const selection = document.getSelection();
+      if (pane === undefined || selection === null || selection.rangeCount === 0) return false;
+      const caret = selection.getRangeAt(0).getBoundingClientRect();
+      return element.closest(".tableWrapper") === null &&
+        box.left >= Math.max(0, pane.left) - 1 && box.right <= Math.min(window.innerWidth, pane.right) + 1 &&
+        box.top >= Math.max(0, pane.top) - 1 && box.bottom <= Math.min(window.innerHeight, pane.bottom) + 1 &&
+        box.left <= caret.left + 1 && box.right >= caret.left - 1 && box.top >= caret.bottom - 1;
+    })).toBe(true);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    const headerLink = header.locator("a.ub-doclink");
+    await expect(headerLink).toHaveText(secondTitle);
+    await expect(headerLink).toHaveAttribute("data-doc-id", second);
+    await expect(header.locator("p")).toHaveCount(1);
+
+    // TableKit's native Tab adds the next body row at this last header cell.
+    await page.keyboard.press("Tab");
+    await expect(table.locator("td")).toHaveCount(8);
+    const body = table.locator("td").first();
+    await page.keyboard.type(`@${prefix}`);
+    await expect(picker).toBeVisible();
+    await activateControl(picker.getByRole("option", { name: firstTitle, exact: true }), { touch });
+    const bodyLink = body.locator("a.ub-doclink");
+    await expect(bodyLink).toHaveText(firstTitle);
+    await expect(bodyLink).toHaveAttribute("data-doc-id", first);
+    await expect(headerLink).toHaveAttribute("data-doc-id", second);
+
+    // With no matches, Enter still cannot split the cell and Tab still moves
+    // to its next neighbour. Picking has restored the editor's native focus.
+    await page.keyboard.press("Tab");
+    const emptyResultCell = table.locator("td").nth(1);
+    const missing = `@absent-${prefix}`;
+    await page.keyboard.type(missing);
+    await expect(picker.getByRole("option")).toHaveCount(0);
+    const emptyCard = page.locator('[data-slot="caret-menu-content"]').filter({ hasText: "No document this page knows matches." });
+    await expect(emptyCard).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(emptyResultCell).toHaveText(missing);
+    await expect(emptyResultCell.locator("p")).toHaveCount(1);
+    await page.keyboard.press("Tab");
+    await page.keyboard.type("next cell");
+    await expect(table.locator("td").nth(2)).toHaveText("next cell");
+    await expect(emptyCard).toHaveCount(0);
+
+    const room = roomForDoc(harness().workspaceUuid, source);
+    await expect.poll(() => harness().hubText(room)).toContain(`[${secondTitle}](${second})`);
+    await expect.poll(() => harness().hubText(room)).toContain(`[${firstTitle}](${first})`);
+    await author.goto(new URL(`/${ws()}/${source}`, harness().appUrl).href);
+    await expect(author.locator(".ub-table th").last().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", second);
+    await expect(author.locator(".ub-table td").first().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", first);
+    await expect(page.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await page.reload();
+    await expect(headerLink).toHaveText(secondTitle);
+    await expect(bodyLink).toHaveText(firstTitle);
+    await activateControl(headerLink, { touch });
+    await expect(page).toHaveURL(new RegExp(`/${ws()}/${second}$`));
+    await expect(page.locator(".ub-title")).toHaveValue(secondTitle);
+  });
+}
 
 test("two merged cell link conflicts stay distinct through repair and the table binds afterwards", async ({ page }, info) => {
   const source = randomUUID();
