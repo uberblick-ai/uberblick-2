@@ -14,6 +14,10 @@ import {
   getWorkspaceName,
   setWorkspaceName,
   deleteTagCatalogEntry,
+  setTags,
+  getMeta,
+  readDocumentTags,
+  cleanupDocumentTags,
   settingsRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -23,6 +27,7 @@ import { notifyTransient } from "../src/notifications.js";
 import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
 import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
+import { useTagCatalog } from "../src/ui/tags.js";
 
 vi.mock("../src/collab/rooms.js", async (original) => ({
   ...await original<typeof import("../src/collab/rooms.js")>(),
@@ -292,7 +297,12 @@ it("waits for server state, seeds once, and keeps deleted examples absent offlin
   expect(listTagCatalog(room.connection.ydoc)).toHaveLength(0);
 });
 
-it("waits for current catalog sync before making a cached legacy retirement permanent", async () => {
+function CatalogReader({ connection, migrateLegacy }: { connection: RoomConnection; migrateLegacy: boolean }) {
+  useTagCatalog(connection, migrateLegacy);
+  return null;
+}
+
+it("waits for direct hub catalog sync before making a cached legacy retirement permanent", async () => {
   const room = statusRoom({ ...SYNCED, synced: false }, settingsRoom(WORKSPACE.uuid));
   seedTagCatalog(room.connection.ydoc);
   const billing = EXAMPLE_TAGS.find((tag) => tag.name === "billing");
@@ -300,12 +310,54 @@ it("waits for current catalog sync before making a cached legacy retirement perm
   // Legacy clients curate these name-keyed levels independently.
   getTagCatalogIdentities(room.connection.ydoc).set(billing.id, billing.name);
   room.connection.ydoc.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("billing#1", 1);
-  await mountTags(room.connection);
+  await renderSettled(<CatalogReader connection={room.connection} migrateLegacy />);
   expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(false);
   act(() => room.connection.ydoc.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("billing#2", 1));
   room.update({ synced: true });
   expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(false);
   expect(listTagCatalog(room.connection.ydoc).some((entry) => entry.id === billing.id)).toBe(true);
+});
+
+it("migrates a retired catalog after direct hub synchronization", async () => {
+  const room = statusRoom({ ...SYNCED, synced: false }, settingsRoom(WORKSPACE.uuid));
+  const billing = EXAMPLE_TAGS.find((tag) => tag.name === "billing");
+  if (billing === undefined) throw new Error("missing billing example");
+  getTagCatalogIdentities(room.connection.ydoc).set(billing.id, billing.name);
+  room.connection.ydoc.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("billing#1", 1);
+  await renderSettled(<CatalogReader connection={room.connection} migrateLegacy />);
+  expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(false);
+  room.update({ synced: true });
+  expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(true);
+});
+
+it("preserves a hub restoration when the browser synchronizes only with a stale ub open cache", async () => {
+  const local = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const hub = new Y.Doc();
+  const billing = EXAMPLE_TAGS.find((tag) => tag.name === "billing");
+  if (billing === undefined) throw new Error("missing billing example");
+  getTagCatalogIdentities(hub).set(billing.id, billing.name);
+  hub.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("billing#1", 1);
+  Y.applyUpdate(local.connection.ydoc, Y.encodeStateAsUpdate(hub));
+  hub.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("billing#2", 1);
+  const doc = new Y.Doc();
+  setTags(doc, [billing.id]);
+  const stored = Y.encodeStateAsUpdate(doc);
+
+  await renderSettled(<CatalogReader connection={local.connection} migrateLegacy={false} />);
+  await mountTags(local.connection);
+  expect(isTagCatalogIdentityDeleted(local.connection.ydoc, billing.id)).toBe(false);
+  act(() => {
+    Y.applyUpdate(hub, Y.encodeStateAsUpdate(local.connection.ydoc));
+    Y.applyUpdate(local.connection.ydoc, Y.encodeStateAsUpdate(hub));
+  });
+  expect(isTagCatalogIdentityDeleted(hub, billing.id)).toBe(false);
+  expect(readDocumentTags(doc, hub)).toEqual([expect.objectContaining({ id: billing.id })]);
+  expect(Y.encodeStateAsUpdate(doc)).toEqual(stored);
+  cleanupDocumentTags(doc, hub);
+  expect(getMeta(doc).tags).toEqual([billing.id]);
+  hub.destroy();
+  local.connection.ydoc.destroy();
+  doc.destroy();
 });
 
 it("validates names and converges confirmed deletion and fresh recreation with a peer", async () => {

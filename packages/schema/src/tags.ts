@@ -260,6 +260,9 @@ export function deleteTagCatalogEntry(
     for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
       if (name === entry.name && canonicalDocumentUuid(id) === id) deleted.set(id, true);
     }
+    // Deletion covers the fixed alias before an offline replica can seed it.
+    const example = EXAMPLE_TAGS.find((tag) => tag.name === entry.name);
+    if (example !== undefined) deleted.set(example.id, true);
   });
 }
 
@@ -273,6 +276,8 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
   catalogDoc.transact(() => {
     for (const example of EXAMPLE_TAGS) {
       if (isTagCatalogIdentityDeleted(catalogDoc, example.id) ||
+        [...getTagCatalogIdentities(catalogDoc).entries()].some(([id, name]) =>
+          name === example.name && isTagCatalogIdentityDeleted(catalogDoc, id)) ||
         listTagCatalog(catalogDoc).some((entry) => entry.name === example.name)) continue;
       // Fixed examples remain legacy identities so delayed retirement can migrate them.
       if (!getTagCatalogIdentities(catalogDoc).has(example.id)) {
@@ -318,8 +323,8 @@ export function readDirectoryTags(
 
 /**
  * Validate the whole request before replacing assignments with canonical UUIDs.
- * Replace existing-tag assignments while retaining unresolved stored references.
- * Only positive identity tombstones permit removing hidden references.
+ * Replace existing-tag assignments while retaining unresolved stored UUIDs.
+ * Only positive identity tombstones permit removing unresolved UUIDs.
  */
 export function assignDocumentTags(
   document: Y.Doc,
@@ -350,7 +355,7 @@ export function assignDocumentTags(
   }
   for (const stored of getMeta(document).tags) {
     const identity = canonicalDocumentUuid(stored);
-    if ((identity === null || !index.byIdentity.has(identity)) && !isTagCatalogIdentityDeleted(catalogDoc, stored) && !seen.has(stored)) {
+    if (identity !== null && !index.byIdentity.has(identity) && !isTagCatalogIdentityDeleted(catalogDoc, stored) && !seen.has(stored)) {
       seen.add(stored);
       next.push(stored);
     }

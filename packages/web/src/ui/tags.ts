@@ -14,12 +14,13 @@ export interface TagCatalogReading {
 /** Read one catalog Y.Doc, updating for local and remote changes alike. */
 export function useTagCatalog(
   connection: RoomConnection | null,
+  migrateLegacy = false,
 ): TagCatalogReading | null {
   const [reading, setReading] = useState<TagCatalogReading | null>(null);
   useEffect(() => {
     if (connection === null) return;
     const read = (): void => {
-      if (connection.status.synced && connection.status.hasReceivedServerState && connection.status.writable) {
+      if (migrateLegacy && connection.status.synced && connection.status.hasReceivedServerState && connection.status.writable) {
         migrateTagCatalog(connection.ydoc);
       }
       setReading({
@@ -32,7 +33,7 @@ export function useTagCatalog(
     connection.ydoc.on("update", read);
     const stop = connection.onStatusChange(read);
     return () => { connection.ydoc.off("update", read); stop(); };
-  }, [connection]);
+  }, [connection, migrateLegacy]);
   if (connection === null) return null;
   return reading?.connection === connection
     ? reading

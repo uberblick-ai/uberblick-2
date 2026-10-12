@@ -2404,7 +2404,7 @@ test("Workspace Settings uses the shared touch floors in narrow and wide layouts
         font: Number.parseFloat(getComputedStyle(element).fontSize),
       })),
     );
-    expect(new Set(controls.map((one) => one.slot))).toEqual(new Set(["button", "input"]));
+    expect(new Set(controls.map((one) => one.slot))).toEqual(new Set(["button", "input", "alert-dialog-trigger"]));
     for (const one of controls) {
       expect(one.height, `${one.slot} at ${width}px`).toBeGreaterThanOrEqual(44);
       if (one.slot === "input") expect(one.font).toBeGreaterThanOrEqual(16);

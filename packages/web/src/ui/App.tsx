@@ -549,7 +549,9 @@ export function App(): ReactElement {
       : null,
     defaultIdentity,
   );
-  useTagCatalog(catalog);
+  // A ub open browser syncs with the engine's cache; only the engine knows
+  // whether upstream settings have settled and owns migration on that route.
+  useTagCatalog(catalog, serving === null);
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);

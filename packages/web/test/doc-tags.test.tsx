@@ -16,10 +16,15 @@ import {
   editBlock,
   getBlocks,
   getBlocksFragment,
+  getTagCatalogIdentities,
+  isTagCatalogIdentityDeleted,
+  readDocumentTags,
   roomForDoc,
   settingsRoom,
   setTags,
   tombstoneDirectoryEntry,
+  TAG_CATALOG_RETIRED_KEY,
+  TAG_CATALOG_RESTORED_KEY,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -448,5 +453,44 @@ describe("the document tag picker", () => {
     expect(within(host).getByText("No tags").textContent).toBe("No tags");
     expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     expect(picker(host)).toBeNull();
+  });
+
+  it("does not make a stale ub open catalog retirement durable before the hub restoration arrives", async () => {
+    const fix = documentFixture([TAGS.legacy]);
+    const hub = new Y.Doc();
+    getTagCatalogIdentities(hub).set(TAGS.legacy, "legacy");
+    hub.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("legacy#1", 1);
+    Y.applyUpdate(fix.catalog.ydoc, Y.encodeStateAsUpdate(hub));
+    hub.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("legacy#2", 1);
+    vi.mocked(globalThis.fetch).mockImplementation(async (input) => new Response(
+      String(input).endsWith("/uberblick-config.json")
+        ? JSON.stringify({
+          hubUrl: "ws://127.0.0.1:4321",
+          workspaces: [WORKSPACE],
+          remoteHubUrl: "wss://remote.example/ws",
+          servedWorkspaces: {
+            [WORKSPACE]: { browserKey: "", remoteHubUrl: "wss://remote.example/ws", name: "Fixture" },
+          },
+        })
+        : "",
+      { status: String(input).endsWith("/uberblick-config.json") ? 200 : 404 },
+    ));
+
+    const host = await openApp();
+    expect(picker(host)?.textContent).not.toContain("legacy");
+    expect(isTagCatalogIdentityDeleted(fix.catalog.ydoc, TAGS.legacy)).toBe(false);
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
+
+    act(() => {
+      Y.applyUpdate(hub, Y.encodeStateAsUpdate(fix.catalog.ydoc));
+      Y.applyUpdate(fix.catalog.ydoc, Y.encodeStateAsUpdate(hub));
+    });
+    expect(isTagCatalogIdentityDeleted(hub, TAGS.legacy)).toBe(false);
+    expect(picker(host)?.textContent).toContain("legacy");
+    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title"), "Permitted title"));
+    expect(getMeta(fix.document.ydoc).title).toBe("Permitted title");
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
+    expect(readDocumentTags(fix.document.ydoc, hub)).toEqual([{ id: TAGS.legacy, name: "legacy" }]);
+    hub.destroy();
   });
 });

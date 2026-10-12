@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   EXAMPLE_TAGS, InvalidTagAssignmentError, InvalidTagDescriptionError,
-  InvalidTagIdentityError, InvalidTagNameError, TAG_CATALOG_RESTORED_KEY,
+  InvalidTagIdentityError, InvalidTagNameError, TAG_CATALOG_DELETED_KEY, TAG_CATALOG_RESTORED_KEY,
   TAG_CATALOG_RETIRED_KEY, assignDocumentTags, cleanupDocumentTags,
   createTagCatalogEntry, deleteTagCatalogEntry, exportMarkdown, getDirectoryEntry,
   getMeta, getMetaMap, getTagCatalogFlags, getTagCatalogIdentities, initDoc,
@@ -143,7 +143,7 @@ describe("workspace tag catalog", () => {
     syncDocs(left, right);
     expect(listTagCatalog(left)).toEqual([]);
     expect(listTagCatalog(right)).toEqual([]);
-    expect(listDeletedTagIdentities(left)).toEqual([AUTH, BILLING]);
+    expect(listDeletedTagIdentities(left)).toEqual([EXAMPLE_TAGS[0].id, AUTH, BILLING]);
     expect(readDocumentTags(doc, left)).toEqual([]);
     expect(getMeta(doc).tags).toEqual([BILLING]);
   });
@@ -245,6 +245,40 @@ describe("workspace tag catalog", () => {
     expect(listTagCatalog(stale).some((entry) => entry.name === "billing")).toBe(false);
   });
 
+  it("never revives a deleted curated example through a fresh offline seed", () => {
+    const current = new Y.Doc();
+    const fresh = new Y.Doc();
+    const rfc = EXAMPLE_TAGS.find((entry) => entry.name === "rfc")!;
+    createTagCatalogEntry(current, "rfc", AUTH, "Proposal discussions");
+    deleteTagCatalogEntry(current, AUTH);
+    seedTagCatalog(fresh);
+    expect(listTagCatalog(fresh).some((entry) => entry.name === "rfc")).toBe(true);
+    syncDocs(current, fresh);
+    expect(listTagCatalog(current)).toEqual(listTagCatalog(fresh));
+    expect(listTagCatalog(current).some((entry) => entry.name === "rfc")).toBe(false);
+    expect(isTagCatalogIdentityDeleted(fresh, AUTH)).toBe(true);
+    expect(isTagCatalogIdentityDeleted(fresh, rfc.id)).toBe(true);
+    const staleAssignment = document([AUTH, rfc.id]);
+    expect(readDocumentTags(staleAssignment, current)).toEqual([]);
+    createTagCatalogEntry(current, "rfc", BILLING, "New proposals");
+    syncDocs(current, fresh);
+    expect(listTagCatalog(fresh).find((entry) => entry.name === "rfc")).toEqual({ id: BILLING, name: "rfc", description: "New proposals" });
+    expect(readDocumentTags(staleAssignment, fresh)).toEqual([]);
+    cleanupDocumentTags(staleAssignment, fresh);
+    expect(getMeta(staleAssignment).tags).toEqual([]);
+  });
+
+  it("does not seed an example whose curated identity is already deleted", () => {
+    const catalog = new Y.Doc();
+    legacyTag(catalog, AUTH, "rfc");
+    catalog.getMap<boolean>(TAG_CATALOG_DELETED_KEY).set(AUTH, true);
+    seedTagCatalog(catalog);
+    const rfc = EXAMPLE_TAGS.find((entry) => entry.name === "rfc")!;
+    expect(getTagCatalogIdentities(catalog).has(rfc.id)).toBe(false);
+    expect(listTagCatalog(catalog).some((entry) => entry.name === "rfc")).toBe(false);
+    expect(isTagCatalogSeeded(catalog)).toBe(true);
+  });
+
   it("does not add examples to an already seeded catalog", () => {
     const older = new Y.Doc();
     for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== "rfc")) {
@@ -298,12 +332,23 @@ describe("workspace tag catalog", () => {
     expect(getMeta(doc).tags).toEqual([]);
   });
 
+  it("clears provisional strings on whole-set writes while retaining unresolved UUIDs", () => {
+    const catalog = new Y.Doc();
+    createTagCatalogEntry(catalog, "auth", AUTH);
+    const empty = document(["provisional", UNKNOWN]);
+    assignDocumentTags(empty, catalog, []);
+    expect(getMeta(empty).tags).toEqual([UNKNOWN]);
+    const assigned = document(["provisional", UNKNOWN]);
+    assignDocumentTags(assigned, catalog, [AUTH]);
+    expect(getMeta(assigned).tags).toEqual([AUTH, UNKNOWN]);
+  });
+
   it("refuses unknown and deleted assignments atomically even when already stored", () => {
     const catalog = new Y.Doc();
     createTagCatalogEntry(catalog, "auth", AUTH);
     createTagCatalogEntry(catalog, "deleted", DELETED);
     deleteTagCatalogEntry(catalog, DELETED);
-    const doc = document([DELETED, UNKNOWN]);
+    const doc = document([DELETED, UNKNOWN, "provisional"]);
     const before = Y.encodeStateAsUpdate(doc);
     expect(() => assignDocumentTags(doc, catalog, [AUTH, DELETED, UNKNOWN])).toThrow(InvalidTagAssignmentError);
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
