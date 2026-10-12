@@ -36,7 +36,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta } from "@uberblick/schema";
 import { RoutePane } from "../src/ui/App.js";
-import { CopyLink, DocMetaLine } from "../src/ui/DocChrome.js";
+import { CopyLink, DocMetaLine } from "../src/ui/document/DocChrome.js";
 import { notifyTransient } from "../src/notifications.js";
 import { useDocMeta } from "../src/ui/hooks.js";
 import {
@@ -51,7 +51,7 @@ import {
 } from "../src/ui/route.js";
 import type { Route } from "../src/ui/route.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import type { RemotePresence } from "../src/ui/doc-chrome.js";
+import type { RemotePresence } from "../src/ui/status/doc-chrome.js";
 
 /** Nobody else in the room: these cases are about addresses, not the strip. */
 const NOBODY: readonly RemotePresence[] = [];

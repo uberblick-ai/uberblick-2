@@ -21,12 +21,12 @@ import type { ReactElement } from "react";
 import * as Y from "yjs";
 import { Awareness, removeAwarenessStates } from "y-protocols/awareness";
 import { appendBlock, getBlocksFragment, initDoc, insertBlock } from "@uberblick/schema";
-import { SyncPanel } from "../src/ui/SyncPanel.js";
-import { StatusLine } from "../src/ui/EditorPane.js";
+import { SyncPanel } from "../src/ui/status/SyncPanel.js";
+import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { usePresence } from "../src/ui/hooks.js";
 import type { HubEndpoint } from "../src/config.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { TOKEN_MISSING } from "../src/ui/status/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 
 /** A workspace id is a uuid. */

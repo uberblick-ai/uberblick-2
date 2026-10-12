@@ -3,13 +3,13 @@
 import { act, render } from "./react-render.js";
 import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StatusLine } from "../src/ui/EditorPane.js";
+import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
-import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status/status-reading.js";
 import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
-import type { RemotePresence } from "../src/ui/doc-chrome.js";
+import type { RemotePresence } from "../src/ui/status/doc-chrome.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";

@@ -52,7 +52,7 @@ import {
 } from "../src/editor/mention-menu.js";
 import type { MentionTrigger } from "../src/editor/mention-menu.js";
 import { moveTableRow, tableRowTarget } from "../src/editor/table-controls.js";
-import { MentionMenu } from "../src/ui/MentionMenu.js";
+import { MentionMenu } from "../src/ui/editor-controls/MentionMenu.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 

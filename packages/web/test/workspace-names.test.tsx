@@ -4,7 +4,7 @@ import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
+import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
 import { useWorkspaceNames, workspaceLabel } from "../src/ui/workspace-names.js";
 import type { Workspace } from "../src/ui/route.js";
 

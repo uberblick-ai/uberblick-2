@@ -34,8 +34,8 @@ import {
   removeAwarenessStates,
 } from "y-protocols/awareness";
 import type { ReactElement } from "react";
-import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
-import { UserMenu } from "../src/ui/UserMenu.js";
+import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
+import { UserMenu } from "../src/ui/sidebar/UserMenu.js";
 import type { AccountIdentity } from "../src/shell/account.js";
 import { useAgentSessions, useSetting } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";

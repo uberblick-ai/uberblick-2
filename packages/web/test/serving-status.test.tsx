@@ -11,7 +11,7 @@ import {
   SERVING_STATUS_SETTLE_MS,
   SERVING_STATUS_TIMEOUT_MS,
   useServingRoomStatus,
-} from "../src/ui/serving-status.js";
+} from "../src/ui/status/serving-status.js";
 
 const ROOM_A = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc-a";
 const ROOM_B = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc-b";

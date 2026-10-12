@@ -47,7 +47,7 @@ import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import { uberblickSchema } from "../src/editor/create-editor.js";
 import { createDocLinkContext } from "../src/editor/doc-links.js";
 import type { DocLinkContext } from "../src/editor/doc-links.js";
-import { EditorPane } from "../src/ui/EditorPane.js";
+import { EditorPane } from "../src/ui/document/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import {
   mountEditor,

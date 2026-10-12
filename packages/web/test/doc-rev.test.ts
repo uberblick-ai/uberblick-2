@@ -33,7 +33,7 @@ import {
   setBlockType,
   type TableMapping,
 } from "@uberblick/schema";
-import { observeDocRev } from "../src/ui/doc-chrome.js";
+import { observeDocRev } from "../src/ui/status/doc-chrome.js";
 
 interface Fixture {
   ydoc: Y.Doc;

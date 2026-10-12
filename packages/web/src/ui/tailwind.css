@@ -17,27 +17,27 @@
  * classes.
  */
 @source "./shadcn";
-@source "./CommentForm.tsx";
-@source "./CommentComposer.tsx";
-@source "./Sidebar.tsx";
+@source "./comments/CommentForm.tsx";
+@source "./comments/CommentComposer.tsx";
+@source "./sidebar/Sidebar.tsx";
 @source "./App.tsx";
-@source "./RemoteHubGuide.tsx";
-@source "./ThreadsPane.tsx";
-@source "./BlockMenu.tsx";
-@source "./CaretMenu.tsx";
-@source "./MentionMenu.tsx";
-@source "./WorkspaceSettings.tsx";
-@source "./HubSettings.tsx";
-@source "./WorkspaceSwitcher.tsx";
-@source "./UserMenu.tsx";
-@source "./OutlinePane.tsx";
-@source "./DocChrome.tsx";
+@source "./document/RemoteHubGuide.tsx";
+@source "./comments/ThreadsPane.tsx";
+@source "./editor-controls/BlockMenu.tsx";
+@source "./editor-controls/CaretMenu.tsx";
+@source "./editor-controls/MentionMenu.tsx";
+@source "./settings/WorkspaceSettings.tsx";
+@source "./settings/HubSettings.tsx";
+@source "./sidebar/WorkspaceSwitcher.tsx";
+@source "./sidebar/UserMenu.tsx";
+@source "./document/OutlinePane.tsx";
+@source "./document/DocChrome.tsx";
 @source "./PickerList.tsx";
-@source "./CodeLanguageControl.tsx";
-@source "./EditorPane.tsx";
+@source "./editor-controls/CodeLanguageControl.tsx";
+@source "./document/EditorPane.tsx";
 @source "../shell/DocumentList.tsx";
-@source "./PeerCluster.tsx";
-@source "./SyncPanel.tsx";
+@source "./status/PeerCluster.tsx";
+@source "./status/SyncPanel.tsx";
 
 /*
  * Bridge names to existing product tokens without defining colors. Sidebar-

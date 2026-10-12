@@ -2,8 +2,8 @@ import { act, renderSettled } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import type { AccessAction, AccessAnswer, HubAdmin, HubWorkspace } from "../src/shell/workspace-access.js";
-import { HubSettings } from "../src/ui/HubSettings.js";
-import { useHubAdministration } from "../src/ui/hub-administration.js";
+import { HubSettings } from "../src/ui/settings/HubSettings.js";
+import { useHubAdministration } from "../src/ui/settings/hub-administration.js";
 
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
 const SERVING = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };

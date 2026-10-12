@@ -24,7 +24,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { rawSyncState, useCalmSyncState } from "../src/ui/calm.js";
+import { rawSyncState, useCalmSyncState } from "../src/ui/status/calm.js";
 
 /** The workspace these stub room keys sit in. A workspace id is a uuid. */
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";

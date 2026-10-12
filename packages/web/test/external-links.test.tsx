@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, getBlocksFragment, initDoc } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { EditorPane } from "../src/ui/EditorPane.js";
+import { EditorPane } from "../src/ui/document/EditorPane.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";

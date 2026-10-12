@@ -21,7 +21,7 @@ import {
 import type { Editor } from "@tiptap/core";
 import { redo, undo, yUndoPluginKey } from "y-prosemirror";
 import { codeHighlightingKey } from "../src/editor/syntax-highlighting.js";
-import { threadIdFromTarget } from "../src/ui/threads.js";
+import { threadIdFromTarget } from "../src/ui/comments/threads.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 
 const editors: Editor[] = [];

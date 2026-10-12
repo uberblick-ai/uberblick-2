@@ -21,8 +21,8 @@
 
 import { act, render } from "./react-render.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SETTLE_MS, rawSyncState, useCalmSyncState } from "../src/ui/calm.js";
-import type { SyncState } from "../src/ui/calm.js";
+import { SETTLE_MS, rawSyncState, useCalmSyncState } from "../src/ui/status/calm.js";
+import type { SyncState } from "../src/ui/status/calm.js";
 import type { RoomStatus } from "../src/collab/rooms.js";
 
 /** A connected, quiet room — the settled good state, patched per case. */

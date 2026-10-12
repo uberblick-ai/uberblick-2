@@ -1,12 +1,12 @@
 /** Status notices follow the same settled, room-scoped facts as their header. */
 import { act, cleanup, render } from "./react-render.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StatusLine } from "../src/ui/EditorPane.js";
+import { StatusLine } from "../src/ui/document/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
 import type { Notice } from "../src/notifications.js";
 import { AUTH_REJECTED } from "@uberblick/schema/protocol";
-import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
+import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status/status-reading.js";
 
 const notices = vi.hoisted(() => {
   const active = new Map<string, Notice>();

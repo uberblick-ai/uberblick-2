@@ -21,8 +21,8 @@ import {
   initDoc,
   setBlockLevel,
 } from "@uberblick/schema";
-import { observeOutline, outlineFromDoc } from "../src/ui/outline.js";
-import type { OutlineEntry } from "../src/ui/outline.js";
+import { observeOutline, outlineFromDoc } from "../src/ui/document/outline.js";
+import type { OutlineEntry } from "../src/ui/document/outline.js";
 import { mountEditor } from "./helpers.js";
 
 function docWithHeadings(): Y.Doc {

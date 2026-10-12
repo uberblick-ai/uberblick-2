@@ -17,8 +17,8 @@ import { decisionCurrentRecord, decisionTopicState, resolveDecisionTopics } from
 import type { DecisionTopicState, DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
-import { LifecycleBadge } from "../ui/LifecycleBadge.js";
-import { TOPIC_STATES } from "../ui/decision-state.js";
+import { LifecycleBadge } from "../ui/document/LifecycleBadge.js";
+import { TOPIC_STATES } from "../ui/document/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { foldForTitleMatch } from "../title-fold.js";
 

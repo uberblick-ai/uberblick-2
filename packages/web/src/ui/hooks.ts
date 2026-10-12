@@ -36,12 +36,12 @@ import { agentCursorAwareness } from "../editor/collaboration.js";
 import { findForeignBlocks, findLinkConflicts } from "../editor/palette.js";
 import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
-import { groupAgentPresence, observeDocRev, presenceKey, readPresence, samePresence } from "./doc-chrome.js";
-import type { RemotePresence } from "./doc-chrome.js";
-import { observeOutline } from "./outline.js";
-import type { OutlineEntry } from "./outline.js";
-import { observeThreads } from "./threads.js";
-import type { ThreadView } from "./threads.js";
+import { groupAgentPresence, observeDocRev, presenceKey, readPresence, samePresence } from "./status/doc-chrome.js";
+import type { RemotePresence } from "./status/doc-chrome.js";
+import { observeOutline } from "./document/outline.js";
+import type { OutlineEntry } from "./document/outline.js";
+import { observeThreads } from "./comments/threads.js";
+import type { ThreadView } from "./comments/threads.js";
 
 /**
  * Resolve configuration before acquiring any room: the first connect fixes

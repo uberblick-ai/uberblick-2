@@ -31,11 +31,11 @@ import {
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
-import { CommentComposer } from "../src/ui/CommentComposer.js";
-import { ThreadsPane } from "../src/ui/ThreadsPane.js";
+import { CommentComposer } from "../src/ui/comments/CommentComposer.js";
+import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
 import { cellTextTargetOf, commentTargetOf } from "../src/editor/selection.js";
-import { withMention } from "../src/ui/CommentForm.js";
-import { resolvedHighlightCss } from "../src/ui/threads.js";
+import { withMention } from "../src/ui/comments/CommentForm.js";
+import { resolvedHighlightCss } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { useThreads } from "../src/ui/hooks.js";

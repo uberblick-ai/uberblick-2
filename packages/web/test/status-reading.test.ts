@@ -12,12 +12,12 @@
 import { describe, expect, it } from "vitest";
 import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomStatus } from "../src/collab/rooms.js";
-import type { SyncState } from "../src/ui/calm.js";
+import type { SyncState } from "../src/ui/status/calm.js";
 import {
   STORE_REFUSED,
   TOKEN_MISSING,
   statusReading,
-} from "../src/ui/status-reading.js";
+} from "../src/ui/status/status-reading.js";
 
 /** A room that is connected, synced and refused by nothing. */
 const CALM: RoomStatus = {

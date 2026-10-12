@@ -5,7 +5,7 @@ import {
   appendBlock, cardButton, cardPartTexts, getBlocksFragment, insertBlock,
 } from "@uberblick/schema";
 import { openCardButton } from "../src/editor/card-button.js";
-import { CardButtonControls } from "../src/ui/CardButtonControls.js";
+import { CardButtonControls } from "../src/ui/editor-controls/CardButtonControls.js";
 import { mountEditor } from "./helpers.js";
 import { act, renderSettled } from "./react-render.js";
 

@@ -1,8 +1,8 @@
 import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AccountClient, AccountIdentity } from "../src/shell/account.js";
-import { useServingAccount } from "../src/ui/serving-account.js";
-import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/serving-status.js";
+import { useServingAccount } from "../src/ui/status/serving-account.js";
+import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
 function Reading({ api }: { api: AccountClient | null }) {
   const account = useServingAccount(api);

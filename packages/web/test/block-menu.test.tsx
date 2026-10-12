@@ -46,7 +46,7 @@ import {
   slashTriggerAt,
 } from "../src/editor/block-menu.js";
 import type { SlashTrigger } from "../src/editor/block-menu.js";
-import { BlockMenu } from "../src/ui/BlockMenu.js";
+import { BlockMenu } from "../src/ui/editor-controls/BlockMenu.js";
 import { mountEditor } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 

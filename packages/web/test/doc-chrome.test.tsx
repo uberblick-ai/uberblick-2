@@ -18,7 +18,7 @@ import {
   setStatus,
   setTags,
 } from "@uberblick/schema";
-import { DocMetaLine } from "../src/ui/DocChrome.js";
+import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
