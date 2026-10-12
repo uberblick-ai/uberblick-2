@@ -10,8 +10,8 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
     title: "List documents",
     description:
       "List workspace documents from directory stubs without opening document rooms. " +
-      "Decision records hold one to three short answer blocks with a brief reason; guidance belongs on the " +
-      "related regular page and discussion in an RFC. get_doc on a regular page marks topics related or linked. " +
+      "Decision topics summarize one to three short answer blocks and a brief reason; their related page " +
+      "holds guidance and an RFC holds discussion. Read a regular page with get_doc for related or linked topics. " +
       "The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. " +
       "kind: decision returns one " +
       "row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status " +
