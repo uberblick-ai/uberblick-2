@@ -46,7 +46,7 @@ export function parseCardButton(source: string): CardButton {
     throw new InvalidCardError("The button text must be nonempty plain text, without formatting or document links");
   }
   const suffix = source.slice(link.next);
-  if (suffix !== "" && !/^[ \t]+[^\r\n]*$/.test(suffix)) {
+  if (suffix !== "" && (!/^[ \t]/.test(suffix) || /[\r\n]/.test(suffix))) {
     throw new InvalidCardError("Only style and color words may follow a button link");
   }
   let style: CardButtonStyle | undefined;

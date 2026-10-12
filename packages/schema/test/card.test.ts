@@ -263,6 +263,13 @@ describe("card link button", () => {
     expect(getBlockText(doc, id).match(/^button:/gm)).toHaveLength(50);
   });
 
+  it("refuses long malformed appearance suffixes without backtracking", () => {
+    const suffix = "\t".repeat(100_000);
+    for (const ending of ["\r", "\n"]) {
+      expect(() => parseCardButton(`[Action](codex://new)${suffix}${ending}`)).toThrow(InvalidCardError);
+    }
+  });
+
   it("refuses unsupported whole-button appearance values before serializing them", () => {
     for (const appearance of [{ style: "filled blue" }, { style: "" }, { color: "filled" }, { color: "amber" }]) {
       expect(() => writeCardButton({ text: "Action", href: "codex://new", ...appearance } as CardButton)).toThrow(InvalidCardError);
