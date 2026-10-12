@@ -184,6 +184,7 @@ test("a document link typed in a table cell opens its target and Back restores t
 
 for (const colorScheme of ["light", "dark"] as const) {
   test(`the cell @ picker takes keyboard and pointer or iPad touch picks through scrolling and sync — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
+    const touch = browserName === "webkit";
     // The supported touch proof needs an iPad cell surface, independent of the
     // phone project used for the rest of the tagged browser suite.
     const page = await openApp(browser, "/", {
@@ -205,7 +206,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     const first = await createDoc(author, firstTitle);
     const second = await createDoc(author, secondTitle);
     if ((page.viewportSize()?.width ?? 1280) < 1280) {
-      await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+      await activateControl(page.getByRole("button", { name: "Show document list", exact: true }), { touch });
     }
     const source = await createDoc(page, docTitle("picker table"));
     await placeCaret(page);
@@ -216,7 +217,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(table.locator("th")).toHaveCount(8);
     const header = table.locator("th").last();
     const wrapper = table.locator("..");
-    await placeCaretIn(header);
+    await placeCaretIn(header, { touch });
     await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
     await page.keyboard.type(` @${prefix}`);
     const picker = page.getByRole("listbox", { name: "Documents" });
@@ -255,7 +256,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     const body = table.locator("td").first();
     await page.keyboard.type(`@${prefix}`);
     await expect(picker).toBeVisible();
-    await activateControl(picker.getByRole("option", { name: firstTitle, exact: true }));
+    await activateControl(picker.getByRole("option", { name: firstTitle, exact: true }), { touch });
     const bodyLink = body.locator("a.ub-doclink");
     await expect(bodyLink).toHaveText(firstTitle);
     await expect(bodyLink).toHaveAttribute("data-doc-id", first);
@@ -288,7 +289,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.reload();
     await expect(headerLink).toHaveText(secondTitle);
     await expect(bodyLink).toHaveText(firstTitle);
-    await activateControl(headerLink);
+    await activateControl(headerLink, { touch });
     await expect(page).toHaveURL(new RegExp(`/${ws()}/${second}$`));
     await expect(page.locator(".ub-title")).toHaveValue(secondTitle);
   });
