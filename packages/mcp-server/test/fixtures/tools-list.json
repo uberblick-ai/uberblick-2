@@ -237,11 +237,12 @@
                   "table",
                   "terminal",
                   "chart",
-                  "card"
+                  "card",
+                  "figma"
                 ]
               },
               "text": {
-                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped.",
+                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
                 "type": "string"
               },
               "level": {
@@ -255,7 +256,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -631,7 +632,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -689,7 +690,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -750,7 +751,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -819,7 +820,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -850,7 +851,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -872,6 +873,65 @@
                   "text",
                   "rev",
                   "type"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
+                  },
+                  "rev": {
+                    "type": "string",
+                    "description": "Content hash to assert on a later block edit."
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "figma"
+                  },
+                  "figma": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "frame",
+                          "file",
+                          "prototype",
+                          "board",
+                          "slides",
+                          "community file"
+                        ]
+                      },
+                      "file": {
+                        "type": "string"
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "file"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Read-only view identity derived from the normalized Figma link."
+                  }
+                },
+                "required": [
+                  "id",
+                  "text",
+                  "rev",
+                  "type",
+                  "figma"
                 ],
                 "additionalProperties": false
               }
@@ -2786,7 +2846,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2844,7 +2904,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2905,7 +2965,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2974,7 +3034,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -3005,7 +3065,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -3027,6 +3087,65 @@
                   "text",
                   "rev",
                   "type"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
+                  },
+                  "rev": {
+                    "type": "string",
+                    "description": "Content hash to assert on a later block edit."
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "figma"
+                  },
+                  "figma": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "frame",
+                          "file",
+                          "prototype",
+                          "board",
+                          "slides",
+                          "community file"
+                        ]
+                      },
+                      "file": {
+                        "type": "string"
+                      },
+                      "fileName": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "file"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Read-only view identity derived from the normalized Figma link."
+                  }
+                },
+                "required": [
+                  "id",
+                  "text",
+                  "rev",
+                  "type",
+                  "figma"
                 ],
                 "additionalProperties": false
               }
@@ -3092,7 +3211,8 @@
                           "label",
                           "title",
                           "body",
-                          "footer"
+                          "footer",
+                          "caption"
                         ]
                       },
                       "start": {
@@ -3183,7 +3303,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read metadata, blocks and annotation threads with lifecycle and decision context. Decisions hold one to three short answer blocks; related pages hold guidance, RFCs discussion. Regular pages mark related topics first, then topics linked by any record. Decision metadata returns discussion: RFC UUID or null; entries cache it, null for none and absent if unknown. This derived link is separate from curated links and recorded answer. An RFC marks its topic linked unless also related. Cached answerPreview: legacy TL;DR, else first paragraph/list, at most 300 characters. Missing description and TL;DR are null. Data summaries name collections and record counts; get_data reads schemas/values. Blocks include rev. Tables use canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Nonempty plain labels; destinations are https or claude://code/new, claude-cli://open, codex://new, with optional ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Card rev includes every button and formatting; table rev includes formatting. Other text is plain; rev ignores marks. Prose doc_links expose character ranges; table and card links have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts toward this process's briefing. Edit with the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks and threads. Regular pages return related then linked decision topics; decisions return discussion (RFC UUID or null), separate from curated links and recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. Read-only figma: kind (frame, file, prototype, board, slides or community file), file, optional decoded fileName (dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive rev, including every button's text, destination, appearance and order; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -5085,7 +5205,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5115,7 +5235,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5148,7 +5268,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5189,7 +5309,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5220,7 +5340,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5242,6 +5362,65 @@
                     "text",
                     "rev",
                     "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
+                    },
+                    "rev": {
+                      "type": "string",
+                      "description": "Content hash to assert on a later block edit."
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "figma"
+                    },
+                    "figma": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "frame",
+                            "file",
+                            "prototype",
+                            "board",
+                            "slides",
+                            "community file"
+                          ]
+                        },
+                        "file": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "file"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Read-only view identity derived from the normalized Figma link."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "rev",
+                    "type",
+                    "figma"
                   ],
                   "additionalProperties": false
                 }
@@ -5358,7 +5537,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Splice changed block text, preserving edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch; without rev, mismatch is stale_block. Both carry currentText/currentRev. Assertions are local, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at same dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings: invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Cards use inline Markdown prose and repeated button: [Text](destination) lines after footer in authored order. Nonempty plain labels link to https or exact claude://code/new, claude-cli://open or codex://new, with optional ?query. One style (outline/filled) and color (neutral/blue/green/violet) may follow in either order, default outline neutral; output writes style before color and omits defaults. Invalid cards return invalid_card. Unchanged parts, buttons and anchors survive; rev includes formatting and each button's text, destination, appearance and order.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Splice block text, preserving edits elsewhere. Assert old_text and preferably rev from get_doc; stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block and verify export_markdown. Tables require GFM old/new text and table_mapping for structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: [Text](destination) lines after footer in authored order. New buttons need nonempty plain labels linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output writes style before color and omits defaults. invalid_card refuses bad input; unchanged parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line and marked caption. Accepted Figma view URLs retain only the path and node-id, starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes caption formatting. Card/Figma conversions and table_mapping are refused; new document targets must be known locally.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -5402,11 +5581,12 @@
             "table",
             "terminal",
             "chart",
-            "card"
+            "card",
+            "figma"
           ]
         },
         "text": {
-          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped.",
+          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
           "type": "string"
         },
         "level": {
@@ -5420,7 +5600,7 @@
           "type": "string"
         },
         "inline": {
-          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables, cards and figma also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card/:::figma and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
           "type": "array",
           "items": {
             "type": "object",
@@ -5490,7 +5670,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5520,7 +5700,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5553,7 +5733,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5594,7 +5774,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5625,7 +5805,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5647,6 +5827,65 @@
                     "text",
                     "rev",
                     "type"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."
+                    },
+                    "rev": {
+                      "type": "string",
+                      "description": "Content hash to assert on a later block edit."
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "figma"
+                    },
+                    "figma": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "frame",
+                            "file",
+                            "prototype",
+                            "board",
+                            "slides",
+                            "community file"
+                          ]
+                        },
+                        "file": {
+                          "type": "string"
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "node": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "file"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Read-only view identity derived from the normalized Figma link."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "text",
+                    "rev",
+                    "type",
+                    "figma"
                   ],
                   "additionalProperties": false
                 }
@@ -5763,7 +6002,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Card text omits its :::card and ::: delimiter lines: label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose holds inline Markdown. Each button has one [Text](destination) link with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Output preserves button order, writes style before color and omits defaults. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output. Chart text is a JSON mapping for a line chart or data table over this document's collection; invalid mappings show a problem. Use update_data for view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks. Tables take one GFM table or invalid_table refuses. Cards take :::card content without delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines and inline-Markdown prose. Button labels are plain text; destinations are https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with invalid_card. Figma takes :::figma content without delimiters: required url, optional plain one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com design/file/proto/board/slides/community/file links retain the key/id, optional name and node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments disappear. invalid_figma refuses bad headers, paths or height without writing; other sites require a plain link. Document targets must be known locally or doclink_target_not_known_locally refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. Other text is plain or literal source; chart source maps document data.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -6946,7 +7185,8 @@
                         "label",
                         "title",
                         "body",
-                        "footer"
+                        "footer",
+                        "caption"
                       ]
                     },
                     "start": {
@@ -7083,7 +7323,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; open it in the web editor. Existing card threads accept replies, resolution and reopening.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; open it in the web editor. Opening a Figma thread refuses with annotation_figma and no write. Existing card and Figma threads accept replies, resolution and reopening; Figma ranges name caption.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7262,7 +7502,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links, source blocks, tables and cards refuse. Write card links as inline Markdown in the card text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links, source blocks, tables, cards and Figma blocks refuse. Write card and Figma caption links as inline Markdown in their container text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7319,7 +7559,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Cards export as separate :::card containers with inline Markdown prose and escaped ::: lines. Each button: [Text](destination) line follows footer in authored order; its nonempty plain text links to an https URL or exact claude://code/new, claude-cli://open or codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; export writes style before color and omits default words. Import restores the buttons and appearances. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Render a Markdown projection: code, mermaid, terminal and chart keep source fences; tables write padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown prose and button: [Text](destination) lines after footer in authored order. Each exported button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; export writes style before color and omits defaults. Import restores buttons and appearances. Figma exports separate :::figma containers: url, optional literal title and height, blank line and marked caption. Normalized HTTPS www.figma.com links retain design/file/proto/board/slides/community/file path, key/id, optional name and node-id, starting-point-node-id, version-id; other query values and fragments were dropped at save. Absent keys are omitted; header newlines fold to spaces and prose lines starting ::: are escaped. Import restores caption marks and adjacent containers; invalid/unclosed containers remain literal paragraphs. MCP refuses bad Figma content with invalid_figma; get_doc derives kind/file/fileName/node. Markdown help owns height 240–960 and accepted links. Export contacts no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and MCP has no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

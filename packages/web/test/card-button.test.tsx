@@ -2,7 +2,7 @@ import { screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
-  appendBlock, cardButton, cardButtons, cardPartTexts, editBlock, getBlocks, getBlocksFragment, insertBlock,
+  appendBlock, cardButtons, cardPartTexts, editBlock, getBlocks, getBlocksFragment, insertBlock,
 } from "@uberblick/schema";
 import { openCardButton } from "../src/editor/card-button.js";
 import { CardButtonControls } from "../src/ui/CardButtonControls.js";
@@ -41,13 +41,13 @@ describe("card action controls", () => {
     expect(card.getAttribute("button")).toBeUndefined();
     act(() => fill("Discuss in **Codex**", "codex://new?prompt=Review%20this"));
     await click("Save button");
-    expect(cardButton(card)).toEqual({ text: "Discuss in **Codex**", href: "codex://new?prompt=Review%20this" });
+    expect(cardButtons(card)).toEqual([{ text: "Discuss in **Codex**", href: "codex://new?prompt=Review%20this" }]);
     expect(screen.getByRole("button", { name: "Discuss in **Codex**" }).textContent).toBe("Discuss in **Codex**");
     await click("Edit buttons");
     expect(screen.getByLabelText<HTMLInputElement>("Button text").value).toBe("Discuss in **Codex**");
     act(() => fill("Read report", "https://example.invalid/report"));
     await click("Save button");
-    expect(cardButton(card)).toEqual({ text: "Read report", href: "https://example.invalid/report" });
+    expect(cardButtons(card)).toEqual([{ text: "Read report", href: "https://example.invalid/report" }]);
     await click("Edit buttons");
     await click("Remove button");
     expect(card.getAttribute("button")).toBeUndefined();
@@ -126,7 +126,7 @@ describe("card action controls", () => {
     act(() => insertBlock(peer, null, { type: "paragraph", text: "Remote preface" }));
     act(() => fill("Open Claude", "claude://code/new?q=Opaque%20query"));
     await click("Save button");
-    expect(cardButton(card)).toEqual({ text: "Open Claude", href: "claude://code/new?q=Opaque%20query" });
+    expect(cardButtons(card)).toEqual([{ text: "Open Claude", href: "claude://code/new?q=Opaque%20query" }]);
     const remoteCard = getBlocksFragment(peer).get(1) as Y.XmlElement;
     expect(remoteCard.getAttribute("button")).toBe(card.getAttribute("button"));
     expect(peerEditor.state.doc.child(1).attrs.button).toBe(editor.state.doc.child(1).attrs.button);

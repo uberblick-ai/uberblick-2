@@ -8,7 +8,7 @@ test.describe("a hub administrator with no workspace membership", () => {
 
   for (const appearance of ["light", "dark"] as const) {
     for (const touch of [false, true]) {
-      test(`administrator removal uses ${touch ? "iPad touch" : "desktop pointer and keyboard"} in ${appearance}`,
+      test(`hub administration uses ${touch ? "iPad touch" : "desktop pointer and keyboard"} in ${appearance}`,
         { tag: touch ? "@webkit-touch" : "@webkit" }, async ({ browser, browserName }, info) => {
         test.skip(!touch && info.project.name === "webkit-iphone", "The paired iPad context owns touch coverage.");
         const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`, {
@@ -49,7 +49,59 @@ test.describe("a hub administrator with no workspace membership", () => {
         await expect(inventory).toBeVisible();
         await expect(inventory.getByText(harness().workspaceUuid.slice(0, 8), { exact: true })).toBeVisible();
         await expect(inventory.getByText("@other-admin", { exact: true })).toBeVisible();
-        await expect(inventory.getByRole("button")).toHaveCount(0);
+        const workspace = inventory.getByRole("row").filter({ hasText: harness().workspaceUuid.slice(0, 8) });
+        await expect(workspace.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
+        const suspend = workspace.getByRole("button", { name: /^Suspend / });
+        await activateControl(suspend);
+        const suspension = page.getByRole("alertdialog", { name: /^Suspend / });
+        await expect(suspension).toContainText("downloaded copies remain usable");
+        await expect(suspension.getByRole("button", { name: "Suspend", exact: true })).toHaveAttribute("data-variant", "default");
+        const cancelSuspend = suspension.getByRole("button", { name: "Cancel", exact: true });
+        await expect(cancelSuspend).toBeFocused();
+        if (!touch) {
+          await page.keyboard.press("Escape");
+          await expect(suspension).toHaveCount(0);
+          await expect(suspend).toBeFocused();
+          await suspend.press("Enter");
+          await expect(cancelSuspend).toBeFocused();
+        }
+        await activateControl(cancelSuspend);
+        await expect(suspension).toHaveCount(0);
+        await expect(suspend).toBeFocused();
+        await expect(workspace.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
+        if (!touch) {
+          await suspend.press("Enter");
+          await expect(cancelSuspend).toBeFocused();
+          await page.keyboard.press(browserName === "webkit" ? "Alt+Tab" : "Tab");
+          await expect(suspension.getByRole("button", { name: "Suspend", exact: true })).toBeFocused();
+          await page.keyboard.press("Enter");
+        } else {
+          await activateControl(suspend);
+          await activateControl(suspension.getByRole("button", { name: "Suspend", exact: true }));
+        }
+        await expect(workspace.getByRole("cell", { name: "Suspended", exact: true })).toBeVisible();
+        await expect(workspace).toContainText("@other-admin");
+        await expect(workspace.getByRole("cell").first()).toHaveText("1");
+        await page.reload();
+        if (touch) await activateControl(page.getByRole("button", { name: "Show sidebar", exact: true }));
+        await expect(page.getByRole("region", { name: "Hub", exact: true })).toBeVisible();
+        if (touch) await activateControl(page.getByRole("button", { name: "Workspaces", exact: true }));
+        await expect(workspace.getByRole("cell", { name: "Suspended", exact: true })).toBeVisible();
+        const restore = workspace.getByRole("button", { name: /^Restore / });
+        await activateControl(restore);
+        const restoration = page.getByRole("alertdialog", { name: /^Restore / });
+        await expect(restoration).toContainText("without signing in or being added again");
+        await expect(restoration.getByRole("button", { name: "Restore", exact: true })).toHaveAttribute("data-variant", "default");
+        const cancelRestore = restoration.getByRole("button", { name: "Cancel", exact: true });
+        await expect(cancelRestore).toBeFocused();
+        await activateControl(cancelRestore);
+        await expect(restoration).toHaveCount(0);
+        await expect(restore).toBeFocused();
+        await expect(workspace.getByRole("cell", { name: "Suspended", exact: true })).toBeVisible();
+        await activateControl(restore);
+        await activateControl(restoration.getByRole("button", { name: "Restore", exact: true }));
+        await expect(workspace.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
+        await expect(workspace.getByRole("button", { name: /^Suspend / })).toBeVisible();
       });
     }
   }
@@ -75,7 +127,9 @@ test.describe("a hub administrator with no workspace membership", () => {
       await expect(workspaces.getByRole("columnheader", { name: "Members", exact: true })).toHaveCount(0);
       await expect(workspaces.getByRole("columnheader", { name: "Admins", exact: true })).toHaveCount(0);
       await expect(workspaces.getByRole("rowheader")).toContainText("Members: 1 · Admins: @other-admin");
-      await expect(workspaces.getByRole("button")).toHaveCount(0);
+      await expect(workspaces.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
+      await expect(workspaces.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
+      await expect(workspaces.getByRole("button", { name: /^Suspend / })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
   }

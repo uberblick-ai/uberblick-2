@@ -91,11 +91,6 @@ export function cardButtons(element: Y.XmlElement): CardButton[] {
   }
 }
 
-export function cardButton(element: Y.XmlElement): CardButton | undefined {
-  const buttons = cardButtons(element);
-  return buttons.length === 1 ? buttons[0] : undefined;
-}
-
 /** The container header is inline Markdown, never a YAML mapping. */
 export function parseCardInput(source: string, requireTitle = true): CardText {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");

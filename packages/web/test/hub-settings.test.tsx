@@ -13,7 +13,7 @@ vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient
 
 const ADMIN: HubAdmin = { principalId: "person", githubAccountId: "1234", githubUsername: "person",
   workspaces: 0, lastSignedInAt: null, current: true };
-const INVENTORY: HubWorkspace = { workspaceId: WORKSPACE, name: "Project", members: 2, admins: ["person"] };
+const INVENTORY: HubWorkspace = { workspaceId: WORKSPACE, name: "Project", members: 2, admins: ["person"], status: "active" };
 
 function Reading({ page }: { page: "hub-admins" | "hub-workspaces" }) {
   const administration = useHubAdministration(WORKSPACE, SERVING, "presence", "settings");
@@ -57,6 +57,59 @@ describe("complete hub settings inventories", () => {
     const project = within(table).getAllByRole("row").find((row) => row.textContent?.includes("Project"));
     expect(project).toBeDefined();
     expect(within(project as HTMLElement).getAllByRole("cell")[1]?.textContent).toBe("@person, @other");
+  });
+
+  it("asks before suspending and restoring, then rereads the preserved inventory", async () => {
+    let inventory = INVENTORY;
+    api.mockImplementation(async (action) => {
+      if (action.operation === "own-hub-role") return { status: "ok", role: "admin", hub: HUB };
+      if (action.operation === "list-hub-workspaces") return { status: "ok", hub: HUB, workspaces: [inventory], nextCursor: null };
+      if (action.operation !== "suspend-workspace" && action.operation !== "restore-workspace") throw new Error("Unexpected request");
+      inventory = { ...inventory, status: action.operation === "suspend-workspace" ? "suspended" : "active" };
+      return { status: "ok", hub: HUB, workspaceId: action.workspaceId, workspaceStatus: inventory.status };
+    });
+    await renderSettled(<Reading page="hub-workspaces" />);
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeDefined();
+    expect(screen.getByRole("cell", { name: "Active" })).toBeDefined();
+    expect(screen.getByText(/Suspending one stops its sync for everyone/)).toBeDefined();
+    await act(async () => screen.getByRole("button", { name: "Suspend Project" }).click());
+    const suspend = screen.getByRole("alertdialog", { name: 'Suspend "Project"?' });
+    expect(suspend.textContent).toContain("downloaded copies remain usable");
+    expect(api.mock.calls.some(([action]) => action.operation === "suspend-workspace")).toBe(false);
+    await act(async () => within(suspend).getByRole("button", { name: "Cancel" }).click());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(api.mock.calls.some(([action]) => action.operation === "suspend-workspace")).toBe(false);
+    await act(async () => screen.getByRole("button", { name: "Suspend Project" }).click());
+    await act(async () => within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }).click());
+    expect(screen.getByRole("cell", { name: "Suspended" })).toBeDefined();
+    expect(screen.getByText("Project suspended.")).toBeDefined();
+    expect(within(screen.getByRole("table")).getByText("@person")).toBeDefined();
+    expect(api.mock.calls.filter(([action]) => action.operation === "suspend-workspace").map(([action]) => action))
+      .toEqual([{ operation: "suspend-workspace", workspaceId: WORKSPACE }]);
+    await act(async () => screen.getByRole("button", { name: "Restore Project" }).click());
+    const restore = screen.getByRole("alertdialog", { name: 'Restore "Project"?' });
+    expect(restore.textContent).toContain("without signing in or being added again");
+    expect(api.mock.calls.some(([action]) => action.operation === "restore-workspace")).toBe(false);
+    await act(async () => within(restore).getByRole("button", { name: "Restore" }).click());
+    expect(screen.getByRole("cell", { name: "Active" })).toBeDefined();
+    expect(screen.getByText("Project restored.")).toBeDefined();
+    expect(api.mock.calls.filter(([action]) => action.operation === "restore-workspace").map(([action]) => action))
+      .toEqual([{ operation: "restore-workspace", workspaceId: WORKSPACE }]);
+  });
+
+  it("drops hub authority and the inventory when a confirmed suspension is refused", async () => {
+    api.mockImplementation(async (action) => {
+      if (action.operation === "own-hub-role") return { status: "ok", role: "admin", hub: HUB };
+      if (action.operation === "list-hub-workspaces") return { status: "ok", hub: HUB, workspaces: [INVENTORY], nextCursor: null };
+      return { status: "forbidden", hub: HUB };
+    });
+    await renderSettled(<Reading page="hub-workspaces" />);
+    await act(async () => screen.getByRole("button", { name: "Suspend Project" }).click());
+    await act(async () => within(screen.getByRole("alertdialog")).getByRole("button", { name: "Suspend" }).click());
+    expect(screen.queryByRole("region", { name: "Hub" })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("hub refused access");
+    expect(api.mock.calls.filter(([action]) => action.operation === "list-hub-workspaces")).toHaveLength(1);
   });
 
   it.each(["hub-admins", "hub-workspaces"] as const)("discards %s rows and authority when a subsequent page is refused", async (page) => {

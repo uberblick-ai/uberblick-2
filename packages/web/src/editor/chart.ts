@@ -1,4 +1,3 @@
-// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /**
  * A document-owned data view. Only the JSON mapping is block content. Drawing,
  * diagnostics and subscriptions never dispatch a content transaction or repair

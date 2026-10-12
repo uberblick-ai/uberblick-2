@@ -276,6 +276,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       await button.hover();
       const hovered = await buttonPaint(button);
       expect(contrast(hovered.ink, composite(hovered.ground, hovered.under)), `${option.text} hover`).toBeGreaterThanOrEqual(4.5);
+      if (!touch) expect(hovered.ground, `${option.text} hover feedback`).not.toBe(resting.ground);
     }
     expect(paints.size).toBe(8);
     await page.evaluate(() => {

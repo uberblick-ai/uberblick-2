@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_PARTS, CardAnnotationError, CardConversionError, InvalidCardError,
   InlineLinkRangeError, OldTextMismatchError, StaleBlockError,
-  appendBlock, buildCardElement, cardButton, cardButtons, cardInline, cardPartElement, cardPartTexts,
+  appendBlock, buildCardElement, cardButtons, cardInline, cardPartElement, cardPartTexts,
   createAnnotation, decisionApprovalFingerprint, deleteAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
   getBlockText, importMarkdown, initDoc, insertBlock, isCardButtonHref, isSupportedCard,
@@ -378,7 +378,7 @@ describe("card link button", () => {
     expect(getBlockText(doc, id)).toBe(SOURCE.replace("footer: Metadata", `footer: Metadata\nbutton: ${source}`));
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
     expect(getBlocks(copy).map(({ text }) => text)).toEqual([getBlockText(doc, id)]);
-    expect(cardButton(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual({ text: "Author's text", href });
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([{ text: "Author's text", href }]);
   });
 
   it.each([
@@ -399,7 +399,7 @@ describe("card link button", () => {
     expect(importMarkdown(container).blocks).toEqual([{ type: "paragraph", text: container, inline: [{ text: container, marks: {} }] }]);
     card.setAttribute("button", `[Discuss](${href})`);
     expect(isSupportedCard(card)).toBe(false);
-    expect(cardButton(card)).toBeUndefined();
+    expect(cardButtons(card)).toEqual([]);
   });
 
   it.each([
@@ -419,10 +419,10 @@ describe("card link button", () => {
     const href = "codex://new?prompt=space and (<opaque>)\\literal&encoded=%2F%25";
     const button = { text, href };
     const { doc, id, card } = fixture(`title: Action\nbutton: ${writeCardButton(button)}\n\nBody`);
-    expect(cardButton(card)).toEqual(button);
+    expect(cardButtons(card)).toEqual([button]);
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
     expect(getBlocks(copy)[0]!.text).toBe(getBlockText(doc, id));
-    expect(cardButton(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(button);
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([button]);
     for (const value of ["", " ", "line\nbreak", "line\rbreak"]) {
       expect(() => writeCardButton({ text: value, href })).toThrow(InvalidCardError);
     }
@@ -469,13 +469,13 @@ describe("card link button", () => {
     partText(findBlockElement(b, id)!, "body").insert(0, "Concurrent ");
     syncDocs(a, b);
     expect(getBlockText(a, id)).toBe(getBlockText(b, id));
-    const winner = cardButton(findBlockElement(a, id)!);
-    expect([{ text: "First", href: "codex://new" }, { text: "Second", href: "claude-cli://open?q=second" }]).toContainEqual(winner);
+    const winner = cardButtons(findBlockElement(a, id)!);
+    expect([[{ text: "First", href: "codex://new" }], [{ text: "Second", href: "claude-cli://open?q=second" }]]).toContainEqual(winner);
     expect(cardInline(findBlockElement(a, id)!).title).toEqual([{ text: "Changed A useful title", marks: {} }]);
     expect(cardInline(findBlockElement(a, id)!).body).toEqual([{ text: "Concurrent The body text.", marks: {} }]);
     const current = getBlockText(a, id);
     editBlock(a, id, current, current.replace(/^button:.*\n/m, ""));
     syncDocs(a, b);
-    expect(cardButton(findBlockElement(b, id)!)).toBeUndefined();
+    expect(cardButtons(findBlockElement(b, id)!)).toEqual([]);
   });
 });

@@ -62,7 +62,7 @@ Ordinary documents omit \`kind\` and \`status\`. Decision records have kind \`de
 
 ## Decision answers and topics
 
-A decision record holds its current answer with a brief reason in one to three short answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Guidance belongs on the related regular page and discussion in a separately connected RFC. Headings, quotes, Mermaid, terminal, chart and card blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
+A decision record holds its current answer with a brief reason in one to three short answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Guidance belongs on the related regular page and discussion in a separately connected RFC. Headings, quotes, Mermaid, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
 
 Open records may be empty. Every move from another state to \`decided\`, including creation and kind adoption, requires at least one answer block with non-blank text, a valid answer shape, no TL;DR and no structured data. Refusals use \`decision_answer_empty\`, \`decision_tldr_unsupported\`, \`decision_data_unsupported\` or the matching shape code and write nothing. Decision content writes carry no TL;DR review reminder. Legacy content remains readable; an already decided record is not re-checked when its stance is confirmed or rejected.
 
@@ -157,15 +157,35 @@ Each \`button: [Text](destination)\` value has exactly one link with nonempty pl
 
 Export and get_doc order label, title, footer, then every button in authored order. Button output writes style before color and omits \`outline\` and \`neutral\`; import restores the same buttons and appearances. Empty prose keys are omitted and prose header-value newlines fold to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate prose key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 
+## Figma
+
+A Figma block holds one design reference. Its container opens on a line exactly \`:::figma\` and closes on a line exactly \`:::\`. It uses the card container rules, separate from literal source fences: lowercase keys, each at most once and in any input order, one optional space after the colon, and the first blank line ending the header. The closed keys are required \`url\`, optional \`title\` and optional \`height\`; the remaining text is one optional prose caption with bold, italic, strike, inline code, http(s) external links and document links.
+
+    :::figma
+    url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345&t=AbC123-1
+    title: Payment, mobile
+    height: 560
+
+    Card form after the **address** step.
+    :::
+
+The URL accepts only HTTPS on \`www.figma.com\` or \`figma.com\`, with \`/design/<key>[/<name>]\`, \`/file/<key>[/<name>]\`, \`/proto/<key>[/<name>]\`, \`/board/<key>[/<name>]\`, \`/slides/<key>[/<name>]\` or \`/community/file/<id>[/<name>]\`. Saving rebuilds it on \`https://www.figma.com\` with only the path kind, file key/id, file name, \`node-id\`, \`starting-point-node-id\` and \`version-id\`. Other parameters, including \`t\`, and fragments are dropped. Branch paths, \`/deck/\` and extra path segments are unsupported. No schema, MCP, CLI or hub operation contacts Figma.
+
+Title is literal one-line plain text, without inline Markdown; an empty title is absent and export folds title newlines to spaces. Height is a whole number from 240 to 960 pixels, defaulting to 480 when absent. get_doc orders url, title, height, omits absent keys, then writes a blank line and the caption as inline Markdown. It also returns read-only \`figma: {kind, file, fileName?, node?}\`: kind is frame for design/file with node-id, otherwise file; proto gives prototype, then board, slides or community file. The optional fileName is percent-decoded with dashes read as spaces; node changes \`12-345\` or \`12%3A345\` to \`12:345\`. The revision includes caption formatting.
+
+Missing URL, unknown or duplicate keys, non-key header lines, unsupported paths and invalid height refuse before writing with \`invalid_figma\`. A non-Figma or HTTP link gives exactly \`figma blocks take figma.com links only; use a plain link for other sites\`. Markdown import retains invalid or unclosed containers as plain paragraph text, delimiters included. Export escapes caption and ordinary prose lines beginning \`:::\` with a backslash, and import restores them; adjacent containers stay separate.
+
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
 ## MCP content writes
 
-For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. A card's text is the content between the container delimiters. get_doc exposes canonical table GFM and card content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
+For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does not add inline formatting. Creation and insertion may supply explicit inline runs for prose. A table's text must be exactly one GFM table and writes its parsed cell formatting. Card and figma text is the content between its container delimiters, including create_doc seeds. get_doc exposes canonical table GFM, card content and Figma content; their revisions include inline formatting, while prose revisions ignore marks. Prose document links also appear as character ranges in \`doc_links\`.
 
 Table structural and multi-cell edits require \`table_mapping\` rows and columns; see \`edit_block\` for the full mapping contract. For prose carrying formatting, text splices can re-anchor a mark when a changed range touches its edge. See \`edit_block\` before changing a marked span and verify the result with \`export_markdown\`.
 
 Card edits splice only changed parts and characters, preserving unchanged buttons, their appearances and order, marks and comment anchors. Remove a button header line to remove that button. A card's rev includes every button's text, destination, style, color and order. The entire button list syncs as one atomic value, so concurrent button edits may overwrite each other without mixing text and destinations. Approval counts button text in order but excludes destinations, styles and colors. Prose card links count toward backlinks. Open card comments in the web editor: MCP \`annotate\` refuses new card anchors but accepts replies, resolution and reopening by thread_id. \`link_range\` refuses cards; write prose links as inline Markdown in their text. Returned annotation ranges name the card part.
+
+Figma header edits update only changed URL, title or height fields, and caption edits preserve marks and comment anchors on unchanged characters. New caption document-link targets must be known locally; caption links count toward backlinks. Conversions to or from figma, like card, are refused. MCP \`annotate\` refuses opening a Figma thread with \`annotation_figma\`, while existing threads accept replies, resolution and reopening. Their get_doc ranges name \`part: "caption"\` and count caption characters. \`link_range\` refuses Figma blocks; write caption links through inline Markdown. The web editor keeps documents containing figma read-only with an unsupported-block fallback until its viewer is available.
 
 ## Export
 

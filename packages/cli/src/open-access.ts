@@ -69,7 +69,8 @@ export async function requestAccess(
   signal: AbortSignal,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   // Check before selecting or contacting any upstream, even for local-only.
-  if ("workspaceId" in action && action.workspaceId !== binding.workspaceId) {
+  const hubWorkspaceAction = action.operation === "suspend-workspace" || action.operation === "restore-workspace";
+  if ("workspaceId" in action && !hubWorkspaceAction && action.workspaceId !== binding.workspaceId) {
     return { status: 403, body: { status: "workspace-mismatch" } };
   }
   if (binding.hubUrl === null) return { status: 200, body: { status: "local-only", hub: null } };
@@ -85,7 +86,7 @@ export async function requestAccess(
     let result = await manageRequest(origin, action, login, { signal });
     const rejected = result.status === 401 && result.body.status === "sign-in-required";
     const missingScope = result.status === 403 && result.body.status === "forbidden" &&
-      login !== null && "workspaceId" in action && !login.credential.record.workspaces.includes(binding.workspaceId);
+      login !== null && !hubWorkspaceAction && "workspaceId" in action && !login.credential.record.workspaces.includes(binding.workspaceId);
     if (login !== null && (rejected || missingScope)) {
       const ensured = await ensureDeviceLogin(endpoint, binding.workspaceId, {
         env: binding.env, ...(rejected ? { rejected: login } : {}), signal,

@@ -3025,6 +3025,8 @@ for (const scheme of ["light"] as const) {
 test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {
   const page = await openAppearanceApp(browser, "dark");
   await contrastDocument(page, "dark", async () => {
+    // The preceding diagram changes the terminal's position when it renders.
+    await expect(page.locator(".ub-mermaid")).toHaveAttribute("data-state", "ready");
     await page.addStyleTag({ content: "* { transition: none !important; }" });
     const readings: Record<string, Awaited<ReturnType<typeof renderedText>>> = {};
     for (const scheme of ["dark", "light"] as const) {

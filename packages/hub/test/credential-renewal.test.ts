@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
@@ -85,6 +86,56 @@ afterEach(() => {
 });
 
 describe("device credential renewal", () => {
+  it("omits suspended workspaces once, polls without retiring healthy rooms, and rediscovers restored access", async () => {
+    const { db, store, memberships } = registry();
+    const admins = new HubAdminRegistry(db);
+    admins.grant("hub-admin");
+    memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "admin" });
+    memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "member" });
+    const original = issue(store, [WORKSPACE, OTHER_WORKSPACE]);
+    const device = store.listDevices(PRINCIPAL)[0]!;
+    const closed = vi.fn();
+    store.onRevoke(closed);
+    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    expect(store.get(original.record.id)).toEqual(original.record);
+    expect(store.issue({ principalId: "new-device", deviceId: "new", workspaces: [WORKSPACE, OTHER_WORKSPACE] })
+      .record.workspaces).toEqual([OTHER_WORKSPACE]);
+
+    const renewed = replacement(await store.renew(await proof(original), memberships));
+    expect(renewed.record.workspaces).toEqual([OTHER_WORKSPACE]);
+    expect(closed).toHaveBeenCalledExactlyOnceWith(original.record.id);
+    const request = await proof(renewed);
+    const before = states(db);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
+    }
+    expect(states(db)).toEqual(before);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(memberships.workspacesFor(PRINCIPAL)).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
+    expect(memberships.roleFor(WORKSPACE, PRINCIPAL)).toBe("admin");
+
+    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+    const restored = replacement(await store.renew(request, memberships, { ifWorkspacesChanged: true }));
+    expect(restored.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
+    expect(store.listDevices(PRINCIPAL)).toEqual([{ ...device, workspaces: restored.record.workspaces }]);
+  });
+
+  it("reads suspension after the last awaited renewal proof verification", async () => {
+    const { db, store, memberships } = registry();
+    const admins = new HubAdminRegistry(db);
+    admins.grant("hub-admin");
+    memberships.grant({ principalId: PRINCIPAL, workspaceId: WORKSPACE, role: "admin" });
+    const original = issue(store);
+    const request = await proof(original);
+    const barrier = holdVerification();
+    const renewing = store.renew(request, memberships);
+    await barrier.reached;
+    try { admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended"); }
+    finally { barrier.release(); }
+    expect(replacement(await renewing).record.workspaces).toEqual([]);
+    expect(memberships.roleFor(WORKSPACE, PRINCIPAL)).toBe("admin");
+  });
+
   it("preserves the device name, UUID and original sign-in time across renewal and restart", async () => {
     const path = tempDatabasePath();
     const first = registry(path);

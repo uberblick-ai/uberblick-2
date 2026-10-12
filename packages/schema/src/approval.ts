@@ -1,4 +1,3 @@
-// Decision approval model: b4e616bb-10f6-460d-a13b-9c21354ca80b
 
 import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";

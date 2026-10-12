@@ -6,6 +6,7 @@ import { CredentialRegistry } from "../src/credentials.js";
 import { GithubSignIn, type SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
@@ -92,6 +93,24 @@ function connect(port: number, room: string, token: string) {
 }
 
 describe("signed-in credentials on composed admission", () => {
+  it("keeps memberships while omitting suspended workspaces from a new sign-in", async () => {
+    const rig = await startServer();
+    const principal = rig.principals.identify("1234", "previous-username");
+    rig.memberships.grant({ workspaceId: WORKSPACE, principalId: principal.id, role: "admin" });
+    rig.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: principal.id, role: "member" });
+    const admins = new HubAdminRegistry(rig.database);
+    admins.grant("hub-admin");
+    admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    const before = membershipSnapshot(rig.database);
+    const signedIn = await rig.completeSignIn();
+    expect(signedIn.credential.record.workspaces).toEqual([OTHER_WORKSPACE]);
+    expect(membershipSnapshot(rig.database)).toEqual(before);
+    const refused = connect(rig.port, testRoom(WORKSPACE), await credentialToken(signedIn, WORKSPACE));
+    await expect(refused.denied).resolves.toBe("device-credential-refused");
+    const allowed = connect(rig.port, testRoom(OTHER_WORKSPACE), await credentialToken(signedIn, OTHER_WORKSPACE));
+    await allowed.synced;
+  });
+
   it("identifies a nonmember without granting membership or admitting any workspace", async () => {
     const rig = await startServer();
     rig.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-admin", role: "admin" });

@@ -9,21 +9,22 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
   server.registerTool("get_doc", {
     title: "Read a document",
     description:
-      "Read metadata, blocks and annotation threads with lifecycle and decision context. Decisions hold one " +
-      "to three short answer blocks; related pages hold guidance, RFCs discussion. Regular pages mark related " +
-      "topics first, then topics linked by any record. Decision metadata returns discussion: RFC UUID or null; " +
-      "entries cache it, null for none and absent if unknown. This derived link is separate from curated links " +
-      "and recorded answer. An RFC marks its topic linked unless also related. Cached answerPreview: legacy " +
-      "TL;DR, else first paragraph/list, at most 300 characters. Missing description and TL;DR are null. " +
-      "Data summaries name collections and record counts; get_data reads schemas/values. Blocks include rev. " +
-      "Tables use canonical GFM; cards return button: [Text](destination) lines after footer in authored order. " +
-      "Nonempty plain labels; destinations are https or claude://code/new, claude-cli://open, codex://new, with " +
-      "optional ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; " +
-      "output puts style before color and omits defaults. Card rev includes every button and formatting; table " +
-      "rev includes formatting. Other " +
-      "text is plain; rev ignores marks. Prose doc_links expose character ranges; table and card links " +
-      "have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts " +
-      "toward this process's briefing. Edit with the returned text and rev." +
+      "Read metadata, blocks and threads. Regular pages return related then linked decision topics; " +
+      "decisions return discussion (RFC UUID or null), separate from curated links and recorded answer " +
+      "attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or " +
+      "first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists " +
+      "collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return " +
+      "button: [Text](destination) lines after footer in authored order. Plain labels link to https or " +
+      "exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style " +
+      "outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style " +
+      "before color and omits defaults. Figma returns :::figma content without delimiters: normalized " +
+      "url, optional plain title and height, blank line and marked caption. Read-only figma: kind " +
+      "(frame, file, prototype, board, slides or community file), file, optional decoded fileName " +
+      "(dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive " +
+      "rev, including every button's text, destination, appearance and order; other rev ignores marks. " +
+      "Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma " +
+      "ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward " +
+      "this process's briefing." +
       helpPointer("get_doc"),
     outputSchema: outputSchemas.get_doc,
     inputSchema,

@@ -1,4 +1,3 @@
-// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /** A chart derives a bounded view from the shared reader; it never repairs data. */
 import { compareCodePoints } from "@uberblick/schema";
 import type { DocData, JSONObject } from "@uberblick/schema";

@@ -5,6 +5,8 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+    "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
+    "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
     "Decision records instead hold one to three short answer blocks with a brief reason: paragraph, code, " +
     "table or a maximal run of adjacent list-item blocks. Other types refuse with decision_block_unsupported; " +
@@ -93,7 +95,13 @@ export const toolHelpDetails = {
     "claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Optional style outline/filled " +
     "and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits " +
     "the defaults. Its rev includes every button's text, destination, appearance and order, and prose formatting. Card thread " +
-    "ranges name their anchored part. For other blocks " +
+    "ranges name their anchored part. Figma text is canonical :::figma content without delimiters: url, " +
+    "optional plain title and height, a blank line and inline-Markdown caption. URL normalization keeps " +
+    "only path kind, key/id, name and node-id, starting-point-node-id and version-id on https://www.figma.com. " +
+    "Its formatting-sensitive rev includes the caption, and thread ranges use part caption with offsets in " +
+    "caption text. The read-only figma field returns kind (frame, file, prototype, board, slides or community " +
+    "file), file and optional percent-decoded fileName with dashes read as spaces, plus optional node in " +
+    "colon form. See markdown for accepted paths and container validation. For other blocks " +
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
     "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
@@ -241,7 +249,14 @@ export const toolHelpDetails = {
     "remain editable. Unchanged buttons keep their appearances and order during prose or other button edits; " +
     "removing a header line removes that button. The complete button list is one atomic synced value; concurrent " +
     "button edits may overwrite each other without mixing text and destinations. A card's rev includes every " +
-    "button's text, destination, style, color and order, and prose formatting. Cards reject table_mapping. Other blocks use plain text with no markdown and reject " +
+    "button's text, destination, style, color and order, and prose formatting. Figma takes the content between :::figma and :::; " +
+    "url, optional plain one-line title, optional whole-pixel height 240–960 and an inline-Markdown caption " +
+    "after the first blank line. The markdown topic owns its accepted links and normalization. " +
+    "Invalid content refuses with invalid_figma before writing. Header edits update only changed " +
+    "URL, title or height attributes; caption edits splice changed characters and mark keys, preserving " +
+    "unchanged marks and comment anchors. Newly added caption document targets must be known locally. " +
+    "Figma revisions include caption formatting. Conversions to or from card or figma are refused. " +
+    "Cards and Figma reject table_mapping. Other blocks use plain text with no markdown and reject " +
     "`table_mapping`. In other blocks, spliced-in text inherits the formatting of the character to its left, " +
     "and `rev` ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM " +
     "preserves representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's " +
@@ -255,7 +270,7 @@ export const toolHelpDetails = {
     "yet cannot be detected, and the window widens the longer this server stays offline.",
   insert_block:
     "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types " +
-    `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")} — which is the editor's whole palette too. ` +
+    `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")}. ` +
     "A list is a run of adjacent list-item blocks. " +
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
@@ -274,7 +289,19 @@ export const toolHelpDetails = {
     "get_doc orders present prose keys label, title, footer, then buttons in authored order, a blank line and body. " +
     "Canonical buttons put style before color and omit outline and neutral. Export wraps that content " +
     "in :::card and :::, folds header newlines to spaces, omits empty keys and escapes prose/body lines " +
-    "beginning :::. Invalid imports become plain paragraphs preserving all container text. A terminal's text is a " +
+    "beginning :::. Invalid imports become plain paragraphs preserving all container text. " +
+    "A figma block takes the :::figma body without delimiters: required url, optional plain one-line title " +
+    "and whole-pixel height 240–960 (default 480), then a blank line and optional inline-Markdown caption. " +
+    "Lowercase keys occur at most once; unknown, duplicate or non-key headers refuse. Accepted links are " +
+    "HTTPS figma.com/www.figma.com design, file, proto, board, slides and community/file paths with one " +
+    "key/id and optional name. Saving rebuilds https://www.figma.com with those path parts and only " +
+    "node-id, starting-point-node-id and version-id; it drops other parameters and fragments. Unsupported " +
+    "paths, missing url and invalid height refuse with invalid_figma before writing; a non-Figma URL " +
+    "gives exactly: figma blocks take figma.com links only; use a plain link for other sites. get_doc returns " +
+    "canonical text and derived kind, file, optional fileName and node; see markdown for their meaning. " +
+    "Caption document links count toward backlinks and need locally known targets. Documents with figma " +
+    "stay read-only in the web unsupported-block fallback, and these writes make no Figma request. " +
+    "A terminal's text is a " +
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +
     "whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's " +
     "text is a JSON mapping, for example " +
@@ -396,7 +423,9 @@ export const toolHelpDetails = {
     "table threads stay orphaned and accept replies, resolution and reopening. Card comments are opened in " +
     "the web editor; MCP opening a new card thread refuses with annotation_card before writing. Existing " +
     "card threads accept replies, resolution and reopening. Their returned ranges name label, title, body " +
-    "or footer in part.\n\n" +
+    "or footer in part. Opening a Figma thread refuses with annotation_figma before writing. Existing " +
+    "Figma threads still accept replies, resolution and reopening by thread_id; returned ranges name " +
+    "part caption and measure caption characters.\n\n" +
     "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all " +
     "three, none of them optional — plus `row` and `column` for a table cell, or reply to one with " +
     "`thread_id` and no range fields at all. Mixing them, or leaving a range half-stated, is refused at the " +
@@ -415,7 +444,7 @@ export const toolHelpDetails = {
     "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
     "reversed; a range that clamps to nothing is refused.\n\n" +
     "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-    "one range cannot be both — and so are source blocks, tables and cards. Write card links as inline " +
+    "one range cannot be both — and so are source blocks, tables, cards and figma. Write card and Figma caption links as inline " +
     "Markdown through insert_block or edit_block. The answer carries the target's current `title` for information; the label in the document is the " +
     "text you linked, and it does not follow a later rename.\n\n" +
     "The target must be a document this replica's directory knows, or the call refuses with " +

@@ -11,6 +11,8 @@ export async function createPinnedDoc(page: Page, title: string): Promise<void> 
     page.getByRole("menuitem", { name: "Unpin from sidebar" }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  // Radix restores trigger focus after closing; wait before another gesture.
+  await expect(actions).toBeFocused();
 }
 
 /** Drag the row itself with real pointer events. */
