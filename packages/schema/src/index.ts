@@ -96,6 +96,13 @@ export {
   seedNewCardParts, writeCardButton, writeCardText,
 } from "./card.js";
 export type { CardButton, CardInline, CardPart, CardText } from "./card.js";
+export {
+  buildFigmaElement, editFigma, figmaCaptionElement, figmaCaptionTexts, figmaFields,
+  figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaInput, writeFigmaInline, writeFigmaText,
+} from "./figma.js";
+export type { FigmaInline, FigmaText } from "./figma.js";
+export { FIGMA_PROVIDER, normalizeFigmaLink } from "./providers/figma.js";
+export type { FigmaFields } from "./providers/figma.js";
 
 export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {
@@ -196,6 +203,8 @@ export {
   BlockNotFoundError,
   CardAnnotationError,
   CardConversionError,
+  FigmaAnnotationError,
+  FigmaConversionError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -212,6 +221,7 @@ export {
   StaleBlockError,
   InvalidTableError,
   InvalidCardError,
+  InvalidFigmaError,
   InvalidTableMappingError,
   TableMappingRequiredError,
   TableAnnotationError,

@@ -9,20 +9,19 @@ export function registerEditBlock(server: ToolRegistrar, context: ToolContext): 
   server.registerTool("edit_block", {
     title: "Edit one block",
     description:
-      "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and " +
-      "preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns " +
-      "old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to " +
-      "re-diff. Assertions are local, without distributed compare-and-swap. For prose, " +
-      "use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges " +
-      "touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, " +
-      "old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell " +
-      "change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. " +
-      "Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added " +
-      "document targets must be known locally. Read help before editing tables. Cards take canonical content " +
-      "with inline Markdown and optional button: [Text](destination), ordered after footer. Button text must " +
-      "be nonempty plain text; destinations are https URLs or exact claude://code/new, claude-cli://open or " +
-      "codex://new routes, alone or with ?query. Invalid cards refuse with invalid_card. Edits preserve " +
-      "unchanged parts, buttons and comment anchors; rev includes formatting and the button." +
+      "Replace one block by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and " +
+      "preferably rev from get_doc: stale_block or old_text_mismatch returns currentText/currentRev for a " +
+      "fresh diff; assertions are replica-local. Prose uses plain text; edit strictly inside unmarked text, " +
+      "or replace marked spans with delete_block/insert_block and verify export_markdown. Tables require " +
+      "GFM old/new text and table_mapping for structural or multi-cell changes; read help for refusals and " +
+      "mapping rules. Cards parse :::card content and preserve unchanged parts, buttons, marks and anchors; " +
+      "invalid_card refuses malformed input. Figma parses content between :::figma and :::; url, optional " +
+      "plain title and height 240–960, then a blank line and inline-Markdown caption. It accepts HTTPS Figma " +
+      "design/file/proto/board/slides/community-file links and keeps only the view's path, node-id, " +
+      "starting-point-node-id and version-id on www.figma.com. invalid_figma refuses invalid keys, URL or " +
+      "height without writing. Changed headers update only their fields; unchanged caption marks and anchors " +
+      "survive. Figma rev includes caption formatting; get_doc supplies derived fields. Card/Figma conversions " +
+      "and table_mapping are refused; new caption document targets must be known locally." +
       helpPointer("edit_block"),
     outputSchema: outputSchemas.edit_block,
     inputSchema,

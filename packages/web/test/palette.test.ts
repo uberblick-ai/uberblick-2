@@ -39,7 +39,7 @@ import {
 import { plainText } from "../src/editor/ytext.js";
 import { mountEditor } from "./helpers.js";
 
-describe("the palette is exactly the schema's block types", () => {
+describe("the editor palette and stored block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
       "card",
@@ -73,6 +73,7 @@ describe("the palette is exactly the schema's block types", () => {
       "terminal",
       "chart",
       "card",
+      "figma",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
@@ -104,7 +105,7 @@ describe("the palette is exactly the schema's block types", () => {
   it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card")) {
+    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
@@ -289,6 +290,45 @@ describe("document links in table cells", () => {
 });
 
 describe("foreign blocks already in the document", () => {
+  it.each([false, true])("preserves figma without binding when it arrives %s", (arrivesWhileBound) => {
+    const ydoc = new Y.Doc();
+    const peer = new Y.Doc();
+    initDoc(ydoc, { uuid: "figma-palette", title: "Design reference" });
+    appendBlock(ydoc, { type: "paragraph", text: "Context" });
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+    const figma = new Y.XmlElement("figma");
+    figma.setAttribute("id", "figma-reference");
+    figma.setAttribute("url", "https://www.figma.com/design/key/Checkout-flow?node-id=12-345");
+    figma.setAttribute("title", "Payment");
+    figma.setAttribute("height", "560");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const unbound: string[] = [];
+    let binding: GuardedBinding | null = null;
+    try {
+      if (arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null,
+          onUnbind: () => unbound.push("unbound") });
+        expect(binding.editor).not.toBeNull();
+      }
+      getBlocksFragment(peer).insert(1, [figma]);
+      Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+      if (!arrivesWhileBound) {
+        binding = bindGuardedEditor({ element: host, fragment: getBlocksFragment(ydoc), awareness: null });
+        expect(binding.refused).toBe(true);
+        expect(binding.editor).toBeNull();
+      } else expect(unbound).toEqual(["unbound"]);
+      const stored = getBlocksFragment(ydoc).get(1) as Y.XmlElement;
+      expect(stored.nodeName).toBe("figma");
+      expect(stored.getAttributes()).toEqual(figma.getAttributes());
+      expect(stored.length).toBe(0);
+      const foreign = findForeignBlocks(getBlocksFragment(ydoc));
+      expect(foreign).toMatchObject([{ index: 1, nodeName: "figma", id: "figma-reference" }]);
+      expect(describeForeignBlocks(foreign)).toContain("unsupported type (figma)");
+      expect(uberblickSchema.nodes.figma).toBeUndefined();
+    } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
+  });
+
   function docWithForeignBlock(): { ydoc: Y.Doc; foreignId: string } {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "doc-1", title: "Has a stranger" });
