@@ -2,7 +2,7 @@ import { screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
-  appendBlock, cardButton, cardPartTexts, getBlocksFragment, insertBlock,
+  appendBlock, cardButton, cardButtons, cardPartTexts, editBlock, getBlocks, getBlocksFragment, insertBlock,
 } from "@uberblick/schema";
 import { openCardButton } from "../src/editor/card-button.js";
 import { CardButtonControls } from "../src/ui/CardButtonControls.js";
@@ -43,17 +43,76 @@ describe("card action controls", () => {
     await click("Save button");
     expect(cardButton(card)).toEqual({ text: "Discuss in **Codex**", href: "codex://new?prompt=Review%20this" });
     expect(screen.getByRole("button", { name: "Discuss in **Codex**" }).textContent).toBe("Discuss in **Codex**");
-    await click("Edit button");
+    await click("Edit buttons");
     expect(screen.getByLabelText<HTMLInputElement>("Button text").value).toBe("Discuss in **Codex**");
     act(() => fill("Read report", "https://example.invalid/report"));
     await click("Save button");
     expect(cardButton(card)).toEqual({ text: "Read report", href: "https://example.invalid/report" });
-    await click("Edit button");
+    await click("Edit buttons");
     await click("Remove button");
     expect(card.getAttribute("button")).toBeUndefined();
     expect(screen.queryByRole("button", { name: "Read report" })).toBeNull();
     expect(cardPartTexts(card, "body")[0]).toBe(body);
     expect(body.toString()).toBe("Body");
+  });
+
+  it("appends buttons and changes or removes one without changing its neighbours or prose", async () => {
+    const { card } = await fixture("title: Action\nbutton: [First](https://example.invalid/first) filled violet\nbutton: [Second](claude-cli://open?q=Second) outline green\n\nBody");
+    const original = cardButtons(card);
+    const body = cardPartTexts(card, "body")[0]!;
+    await click("Edit buttons");
+    await click("Add button");
+    act(() => fill("Third", "codex://new?prompt=Third"));
+    await click("filled");
+    await click("blue");
+    await click("Save button");
+    expect(cardButtons(card)).toEqual([...original, { text: "Third", href: "codex://new?prompt=Third", style: "filled", color: "blue" }]);
+    await click("Edit buttons");
+    await click("2. Second");
+    expect(screen.getByRole("button", { name: "outline" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "green" }).getAttribute("aria-pressed")).toBe("true");
+    act(() => fill("Second changed", "https://example.invalid/second"));
+    await click("filled");
+    await click("neutral");
+    await click("Save button");
+    const changed = cardButtons(card);
+    expect(changed[0]).toEqual(original[0]);
+    expect(changed[1]).toEqual({ text: "Second changed", href: "https://example.invalid/second", style: "filled" });
+    expect(changed[2]).toEqual({ text: "Third", href: "codex://new?prompt=Third", style: "filled", color: "blue" });
+    expect([...document.querySelectorAll(".ub-card-button")].map((button) => button.textContent)).toEqual(["First", "Second changed", "Third"]);
+    await click("Edit buttons");
+    await click("2. Second changed");
+    await click("Remove button");
+    expect(cardButtons(card)).toEqual([changed[0], changed[2]]);
+    expect(cardPartTexts(card, "body")[0]).toBe(body);
+    expect(body.toString()).toBe("Body");
+  });
+
+  it("preserves newer remote buttons when saving an open form", async () => {
+    const { ydoc, card } = await fixture("title: Action\nbutton: [First](https://example.invalid/first)\nbutton: [Second](codex://new) filled blue\n\nBody");
+    await click("Edit buttons");
+    act(() => fill("First changed", "https://example.invalid/changed"));
+    act(() => editBlock(ydoc, card.getAttribute("id")!, getBlocks(ydoc)[0]!.text,
+      "title: Action\nbutton: [First](https://example.invalid/first)\nbutton: [Second remote](claude://code/new) filled green\nbutton: [Third remote](codex://new) violet\n\nBody"));
+    await click("Save button");
+    expect(cardButtons(card)).toEqual([
+      { text: "First changed", href: "https://example.invalid/changed" },
+      { text: "Second remote", href: "claude://code/new", style: "filled", color: "green" },
+      { text: "Third remote", href: "codex://new", color: "violet" },
+    ]);
+  });
+
+  it("refuses to retarget an open form when a remote removal shifts its button", async () => {
+    const { ydoc, card } = await fixture("title: Action\nbutton: [First](https://example.invalid/first)\nbutton: [Second](codex://new)\nbutton: [Third](claude-cli://open)\n\nBody");
+    await click("Edit buttons");
+    await click("2. Second");
+    act(() => fill("Second changed", "https://example.invalid/changed"));
+    act(() => editBlock(ydoc, card.getAttribute("id")!, getBlocks(ydoc)[0]!.text,
+      "title: Action\nbutton: [Second](codex://new)\nbutton: [Third](claude-cli://open)\n\nBody"));
+    const before = card.getAttribute("button");
+    await click("Save button");
+    expect(screen.getByRole("alert").textContent).toContain("changed while you were editing");
+    expect(card.getAttribute("button")).toBe(before);
   });
 
   it("keeps its original card while remote insertion shifts positions and syncs the button to another client", async () => {
@@ -81,7 +140,7 @@ describe("card action controls", () => {
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
     try {
       act(() => editor.setEditable(false));
-      expect(screen.queryByRole("button", { name: "Edit button" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit buttons" })).toBeNull();
       await click("Read report");
       expect(opened).toHaveBeenCalledWith("https://example.invalid/report", "_blank", "noopener,noreferrer");
     } finally { opened.mockRestore(); }

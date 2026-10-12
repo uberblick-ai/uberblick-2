@@ -897,8 +897,36 @@ h3.ub-heading {
 
 .ub-card + .ub-card { margin-top: 12px; }
 .ub-card-parts { display: contents; }
+.ub-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .ub-card-actions:has(.ub-card-button) { margin-top: 12px; }
-.ub-card-button { max-width: 100%; }
+.ub-card-button {
+  flex: 0 1 auto;
+  width: max-content;
+  max-width: 100%;
+  height: auto;
+  min-height: 2.25rem;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+@media (any-pointer: coarse) { .ub-card-button { min-height: 2.75rem; } }
+.ub-card-button[data-card-button-color="blue"] { --card-button-ink: var(--syntax-name); }
+.ub-card-button[data-card-button-color="green"] { --card-button-ink: var(--syntax-string); }
+.ub-card-button[data-card-button-color="violet"] { --card-button-ink: var(--syntax-keyword); }
+.ub-card-button:not([data-card-button-color="neutral"])[data-card-button-style="outline"] {
+  border-color: var(--card-button-ink);
+  background: var(--background);
+  color: var(--card-button-ink);
+}
+.ub-card-button:not([data-card-button-color="neutral"])[data-card-button-style="outline"]:hover {
+  background: color-mix(in srgb, var(--card-button-ink) 10%, var(--background));
+}
+.ub-card-button:not([data-card-button-color="neutral"])[data-card-button-style="filled"] {
+  background: var(--card-button-ink);
+  color: var(--background);
+}
 .ub-card-button-edit {
   position: absolute;
   top: 8px;

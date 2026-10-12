@@ -88,9 +88,11 @@ export const toolHelpDetails = {
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
     "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
-    "canonical container content with inline Markdown prose parts and optional `button: [Text](destination)` " +
-    "after footer. The button has nonempty plain text and an https URL or exactly claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by ?query. Its rev also includes the button and formatting. Card thread " +
+    "canonical container content with inline Markdown prose parts and repeated `button: [Text](destination)` " +
+    "lines after footer in authored order. Each button has nonempty plain text and an https URL or exactly " +
+    "claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Optional style outline/filled " +
+    "and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits " +
+    "the defaults. Its rev includes every button's text, destination, appearance and order, and prose formatting. Card thread " +
     "ranges name their anchored part. For other blocks " +
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
@@ -227,14 +229,19 @@ export const toolHelpDetails = {
     "invalid GFM remains `invalid_table`. Malformed input shapes are refused by the MCP input schema before " +
     "the handler. Previously accepted structural and multi-cell table calls must now supply mappings as part " +
     "of the coordinated table cutover. Cards take the canonical content between :::card and :::, with " +
-    "inline Markdown in each prose part and an optional `button: [Text](destination)` header after footer. " +
-    "The button text is nonempty plain text; its destination is an https URL or claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by an opaque ?query. A repeated button or any " +
-    "other button value or destination refuses with invalid_card before writing. An edit splices " +
+    "inline Markdown in each prose part and one `button: [Text](destination)` header per button, after footer " +
+    "in authored order. Each button's text is nonempty plain text; its destination is an https URL or " +
+    "claude://code/new, claude-cli://open or codex://new, alone or followed by an opaque ?query. At most one " +
+    "style word (outline/filled) and one color word (neutral/blue/green/violet) may follow the link in either " +
+    "order; defaults are outline neutral. Canonical output puts style before color and omits default words. " +
+    "Unknown or repeated appearance words, other trailing text and invalid links refuse with invalid_card " +
+    "before writing. Repeated label, title or footer headers remain invalid. An edit splices " +
     "only changed parts, characters and mark keys; unchanged parts and comment anchors on unchanged " +
     "characters survive. Newly added document targets must be known locally; existing targets in a part " +
-    "remain editable. An unchanged button survives prose edits; removing its header line removes it. " +
-    "A card's rev includes its button and formatting. Cards reject table_mapping. Other blocks use plain text with no markdown and reject " +
+    "remain editable. Unchanged buttons keep their appearances and order during prose or other button edits; " +
+    "removing a header line removes that button. The complete button list is one atomic synced value; concurrent " +
+    "button edits may overwrite each other without mixing text and destinations. A card's rev includes every " +
+    "button's text, destination, style, color and order, and prose formatting. Cards reject table_mapping. Other blocks use plain text with no markdown and reject " +
     "`table_mapping`. In other blocks, spliced-in text inherits the formatting of the character to its left, " +
     "and `rev` ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM " +
     "preserves representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's " +
@@ -254,15 +261,18 @@ export const toolHelpDetails = {
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
     "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
-    "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button, " +
-    "each at most once, in any order. A nonempty title is required. Values are one-line inline Markdown " +
-    "after the colon and one optional space, not YAML; quotes stay literal. The optional button value is " +
-    "exactly `[Text](destination)` with nonempty plain text and an https URL or exactly claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by an opaque ?query. It accepts no formatting, " +
-    "document links or comments in its text. The first blank line ends the " +
+    "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button " +
+    "in any order. Prose keys occur at most once; any number of button lines preserve authored order. " +
+    "A nonempty title is required. Prose values are one-line inline Markdown after the colon and one optional " +
+    "space, not YAML; quotes stay literal. Each button value contains exactly one `[Text](destination)` " +
+    "link with nonempty plain text and an https URL or exactly claude://code/new, claude-cli://open or " +
+    "codex://new, alone or followed by an opaque ?query. It accepts no formatting, document links or comments " +
+    "in its text. At most one style (outline/filled) and one color (neutral/blue/green/violet) may follow the " +
+    "link in either order; defaults are outline neutral, and all other trailing text is invalid. The first blank line ends the " +
     "header, and the remainder is one optional prose body. Parts keep table-cell inline marks. Missing " +
-    "title, invalid buttons, unknown or duplicate keys and non-key header lines refuse with invalid_card and write nothing. " +
-    "get_doc orders present keys label, title, footer, button, then a blank line and body. Export wraps that content " +
+    "title, invalid buttons, unknown or duplicate prose keys and non-key header lines refuse with invalid_card and write nothing. " +
+    "get_doc orders present prose keys label, title, footer, then buttons in authored order, a blank line and body. " +
+    "Canonical buttons put style before color and omit outline and neutral. Export wraps that content " +
     "in :::card and :::, folds header newlines to spaces, omits empty keys and escapes prose/body lines " +
     "beginning :::. Invalid imports become plain paragraphs preserving all container text. A terminal's text is a " +
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +

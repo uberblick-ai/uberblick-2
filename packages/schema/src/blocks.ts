@@ -7,7 +7,7 @@
 import * as Y from "yjs";
 import fastDiff from "fast-diff";
 import { getBlocksFragment } from "./doc.js";
-import { CARD_PARTS, buildCardElement, cardButton, cardInline, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
+import { CARD_PARTS, buildCardElement, cardButtons, cardInline, cardText, cardTextParts, editCard, parseCardInput, writeCardInline } from "./card.js";
 import type { CardButton, CardInline } from "./card.js";
 import { parseInline } from "./markdown.js";
 import {
@@ -265,14 +265,14 @@ export function getBlockInline(ydoc: Y.Doc, blockId: string): InlineRun[] {
  */
 export function getBlocksWithInline(
   ydoc: Y.Doc,
-): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][]; card?: CardInline; cardButton?: CardButton | undefined }> {
+): Array<{ block: Block; inline: InlineRun[]; table?: InlineRun[][][]; card?: CardInline; cardButtons?: CardButton[] }> {
   return partitionById(getBlocksFragment(ydoc)).visible.map((element) => ({
     block: toBlock(element),
     inline: readInlineRuns(textOf(element)),
     ...(element.nodeName === "table" ? {
       table: tableRows(element).map((row) => row.map((cell) => tableCellTexts(cell).flatMap(readInlineRuns))),
     } : {}),
-    ...(element.nodeName === "card" ? { card: cardInline(element), cardButton: cardButton(element) } : {}),
+    ...(element.nodeName === "card" ? { card: cardInline(element), cardButtons: cardButtons(element) } : {}),
   }));
 }
 
