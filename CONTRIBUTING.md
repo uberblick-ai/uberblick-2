@@ -142,7 +142,8 @@ loaded in a tab. The deployed-hub wire-compatibility rule belongs to
 bundle per run, including filtered runs, and each harness starts its own hub
 and real `ub open` on ephemeral ports with private state. Compiled fallbacks
 are also run-owned: no fnox key is needed, and the harness cannot collide with
-`mise run dev`. Each Playwright run uses two workers; tests within a file stay serial
+`mise run dev`. Interactive projects use two workers and workload probes use one;
+tests within a file stay serial
 and share a harness, except proofs requiring fresh state per test. Only the
 release-runtime, shared-controls and compiled-loopback fallback proofs build
 their own bundles.
@@ -157,7 +158,7 @@ mise run e2e -- --repeat-each=3 outline.spec.ts
 ```
 
 The full suite runs in Chromium; a tagged device and engine set also runs in
-WebKit at iPad (gen 11) and 13-inch MacBook sizes. WebKit needs host system libraries,
+WebKit at iPad (gen 7) and 13-inch MacBook sizes. WebKit needs host system libraries,
 which CI installs separately. The task downloads engines without installing
 system packages, and a missing library fails the full run. Use
 `mise run e2e -- --project=chromium` for Chromium alone. Physical-device checks

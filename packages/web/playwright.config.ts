@@ -1,7 +1,7 @@
 /**
  * The e2e harness (`mise run e2e`).
  *
- * Full Chromium suite plus tagged supported-device WebKit proofs, two workers,
+ * Full Chromium suite plus tagged supported-device WebKit proofs, two interactive workers,
  * no retries, no `webServer`:
  *
  * - **Parallel files, serial tests.** A spec's tests share one hub and one
@@ -13,8 +13,8 @@
  *   is not evidence of anything; a flake here should be visible, not absorbed.
  * - **Bounded WebKit set.** @webkit runs on iPad and MacBook;
  *   @webkit-touch runs only on iPad. Chromium still runs every test, including its
- *   forced-width and forced-touch cases. Tagged WebKit tests inherit their
- *   project's viewport and input rather than resizing or enabling touch.
+ *   forced-width and forced-touch cases. Tagged WebKit tests use their project's
+ *   viewport and input, or explicit paired desktop/iPad contexts.
  * - **Workload isolation.** Timing probes run after all interactive projects
  *   locally. CI selects them without dependencies on a separate runner, so
  *   layout/GC cannot compete with interactive input on the same host.
@@ -44,7 +44,7 @@ export default defineConfig({
     {
       name: "webkit-ipad",
       grep: /@webkit(?:-touch)?(?:\s|$)/,
-      use: { ...devices["iPad (gen 11)"] },
+      use: { ...devices["iPad (gen 7)"] },
     },
     {
       name: "webkit-macbook",
@@ -53,6 +53,8 @@ export default defineConfig({
     },
     {
       name: "chromium-workload",
+      // Timing probes must not compete with one another on the same runner.
+      workers: 1,
       // Focused workload probes use --project=chromium-workload --no-deps.
       grep: /@workload(?:\s|$)/,
       dependencies: ["chromium", "webkit-ipad", "webkit-macbook"],

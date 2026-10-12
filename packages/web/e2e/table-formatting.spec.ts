@@ -52,7 +52,17 @@ async function openTable(page: Page, wide = false): Promise<Locator> {
   const table = page.locator(".ub-table");
   await expect(table).toBeVisible();
   if (!wide) {
-    await table.locator("th").first().click();
+    // Touch column controls straddle the top border of an empty header. Seed
+    // its text through the paragraph's lower edge, away from those targets.
+    const paragraph = table.locator("th").first().locator("p");
+    const bounds = await paragraph.boundingBox();
+    if (bounds === null) throw new Error("e2e: empty header paragraph has no geometry");
+    const position = { x: Math.min(32, bounds.width - 1), y: bounds.height - 1 };
+    await expect.poll(() => paragraph.evaluate((element, point) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.left + point.x, box.top + point.y));
+    }, position)).toBe(true);
+    await paragraph.click({ position });
     await page.keyboard.insertText("Alpha words suffix");
     await page.keyboard.press("Tab");
     await page.keyboard.insertText("Beta words suffix");

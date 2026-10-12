@@ -198,7 +198,7 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const base = frame.getBoundingClientRect();
       const box = wrapper.getBoundingClientRect();
-      const width = wrapper.clientWidth;
+      const width = box.width;
       const header = table.rows[0];
       const cells = Array.from(header?.cells ?? []);
       const first = cells[0];
@@ -247,7 +247,9 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const next: Geometry = {
         tableId: id, left: box.left - base.left, top: box.top - base.top,
-        width, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft, scrollWidth: wrapper.scrollWidth,
+        width, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft,
+        // Keep the native scroll range while retaining fractional CSS bounds.
+        scrollWidth: wrapper.scrollWidth - wrapper.clientWidth + width,
         // A native scroll strip keeps every column in keyboard order. Focus
         // scrolls it normally, and its scroll also brings the table along.
         columns: edges.map((edge) => edge - box.left + wrapper.scrollLeft),
