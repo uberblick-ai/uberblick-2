@@ -91,9 +91,11 @@ describe("card action controls", () => {
 describe("card action navigation boundary", () => {
   it("opens https safely and dispatches only exact app routes with no new tab", () => {
     const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    const destinations: string[] = [];
     const activated = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
       expect(this.isConnected).toBe(true);
       expect(this.target).toBe("_self");
+      destinations.push(this.getAttribute("href") ?? "");
     });
     try {
       openCardButton("https://example.invalid/report");
@@ -101,7 +103,7 @@ describe("card action navigation boundary", () => {
       for (const href of app) openCardButton(href);
       for (const href of ["codex://settings", "codex://new/else", "claude://code/new#other", "javascript:alert(1)", "http://example.invalid", "/relative", null]) openCardButton(href);
       expect(opened.mock.calls).toEqual([["https://example.invalid/report", "_blank", "noopener,noreferrer"]]);
-      expect(activated.mock.instances.map((anchor) => anchor.getAttribute("href"))).toEqual(app);
+      expect(destinations).toEqual(app);
       expect(document.querySelector("[data-card-button-navigation]")).toBeNull();
     } finally { opened.mockRestore(); activated.mockRestore(); }
   });

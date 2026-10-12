@@ -32,7 +32,7 @@ async function editButton(page: Page, text: string, href: string, touch: boolean
 }
 
 for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
-  test(`card buttons author, sync and activate on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }, info) => {
+  test(`card buttons author, sync and activate on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, { tag: "@webkit" }, async ({ browser }, info) => {
     const writer = session();
     const created = await writer.call<{ uuid: string }>("create_doc", {
       title: "Card button browser proof", description: "Synthetic action card for browser acceptance.",
