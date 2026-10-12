@@ -20,8 +20,8 @@ test.describe("a hub administrator with no workspace membership", () => {
         await expect(own).toContainText("you");
         await expect(own.getByRole("cell").first()).toHaveText("0");
         await expect(own.getByRole("button")).toHaveCount(0);
-        await expect(own.locator("time")).toHaveText("just now");
-        await expect(own.locator("time")).toHaveAttribute("title", /.+/);
+        await expect(own.locator("time:visible")).toHaveText("just now");
+        await expect(own.locator("time:visible")).toHaveAttribute("title", /.+/);
         const remove = table.getByRole("button", { name: "Remove other-admin", exact: true });
         await activateControl(remove);
         const dialog = page.getByRole("alertdialog", { name: "Remove @other-admin as a hub administrator?", exact: true });
@@ -53,6 +53,56 @@ test.describe("a hub administrator with no workspace membership", () => {
       });
     }
   }
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    test(`phone hub tables keep secondary facts with their account or workspace in ${colorScheme}`,
+      { tag: "@webkit-touch" }, async ({ browser }) => {
+      const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`, {
+        contextOptions: { viewport: { width: 375, height: 812 }, hasTouch: true, colorScheme },
+      });
+      const admins = page.getByRole("table", { name: "Hub admins", exact: true });
+      await expect(admins).toBeVisible();
+      await expect(admins.getByRole("columnheader", { name: "Workspaces", exact: true })).toHaveCount(0);
+      await expect(admins.getByRole("columnheader", { name: "Last signed in", exact: true })).toHaveCount(0);
+      const own = admins.getByRole("row").filter({ hasText: "@browser-person" });
+      await expect(own.getByRole("rowheader")).toContainText("Workspaces: 0 · Last signed in: just now");
+      await expect(own.locator("time:visible")).toHaveAttribute("title", /.+/);
+      await expect(admins.getByRole("button", { name: "Remove other-admin", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.goto(new URL(`/${harness().workspace}/settings/hub-workspaces`, harness().appUrl).href);
+      const workspaces = page.getByRole("table", { name: "Hub workspaces", exact: true });
+      await expect(workspaces).toBeVisible();
+      await expect(workspaces.getByRole("columnheader", { name: "Members", exact: true })).toHaveCount(0);
+      await expect(workspaces.getByRole("columnheader", { name: "Admins", exact: true })).toHaveCount(0);
+      await expect(workspaces.getByRole("rowheader")).toContainText("Members: 1 · Admins: @other-admin");
+      await expect(workspaces.getByRole("button")).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    });
+  }
+
+  test("the signed bridge reads the complete inventory beyond one response's byte limit", async ({ browser }) => {
+    const inventory = harness().seedHubInventory(420);
+    expect(inventory.unpagedBytes).toBeGreaterThan(65_536);
+    const reads: Array<Record<string, unknown>> = [];
+    const page = await openApp(browser, `/${harness().workspace}/settings/hub-workspaces`, {
+      beforeNavigate: async (page) => {
+        page.on("request", (request) => {
+          if (!request.url().endsWith("/api/access")) return;
+          const body = request.postDataJSON() as Record<string, unknown>;
+          if (body.operation === "list-hub-workspaces") reads.push(body);
+        });
+      },
+    });
+    const table = page.getByRole("table", { name: "Hub workspaces", exact: true });
+    await expect(table).toBeVisible();
+    await expect(table.getByRole("row")).toHaveCount(422);
+    for (const uuid of inventory.workspaceIds) {
+      await expect(table.getByText(uuid.slice(0, 8), { exact: true })).toHaveCount(1);
+    }
+    expect(reads.length).toBeGreaterThan(1);
+    expect(reads[0]?.cursor).toBeUndefined();
+    expect(reads.slice(1).every((read) => typeof read.cursor === "string")).toBe(true);
+  });
 
   test("revocation clears a focused tab's group on its next live read", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`);

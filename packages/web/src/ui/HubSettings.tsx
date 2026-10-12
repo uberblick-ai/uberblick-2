@@ -1,12 +1,13 @@
 /** Hub-private inventory and administrator removal, with live signed requests. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { AccessAnswer, HubAdmin } from "../shell/workspace-access.js";
+import type { AccessAnswer, HubAdmin, HubWorkspace } from "../shell/workspace-access.js";
 import type { HubAdministration } from "./hub-administration.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "./shadcn/alert-dialog.js";
 import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "./timestamps.js";
 
 const CELL = "border-b border-(--border) px-2 py-3 text-left text-sm";
+const SECONDARY_CELL = `${CELL} hidden sm:table-cell`;
 
 function failure(status: string): string {
   switch (status) {
@@ -43,10 +44,12 @@ function AdminRow({ admin, now, disabled, remove }: {
   admin: HubAdmin; now: number; disabled: boolean; remove: (admin: HubAdmin) => void;
 }): ReactElement {
   return <tr>
-    <th className={`${CELL} font-normal`} scope="row">@{admin.githubUsername}{admin.current && <span className="ub-muted ml-2">you</span>}</th>
-    <td className={CELL}>{admin.workspaces}</td>
-    <td className={CELL}><SignedIn at={admin.lastSignedInAt} now={now} /></td>
-    <td className={CELL}>{!admin.current && <AlertDialog>
+    <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">@{admin.githubUsername}{admin.current && <span className="ub-muted ml-2">you</span>}
+      <span className="ub-muted mt-1 block text-xs sm:hidden">Workspaces: {admin.workspaces} · Last signed in: <SignedIn at={admin.lastSignedInAt} now={now} /></span>
+    </th>
+    <td className={SECONDARY_CELL}>{admin.workspaces}</td>
+    <td className={SECONDARY_CELL}><SignedIn at={admin.lastSignedInAt} now={now} /></td>
+    <td className={`${CELL} w-20 sm:w-auto`}>{!admin.current && <AlertDialog>
       <AlertDialogTrigger asChild><button type="button" className="min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] text-sm text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50" disabled={disabled}
         aria-label={`Remove ${admin.githubUsername}`}>Remove</button></AlertDialogTrigger>
       <AlertDialogContent>
@@ -71,8 +74,33 @@ export function HubSettings({ page, administration }: {
   const lifetime = useRef<AbortController | null>(null);
   const now = useTimestampClock();
   const refresh = useCallback(async (signal: AbortSignal): Promise<void> => {
-    const answer = await request({ operation: page === "hub-admins" ? "list-hub-admins" : "list-hub-workspaces" }, signal);
-    if (!signal.aborted) setList(answer);
+    setList(null);
+    const admins = new Map<string, HubAdmin>();
+    const workspaces = new Map<string, HubWorkspace>();
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    for (;;) {
+      const answer = await request({ operation: page === "hub-admins" ? "list-hub-admins" : "list-hub-workspaces",
+        ...(cursor === undefined ? {} : { cursor }) }, signal);
+      if (signal.aborted) return;
+      if (answer.status !== "ok") { setList(answer); return; }
+      for (const person of answer.admins ?? []) admins.set(person.principalId, person);
+      for (const workspace of answer.workspaces ?? []) {
+        const previous = workspaces.get(workspace.workspaceId);
+        workspaces.set(workspace.workspaceId, { ...workspace,
+          admins: [...new Set([...(previous?.admins ?? []), ...workspace.admins])] });
+      }
+      if (answer.nextCursor === null) {
+        setList({ ...answer, ...(page === "hub-admins" ? { admins: [...admins.values()] } : { workspaces: [...workspaces.values()] }) });
+        return;
+      }
+      if (answer.nextCursor === undefined || seen.has(answer.nextCursor)) {
+        setList({ status: "hub-down", hub: answer.hub });
+        return;
+      }
+      seen.add(answer.nextCursor);
+      cursor = answer.nextCursor;
+    }
   }, [page, request]);
 
   useEffect(() => {
@@ -105,19 +133,21 @@ export function HubSettings({ page, administration }: {
         list === null ? <p className="m-0 text-sm" role="status">Reading from the hub…</p> :
         list.status !== "ok" ? <p className="m-0 text-sm" role="alert">{failure(list.status)}</p> : null}
       {feedback !== null && <p className="m-0 text-sm" role={feedback.ok ? "status" : "alert"}>{feedback.text}</p>}
-      {ready && <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
+      {ready && <table className="w-full table-fixed border-collapse sm:table-auto" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
         {page === "hub-admins" ? <>
-          <thead><tr><th className={CELL} scope="col">Account</th><th className={CELL} scope="col">Workspaces</th><th className={CELL} scope="col">Last signed in</th><th className={CELL} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th className={CELL} scope="col">Account</th><th className={SECONDARY_CELL} scope="col">Workspaces</th><th className={SECONDARY_CELL} scope="col">Last signed in</th><th className={`${CELL} w-20 sm:w-auto`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
           <tbody>{list.admins?.map((person) => <AdminRow key={person.principalId} admin={person} now={now} disabled={busy} remove={(person) => { void remove(person); }} />)}</tbody>
         </> : <>
-          <thead><tr><th className={CELL} scope="col">Workspace</th><th className={CELL} scope="col">Members</th><th className={CELL} scope="col">Admins</th></tr></thead>
+          <thead><tr><th className={CELL} scope="col">Workspace</th><th className={SECONDARY_CELL} scope="col">Members</th><th className={SECONDARY_CELL} scope="col">Admins</th></tr></thead>
           <tbody>{list.workspaces?.map((workspace) => <tr key={workspace.workspaceId}>
-            <th className={`${CELL} font-normal`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) text-xs" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span></th>
-            <td className={CELL}>{workspace.members}</td>
-            <td className={CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
+            <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) text-xs" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
+              <span className="ub-muted mt-1 block text-xs sm:hidden">Members: {workspace.members} · Admins: {workspace.admins.length === 0 ? "—" : workspace.admins.map((name) => `@${name}`).join(", ")}</span>
+            </th>
+            <td className={SECONDARY_CELL}>{workspace.members}</td>
+            <td className={SECONDARY_CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
           </tr>)}</tbody>
         </>}
-      </table></div>}
+      </table>}
     </div>
   </section>;
 }

@@ -44,6 +44,7 @@ export interface AccessAnswer {
   devices?: AccessDevice[];
   admins?: HubAdmin[];
   workspaces?: HubWorkspace[];
+  nextCursor?: string | null;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -63,6 +64,10 @@ function member(value: unknown): AccessMember {
 }
 function count(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function cursor(value: unknown): string | null {
+  if (value === null || (typeof value === "string" && value.length > 0 && value.length <= 160)) return value;
+  throw new Error("Invalid access answer");
 }
 function hubAdmin(value: unknown): HubAdmin {
   const item = object(value);
@@ -111,10 +116,12 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
     case "list-hub-admins":
       if (!Array.isArray(body.admins)) throw new Error("Invalid access answer");
       parsed.admins = body.admins.map(hubAdmin);
+      parsed.nextCursor = cursor(body.nextCursor);
       break;
     case "list-hub-workspaces":
       if (!Array.isArray(body.workspaces)) throw new Error("Invalid access answer");
       parsed.workspaces = body.workspaces.map(hubWorkspace);
+      parsed.nextCursor = cursor(body.nextCursor);
       break;
     case "resolve-account":
       if (typeof body.githubAccountId !== "string" || typeof body.githubUsername !== "string") {

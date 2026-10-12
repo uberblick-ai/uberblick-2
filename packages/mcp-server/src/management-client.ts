@@ -75,6 +75,12 @@ function count(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
+function nextCursor(value: unknown, login?: StoredHubLogin): string | null {
+  if (value === null || (typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(value) &&
+      (login === undefined || !value.includes(login.credential.key)))) return value;
+  throw new ManagementResponseError();
+}
+
 function hubAdmin(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
   if (!object(value) || !uuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
       !isGithubUsername(value.githubUsername) || !count(value.workspaces) ||
@@ -131,15 +137,15 @@ export function sanitizeManagementReply(
       if (status === 200 && state === "ok" && Array.isArray(body.admins)) {
         const admins = body.admins.map(value => hubAdmin(value, login));
         if (new Set(admins.map(row => row.principalId)).size !== admins.length ||
-            admins.filter(row => row.current).length !== 1) throw new ManagementResponseError();
-        return result({ status: state, admins });
+            admins.filter(row => row.current).length > 1) throw new ManagementResponseError();
+        return result({ status: state, admins, nextCursor: nextCursor(body.nextCursor, login) });
       }
       break;
     case "list-hub-workspaces":
       if (status === 200 && state === "ok" && Array.isArray(body.workspaces)) {
         const workspaces = body.workspaces.map(value => hubWorkspace(value, login));
         if (new Set(workspaces.map(row => row.workspaceId)).size !== workspaces.length) throw new ManagementResponseError();
-        return result({ status: state, workspaces });
+        return result({ status: state, workspaces, nextCursor: nextCursor(body.nextCursor, login) });
       }
       break;
     case "resolve-account":

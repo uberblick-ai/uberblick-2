@@ -843,9 +843,9 @@ may repeat its effect; there is no replay cache.
 | `list-devices` | none | `{status: "ok", devices}` |
 | `revoke-device` | `deviceId` | `{status: "ok"}` |
 | `own-hub-role` | none | `{status: "ok", role: "admin"}` |
-| `list-hub-admins` | none | `{status: "ok", admins}` |
+| `list-hub-admins` | optional `cursor` | `{status: "ok", admins, nextCursor}` |
 | `remove-hub-admin` | `principalId` | `{status: "ok"}` |
-| `list-hub-workspaces` | none | `{status: "ok", workspaces}` |
+| `list-hub-workspaces` | optional `cursor` | `{status: "ok", workspaces, nextCursor}` |
 | `own-role` | `workspaceId` | `{status: "ok", role}` |
 | `list-members` | `workspaceId` | `{status: "ok", members}` |
 | `resolve-account` | `workspaceId`, `githubUsername` | `{status: "ok", githubAccountId, githubUsername}` |
@@ -881,6 +881,15 @@ Workspace inventory rows contain `workspaceId`, optional valid `name`,
 the default workspace and UUIDs present in stored document prefixes,
 memberships, promotion receipts or first-admin setup grants. Names come from
 each workspace's readable `_settings`; no other document content is returned.
+
+Both hub lists use bounded pages. Omit `cursor` for the first request, then
+sign each returned opaque `nextCursor` in the next request until it is null.
+Each JSON page stays within 48 KiB, below the management client's 64 KiB reply
+bound. A workspace with many administrators can repeat across pages with the
+next fragment of its `admins`; combine those fragments by workspace UUID.
+Every page checks current hub administration, so a refusal discards the
+partially collected list. Cursors are not snapshots: each page reads current
+hub state, and visiting the page again starts a fresh list.
 
 To add an account, first resolve its handle, then have the admin confirm the
 returned permanent GitHub account ID and current login. Resolution grants

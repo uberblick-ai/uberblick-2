@@ -144,8 +144,8 @@ export async function handleAccessManagement(
         }
         hubAdmins.requireAdmin(current.principalId);
         if (action.operation === "own-hub-role") reply(200, { status: "ok", role: "admin" });
-        else if (action.operation === "list-hub-admins") reply(200, { status: "ok", admins: hubAdmins.listAdmins(current.principalId) });
-        else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", workspaces: hubAdmins.listWorkspaces(current.principalId) });
+        else if (action.operation === "list-hub-admins") reply(200, { status: "ok", ...hubAdmins.pageAdmins(current.principalId, action.cursor) });
+        else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", ...hubAdmins.pageWorkspaces(current.principalId, action.cursor) });
         else {
           hubAdmins.remove(current.principalId, action.principalId);
           reply(200, { status: "ok" });
@@ -188,7 +188,7 @@ export async function handleAccessManagement(
     }
   } catch (error) {
     if (error instanceof HubAdminRefusal) {
-      const statuses = { "hub-admin-required": 403, "self-admin": 409, "last-admin": 409, "admin-not-found": 404 };
+      const statuses = { "hub-admin-required": 403, "self-admin": 409, "last-admin": 409, "admin-not-found": 404, "invalid-request": 400 };
       reply(statuses[error.code], { status: error.code === "hub-admin-required" ? "forbidden" : error.code });
     } else if (error instanceof MembershipRefusal) {
       const statuses = { "admin-required": 403, "member-required": 403, "member-not-found": 404, "last-admin": 409 };

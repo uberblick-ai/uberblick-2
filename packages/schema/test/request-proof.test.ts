@@ -14,6 +14,7 @@ import {
   inspectToken,
   mintRequestProof,
   mintToken,
+  readRequestAction,
   readTokenKeyId,
   verifyToken,
 } from "../src/token.js";
@@ -29,7 +30,9 @@ const ACTIONS: RequestAction[] = [
   { operation: "list-devices" },
   { operation: "own-hub-role" },
   { operation: "list-hub-admins" },
+  { operation: "list-hub-admins", cursor: "WzFd" },
   { operation: "list-hub-workspaces" },
+  { operation: "list-hub-workspaces", cursor: "WzEsMl0" },
   { operation: "remove-hub-admin", principalId: "principal" },
   { operation: "revoke-device", deviceId: "device" },
   { operation: "own-role", workspaceId: WORKSPACE },
@@ -162,6 +165,22 @@ describe("credential request proofs", () => {
     await expect(mintRequestProof(key, request({
       operation: "revoke-device", deviceId: "x".repeat(MAX_TOKEN_LENGTH),
     }))).rejects.toThrow(/mintRequestProof/);
+  });
+
+  it("bounds inventory cursors and binds both their value and presence", async () => {
+    for (const operation of ["list-hub-admins", "list-hub-workspaces"] as const) {
+      const first = { operation };
+      const next = { operation, cursor: "WzFd" };
+      const proof = await mintRequestProof(key, request(next));
+      expect(await inspectRequestProof(key, proof, first)).toHaveProperty("failure", "unsupported-claims");
+      const firstProof = await mintRequestProof(key, request(first));
+      expect(await inspectRequestProof(key, firstProof, next)).toHaveProperty("failure", "unsupported-claims");
+      for (const cursor of [null, undefined, "", 7, "x".repeat(161)]) {
+        expect(readRequestAction({ operation, cursor })).toBeNull();
+      }
+      expect(readRequestAction({ operation, cursor: "x".repeat(160) })).toEqual({ operation, cursor: "x".repeat(160) });
+    }
+    expect(readRequestAction({ operation: "own-hub-role", cursor: "WzFd" })).toBeNull();
   });
 
   it("binds a default member grant to the same role as an explicit member grant", async () => {

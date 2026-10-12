@@ -751,15 +751,43 @@ describe("hub administration", () => {
       .toEqual({ code: 200, result: { status: "ok", role: "admin" } });
     expect(await manage(hub, admin.issued, { operation: "list-hub-admins" })).toEqual({ code: 200,
       result: { status: "ok", admins: [{ principalId: admin.principal.id, githubAccountId: "1234", githubUsername: "hub-admin",
-        workspaces: 0, lastSignedInAt: admin.issued.record.issuedAt, current: true }] } });
+        workspaces: 0, lastSignedInAt: admin.issued.record.issuedAt, current: true }], nextCursor: null } });
     expect(await manage(hub, admin.issued, { operation: "list-hub-workspaces" })).toEqual({ code: 200,
-      result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["workspace-admin"] }] } });
+      result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["workspace-admin"] }], nextCursor: null } });
     expect(hub.memberships!.workspacesFor(admin.principal.id)).toEqual([]);
     expect(admin.issued.record.workspaces).toEqual([]);
     const refused = connect(hub, testRoom(), await roomToken(admin.issued));
     expect(await refused.denied).toBe("device-credential-refused");
     expect(await manage(hub, admin.issued, { operation: "own-role", workspaceId: WORKSPACE }))
       .toEqual({ code: 403, result: { status: "forbidden" } });
+  });
+
+  it("binds page cursors and checks current hub authority for every continuation", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "first", [[WORKSPACE, "admin"]]);
+    const backup = person(hub, "5678", "second", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    hub.hubAdmins!.grant(backup.principal.id);
+    for (const operation of ["list-hub-admins", "list-hub-workspaces"] as const) {
+      const cursor = Buffer.from(JSON.stringify(operation === "list-hub-admins" ? [1] : [0, 1])).toString("base64url");
+      const action = { operation, cursor };
+      const signed = await proof(owner.issued, action);
+      expect(await post(hub, envelope(signed, { operation })))
+        .toEqual({ code: 401, result: { status: "sign-in-required" } });
+      expect(await manage(hub, owner.issued, action)).toMatchObject({ code: 200, result: { status: "ok", nextCursor: null } });
+      for (const position of [[], [-1], [1.5], [Number.MAX_SAFE_INTEGER], [0, -1], [0, 50]]) {
+        const malformed = Buffer.from(JSON.stringify(position)).toString("base64url");
+        expect(await manage(hub, owner.issued, { operation, cursor: malformed }))
+          .toEqual({ code: 400, result: { status: "invalid-request" } });
+      }
+      expect(await manage(hub, owner.issued, { operation, cursor: "not-a-cursor" }))
+        .toEqual({ code: 400, result: { status: "invalid-request" } });
+    }
+    hub.hubAdmins!.remove(backup.principal.id, owner.principal.id);
+    for (const operation of ["list-hub-admins", "list-hub-workspaces"] as const) {
+      const cursor = Buffer.from(JSON.stringify(operation === "list-hub-admins" ? [1] : [0, 1])).toString("base64url");
+      expect(await manage(hub, owner.issued, { operation, cursor })).toEqual({ code: 403, result: { status: "forbidden" } });
+    }
   });
 
   it("lists the newest device sign-in, including revoked devices and excluding renewals", async () => {

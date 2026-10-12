@@ -4,7 +4,7 @@ import type { HubDatabase } from "./persistence.js";
 import { WorkspaceNameReader } from "./workspace-names.js";
 
 export class HubAdminRefusal extends Error {
-  constructor(readonly code: "hub-admin-required" | "self-admin" | "last-admin" | "admin-not-found") {
+  constructor(readonly code: "hub-admin-required" | "self-admin" | "last-admin" | "admin-not-found" | "invalid-request") {
     super(`Hub administration: ${code}`);
     this.name = "HubAdminRefusal";
   }
@@ -24,6 +24,27 @@ export interface HubWorkspaceRecord {
   name?: string;
   members: number;
   admins: string[];
+}
+
+const PAGE_BYTES = 49_152;
+// Reserve the envelope and maximum cursor size before adding public rows.
+const ROW_BYTES = PAGE_BYTES - 256;
+
+function encodeCursor(position: number[]): string {
+  return Buffer.from(JSON.stringify(position)).toString("base64url");
+}
+
+function readCursor(cursor: string | undefined, fields: 1 | 2): [number, number] {
+  if (cursor === undefined) return [0, 0];
+  try {
+    if (!/^[A-Za-z0-9_-]{1,160}$/.test(cursor)) throw new Error();
+    const position: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (!Array.isArray(position) || position.length !== fields ||
+        !position.every(value => Number.isSafeInteger(value) && value >= 0) || encodeCursor(position) !== cursor) throw new Error();
+    return [position[0] as number, fields === 2 ? position[1] as number : 0];
+  } catch {
+    throw new HubAdminRefusal("invalid-request");
+  }
 }
 
 export class HubAdminRegistry {
@@ -66,6 +87,24 @@ export class HubAdminRegistry {
       lastSignedInAt: row.last_signed_in_at as number | null,
       current: row.principal_id === actorPrincipalId,
     }));
+  }
+
+  pageAdmins(actorPrincipalId: string, cursor?: string): { admins: HubAdminRecord[]; nextCursor: string | null } {
+    const rows = this.listAdmins(actorPrincipalId);
+    let [index] = readCursor(cursor, 1);
+    if (index > rows.length) throw new HubAdminRefusal("invalid-request");
+    const admins: HubAdminRecord[] = [];
+    let bytes = 0;
+    for (; index < rows.length; index++) {
+      const row = rows[index];
+      if (row === undefined) break;
+      const size = Buffer.byteLength(JSON.stringify(row)) + (admins.length > 0 ? 1 : 0);
+      if (bytes + size > ROW_BYTES) break;
+      admins.push(row);
+      bytes += size;
+    }
+    if (admins.length === 0 && index < rows.length) throw new Error("Hub administration: admin row exceeds page bound");
+    return { admins, nextCursor: index === rows.length ? null : encodeCursor([index]) };
   }
 
   /** Current authority, last-admin protection and removal commit without yielding. */
@@ -115,5 +154,39 @@ export class HubAdminRegistry {
         .all(workspaceId).map(admin => admin.github_username as string);
       return [{ workspaceId, ...(name === undefined ? {} : { name }), members, admins }];
     }).sort((left, right) => left.workspaceId.localeCompare(right.workspaceId));
+  }
+
+  pageWorkspaces(actorPrincipalId: string, cursor?: string): { workspaces: HubWorkspaceRecord[]; nextCursor: string | null } {
+    const rows = this.listWorkspaces(actorPrincipalId);
+    let [index, offset] = readCursor(cursor, 2);
+    if (index > rows.length || offset > (rows[index]?.admins.length ?? 0)) throw new HubAdminRefusal("invalid-request");
+    const workspaces: HubWorkspaceRecord[] = [];
+    let bytes = 0;
+    for (; index < rows.length; index++) {
+      const row = rows[index];
+      if (row === undefined) break;
+      const fragment = { ...row, admins: [] as string[] };
+      let size = Buffer.byteLength(JSON.stringify(fragment)) + (workspaces.length > 0 ? 1 : 0);
+      if (bytes + size > ROW_BYTES) break;
+      let end = offset;
+      for (; end < row.admins.length; end++) {
+        const handle = row.admins[end];
+        if (handle === undefined) break;
+        const handleBytes = Buffer.byteLength(JSON.stringify(handle)) + (end > offset ? 1 : 0);
+        if (bytes + size + handleBytes > ROW_BYTES) break;
+        fragment.admins.push(handle);
+        size += handleBytes;
+      }
+      if (end === offset && offset < row.admins.length) break;
+      workspaces.push(fragment);
+      bytes += size;
+      if (end < row.admins.length) {
+        offset = end;
+        break;
+      }
+      offset = 0;
+    }
+    if (workspaces.length === 0 && index < rows.length) throw new Error("Hub administration: workspace row exceeds page bound");
+    return { workspaces, nextCursor: index === rows.length ? null : encodeCursor([index, offset]) };
   }
 }

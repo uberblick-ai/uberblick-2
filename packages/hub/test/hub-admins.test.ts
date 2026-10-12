@@ -4,7 +4,7 @@ import { afterEach, expect, it } from "vitest";
 import * as Y from "yjs";
 import { SetupReceipts } from "../src/admin-setup.js";
 import { CredentialRegistry } from "../src/credentials.js";
-import { HubAdminRegistry } from "../src/hub-admins.js";
+import { HubAdminRegistry, type HubAdminRecord, type HubWorkspaceRecord } from "../src/hub-admins.js";
 import { HubClaimState } from "../src/hub-claim.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
@@ -94,4 +94,83 @@ it("retains private hub roles through restart and rolls back a failed removal", 
     expect(() => registry.remove("second", "first")).toThrow("hub-admin-required");
     expect(registry.isAdmin("first")).toBe(true);
   } finally { reopened.close(); }
+});
+
+it("retrieves inventories larger than the transport bound through bounded pages, including one workspace's many admins", () => {
+  const database = new HubDatabase(tempDatabasePath(), error => { throw error; });
+  database.open();
+  try {
+    const principals = new PrincipalRegistry(database);
+    const memberships = new MembershipRegistry(database);
+    const credentials = new CredentialRegistry(database);
+    const registry = new HubAdminRegistry(database);
+    const owner = principals.identify("999999999", "owner");
+    registry.grant(owner.id);
+    const issued = credentials.issue({ principalId: owner.id, deviceId: randomUUID(), workspaces: [] });
+    const settings = new Y.Doc();
+    setWorkspaceName(settings, "A".repeat(64));
+    settings.getText("private-content").insert(0, "private document content");
+    const bytes = Y.encodeStateAsUpdate(settings);
+    settings.destroy();
+    const giant = randomUUID();
+    database.connection.exec("BEGIN IMMEDIATE");
+    for (let index = 0; index < 2_000; index++) {
+      const principal = principals.identify(String(index + 1), `account-${String(index).padStart(31, "0")}`);
+      memberships.grant({ workspaceId: giant, principalId: principal.id, role: "admin" });
+      if (index < 400) {
+        registry.grant(principal.id);
+        const workspaceId = randomUUID();
+        memberships.grant({ workspaceId, principalId: principal.id, role: "admin" });
+        database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(`${workspaceId}/_settings`, bytes);
+      }
+    }
+    database.connection.exec("COMMIT");
+
+    const expectedAdmins = registry.listAdmins(owner.id);
+    const expectedWorkspaces = registry.listWorkspaces(owner.id);
+    expect(Buffer.byteLength(JSON.stringify(expectedAdmins))).toBeGreaterThan(65_536);
+    expect(Buffer.byteLength(JSON.stringify(expectedWorkspaces))).toBeGreaterThan(65_536);
+    expect(Buffer.byteLength(JSON.stringify(expectedWorkspaces.find(row => row.workspaceId === giant)))).toBeGreaterThan(65_536);
+
+    const admins: HubAdminRecord[] = [];
+    let cursor: string | undefined;
+    let adminPages = 0;
+    do {
+      const page = registry.pageAdmins(owner.id, cursor);
+      expect(Buffer.byteLength(JSON.stringify({ status: "ok", ...page }))).toBeLessThanOrEqual(49_152);
+      admins.push(...page.admins);
+      cursor = page.nextCursor ?? undefined;
+      expect(++adminPages).toBeLessThan(10);
+    } while (cursor !== undefined);
+    expect(adminPages).toBeGreaterThan(1);
+    expect(admins).toEqual(expectedAdmins);
+
+    const workspaces = new Map<string, HubWorkspaceRecord>();
+    let workspacePages = 0;
+    let giantFragments = 0;
+    do {
+      const page = registry.pageWorkspaces(owner.id, cursor);
+      expect(Buffer.byteLength(JSON.stringify({ status: "ok", ...page }))).toBeLessThanOrEqual(49_152);
+      expect(JSON.stringify(page)).not.toContain("private document content");
+      expect(JSON.stringify(page)).not.toContain(Buffer.from(issued.keyBytes).toString("base64url"));
+      for (const row of page.workspaces) {
+        if (row.workspaceId === giant) giantFragments++;
+        const prior = workspaces.get(row.workspaceId);
+        if (prior === undefined) workspaces.set(row.workspaceId, { ...row, admins: [...row.admins] });
+        else {
+          expect({ ...row, admins: [] }).toEqual({ ...prior, admins: [] });
+          prior.admins.push(...row.admins);
+        }
+      }
+      cursor = page.nextCursor ?? undefined;
+      expect(++workspacePages).toBeLessThan(10);
+    } while (cursor !== undefined);
+    expect(workspacePages).toBeGreaterThan(1);
+    expect(giantFragments).toBeGreaterThan(1);
+    expect([...workspaces.values()]).toEqual(expectedWorkspaces);
+
+    registry.remove(expectedAdmins.find(row => !row.current)!.principalId, owner.id);
+    expect(() => registry.pageAdmins(owner.id, "WzFd")).toThrow("hub-admin-required");
+    expect(() => registry.pageWorkspaces(owner.id, "WzAsMV0")).toThrow("hub-admin-required");
+  } finally { database.close(); }
 });
