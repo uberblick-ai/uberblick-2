@@ -1,7 +1,9 @@
-import { applyDocData, summarizeDocData } from "@uberblick/schema";
+import { prepareDocData } from "@uberblick/schema";
 import type { DataOperation } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
+import type { Replica } from "../replica.js";
+import type { ToolContext } from "./context.js";
 import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
@@ -20,15 +22,16 @@ const operation = strictInput({
 
 export const inputSchema = strictInput({ uuid: uuidArg, operations: z.array(operation) });
 
-export const updateDataOperation = documentOperation("update_data", inputSchema, (context, { uuid, operations }, _request, replica) => {
-  const { replicas } = context;
+/** Both transports validate the same batch before any proposed keys are written. */
+export function prepareDataUpdate(context: ToolContext, args: z.infer<typeof inputSchema>, replica: Replica) {
+  return prepareDocData(replica.doc, context.replicas.directory().doc, args.operations as DataOperation[]);
+}
 
-  const { changed } = applyDocData(replica.doc, replicas.directory().doc, operations as DataOperation[]);
-  const counts = new Map((summarizeDocData(replica.doc) ?? []).map((entry) => [entry.name, entry.recordCount]));
+export const updateDataOperation = documentOperation("update_data", inputSchema, (context, args, _request, replica) => {
+  const update = prepareDataUpdate(context, args, replica);
+  update.commit();
   return {
-    uuid, changed,
-    collections: operations.map(({ collection: name }) => ({
-      name, recordCount: counts.get(name) ?? 0, deleted: !counts.has(name),
-    })),
+    uuid: args.uuid, changed: update.changed,
+    collections: update.collections.map(({ name, recordCount, deleted }) => ({ name, recordCount, deleted })),
   };
 });

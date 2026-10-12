@@ -46,6 +46,20 @@ export interface DocData {
   bytes: number;
   errors: DataIssue[];
 }
+export interface DataCollectionChange {
+  name: string;
+  recordCount: number;
+  deleted: boolean;
+  upserted: number;
+  removed: number;
+  schemaChanged: boolean;
+}
+export interface DataUpdatePlan {
+  changed: boolean;
+  collections: DataCollectionChange[];
+  /** Commit synchronously before yielding or changing the document or directory. */
+  commit(): { changed: boolean };
+}
 
 function key(kind: "schema" | "record", collection: string, id?: string): string {
   return JSON.stringify(id === undefined ? [kind, collection] : [kind, collection, id]);
@@ -204,9 +218,34 @@ export function readDocData(doc: Y.Doc): DocData | null {
   return { collections, bytes: size, valid: errors.length === 0 && collections.every((c) => c.valid), errors };
 }
 
-/** Validate all touched collections before writing; local transactions cannot roll back. */
+function collectionChanges(
+  touched: Set<string>, collections: Map<string, CollectionEntries>,
+  writes: [string, JSONValue][], deletes: string[],
+): DataCollectionChange[] {
+  const changes = new Map([...touched].map((name) => [name, {
+    name, recordCount: collections.get(name)?.records.size ?? 0,
+    deleted: !collections.has(name), upserted: 0, removed: 0, schemaChanged: false,
+  }]));
+  for (const [k] of writes) {
+    const tuple = parseKey(k);
+    const change = changes.get(tuple[1]);
+    if (change === undefined) throw new Error("Changed data key belongs to an untouched collection");
+    if (tuple[0] === "schema") change.schemaChanged = true;
+    else change.upserted++;
+  }
+  for (const k of deletes) {
+    const tuple = parseKey(k);
+    const change = changes.get(tuple[1]);
+    if (change === undefined) throw new Error("Deleted data key belongs to an untouched collection");
+    if (tuple[0] === "schema") change.schemaChanged = true;
+    else change.removed++;
+  }
+  return [...changes.values()];
+}
+
+/** Validate and summarize without writing; commit the resulting plan synchronously. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): { changed: boolean } {
+export function prepareDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): DataUpdatePlan {
   const meta = getMeta(doc);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });
   if (decisionContentLocked(meta)) {
@@ -296,11 +335,25 @@ export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly 
   }
   limit("operation", writes.reduce((total, [, value]) => total + bytes(value), 0));
   const deletes = [...before.keys()].filter((k) => !next.has(k));
-  if (writes.length === 0 && deletes.length === 0) return { changed: false };
-  const root = doc.getMap<JSONValue>(DATA_KEY);
-  doc.transact(() => {
-    for (const k of deletes) root.delete(k);
-    for (const [k, value] of writes) root.set(k, value);
-  });
-  return { changed: true };
+  const changed = writes.length > 0 || deletes.length > 0;
+  let committed = false;
+  return {
+    changed, collections: collectionChanges(touched, collections, writes, deletes),
+    commit() {
+      if (changed && !committed) {
+        const root = doc.getMap<JSONValue>(DATA_KEY);
+        doc.transact(() => {
+          for (const k of deletes) root.delete(k);
+          for (const [k, value] of writes) root.set(k, value);
+        });
+        committed = true;
+      }
+      return { changed };
+    },
+  };
+}
+
+/** Validate all touched collections before writing; local transactions cannot roll back. */
+export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): { changed: boolean } {
+  return prepareDocData(doc, directory, operations).commit();
 }
