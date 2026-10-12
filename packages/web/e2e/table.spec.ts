@@ -29,8 +29,7 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   await expect(table.locator("th")).toHaveCount(3);
   await expect(table.locator("td")).toHaveCount(6);
   const first = table.locator("th").first();
-  if (info.project.use.hasTouch === true) await first.tap();
-  else await first.click();
+  await activateControl(first, { touch: info.project.use.hasTouch === true });
   await page.keyboard.type("Direct");
   await page.keyboard.press("Enter");
   await page.keyboard.press("Shift+Enter");
@@ -51,7 +50,7 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   const wrapper = wide.locator("..");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await wide.locator("th").first().click();
+  await activateControl(wide.locator("th").first(), { touch: info.project.use.hasTouch === true });
   for (let index = 0; index < 7; index += 1) await page.keyboard.press("Tab");
   await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await page.keyboard.type(" edited");
@@ -103,10 +102,7 @@ for (const input of [
     await expect(revision).toHaveText(/rev [0-9a-f]{8}$/);
     let before = await revision.innerText();
 
-    const activate = async (control: Locator): Promise<void> => {
-      if (input.hasTouch) await control.tap();
-      else await control.click();
-    };
+    const activate = (control: Locator): Promise<void> => activateControl(control, { touch: input.hasTouch });
     const checkFreshRev = async (): Promise<void> => {
       await expect(revision).not.toHaveText(before);
       await expect(page.locator(".ub-status-word--saved")).toHaveText("saved here");
@@ -167,8 +163,7 @@ test("a document link typed in a table cell opens its target and Back restores t
   await page.keyboard.type("/table");
   await page.keyboard.press("Enter");
   const cell = page.locator(".ub-table th").first();
-  if (info.project.use.hasTouch === true) await cell.tap();
-  else await cell.click();
+  await activateControl(cell, { touch: info.project.use.hasTouch === true });
   await page.keyboard.type(`[the target](${target})`);
   const link = cell.locator("a.ub-doclink");
   await expect(link).toHaveText("the target");
