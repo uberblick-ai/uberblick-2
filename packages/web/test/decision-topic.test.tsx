@@ -213,6 +213,15 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it("keeps older recorded answer dates relative without using edit timestamps", async () => {
+    record(FIRST, "Longstanding answer", "decided", "A longstanding answer.", { answerer: "Ben", answerDate: "2020-01-01T00:00:00Z" });
+    upsertDirectoryEntry(directory(), { uuid: FIRST, title: "Longstanding answer", updatedAt: Date.now() });
+    const host = (await open()).container;
+    const time = item(host, FIRST).querySelector("time");
+    expect(time?.dateTime).toBe("2020-01-01T00:00:00.000Z");
+    expect(time?.textContent).toMatch(/weeks ago$/);
+  });
+
   it("opens a superseded link at the current answer and keeps the named record reachable", async () => {
     story();
     const host = (await open()).container;

@@ -40,10 +40,11 @@ export function formatExactTimestamp(
     : { label: DATE_TIME_FORMAT.format(date), dateTime: date.toISOString() };
 }
 
-/** One visible timestamp rule for every web surface. */
+/** Activity switches to calendar dates; record timelines keep elapsed time. */
 export function formatTimestamp(
   value: string | number,
   now: number = Date.now(),
+  relativeOnly = false,
 ): FormattedTimestamp | null {
   const date = timestampDate(value);
   if (date === null) return null;
@@ -51,7 +52,7 @@ export function formatTimestamp(
 
   const dateTime = date.toISOString();
   const age = Math.max(0, now - at);
-  if (age >= RECENT_WINDOW) {
+  if (age >= RECENT_WINDOW && !relativeOnly) {
     return { label: DATE_FORMAT.format(at), dateTime };
   }
 

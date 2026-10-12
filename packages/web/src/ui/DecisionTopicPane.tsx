@@ -85,7 +85,7 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks }
     <ol className="ub-decision-timeline">
       {topic.records.map((record) => {
         const date = record.status === "decided" || record.status === "rejected" ? record.decidedAt : record.createdAt;
-        const time = date === undefined ? null : formatTimestamp(date, now);
+        const time = date === undefined ? null : formatTimestamp(date, now, true);
         const chosen = record.uuid === selected;
         return <li key={record.uuid} data-record={record.uuid} data-selected={chosen}>
           <a className="ub-decision-record" href={decisionRecordPath(segment, topic.topic, record.uuid)}
