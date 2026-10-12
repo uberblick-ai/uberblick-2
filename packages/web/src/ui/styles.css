@@ -1446,8 +1446,55 @@ h3.ub-heading {
   padding-right: 7rem;
 }
 
-.ub-mermaid::before {
-  content: "mermaid source (not rendered)";
+.ub-mermaid { min-width: 0; max-width: 100%; }
+.ub-mermaid-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+  color: var(--muted-foreground);
+  font: 0.7rem/1.5 var(--font-mono);
+}
+.ub-mermaid-actions { display: flex; gap: 0.3rem; }
+.ub-mermaid-actions > button {
+  position: static;
+  min-width: max(1.5rem, 8ch);
+  min-height: 1.5rem;
+  padding: 0.05rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ub-mermaid-actions > button:hover { color: var(--foreground); }
+}
+.ub-mermaid-actions > button:focus-visible,
+.ub-mermaid-panel:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ub-mermaid-panel {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.ub-mermaid > .ub-mermaid-source { display: none; }
+.ub-mermaid-editing > .ub-mermaid-source,
+.ub-mermaid[data-annotated="true"] > .ub-mermaid-source,
+.ub-mermaid[data-state="error"] > .ub-mermaid-source { display: block; }
+.ub-mermaid-error {
+  margin: 0.5rem 0;
+  color: var(--muted-foreground);
+  font: 0.75rem/1.5 var(--font-sans);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+@media (any-pointer: coarse) {
+  .ub-mermaid-actions > button { min-width: max(2.75rem, 8ch); min-height: 2.75rem; }
 }
 
 /* The terminal's screen, text, cursor and controls share one fixed dark

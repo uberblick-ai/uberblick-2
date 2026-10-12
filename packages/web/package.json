@@ -33,6 +33,7 @@
     "@uberblick/wireframe": "^0.2.0",
     "chart.js": "4.5.1",
     "lowlight": "^3.3.0",
+    "mermaid": "12.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "sonner": "2.0.8",

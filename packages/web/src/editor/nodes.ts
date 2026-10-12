@@ -18,7 +18,6 @@ import type { HeadingLevel, ListIndent } from "@uberblick/schema";
 import { PROSE_MARKS, inlineMarkExtensions } from "./marks.js";
 import {
   codeBlockChrome,
-  mermaidChrome,
   sourceBlockView,
 } from "./source-chrome.js";
 import { TableNodes } from "./table.js";
@@ -26,6 +25,7 @@ import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
+import { mermaidBlockView } from "./mermaid.js";
 import { Card, CardParts } from "./card.js";
 
 /**
@@ -246,10 +246,7 @@ export const CodeBlock = Node.create({
   // Enter override would also intercept paragraph splits.
 });
 
-/**
- * Mermaid source, rendered as plain text in a styled block. The diagram is not
- * drawn: the block shows its source, labelled as such.
- */
+/** Persist literal Mermaid source; the drawing belongs to its NodeView. */
 export const Mermaid = Node.create({
   name: "mermaid",
   group: "block",
@@ -274,9 +271,8 @@ export const Mermaid = Node.create({
       ["pre", {}, 0],
     ];
   },
-  // Mermaid source is text people take away too — see CodeBlock's node view.
   addNodeView() {
-    return sourceBlockView(mermaidChrome);
+    return mermaidBlockView();
   },
   // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`.
 });

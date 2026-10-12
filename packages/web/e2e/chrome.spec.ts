@@ -2143,10 +2143,11 @@ for (const scheme of ["light", "dark"] as const) {
       expect(selected.focused).toBe(true);
       expect(selected.from).not.toBe(selected.to);
       for (const [selector, , text] of sources) {
-        const copy = page.locator(selector).getByRole("button", { name: "copy", exact: true });
+        const copyLabel = selector === ".ub-mermaid" ? "Copy" : "copy";
+        const copy = page.locator(selector).getByRole("button", { name: copyLabel, exact: true });
         await activateCopy(page, copy);
         await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
-        await expect(copy).toHaveText("copy");
+        await expect(copy).toHaveText(copyLabel);
         expect((await copiedTexts(page)).at(-1)).toBe(text);
         expect(await editorSelection(page)).toEqual(selected);
         await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);

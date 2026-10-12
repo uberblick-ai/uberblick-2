@@ -87,7 +87,7 @@ describe("copying a source block", () => {
     for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
       expect(notice).toEqual({ key: "clipboard", message: "Copied to clipboard", severity: "success" });
     }
-    for (const button of buttons) expect(button.textContent).toBe("copy");
+    expect(buttons.map(button => button.textContent)).toEqual(["copy", "Copy"]);
 
     editor.destroy();
   });
