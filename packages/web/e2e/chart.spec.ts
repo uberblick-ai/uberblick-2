@@ -62,6 +62,7 @@ interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: Painted
 /** Tick anchors and point anchors are observed independently from canvas calls. */
 async function expectObservationGeometry(
   page: Page, observations: { value: number; label: string }[], pattern: RegExp, all = false, canvasIndex = 0,
+  minimumGap = 0,
 ): Promise<PaintedText[]> {
   const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
   const pointXs = [...new Set(probe.points.filter((point) => point.canvas === canvasIndex)
@@ -90,7 +91,7 @@ async function expectObservationGeometry(
     expect(label.rotated).toBe(false);
   }
   for (let index = 1; index < labels.length; index += 1) {
-    expect(labels[index - 1]?.right ?? Infinity).toBeLessThanOrEqual((labels[index]?.left ?? -Infinity) + 0.5);
+    expect((labels[index]?.left ?? -Infinity) - (labels[index - 1]?.right ?? Infinity)).toBeGreaterThanOrEqual(minimumGap - 0.5);
   }
   if (all) expect(labels).toHaveLength(observations.length);
   else {
@@ -106,12 +107,46 @@ async function expectObservationGeometry(
     observations.forEach((_observation, index) => {
       if (labeled.has(index)) return;
       const x = pointXs[index] ?? NaN;
-      const halfWidth = (widths[index] ?? NaN) / 2;
-      expect(labels.some((label) => x - halfWidth < label.x + label.width / 2
-        && x + halfWidth > label.x - label.width / 2), `observation ${index} was omitted without overlap`).toBe(true);
+      const halfWidth = ((widths[index] ?? NaN) + minimumGap) / 2;
+      expect(labels.some((label) => x - halfWidth < label.x + (label.width + minimumGap) / 2
+        && x + halfWidth > label.x - (label.width + minimumGap) / 2), `observation ${index} was omitted without overlap`).toBe(true);
     });
   }
   return labels;
+}
+
+/** Data-point anchors independently recover the value at each painted y label. */
+async function expectPanelTickGeometry(
+  page: Page, canvasIndex: number, values: number[], unit: string, markerHeadroom = false,
+): Promise<PaintedText[]> {
+  const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
+  const points = probe.points.filter(entry => entry.canvas === canvasIndex);
+  expect(points).toHaveLength(values.length);
+  const ticks = probe.ink.filter(entry => entry.canvas === canvasIndex && entry.text.endsWith(unit));
+  expect(ticks.length).toBeGreaterThanOrEqual(2);
+  expect(ticks.length).toBeLessThanOrEqual(3);
+  const first = points[0], last = points.at(-1), firstValue = values[0], lastValue = values.at(-1);
+  if (first === undefined || last === undefined || firstValue === undefined || lastValue === undefined) {
+    throw new Error("e2e: panel value anchors are missing");
+  }
+  expect(lastValue).not.toBe(firstValue);
+  for (const tick of ticks) {
+    const number = tick.text.slice(0, -unit.length).trim().replaceAll(",", "");
+    const match = /^(-?\d+(?:\.\d+)?)([KMBT]?)$/.exec(number);
+    expect(match, `unrecognized compact tick ${tick.text}`).not.toBeNull();
+    const divisors: Record<string, number> = { "": 1, K: 1e3, M: 1e6, B: 1e9, T: 1e12 };
+    const labeledValue = Number(match?.[1]) * (divisors[match?.[2] ?? ""] ?? NaN);
+    const plottedValue = firstValue + (tick.y - first.y) / (last.y - first.y) * (lastValue - firstValue);
+    expect(labeledValue, `tick ${tick.text} misstates its gridline value`).toBeCloseTo(plottedValue, 3);
+    expect(tick.left, `tick ${tick.text} extends outside its canvas`).toBeGreaterThanOrEqual(-0.5);
+  }
+  const top = Math.min(...ticks.map(entry => entry.y)), bottom = Math.max(...ticks.map(entry => entry.y));
+  for (const point of points) {
+    const radius = markerHeadroom ? point.radius : 0;
+    expect(point.y - radius, "marker has no headroom above the plotted value").toBeGreaterThan(top);
+    expect(point.y + radius, "marker has no headroom below the plotted value").toBeLessThan(bottom);
+  }
+  return ticks;
 }
 
 /** Controls share the title's line and stay inside the panel in every state. */
@@ -979,7 +1014,7 @@ for (const viewport of ["desktop", "phone"] as const) {
           const canvas = panel.locator("canvas");
           await expect(canvas).toHaveAttribute("aria-hidden", "true");
           const canvasIndex = await canvas.evaluate(element => [...document.querySelectorAll(".ub-chart canvas")].indexOf(element));
-          const dates = await expectObservationGeometry(page, observations, /^Oct \d+$/, false, canvasIndex);
+          const dates = await expectObservationGeometry(page, observations, /^Oct \d+$/, false, canvasIndex, 6);
           labels.push(dates.map(entry => entry.text));
           const ink = await page.evaluate(target => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
             .filter(entry => entry.canvas === target), canvasIndex);
@@ -990,6 +1025,8 @@ for (const viewport of ["desktop", "phone"] as const) {
           ticks.push(yTicks.map(entry => entry.text));
           expect(ink.some(entry => entry.text === series.label || entry.text === `${series.label} (%)` || entry.text === "Day")).toBe(false);
           expect(ink.every(entry => entry.font.includes("Geist") && !entry.rotated)).toBe(true);
+          if (index === 0) await expectPanelTickGeometry(page, canvasIndex,
+            Array.from({ length: 14 }, (_, day) => 65 + day * 2), "%", true);
         }
         expect(labels[1]).toEqual(labels[0]);
         expect(labels[2]).toEqual(labels[0]);
@@ -1000,6 +1037,36 @@ for (const viewport of ["desktop", "phone"] as const) {
       }
     });
 }
+
+test("panel tick labels match their gridlines and retain extreme markers across unit ranges", async ({ browser }) => {
+  const session = writer();
+  const values = [[40, 105], [30, 87.5], [100, 1049], [-1049, -1001], [10, 25], [45, 99]];
+  const mapping = { ...MAPPING, title: "Panel tick precision", layout: "panels", x: { field: "day", type: "number" }, y: [
+    { field: "a", unit: "items" }, { field: "b", unit: "ms" }, { field: "c", unit: "requests" },
+    { field: "d", unit: "rpm" }, { field: "e", unit: "items" }, { field: "f", unit: "%" },
+  ] };
+  const uuid = await chartDoc(session, "Panel tick precision", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+    schema: { version: 1, schema: { type: "object" } }, replaceRecords: [0, 1].map(index => ({
+      id: `point-${index}`, value: { day: index + 1,
+        ...Object.fromEntries(mapping.y.map((series, seriesIndex) => [series.field, values[seriesIndex]?.[index]])),
+      },
+    })),
+  }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: loading => installProbe(loading, uuid), contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
+  });
+  await expect(page.getByRole("img", { name: "Panel tick precision", exact: true })).toBeVisible();
+  const canvases = page.locator(".ub-chart-series-panel canvas");
+  await expect(canvases).toHaveCount(6);
+  const ticks: { text: string; y: number }[][] = [];
+  for (const [index, series] of mapping.y.entries()) {
+    const canvasIndex = await canvases.nth(index).evaluate(element => [...document.querySelectorAll(".ub-chart canvas")].indexOf(element));
+    ticks.push((await expectPanelTickGeometry(page, canvasIndex, values[index] ?? [], series.unit))
+      .map(entry => ({ text: entry.text, y: entry.y })));
+  }
+  expect(ticks[4]).toEqual(ticks[0]);
+});
 
 test("panels compare units, retain empty series and switch layouts without rendering writes", async ({ browser }) => {
   const session = writer();

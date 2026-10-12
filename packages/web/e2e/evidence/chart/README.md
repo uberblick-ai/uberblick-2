@@ -35,7 +35,11 @@ Panel fixtures check one accessible image, ordered series headers, the latest
 plotted tooltip values, an empty series, comparable unit-group ranges,
 observation-only labels, per-panel hover, mapping/layout changes and zero
 renderer writes. Equal-width percentage panels show matching labels and ticks
-in both appearances; panel canvases remain hidden from accessibility APIs.
+in both appearances, with at least 6 px between retained x labels; panel
+canvases remain hidden from accessibility APIs. Independent point geometry
+checks that each compact y label equals its gridline's value across rounded
+positive and negative ranges, keeps tick text inside the canvas and leaves
+headroom for the latest rising percentage marker.
 Timing fixtures contain a 2.7 MB area with
 4,400 records and a 365-record/three-series chart, plus 5,001 stored records
 limited to the latest 5,000/eight series in both overlay and panels layouts.
@@ -51,8 +55,8 @@ Silicon with the suite's twofold Chromium CPU throttling. They are observations
 from this host, not a cross-host performance guarantee.
 The [5,000-record panels capture](timing-bound-panels.json) was recorded on
 Linux x86_64 with an AMD EPYC-Genoa processor and the same twofold Chromium CPU
-throttling. Its complete eight-panel block first drew in 639.5 ms; all ten
-live redraws took 297.7–393.4 ms, with a 330.0 ms median.
+throttling. Its complete eight-panel block first drew in 645.6 ms; all ten
+live redraws took 322.4–367.7 ms, with a 338.0 ms median.
 
 Regenerate the chart screenshots and timing attachments, with shared-frame
 table regression coverage:

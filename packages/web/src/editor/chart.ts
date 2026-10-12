@@ -56,9 +56,17 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
     measure.save();
     measure.font = `${font.size}px ${font.family}`;
     ranges.forEach((range, index) => {
-      const ticks = [range.min, range.min / 2 + range.max / 2, range.max].map(value => ({ value }));
+      let { min, max } = range;
+      // Reserve native constant-range expansion and one extra digit when nice
+      // rounding crosses a decimal boundary (for example, 99 becomes 100).
+      if (min === max) {
+        const padding = max === 0 ? 1 : Math.abs(max * 0.05);
+        max += padding;
+        if (min < 0) min -= padding;
+      }
+      const ticks = [min, min / 2 + max / 2, max].map(value => ({ value }));
       for (const tick of ticks) panelAxisWidth = Math.max(panelAxisWidth,
-        measure.measureText(formatChartTick(tick.value, panelUnit(index), ticks)).width + 12);
+        measure.measureText(formatChartTick(tick.value, panelUnit(index), ticks)).width + 12 + font.size);
     });
     measure.restore();
   }
@@ -81,7 +89,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
       let ticks = layout === "panels" ? fittedTicks.get(scale.width) : undefined;
       if (ticks === undefined) {
         ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
-          label => ctx.measureText(label).width);
+          label => ctx.measureText(label).width + (layout === "panels" ? 6 : 0));
         if (layout === "panels") fittedTicks.set(scale.width, ticks);
       }
       ctx.restore();
@@ -143,11 +151,11 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
             type: "linear",
             beginAtZero: layout === "panels" ? (ranges[indices[0] ?? 0]?.min ?? 0) >= 0 : beginAtZero("y"),
             ...(layout === "panels" ? {
-              ...ranges[indices[0] ?? 0],
+              suggestedMin: ranges[indices[0] ?? 0]?.min,
+              suggestedMax: ranges[indices[0] ?? 0]?.max,
               afterFit: (scale: Scale) => { scale.width = Math.min(panelAxisWidth, scale.maxWidth); },
             } : {}),
             ticks: { color: colors.color, font, maxTicksLimit: layout === "panels" ? 3 : 6,
-              ...(layout === "panels" ? { count: 3 } : {}),
               callback: (value, _index, ticks) => formatChartTick(Number(value), layout === "panels" ? panelUnit(indices[0] ?? 0) : axes.leftUnit, ticks) },
             grid: { color: colors.borderTopColor },
             border: { display: false },

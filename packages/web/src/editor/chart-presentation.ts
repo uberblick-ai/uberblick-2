@@ -3,7 +3,7 @@ import type { ChartSeries, ChartSeriesMapping } from "./chart-data.js";
 
 export interface ChartPanelRange { min: number; max: number }
 
-/** Explicit bounds keep separate Chart.js instances comparable within a unit. */
+/** Shared extrema let Chart.js choose comparable nice scales within a unit. */
 export function chartPanelRanges(series: ChartSeries[]): ChartPanelRange[] {
   const groups = new Map<string, ChartPanelRange>();
   for (const entry of series) {
@@ -17,14 +17,6 @@ export function chartPanelRanges(series: ChartSeries[]): ChartPanelRange[] {
   }
   for (const range of groups.values()) {
     if (range.min >= 0) range.min = 0;
-    if (range.min === range.max) {
-      if (range.min === 0) range.max = 1;
-      else {
-        const padding = Math.max(Math.abs(range.min) * 0.05, Number.MIN_VALUE);
-        range.min = Math.max(-Number.MAX_VALUE, range.min - padding);
-        range.max = Math.min(Number.MAX_VALUE, range.max + padding);
-      }
-    }
   }
   return series.map(entry => groups.get(entry.unit || "") ?? { min: 0, max: 1 });
 }

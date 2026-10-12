@@ -20,11 +20,9 @@ describe("panel unit ranges", () => {
     ]);
   });
 
-  it("retains empty panels and gives zero and constant negative groups drawable shared ranges", () => {
+  it("retains empty panels and shares degenerate extrema for native scale expansion", () => {
     const ranges = chartPanelRanges([series([null]), series([0], "%"), series([-10], "ms"), series([null], "ms")]);
-    expect(ranges).toEqual([{ min: 0, max: 1 }, { min: 0, max: 1 }, { min: -10.5, max: -9.5 }, { min: -10.5, max: -9.5 }]);
-    const extremes = chartPanelRanges([series([-Number.MAX_VALUE]), series([-Number.MIN_VALUE], "small")]);
-    expect(extremes.every(range => Number.isFinite(range.min) && Number.isFinite(range.max) && range.min < range.max)).toBe(true);
+    expect(ranges).toEqual([{ min: 0, max: 1 }, { min: 0, max: 0 }, { min: -10, max: -10 }, { min: -10, max: -10 }]);
   });
 });
 

@@ -15,7 +15,7 @@ type PanelOptions = { interaction: unknown; scales: {
   x: { min: number; max: number; title: { display: boolean; text: string };
     afterBuildTicks: (scale: unknown) => void; afterFit: (scale: unknown) => void;
     ticks: { callback: (value: number) => unknown } };
-  y: { min: number; max: number; beginAtZero: boolean; ticks: {
+  y: { suggestedMin: number; suggestedMax: number; beginAtZero: boolean; ticks: {
     callback: (value: number, index: number, ticks: { value: number }[]) => string } };
 }; plugins: { tooltip: { callbacks: { label: (item: { datasetIndex: number; parsed: { y: number | null } }) => string } } } };
 
@@ -735,15 +735,20 @@ describe("the panel chart's shared presentation and lifecycle", () => {
     });
     expect(tickSelections).toEqual(Array(4).fill([1, 6]));
     const [first, second, third] = live.map(panelOptions);
-    expect(first?.scales.y.min).toBe(second?.scales.y.min);
-    expect(first?.scales.y.max).toBe(second?.scales.y.max);
-    expect(first?.scales.y.min).toBeLessThanOrEqual(-20);
-    expect(first?.scales.y.max).toBeGreaterThanOrEqual(30);
+    expect(first?.scales.y.suggestedMin).toBe(second?.scales.y.suggestedMin);
+    expect(first?.scales.y.suggestedMax).toBe(second?.scales.y.suggestedMax);
+    expect(first?.scales.y.suggestedMin).toBeLessThanOrEqual(-20);
+    expect(first?.scales.y.suggestedMax).toBeGreaterThanOrEqual(30);
     expect(first?.scales.y.beginAtZero).toBe(false);
-    expect(third?.scales.y.min).toBe(0);
-    expect(third?.scales.y.max).toBeGreaterThanOrEqual(9_000);
+    expect(third?.scales.y.suggestedMin).toBe(0);
+    expect(third?.scales.y.suggestedMax).toBeGreaterThanOrEqual(9_000);
     expect(third?.scales.y.beginAtZero).toBe(true);
-    const sharedTicks = [{ value: first?.scales.y.min ?? 0 }, { value: 0 }, { value: first?.scales.y.max ?? 0 }];
+    for (const chart of live) {
+      expect(panelOptions(chart).scales.y).not.toHaveProperty("min");
+      expect(panelOptions(chart).scales.y).not.toHaveProperty("max");
+      expect(panelOptions(chart).scales.y.ticks).not.toHaveProperty("count");
+    }
+    const sharedTicks = [{ value: -20 }, { value: 0 }, { value: 30 }];
     expect(first?.scales.y.ticks.callback(0, 1, sharedTicks)).toBe("0%");
     expect(third?.scales.y.ticks.callback(9_000, 2, [{ value: 0 }, { value: 5_000 }, { value: 10_000 }])).toBe("9K requests");
     expect(first?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 10 } })).toBe("Autonomous: 10 %");
