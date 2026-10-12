@@ -1,4 +1,4 @@
-/** A floating view of the open document's first two heading levels. */
+/** A floating view of document headings and its Decisions chrome. */
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
@@ -16,18 +16,22 @@ import {
 export function OutlinePane({
   connection,
   obscured = false,
+  decisionsId = null,
 }: {
   connection: RoomConnection | null;
   /** A narrow-screen threads drawer currently covers this control. */
   obscured?: boolean;
+  /** Page chrome follows the document headings without entering its blocks. */
+  decisionsId?: string | null;
 }): ReactElement | null {
-  const entries = useOutline(connection);
+  const headings = useOutline(connection);
+  const entries = decisionsId === null ? headings : [...headings, { id: decisionsId, level: 1, text: "Decisions" }];
   const [open, setOpen] = useState(false);
   const closingFromTab = useRef(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
 
-  // A live edit can remove the last eligible heading without unmounting this
-  // component. Do not remember an open surface for a later heading.
+  // Live edits can remove the last entry without unmounting this component.
+  // Do not remember an open surface for a later entry.
   useEffect(() => {
     if (entries.length !== 0) return;
     setOpen(false);

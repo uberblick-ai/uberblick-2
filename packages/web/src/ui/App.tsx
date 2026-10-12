@@ -22,6 +22,7 @@ import {
   getDirectoryEntry,
   initDoc,
   readSidebar,
+  relatedDecisionTopics,
   restoreDirectoryEntry,
   resolveDecisionTopics,
   roomForDoc,
@@ -54,6 +55,7 @@ import { Sidebar, togglePin } from "./Sidebar.js";
 import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
 import { DecisionTopicPane } from "./DecisionTopicPane.js";
+import { DecisionsBlock, DecisionsLink } from "./DecisionsBlock.js";
 import { RemoteHubGuide } from "./RemoteHubGuide.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
@@ -172,6 +174,7 @@ export function RoutePane({
   selectedUuid,
   navigate,
   directoryConnection = null,
+  relatedTopics = [],
 }: {
   route: Route;
   /**
@@ -234,6 +237,7 @@ export function RoutePane({
   selectedUuid?: string | null | undefined;
   navigate?: Navigate;
   directoryConnection?: RoomConnection | null;
+  relatedTopics?: readonly DecisionTopicResolution[];
 }): ReactElement {
   // Hooks precede early returns. The answer flag distinguishes a joining
   // empty room from an empty server answer.
@@ -323,8 +327,8 @@ export function RoutePane({
     onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
     onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
   };
-  if (navigate !== undefined) {
-    const current = topic === null ? null : decisionCurrentRecord(topic);
+  if (navigate !== undefined && topic !== null) {
+    const current = decisionCurrentRecord(topic);
     return <DecisionTopicPane {...editorProps}
       topic={topic} selected={selectedUuid ?? null} navigate={navigate}
       directoryConnection={directoryConnection}
@@ -332,7 +336,12 @@ export function RoutePane({
       linkedRecord={route.kind === "doc" && route.uuid !== current?.uuid ? route.uuid : null}
     />;
   }
-  return <EditorPane {...editorProps} />;
+  const decisionsId = meta === null || relatedTopics.length === 0 ? null : `decisions-${meta.uuid}`;
+  return <EditorPane {...editorProps}
+    statusLink={decisionsId !== null && meta?.kind !== "decision" && <DecisionsLink topics={relatedTopics} id={decisionsId} />}
+    afterAnswer={decisionsId !== null && meta?.kind !== "decision" && navigate !== undefined &&
+      <DecisionsBlock topics={relatedTopics} segment={route.workspace.segment} navigate={navigate} id={decisionsId} />}
+  />;
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
@@ -565,6 +574,10 @@ export function App(): ReactElement {
     ? routedSelection
     : pinnedRecords[0] ?? topic.topic;
   const meta = useDocMeta(doc);
+  const relatedTopics = route.kind === "doc" && meta !== null && docIsHydrated(route.uuid, meta)
+    ? relatedDecisionTopics(topics, meta)
+    : [];
+  const decisionsId = relatedTopics.length > 0 && meta !== null ? `decisions-${meta.uuid}` : null;
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
@@ -1029,6 +1042,7 @@ export function App(): ReactElement {
               selectedUuid={selected}
               navigate={navigate}
               directoryConnection={directory}
+              relatedTopics={relatedTopics}
               configured={hubReady}
               connection={doc}
               presence={titlePresence}
@@ -1104,6 +1118,7 @@ export function App(): ReactElement {
         <OutlinePane
           key={doc?.room ?? "no-document"}
           connection={doc}
+          decisionsId={decisionsId}
           obscured={narrowThreads && threadsOpen}
         />
         {/* The pane owns draft state across the sheet's unmount and resize.

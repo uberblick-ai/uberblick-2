@@ -7,3 +7,7 @@ export const TOPIC_STATES: Record<DecisionTopicState, string> = {
   "in-force": "In force",
   "not-yet-decided": "Not yet decided",
 };
+
+export const TOPIC_STATE_ORDER: readonly DecisionTopicState[] = [
+  "conflict", "under-review", "in-force", "agent-stance", "not-yet-decided",
+];

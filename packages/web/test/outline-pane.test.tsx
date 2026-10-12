@@ -32,3 +32,20 @@ it("closes when the last eligible heading disappears and stays closed when it re
   expect(within(host).queryByRole("button", { name: "Contents 1" })?.textContent).toContain("Contents 1");
   expect(screen.queryByRole("menu", { hidden: true })).toBeNull();
 });
+
+it("counts Decisions after headings and offers it alone on a page without headings", async () => {
+  const ydoc = new Y.Doc();
+  onTestCleanup(() => ydoc.destroy());
+  initDoc(ydoc, { uuid: "outlined", title: "Outlined" });
+  const connection = { ydoc } as RoomConnection;
+  const view = await renderSettled(<OutlinePane connection={connection} decisionsId="decisions-outlined" />);
+  const open = async (count: number): Promise<void> => {
+    await act(async () => within(view.container).getByRole("button", { name: `Contents ${count}` })
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  };
+  await open(1);
+  expect(screen.getByRole("menuitem", { name: "Decisions" })).toBeDefined();
+  await act(async () => appendBlock(ydoc, { type: "heading", text: "Overview", level: 1 }));
+  expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Overview", "Decisions"]);
+  expect(within(view.container).getByRole("button", { name: "Contents 2" })).toBeDefined();
+});
