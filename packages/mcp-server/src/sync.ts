@@ -384,7 +384,6 @@ export class HubSync {
       return;
     }
 
-    // Decision: 27805659-0dda-404c-a884-599cad021f64
     this.socket = new UnqueuedHocuspocusProviderWebsocket({
       url: config.hubUrl,
       WebSocketPolyfill: this.connection.websocket(),

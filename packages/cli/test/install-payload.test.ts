@@ -174,6 +174,8 @@ describe("the versioned install payload", () => {
     const built = spawnSync(process.execPath, [BUILD_SCRIPT, VERSION], {
       cwd: REPO_ROOT, env: environment, encoding: "utf8", timeout: 120_000,
     });
+    expect(built.error, built.stderr).toBeUndefined();
+    expect(built.signal, built.stderr).toBeNull();
     expect(built.status, built.stderr).toBe(0);
     mkdirSync(isolatedExtracted);
     const unpacked = spawnSync("tar", ["-xzf", join(isolatedOutput, `uberblick-${VERSION}.tar.gz`), "-C", isolatedExtracted], {

@@ -88,7 +88,6 @@
   --color-border: var(--sidebar-border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Decision: 3b99506a-1ccd-453b-b01d-0eadef56f12f. */
   /* Expose the product brand token through the utility theme. */
   --color-brand: var(--brand);
 }
