@@ -28,6 +28,7 @@ import {
   createAnnotation,
   editBlock,
   getDirectoryEntry,
+  getDirectoryMap,
   getMetaMap,
   initDoc,
   setDescription,
@@ -540,22 +541,20 @@ describe("directory stamps from the web", () => {
   it("repairs and clears lifecycle metadata on attach and later remote updates", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Lifecycle" });
-    setKind(doc, "requirement");
-    setStatus(doc, "planned");
+    setKind(doc, "decision");
+    setStatus(doc, "open");
 
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, {
       uuid: UUID,
       title: "Lifecycle",
-      kind: "decision",
-      status: "open",
       updatedAt: T0,
     });
     const directoryPeer = peerOf(directory);
     const stop = watchDocumentStub(doc, directory);
     expect(getDirectoryEntry(directoryPeer, UUID)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
       updatedAt: T0,
     });
 
@@ -571,6 +570,34 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
+  it("projects legacy requirement stubs and preserves raw room fields through opening and editing", () => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Legacy page" });
+    getMetaMap(doc).set("kind", "requirement");
+    getMetaMap(doc).set("status", "implementing");
+    const directory = new Y.Doc();
+    getDirectoryMap(directory).set(UUID, {
+      title: "Stale title",
+      tags: [],
+      kind: "requirement",
+      status: "planned",
+      updatedAt: T0,
+    });
+    const peer = peerOf(directory);
+    const stop = watchDocumentStub(doc, directory);
+    expect(getDirectoryEntry(peer, UUID)).toEqual({
+      uuid: UUID, title: "Legacy page", tags: [], updatedAt: T0,
+      createdAt: T0,
+    });
+    setTitle(doc, "Edited legacy page");
+    expect(getDirectoryEntry(peer, UUID)?.title).toBe("Edited legacy page");
+    expect(getDirectoryEntry(peer, UUID)?.kind).toBeUndefined();
+    expect(getDirectoryEntry(peer, UUID)?.status).toBeUndefined();
+    expect(getMetaMap(doc).get("kind")).toBe("requirement");
+    expect(getMetaMap(doc).get("status")).toBe("implementing");
+    stop();
+  });
+
   it("does not carry a stale description through a concurrent lifecycle repair", () => {
     const doc = new Y.Doc();
     initDoc(doc, {
@@ -578,8 +605,8 @@ describe("directory stamps from the web", () => {
       title: "Lifecycle",
       description: "Current description",
     });
-    setKind(doc, "requirement");
-    setStatus(doc, "implementing");
+    setKind(doc, "decision");
+    setStatus(doc, "open");
 
     const converge = (browserClientId: number, remoteClientId: number): void => {
       const base = new Y.Doc();
@@ -588,8 +615,8 @@ describe("directory stamps from the web", () => {
         uuid: UUID,
         title: "Lifecycle",
         description: "Stale description",
-        kind: "requirement",
-        status: "planned",
+        kind: "decision",
+        status: "withdrawn",
       });
 
       const browser = new Y.Doc();
@@ -603,8 +630,8 @@ describe("directory stamps from the web", () => {
         uuid: UUID,
         title: "Lifecycle",
         description: "Current description",
-        kind: "requirement",
-        status: "implementing",
+        kind: "decision",
+        status: "open",
       });
       const stop = watchDocumentStub(doc, browser);
 

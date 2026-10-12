@@ -226,7 +226,7 @@ describe("with the hub stopped", () => {
     for (const call of [
       rig.ok("set_metadata", { uuid: created.uuid, tags: ["auth"] }),
       rig.ok("set_metadata", { uuid: created.uuid, links: [] }),
-      rig.ok("set_status", { uuid: created.uuid, status: "planned" }),
+      rig.ok("set_status", { uuid: created.uuid, status: "open" }),
     ]) {
       const payload = await call;
       expect(payload.applied).toBe(true);

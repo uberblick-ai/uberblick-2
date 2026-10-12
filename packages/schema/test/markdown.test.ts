@@ -7,6 +7,7 @@ import {
   createAnnotation,
   exportMarkdown,
   getBlocks,
+  getMetaMap,
   importMarkdown,
   initDoc,
   setKind,
@@ -354,15 +355,6 @@ describe("markdown round-trip", () => {
   });
 
   it("exports lifecycle metadata without teaching the importer to store it", () => {
-    const requirement = new Y.Doc();
-    initDoc(requirement, { uuid: UUID, title: "Requirement", tags: [] });
-    setKind(requirement, "requirement");
-    setStatus(requirement, "planned");
-    const requirementExport = exportMarkdown(requirement);
-    expect(requirementExport).toContain("\nkind: requirement\nstatus: planned\n");
-    expect(importMarkdown(requirementExport)).not.toHaveProperty("kind");
-    expect(importMarkdown(requirementExport)).not.toHaveProperty("status");
-
     const decision = new Y.Doc();
     initDoc(decision, { uuid: UUID, title: "Decision", tags: [] });
     setKind(decision, "decision");
@@ -370,6 +362,8 @@ describe("markdown round-trip", () => {
     expect(exportMarkdown(decision)).toContain(
       "\nkind: decision\nstatus: decided\n",
     );
+    expect(importMarkdown(exportMarkdown(decision))).not.toHaveProperty("kind");
+    expect(importMarkdown(exportMarkdown(decision))).not.toHaveProperty("status");
 
     const ordinary = new Y.Doc();
     initDoc(ordinary, { uuid: UUID, title: "Ordinary", tags: [] });
@@ -377,6 +371,27 @@ describe("markdown round-trip", () => {
     expect(ordinaryExport).not.toContain("\nkind:");
     expect(ordinaryExport).not.toContain("\nstatus:");
   });
+
+  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+    "exports a stored requirement with status %j as regular without rewriting metadata",
+    (status) => {
+      const doc = new Y.Doc();
+      initDoc(doc, { uuid: UUID, title: "Proposal", description: "Preserved purpose.", tags: [] });
+      appendBlock(doc, { type: "paragraph", text: "Preserved content." });
+      const regularExport = exportMarkdown(doc);
+      getMetaMap(doc).set("kind", "requirement");
+      if (status !== undefined) getMetaMap(doc).set("status", status);
+      const before = Y.encodeStateAsUpdate(doc);
+      const markdown = exportMarkdown(doc);
+      expect(markdown).toBe(regularExport);
+      expect(markdown).not.toContain("\nkind:");
+      expect(markdown).not.toContain("\nstatus:");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      expect(getMetaMap(doc).get("kind")).toBe("requirement");
+      expect(getMetaMap(doc).get("status")).toBe(status);
+      doc.destroy();
+    },
+  );
 
   it("lengthens the fence when the code itself contains backticks", () => {
     const doc = new Y.Doc();

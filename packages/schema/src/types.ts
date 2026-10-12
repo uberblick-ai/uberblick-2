@@ -146,26 +146,17 @@ export const MAX_DESCRIPTION_LENGTH = 300;
 export const MAX_TLDR_LENGTH = 300;
 
 /** The document shapes whose lifecycle the schema records. */
-export const DOCUMENT_KINDS = ["requirement", "decision"] as const;
+export const DOCUMENT_KINDS = ["decision"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
-
-/** The states of a requirement record, in lifecycle order. */
-export const REQUIREMENT_STATUSES = [
-  "draft",
-  "planned",
-  "implementing",
-  "done",
-] as const;
-export type RequirementStatus = (typeof REQUIREMENT_STATUSES)[number];
 
 /** The states of a decision record, in lifecycle order. */
 export const DECISION_STATUSES = ["open", "decided", "rejected", "withdrawn"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];
 
-export type DocumentStatus = RequirementStatus | DecisionStatus;
+export type DocumentStatus = DecisionStatus;
 
 export function isDocumentKind(value: unknown): value is DocumentKind {
-  return value === "requirement" || value === "decision";
+  return value === "decision";
 }
 
 /** Whether `status` belongs to `kind`'s closed lifecycle. */
@@ -173,9 +164,7 @@ export function isDocumentStatusForKind(
   kind: DocumentKind,
   status: unknown,
 ): status is DocumentStatus {
-  const statuses =
-    kind === "requirement" ? REQUIREMENT_STATUSES : DECISION_STATUSES;
-  return statuses.some((candidate) => candidate === status);
+  return kind === "decision" && DECISION_STATUSES.some((candidate) => candidate === status);
 }
 
 /**

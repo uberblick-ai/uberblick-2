@@ -4,8 +4,8 @@
  * This holds transport, native activation, layout and real navigation: a
  * directory created by another context reaches this one, Enter and Space
  * activate its Title sort button, the filter spans the table, and All docs
- * enters the browser's history at `/<workspace>/all`. An external MCP status
- * write reaches both the open document and the directory without a reload.
+ * enters the browser's history at `/<workspace>/all`. Legacy Product history
+ * restores Working, and MCP decision adoption reaches the open page and list.
  *
  * Sort state, title-only filtering, its absence of search requests, list
  * content, creation and lifecycle rendering stay in the jsdom suite. Each
@@ -107,9 +107,26 @@ test("the workspace address is the list, and it holds what another browser creat
   const linked = await openApp(browser);
   await linked.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href);
   await expect(linked.getByRole("table")).toBeVisible();
+  await linked.evaluate((query) => history.replaceState({
+    query,
+    mode: "requirement",
+    stateFilter: "all",
+    sort: { order: "title", direction: "descending" },
+  }, ""), first);
+  await linked.reload();
+  await expect(linked.getByRole("button", { name: "Working", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(linked.getByRole("button", { name: "Product", exact: true })).toHaveCount(0);
+  await expect(listedTitles(linked)).toHaveText([first]);
+  await linked.locator(".ub-docs-open").click();
+  await expect(linked.locator(".ub-editor .ProseMirror")).toBeVisible();
+  await linked.goBack();
+  await expect(linked.getByRole("button", { name: "Working", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(linked.getByRole("searchbox", { name: "Filter this list by title" })).toHaveValue(first);
+  await expect(linked.getByRole("columnheader", { name: /^Title/ })).toHaveAttribute("aria-sort", "descending");
+  await expect(listedTitles(linked)).toHaveText([first]);
 });
 
-test("an external status write reaches the open document and the directory", async ({
+test("MCP decision adoption reaches an open regular page and the directory", async ({
   browser,
 }) => {
   const title = docTitle("roadmap");
@@ -120,25 +137,26 @@ test("an external status write reaches the open document and the directory", asy
   const created = await session.call<{ uuid: string }>("create_doc", {
     title,
     description: "A roadmap item created outside the browser.",
-    kind: "requirement",
-    status: "planned",
+    blocks: [{ type: "paragraph", text: "Keep the roadmap on a regular page." }],
   });
-  await page.getByRole("button", { name: "Product", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Product", exact: true })).toHaveCount(0);
   const row = page.locator(".ub-docs-row", { hasText: title });
   await row.locator(".ub-docs-open").click();
   await page.locator(".ub-editor .ProseMirror").waitFor({ state: "visible" });
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveCount(0);
   await session.call("set_status", {
     uuid: created.uuid,
-    status: "implementing",
+    status: "open",
   });
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
-    "Product · implementing",
+    "Decision · open",
   );
   await page.getByRole("button", { name: "All docs" }).click();
-  await page.getByRole("button", { name: "Product", exact: true }).click();
+  await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(0);
+  await page.getByRole("button", { name: "Decisions", exact: true }).click();
   await expect(
-    page.locator(".ub-docs-row", { hasText: title }).locator(".ub-lifecycle-badge"),
-  ).toHaveText("Product · implementing");
+    page.locator(".ub-docs-row", { hasText: title }),
+  ).toContainText("Not yet decided");
 });
 
 interface DecisionFixture {

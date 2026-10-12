@@ -482,8 +482,8 @@ function SettingsNavigation({
 }
 
 /**
- * Fixed navigation is outside sidebar curation and dragging. The two current
- * unbuilt destinations are focusable aria-disabled rows without handlers so
+ * Fixed navigation is outside sidebar curation and dragging. The current
+ * unbuilt destination is a focusable aria-disabled row without a handler so
  * keyboard readers encounter their unavailable state.
  */
 function Navigation({
@@ -509,7 +509,6 @@ function Navigation({
           </button>
         </li>
         <Soon icon={<DashboardIcon />}>Dashboard</Soon>
-        <Soon icon={<ChecklistIcon />}>Product requirements</Soon>
       </ul>
     </section>
   );
@@ -564,21 +563,6 @@ function DashboardIcon(): ReactElement {
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function ChecklistIcon(): ReactElement {
-  return (
-    <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M2.5 4.8 L4 6.3 L6.5 3.3 M8.5 5h5 M2.5 10.8 L4 12.3 L6.5 9.3 M8.5 11h5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );

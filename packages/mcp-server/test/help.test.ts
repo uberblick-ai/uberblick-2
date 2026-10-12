@@ -82,6 +82,19 @@ it("refuses unknown topics through the tool failure contract and the resource-no
   });
 });
 
+it("documents only regular pages and decision lifecycle values in product help", async () => {
+  const rig = await local();
+  const { topics } = await rig.ok("get_help");
+  const lifecycle = topics.find((topic: { id: string }) => topic.id === "lifecycle");
+  expect(lifecycle.description).not.toMatch(/requirement/i);
+  for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_status", "set_metadata", "markdown", "export_markdown"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text, topic).not.toMatch(/requirement|\bplanned\b|\bimplementing\b|\bdone\b/i);
+    expect(text, topic).not.toMatch(/`draft`|"draft"/);
+  }
+  expect((await rig.ok("get_help", { topic: "markdown" })).text).toContain("decision log of any regular page");
+});
+
 it.each(["list", "read"] as const)("contains an unexpected help resource %s failure and logs its original cause", async (route) => {
   const rig = await local();
   const cause = new Error("Private database path: /private/workspace.sqlite; SELECT secret FROM records");

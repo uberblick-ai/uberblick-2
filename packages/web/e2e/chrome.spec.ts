@@ -3079,7 +3079,7 @@ for (const [device, width, hasTouch] of [
     if (width < 1280) {
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
     }
-    for (const destination of ["Dashboard", "Product requirements"]) {
+    for (const destination of ["Dashboard"]) {
       const row = page.getByRole("button", { name: new RegExp(`${destination}.*coming soon`, "i") });
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("aria-disabled", "true");

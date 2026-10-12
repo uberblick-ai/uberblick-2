@@ -138,8 +138,8 @@ function directoryOf(rig: Rig): Y.Doc {
 }
 
 /** The stub a listing shows for one uuid, or undefined when there is none. */
-async function listed(rig: Rig, uuid: string): Promise<any> {
-  const docs = (await rig.ok("list_docs")).docs;
+async function listed(rig: Rig, uuid: string, filters: Record<string, unknown> = {}): Promise<any> {
+  const docs = (await rig.ok("list_docs", filters)).docs;
   return docs.find((entry: any) => entry.uuid === uuid);
 }
 
@@ -277,14 +277,14 @@ describe("a lifecycle update that only half landed", () => {
     store.failing = true;
     const refused = await rig.call("set_status", {
       uuid: created.uuid,
-      status: "planned",
+      status: "open",
     });
     expect(refused.isError).toBe(true);
     expect(refused.payload).toMatchObject({
       error: "persistence_failed",
       uuid: created.uuid,
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
       applied: false,
       partial: false,
       synced: false,
@@ -315,8 +315,8 @@ describe("a lifecycle update that only half landed", () => {
     const restarted = await server(databasePath);
     expect(await restarted.ok("get_doc", { uuid: created.uuid })).not.toHaveProperty("kind");
     expect(await listed(restarted, created.uuid)).not.toHaveProperty("kind");
-    expect(await restarted.ok("set_status", { uuid: created.uuid, status: "planned" })).toMatchObject({
-      kind: "requirement", status: "planned", applied: true,
+    expect(await restarted.ok("set_status", { uuid: created.uuid, status: "open" })).toMatchObject({
+      kind: "decision", status: "open", applied: true,
     });
   });
 
@@ -325,7 +325,7 @@ describe("a lifecycle update that only half landed", () => {
     const store = failingStore(databasePath);
     const rig = await server(databasePath, store);
     const created = await rig.ok("create_doc", {
-      title: "Adopted requirement",
+      title: "Adopted decision",
       description: DESCRIPTION,
     });
 
@@ -333,14 +333,14 @@ describe("a lifecycle update that only half landed", () => {
     store.failing = true;
     const refused = await rig.call("set_status", {
       uuid: created.uuid,
-      status: "planned",
+      status: "open",
     });
     expect(refused.isError).toBe(true);
     expect(refused.payload).toMatchObject({
       error: "persistence_failed",
       uuid: created.uuid,
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
       applied: false,
       partial: true,
       synced: false,
@@ -367,7 +367,7 @@ describe("a lifecycle update that only half landed", () => {
     store.failing = false;
     expect(
       getMeta(fromLog(databasePath, `${WORKSPACE}/${created.uuid}`)),
-    ).toMatchObject({ kind: "requirement", status: "planned" });
+    ).toMatchObject({ kind: "decision", status: "open" });
     expect(
       getDirectoryEntry(
         fromLog(databasePath, `${WORKSPACE}/_directory`),
@@ -376,13 +376,13 @@ describe("a lifecycle update that only half landed", () => {
     ).not.toHaveProperty("kind");
 
     const restarted = await server(databasePath);
-    expect(await listed(restarted, created.uuid)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+    expect(await listed(restarted, created.uuid, { kind: "decision" })).toMatchObject({
+      kind: "decision",
+      status: "open",
     });
     expect(await restarted.ok("get_doc", { uuid: created.uuid })).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
     });
   });
 });

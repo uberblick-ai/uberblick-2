@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -20,22 +20,11 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
     when: { field: "kind", is: "decision" },
   },
   {
-    title: "A requirement document (`kind: requirement`)",
-    when: { field: "kind", is: "requirement" },
-    forbids: ["related", "supersedes", "answer", "discussion"],
-  },
-  {
     title: "An ordinary document",
     when: { field: "kind", present: false },
     forbids: ["status", "related", "supersedes", "answer", "discussion"],
   },
 ];
-
-function firstStatus(kind: DocumentKind): DocumentStatus {
-  return kind === "requirement"
-    ? REQUIREMENT_STATUSES[0]
-    : DECISION_STATUSES[0];
-}
 
 /**
  * Placement implies pinning and names an existing group ID. Document creation
@@ -165,7 +154,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
 
   const lifecycle =
-    kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
+    kind === undefined ? null : { kind, status: status ?? DECISION_STATUSES[0] };
   if (
     lifecycle !== null &&
     !isDocumentStatusForKind(lifecycle.kind, lifecycle.status)

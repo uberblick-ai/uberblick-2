@@ -4,7 +4,6 @@ import {
   DOCUMENT_KINDS,
   MAX_DESCRIPTION_LENGTH,
   MAX_TLDR_LENGTH,
-  REQUIREMENT_STATUSES,
   canonicalDocumentUuid,
 } from "@uberblick/schema";
 import { z } from "zod";
@@ -69,7 +68,7 @@ export const documentKindArg = z.enum(DOCUMENT_KINDS).describe(
 );
 
 export const documentStatusArg = z
-  .enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES])
+  .enum(DECISION_STATUSES)
   .describe("The recorded lifecycle state. Its kind owns the legal values.");
 
 const INLINE_RUNS =

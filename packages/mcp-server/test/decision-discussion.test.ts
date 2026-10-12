@@ -64,8 +64,9 @@ async function refuse(rig: Rig, tool: string, args: Record<string, unknown>, err
   return result.payload;
 }
 
-function stub(rig: Rig, fields: Partial<DirectoryEntry> = {}): DirectoryEntry {
+function stub(rig: Rig, fields: Partial<DirectoryEntry> = {}, regular = false): DirectoryEntry {
   const entry: DirectoryEntry = { uuid: randomUUID(), title: "Cached proposal", kind: "decision", status: "open", tags: [], ...fields };
+  if (regular) { delete entry.kind; delete entry.status; }
   upsertDirectoryEntry(rig.instance.replicas.directory().doc, entry);
   return entry;
 }
@@ -79,27 +80,27 @@ describe("explicit decision discussion references", () => {
     const rig = await localRig();
     const related = await page(rig, { title: "Owning page" });
     const rfc = await page(rig);
-    const requirement = await page(rig, { kind: "requirement" });
-    const unchanged = [related.uuid, rfc.uuid, requirement.uuid].map(uuid => Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc));
+    const otherRfc = await page(rig);
+    const unchanged = [related.uuid, rfc.uuid, otherRfc.uuid].map(uuid => Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc));
     const beforeCount = listDirectory(rig.instance.replicas.directory().doc).length;
 
     vi.mocked(randomUUID).mockClear();
     const first = await decision(rig, { related: related.uuid, discussion: rfc.uuid, blocks: [] });
     expect(randomUUID).toHaveBeenCalled();
     expect(first).toMatchObject({ status: "open", topic: first.uuid, discussion: rfc.uuid, blocks: [] });
-    const next = await decision(rig, { supersedes: first.uuid, discussion: requirement.uuid });
+    const next = await decision(rig, { supersedes: first.uuid, discussion: otherRfc.uuid });
     const without = await decision(rig, { supersedes: first.uuid });
     const stance = await decision(rig, { status: "decided", discussion: rfc.uuid });
-    const recorded = await decision(rig, { status: "decided", supersedes: stance.uuid, discussion: requirement.uuid, answer });
+    const recorded = await decision(rig, { status: "decided", supersedes: stance.uuid, discussion: otherRfc.uuid, answer });
     expect(stance).toMatchObject({ discussion: rfc.uuid, agentStance: true });
-    expect(recorded).toMatchObject({ discussion: requirement.uuid, decidedBy: answer.who, approvalChanged: false });
+    expect(recorded).toMatchObject({ discussion: otherRfc.uuid, decidedBy: answer.who, approvalChanged: false });
     for (const record of [next, without]) expect(record).toMatchObject({ topic: first.uuid, governs: related.uuid });
     expect(without.discussion).toBeNull();
     for (const record of [first, next, without, stance, recorded]) {
       expect((await rig.ok("get_doc", { uuid: record.uuid })).discussion).toBe(record.discussion);
       expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.discussion).toBe(record.discussion);
     }
-    expect([related.uuid, rfc.uuid, requirement.uuid].map(uuid => Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc))).toEqual(unchanged);
+    expect([related.uuid, rfc.uuid, otherRfc.uuid].map(uuid => Y.encodeStateAsUpdate(rig.instance.replicas.replica(uuid).doc))).toEqual(unchanged);
     expect(listDirectory(rig.instance.replicas.directory().doc)).toHaveLength(beforeCount + 5);
     expect((await rig.ok("get_doc", { uuid: rfc.uuid })).tags).toEqual([]);
   });
@@ -111,7 +112,7 @@ describe("explicit decision discussion references", () => {
     const archived = await page(rig);
     await rig.ok("archive_doc", { uuid: archived.uuid });
     const unknown = randomUUID();
-    const unhydrated = stub(rig, { kind: "requirement", status: "draft" });
+    const unhydrated = stub(rig, {}, true);
     const targets = [
       [record.uuid, "discussion_not_regular_document"],
       [archived.uuid, "doc_archived"],
@@ -167,7 +168,7 @@ describe("explicit decision discussion references", () => {
     const record = await decision(rig, { discussion: rfc.uuid });
     const archived = await page(rig);
     await rig.ok("archive_doc", { uuid: archived.uuid });
-    const unhydrated = stub(rig, { kind: "requirement", status: "draft" });
+    const unhydrated = stub(rig, {}, true);
     const cases = [
       [record.uuid, "discussion_not_regular_document"],
       [archived.uuid, "doc_archived"],
@@ -196,10 +197,10 @@ describe("explicit decision discussion references", () => {
     const rejected = await decision(rig, { discussion: rfc.uuid });
     const withdrawn = await decision(rig, { discussion: rfc.uuid });
     const regular = await page(rig);
-    const requirement = await page(rig, { kind: "requirement" });
+    const otherRfc = await page(rig);
     await rig.ok("set_status", { uuid: rejected.uuid, status: "rejected", answer, reason: "Another answer was chosen." });
     await rig.ok("set_status", { uuid: withdrawn.uuid, status: "withdrawn" });
-    for (const record of [decided, rejected, withdrawn, regular, requirement]) {
+    for (const record of [decided, rejected, withdrawn, regular, otherRfc]) {
       for (const discussion of [rfc.uuid, null]) {
         const error = record.uuid === decided.uuid ? "decision_read_only" : "discussion_not_writable";
         const refused = await refuse(rig, "set_metadata", { uuid: record.uuid, description: "Must not survive.", discussion }, error, [record.uuid, rfc.uuid]);

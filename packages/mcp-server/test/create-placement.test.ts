@@ -538,19 +538,19 @@ describe("a create that gets part-way", () => {
     const databasePath = tempDatabasePath();
     const store = failingStore(databasePath);
     const rig = await server(databasePath, store);
-    const requirement = await rig.ok("create_doc", {
-      title: "Requirement", description: "Its log is derived without a write.", kind: "requirement",
+    const page = await rig.ok("create_doc", {
+      title: "Page", description: "Its log is derived without a write.",
     });
-    const requirementRoom = `${WORKSPACE}/${requirement.uuid}`;
-    const before = store.appends.get(requirementRoom);
-    store.failRoom = room => room === requirementRoom;
+    const pageRoom = `${WORKSPACE}/${page.uuid}`;
+    const before = store.appends.get(pageRoom);
+    store.failRoom = room => room === pageRoom;
     store.failing = true;
     const decision = await rig.ok("create_doc", {
       title: "Own metadata", description: "Stores its related page itself.",
-      kind: "decision", related: requirement.uuid,
+      kind: "decision", related: page.uuid,
     });
-    expect(store.appends.get(requirementRoom)).toBe(before);
+    expect(store.appends.get(pageRoom)).toBe(before);
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual(["document", "directory"]);
-    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toMatchObject([{ topic: decision.uuid }]);
+    expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: decision.uuid }]);
   });
 });

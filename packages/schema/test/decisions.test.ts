@@ -36,7 +36,7 @@ import {
 import type { DirectoryUpsert } from "../src/index.js";
 import { syncDocs } from "./helpers.js";
 
-const REQUIREMENT = "11111111-1111-4111-8111-111111111111";
+const PAGE = "11111111-1111-4111-8111-111111111111";
 const A = "22222222-2222-4222-8222-222222222222";
 const B = "33333333-3333-4333-8333-333333333333";
 const C = "44444444-4444-4444-8444-444444444444";
@@ -45,7 +45,7 @@ const E = "66666666-6666-4666-8666-666666666666";
 
 function record(uuid = A, supersedes?: string, topic = A): Y.Doc {
   const doc = new Y.Doc();
-  initDoc(doc, { uuid, title: "A choice", governs: REQUIREMENT, topic, ...(supersedes === undefined ? {} : { supersedes }) });
+  initDoc(doc, { uuid, title: "A choice", governs: PAGE, topic, ...(supersedes === undefined ? {} : { supersedes }) });
   setKind(doc, "decision");
   setStatus(doc, "decided");
   return doc;
@@ -59,7 +59,7 @@ function ids(records: readonly { uuid: string }[]): string[] { return records.ma
 
 function fork(): Y.Doc {
   const directory = new Y.Doc();
-  stub(directory, A, { governs: REQUIREMENT, createdAt: 10 });
+  stub(directory, A, { governs: PAGE, createdAt: 10 });
   stub(directory, B, { supersedes: A, createdAt: 20 });
   stub(directory, C, { supersedes: A, createdAt: 9999 });
   stub(directory, D, { supersedes: B, createdAt: 1 });
@@ -69,8 +69,8 @@ function fork(): Y.Doc {
 describe("decision metadata and caches", () => {
   it("stores own links and fixes both topic and predecessor at creation", () => {
     const doc = record(B, A);
-    setLinks(doc, [REQUIREMENT.toUpperCase(), REQUIREMENT, E, A.toUpperCase()]);
-    expect(getMeta(doc)).toMatchObject({ topic: A, governs: REQUIREMENT, supersedes: A, links: [REQUIREMENT, E, A] });
+    setLinks(doc, [PAGE.toUpperCase(), PAGE, E, A.toUpperCase()]);
+    expect(getMeta(doc)).toMatchObject({ topic: A, governs: PAGE, supersedes: A, links: [PAGE, E, A] });
     initDoc(doc, { uuid: B, title: "Same", supersedes: A, topic: A });
     initDoc(doc, { uuid: B, title: "Same", supersedes: A });
     expect(getMeta(doc).topic).toBe(A);
@@ -101,7 +101,7 @@ describe("decision metadata and caches", () => {
     initDoc(adopted, { uuid: B, title: "No related page" });
     setKind(adopted, "decision");
     const noPage = Y.encodeStateAsUpdate(adopted);
-    expect(() => initDoc(adopted, { uuid: B, title: "Must not change", governs: REQUIREMENT })).toThrow(/related page is immutable/);
+    expect(() => initDoc(adopted, { uuid: B, title: "Must not change", governs: PAGE })).toThrow(/related page is immutable/);
     expect(Y.encodeStateAsUpdate(adopted)).toEqual(noPage);
     expect(getMeta(adopted)).not.toHaveProperty("governs");
   });
@@ -139,11 +139,11 @@ describe("decision metadata and caches", () => {
     setLinks(doc, [discussion.toUpperCase(), E, discussion]);
     expect(getMeta(doc)).toMatchObject({
       discussion,
-      links: [discussion, E, REQUIREMENT, A],
+      links: [discussion, E, PAGE, A],
     });
     expect(getMetaMap(doc).get("links")).toEqual([discussion.toUpperCase(), E, discussion]);
     setDiscussion(doc, D);
-    expect(getMeta(doc)).toMatchObject({ discussion: D, links: [discussion.toUpperCase(), E, discussion, REQUIREMENT, A, D] });
+    expect(getMeta(doc)).toMatchObject({ discussion: D, links: [discussion.toUpperCase(), E, discussion, PAGE, A, D] });
     setDiscussion(doc, null);
     expect(getMetaMap(doc).get("discussion")).toBeNull();
     expect(getMeta(doc).discussion).toBeNull();
@@ -175,7 +175,7 @@ describe("decision metadata and caches", () => {
     setAnnotationResolved(doc, resolved.id, true);
     deleteBlock(doc, block);
     const fields = decisionDirectoryFields(doc);
-    expect(fields).toEqual({ governs: REQUIREMENT, topic: A, supersedes: A, discussion: null, tldr: "Use durable rooms.", answerPreview: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", approvalChanged: false, commentCount: 3 });
+    expect(fields).toEqual({ governs: PAGE, topic: A, supersedes: A, discussion: null, tldr: "Use durable rooms.", answerPreview: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", approvalChanged: false, commentCount: 3 });
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...fields });
     expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), fields)).toBe(false);
@@ -256,7 +256,7 @@ describe("decision metadata and caches", () => {
     const doc = record();
     const block = appendBlock(doc, { type: "paragraph", text: "Current answer" });
     const directory = new Y.Doc();
-    stub(directory, A, { governs: REQUIREMENT });
+    stub(directory, A, { governs: PAGE });
     expect(getDirectoryEntry(directory, A)).not.toHaveProperty("answerPreview");
     const fields = decisionDirectoryFields(doc);
     expect(directoryStubDiffers(getDirectoryEntry(directory, A), getMeta(doc), fields)).toBe(true);
@@ -289,7 +289,7 @@ describe("decision metadata and caches", () => {
     const doc = record(B, A);
     const directory = new Y.Doc();
     stub(directory, A);
-    stub(directory, B, { governs: REQUIREMENT, supersedes: A });
+    stub(directory, B, { governs: PAGE, supersedes: A });
     const repair = () => upsertDirectoryEntry(directory, { ...getMeta(doc), description: "", ...decisionDirectoryFields(doc) });
     expect(getDirectoryEntry(directory, B)).not.toHaveProperty("discussion");
     expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), decisionDirectoryFields(doc))).toBe(true);
@@ -321,12 +321,12 @@ describe("decision metadata and caches", () => {
     directory.destroy();
   });
 
-  it("keeps decision-only cache fields out of ordinary and requirement stubs", () => {
+  it("keeps decision-only cache fields out of regular and stored requirement stubs", () => {
     const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: REQUIREMENT, discussion: E, tldr: "No", answerPreview: "No", agentStance: true, approvalChanged: true, commentCount: 10 });
-    upsertDirectoryEntry(directory, { uuid: B, title: "Product", kind: "requirement", topic: A, discussion: null, answerPreview: null, commentCount: 10 });
+    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: PAGE, discussion: E, tldr: "No", answerPreview: "No", agentStance: true, approvalChanged: true, commentCount: 10 });
+    getDirectoryMap(directory).set(B, { title: "Stored proposal", tags: [], kind: "requirement", status: "planned", topic: A, discussion: null, answerPreview: null, commentCount: 10 });
     expect(getDirectoryEntry(directory, A)).toEqual({ uuid: A, title: "Ordinary", tags: [] });
-    expect(getDirectoryEntry(directory, B)).toEqual({ uuid: B, title: "Product", tags: [], kind: "requirement" });
+    expect(getDirectoryEntry(directory, B)).toEqual({ uuid: B, title: "Stored proposal", tags: [] });
     getDirectoryMap(directory).set(C, { title: "Malformed", kind: "decision", topic: false, discussion: "not-a-uuid", commentCount: -1, decidedBy: {}, answerPreview: 42, agentStance: "true", approvalChanged: "true" });
     expect(getDirectoryEntry(directory, C)).toEqual({ uuid: C, title: "Malformed", tags: [], kind: "decision" });
     upsertDirectoryEntry(directory, { uuid: C, title: "No prose", answerPreview: null });
@@ -462,32 +462,37 @@ describe("stubs-only topic resolution", () => {
     expect(listDirectory(directory)).toEqual([]);
   });
 
-  it.each([undefined, "requirement"] as const)("derives a regular-page log and Markdown from any related history record, kind %s", (kind) => {
+  it.each([undefined, "draft", "planned", "implementing", "done"] as const)("derives a regular-page log and Markdown through stored requirement status %s", (status) => {
     const directory = fork();
-    stub(directory, E, { topic: E, governs: REQUIREMENT, status: "open", createdAt: 0 });
-    const requirement = new Y.Doc();
-    initDoc(requirement, { uuid: REQUIREMENT, title: "Product" });
-    if (kind !== undefined) setKind(requirement, kind);
+    stub(directory, E, { topic: E, governs: PAGE, status: "open", createdAt: 0 });
+    const page = new Y.Doc();
+    initDoc(page, { uuid: PAGE, title: "Regular page" });
+    getMetaMap(page).set("kind", "requirement");
+    if (status !== undefined) getMetaMap(page).set("status", status);
     // Even a stale foreign legacy root cannot influence a read or export.
-    requirement.getArray("decisions").insert(0, [D]);
-    expect(readDecisions(requirement, directory).map((topic) => topic.topic)).toEqual([E, A]);
-    const markdown = exportMarkdown(requirement, { frontmatter: false, directory });
+    page.getArray("decisions").insert(0, [D]);
+    const before = Y.encodeStateAsUpdate(page);
+    expect(readDecisions(page, directory).map((topic) => topic.topic)).toEqual([E, A]);
+    const markdown = exportMarkdown(page, { frontmatter: false, directory });
     expect(markdown).toContain(`${A} — ${A} — nothing in force; conflict:`);
     expect(markdown).toContain(`${E} — ${E} — nothing in force; pending: ${E}`);
     tombstoneDirectoryEntry(directory, B);
-    expect(readDecisions(requirement, directory).map((topic) => topic.topic)).toEqual([E]);
-    expect(exportMarkdown(requirement, { frontmatter: false, directory })).not.toContain(`- ${A}`);
-    expect(readDecisions(requirement)).toEqual([]);
+    expect(readDecisions(page, directory).map((topic) => topic.topic)).toEqual([E]);
+    expect(exportMarkdown(page, { frontmatter: false, directory })).not.toContain(`- ${A}`);
+    expect(readDecisions(page)).toEqual([]);
+    expect(Y.encodeStateAsUpdate(page)).toEqual(before);
+    expect(getMetaMap(page).get("kind")).toBe("requirement");
+    expect(getMetaMap(page).get("status")).toBe(status);
   });
 
   it("includes related rejected and withdrawn history while never listing decisions on a decision record", () => {
     const directory = new Y.Doc();
     stub(directory, A, { createdAt: 10 });
-    stub(directory, B, { supersedes: A, status: "rejected", governs: REQUIREMENT });
+    stub(directory, B, { supersedes: A, status: "rejected", governs: PAGE });
     stub(directory, C, { topic: C, createdAt: 5 });
-    stub(directory, D, { topic: C, supersedes: C, status: "withdrawn", governs: REQUIREMENT });
+    stub(directory, D, { topic: C, supersedes: C, status: "withdrawn", governs: PAGE });
     const page = new Y.Doc();
-    initDoc(page, { uuid: REQUIREMENT, title: "Regular page" });
+    initDoc(page, { uuid: PAGE, title: "Regular page" });
     expect(readDecisions(page, directory).map((topic) => topic.topic)).toEqual([C, A]);
     setKind(page, "decision");
     expect(readDecisions(page, directory)).toEqual([]);
@@ -495,18 +500,18 @@ describe("stubs-only topic resolution", () => {
 
   it("shares regular-page membership from resolved stubs without writes or linked-only topics", () => {
     const directory = new Y.Doc();
-    stub(directory, A, { topic: A, governs: REQUIREMENT, createdAt: 10 });
+    stub(directory, A, { topic: A, governs: PAGE, createdAt: 10 });
     stub(directory, B, { supersedes: A, governs: E, createdAt: 20 });
-    stub(directory, C, { topic: C, governs: REQUIREMENT, createdAt: 5 });
-    stub(directory, D, { topic: D, discussion: REQUIREMENT, createdAt: 1 });
+    stub(directory, C, { topic: C, governs: PAGE, createdAt: 5 });
+    stub(directory, D, { topic: D, discussion: PAGE, createdAt: 1 });
     const before = Y.encodeStateAsUpdate(directory);
     const topics = resolveDecisionTopics(listDirectory(directory, { includeDeleted: true }));
-    expect(relatedDecisionTopics(topics, { uuid: REQUIREMENT }).map((topic) => topic.topic)).toEqual([C, A]);
-    expect(relatedDecisionTopics(topics, { uuid: E, kind: "requirement" }).map((topic) => topic.topic)).toEqual([A]);
-    expect(relatedDecisionTopics(topics, { uuid: REQUIREMENT, kind: "decision" })).toEqual([]);
+    expect(relatedDecisionTopics(topics, { uuid: PAGE }).map((topic) => topic.topic)).toEqual([C, A]);
+    expect(relatedDecisionTopics(topics, { uuid: E }).map((topic) => topic.topic)).toEqual([A]);
+    expect(relatedDecisionTopics(topics, { uuid: PAGE, kind: "decision" })).toEqual([]);
     expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
     const page = new Y.Doc();
-    initDoc(page, { uuid: REQUIREMENT, title: "Regular page" });
+    initDoc(page, { uuid: PAGE, title: "Regular page" });
     expect(relatedDecisionTopics(topics, getMeta(page))).toEqual(readDecisions(page, directory));
     tombstoneDirectoryEntry(directory, C);
     const archived = resolveDecisionTopics(listDirectory(directory, { includeDeleted: true }));
