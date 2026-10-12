@@ -1,4 +1,3 @@
-// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 export interface ObservationTick {
   value: number;
   label: string[];

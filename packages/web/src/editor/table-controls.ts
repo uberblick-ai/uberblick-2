@@ -1,4 +1,3 @@
-// Decision: 211465cd-c58b-44ad-b711-88b5eae825b0
 /** Table controls act on the live shared row, with independent undo steps. */
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
