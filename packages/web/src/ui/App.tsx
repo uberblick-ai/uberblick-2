@@ -561,7 +561,6 @@ export function App(): ReactElement {
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
-  const entries = useMemo(() => allEntries.filter((entry) => !entry.deleted), [allEntries]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
   const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
@@ -574,8 +573,7 @@ export function App(): ReactElement {
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
-  // `entries` is the live directory observer, while this exact lookup keeps the
-  // selected tombstone available after archiving removes it from that listing.
+  // Read the selected stub directly while its directory observer catches up.
   const selectedDirectoryEntry =
     directory === null || selected === null
       ? undefined
