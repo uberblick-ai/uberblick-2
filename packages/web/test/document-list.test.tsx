@@ -39,6 +39,8 @@ import {
   roomForDoc,
   sidebarRoom,
   settingsRoom,
+  setKind,
+  setStatus,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -198,6 +200,14 @@ function typeInto(input: HTMLInputElement, value: string): void {
 function filter(host: HTMLElement): HTMLInputElement {
   return within(host).getByRole<HTMLInputElement>("searchbox", {
     name: "Filter this list by title",
+  });
+}
+
+async function traverseHistory(direction: "back" | "forward"): Promise<void> {
+  await act(async () => {
+    const popped = new Promise<void>((resolve) => window.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true }));
+    window.history[direction]();
+    await popped;
   });
 }
 
@@ -683,6 +693,310 @@ describe("the list", () => {
   });
 });
 
+describe("decision topics in the list", () => {
+  const OTHER = "a8611441-cf83-4f59-8e44-b3ce5a9f571d";
+  const ANOTHER = "a3b75cc9-c880-4511-9ac5-e2305788b5f4";
+
+  function decision(uuid: string, title: string, over: Partial<DirectoryEntry> = {}): DirectoryEntry {
+    return entry({ uuid, title, kind: "decision", status: "decided", ...over });
+  }
+
+  async function chooseDecisions(host: HTMLElement): Promise<void> {
+    await act(async () => {
+      within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("button", { name: "Decisions" }).click();
+    });
+  }
+
+  function topicRow(host: HTMLElement, uuid: string): HTMLElement {
+    const row = openButtons(host).find((button) => button.title === uuid)?.closest("tr");
+    if (row === undefined || row === null) throw new Error(`No topic row ${uuid}`);
+    return row;
+  }
+
+  function stateFilter(host: HTMLElement): HTMLSelectElement {
+    return within(host).getByRole<HTMLSelectElement>("combobox", { name: "Decision state" });
+  }
+
+  async function chooseState(host: HTMLElement, value: string): Promise<void> {
+    await act(async () => {
+      const select = stateFilter(host);
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  async function open(entries: DirectoryEntry[]): Promise<HTMLElement> {
+    const host = await mount(<DocumentList connection={room("decision-list")}
+      entries={entries} groups={[]} onSelect={() => {}} onTogglePin={null} />);
+    await chooseDecisions(host);
+    return host;
+  }
+
+  it("lists one current answer per topic using the whole history's caches without joining records", async () => {
+    const peer = peerOf(directoryDoc());
+    const records = [
+      decision(ONE, "Original answer title", {
+        createdAt: 1, updatedAt: 100, answerPreview: "The superseded answer.", commentCount: 2,
+      }),
+      decision(TWO, "Stable answer title", {
+        topic: ONE, supersedes: ONE, createdAt: 2, updatedAt: 200,
+        answerPreview: "Keep the current answer.", commentCount: 3,
+      }),
+      decision(THREE, "Pending proposal title", {
+        topic: ONE, supersedes: TWO, status: "open", createdAt: 3, updatedAt: 300,
+        answerPreview: "The unapproved replacement.", commentCount: 5,
+      }),
+      decision(FOUR, "Rejected proposal title", {
+        topic: ONE, supersedes: TWO, status: "rejected", createdAt: 4, updatedAt: 400, commentCount: 7,
+      }),
+      decision(GONE, "Withdrawn proposal title", {
+        topic: ONE, supersedes: FOUR, status: "withdrawn", createdAt: 5, updatedAt: 1000, commentCount: 11,
+      }),
+      decision(OTHER, "Alpha answer", { updatedAt: 900, commentCount: 0 }),
+    ];
+    for (const record of records) upsertDirectoryEntry(peer, record);
+
+    const host = await openApp(allPath(WORKSPACE));
+    await chooseDecisions(host);
+    const requestsBeforeFiltering = vi.mocked(globalThis.fetch).mock.calls.length;
+    expect(rowTitles(host)).toEqual(["Stable answer title", "Alpha answer"]);
+    expect(rowUuids(host)).toEqual([ONE, OTHER]);
+    const row = topicRow(host, ONE);
+    expect(within(row).getByText("Under review").textContent).toBe("Under review");
+    expect(within(row).getByText("Keep the current answer.").textContent).toBe("Keep the current answer.");
+    expect(row.textContent).not.toContain("unapproved replacement");
+    expect(row.textContent).not.toContain("superseded answer");
+    expect(within(row).getByText("28 comments").textContent).toBe("28 comments");
+    expect(within(row).getByRole("time").getAttribute("dateTime")).toBe("1970-01-01T00:00:01.000Z");
+    expect([...rooms.keys()].sort()).toEqual(
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+    );
+
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
+    expect(rowTitles(host)).toEqual(["Alpha answer", "Stable answer title"]);
+    await act(async () => typeInto(filter(host), "pending proposal"));
+    expect(rowTitles(host)).toEqual([]);
+    await act(async () => typeInto(filter(host), "stable answer"));
+    expect(rowUuids(host)).toEqual([ONE]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(requestsBeforeFiltering);
+  });
+
+  it("omits unknown or null answer caches and an incomplete history count", async () => {
+    const host = await open([
+      decision(ONE, "No answer cached", { answerPreview: null, commentCount: 0 }),
+      decision(TWO, "Older client", { commentCount: 1 }),
+      decision(THREE, "Complete answer", { answerPreview: "Known answer.", commentCount: 2, createdAt: 1 }),
+      decision(FOUR, "Uncounted history", {
+        topic: THREE, supersedes: THREE, status: "withdrawn", createdAt: 2,
+      }),
+      decision(GONE, "Undecided topic", {
+        status: "open", answerPreview: "An unapproved preview.", commentCount: 0,
+      }),
+    ]);
+    expect(within(topicRow(host, ONE)).getByText("0 comments").textContent).toBe("0 comments");
+    expect(within(topicRow(host, TWO)).getByText("1 comment").textContent).toBe("1 comment");
+    expect(topicRow(host, THREE).textContent).toContain("Known answer.");
+    expect(topicRow(host, THREE).textContent).not.toMatch(/\d+ comments?/);
+    expect(documentTable(host).textContent).not.toContain("An unapproved preview.");
+    expect(topicRow(host, GONE).textContent).toContain("Not yet decided");
+  });
+
+  it("uses the newest usable history stamp and places topics without one last", async () => {
+    const host = await open([
+      decision(ONE, "Alpha", { updatedAt: Number.MAX_VALUE, createdAt: 1 }),
+      decision(TWO, "Pending title", {
+        topic: ONE, supersedes: ONE, status: "open", updatedAt: 500, createdAt: 2,
+      }),
+      decision(THREE, "Zebra", { updatedAt: 400 }),
+      decision(FOUR, "Before Alpha", { updatedAt: Number.NaN }),
+      decision(GONE, "Absent stamp"),
+    ]);
+    expect(rowTitles(host)).toEqual(["Alpha", "Zebra", "Absent stamp", "Before Alpha"]);
+    expect(within(topicRow(host, ONE)).getByRole("time").getAttribute("dateTime")).toBe("1970-01-01T00:00:00.500Z");
+    expect(within(topicRow(host, FOUR)).queryByRole("time")).toBeNull();
+    expect(within(topicRow(host, GONE)).queryByRole("time")).toBeNull();
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Last changed" }).click());
+    expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Absent stamp", "Before Alpha"]);
+  });
+
+  it("filters shared states and changed approvals while combining with the topic title", async () => {
+    const host = await open([
+      decision(ONE, "Undecided", { status: "open", answerPreview: "Pending answer." }),
+      decision(TWO, "Approved", { approvalChanged: true, answerPreview: "Approved answer." }),
+      decision(THREE, "Agent recommendation", { agentStance: true, answerPreview: "Agent answer." }),
+      decision(FOUR, "Answer under review", { agentStance: true, createdAt: 1, answerPreview: "Current stance." }),
+      decision(OTHER, "Proposal under review", {
+        topic: FOUR, supersedes: FOUR, status: "open", createdAt: 2,
+        answerPreview: "Proposed stance.", approvalChanged: true,
+      }),
+      decision(GONE, "First conflicting title", {
+        createdAt: 1, approvalChanged: true, answerPreview: "First conflicting answer.",
+      }),
+      decision(ANOTHER, "Latest conflicting title", {
+        topic: GONE, createdAt: 2, answerPreview: "Second conflicting answer.",
+      }),
+    ]);
+    expect(stateFilter(host).value).toBe("all");
+    expect(within(stateFilter(host)).getAllByRole<HTMLOptionElement>("option").map((option) => [option.value, option.textContent])).toEqual([
+      ["all", "All"], ["not-yet-decided", "Not yet decided"],
+      ["under-review", "Under review"], ["agent-stance", "Agent stance"],
+      ["conflict", "Conflict"], ["changed-after-approval", "Changed after approval"],
+    ]);
+    expect(rowTitles(host)).toEqual(["Agent recommendation", "Answer under review", "Approved", "Latest conflicting title", "Undecided"]);
+    expect(within(topicRow(host, THREE)).getByText("Agent stance").textContent).toBe("Agent stance");
+    expect(topicRow(host, THREE).textContent).not.toContain("In force");
+    expect(topicRow(host, THREE).textContent).toContain("Agent answer.");
+    expect(topicRow(host, FOUR).textContent).toContain("Under review");
+    expect(topicRow(host, FOUR).textContent).toContain("Current stance.");
+    expect(topicRow(host, FOUR).textContent).not.toContain("Proposed stance.");
+    expect(topicRow(host, FOUR).textContent).not.toContain("Changed after approval");
+    expect(topicRow(host, GONE).textContent).toContain("Nothing is in force");
+    expect(topicRow(host, GONE).textContent).not.toContain("conflicting answer");
+    expect(topicRow(host, TWO).textContent).toContain("In force");
+    expect(topicRow(host, TWO).textContent).toContain("Changed after approval");
+    expect(topicRow(host, GONE).textContent).toContain("Changed after approval");
+
+    for (const [state, topics] of [
+      ["not-yet-decided", [ONE]], ["under-review", [FOUR]],
+      ["agent-stance", [THREE]], ["conflict", [GONE]],
+      ["changed-after-approval", [TWO, GONE]],
+    ] as const) {
+      await chooseState(host, state);
+      expect(rowUuids(host)).toEqual(topics);
+    }
+    await act(async () => typeInto(filter(host), "latest conflicting"));
+    expect(rowUuids(host)).toEqual([GONE]);
+    await act(async () => typeInto(filter(host), "no such title"));
+    expect(rowUuids(host)).toEqual([]);
+    expect(within(documentTable(host)).getByText(/Changed after approval/).textContent).toContain("Changed after approval");
+    expect(documentTable(host).textContent).not.toContain("No decision records in this workspace");
+    await act(async () => typeInto(filter(host), ""));
+    await chooseState(host, "conflict");
+    await act(async () => typeInto(filter(host), "approved"));
+    expect(rowUuids(host)).toEqual([]);
+    expect(within(documentTable(host)).getByText(/Conflict/).textContent).toContain("Conflict");
+  });
+
+  it("warns only about changed current or conflicting answers, not superseded records", async () => {
+    const host = await open([
+      decision(ONE, "Changed old answer", { createdAt: 1, approvalChanged: true }),
+      decision(TWO, "Unchanged current answer", { topic: ONE, supersedes: ONE, createdAt: 2 }),
+      decision(THREE, "Unanswered", { status: "open", approvalChanged: true }),
+    ]);
+    expect(documentTable(host).textContent).not.toContain("Changed after approval");
+    await chooseState(host, "changed-after-approval");
+    expect(rowUuids(host)).toEqual([]);
+    expect(documentTable(host).textContent).toContain("Changed after approval");
+    expect(documentTable(host).textContent).not.toContain("No decision records in this workspace");
+  });
+
+  it("excludes archived topics through the first tombstone and ignores a later record's tombstone", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, decision(ONE, "Archived first", { createdAt: 1 }));
+    tombstoneDirectoryEntry(peer, ONE);
+    // An older peer can publish a later record without a tombstone after the
+    // first record has already archived the topic.
+    upsertDirectoryEntry(peer, decision(TWO, "Archived successor", { topic: ONE, supersedes: ONE, createdAt: 2 }));
+    upsertDirectoryEntry(peer, decision(THREE, "Live first", { createdAt: 1 }));
+    // Deliberately bypass the whole-topic archive writer to reproduce a stray
+    // tombstone left on one later record by an older client.
+    getDirectoryMap(peer).set(FOUR, {
+      title: "Live current answer", tags: [], kind: "decision", status: "decided",
+      topic: THREE, supersedes: THREE, createdAt: 2, deleted: true,
+    });
+    const host = await openApp(allPath(WORKSPACE));
+    await chooseDecisions(host);
+    expect(rowUuids(host)).toEqual([THREE]);
+    expect(rowTitles(host)).toEqual(["Live current answer"]);
+    expect([...rooms.keys()].sort()).toEqual(
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+    );
+  });
+
+  it("pins a topic when any record is pinned, then unpins every record and pins the topic address", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, decision(ONE, "Original answer", { createdAt: 1 }));
+    upsertDirectoryEntry(peer, decision(TWO, "Current answer", { topic: ONE, supersedes: ONE, createdAt: 2 }));
+    const sidebarPeer = peerOf(sidebarDoc());
+    const earlier = createGroup(sidebarPeer, "Earlier");
+    const current = createGroup(sidebarPeer, "Current");
+    pinDoc(sidebarPeer, earlier, ONE);
+    pinDoc(sidebarPeer, current, TWO);
+    const host = await openApp(allPath(WORKSPACE));
+    await chooseDecisions(host);
+    const pin = (): HTMLButtonElement => within(topicRow(host, ONE)).getByRole<HTMLButtonElement>("button", {
+      name: /^(?:Pin|Unpin) Current answer (?:to|from) the sidebar$/,
+    });
+    expect(pin().getAttribute("aria-pressed")).toBe("true");
+    await act(async () => pin().click());
+    expect(readSidebar(sidebarPeer).flatMap((group) => group.docs)).toEqual([]);
+    expect(pin().getAttribute("aria-pressed")).toBe("false");
+    await act(async () => pin().click());
+    expect(readSidebar(sidebarPeer).flatMap((group) => group.docs)).toEqual([ONE]);
+    expect(pin().getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it.each(["All docs", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
+    const peer = peerOf(directoryDoc());
+    for (const [uuid, title, supersedes] of [
+      [ONE, "Original answer", undefined], [TWO, "Current answer", ONE],
+    ] as const) {
+      const doc = room(roomForDoc(WORKSPACE, uuid)).ydoc;
+      initDoc(doc, { uuid, title, ...(supersedes === undefined ? {} : { topic: ONE, supersedes }) });
+      setKind(doc, "decision");
+      appendBlock(doc, { type: "paragraph", text: `${title} text.` });
+      setStatus(doc, "decided");
+      upsertDirectoryEntry(peer, decision(uuid, title, {
+        ...(supersedes === undefined ? {} : { topic: ONE, supersedes }),
+        createdAt: uuid === ONE ? 1 : 2, approvalChanged: true,
+      }));
+    }
+    const host = await openApp(allPath(WORKSPACE));
+    await chooseDecisions(host);
+    await chooseState(host, "changed-after-approval");
+    await act(async () => typeInto(filter(host), "Current"));
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
+    await act(async () => openButtons(host)[0]?.click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
+    expect(within(host).getByRole("heading", { name: "Current answer", level: 1 }).textContent).toBe("Current answer");
+    const assertRestored = (): void => {
+      expect(window.location.pathname).toBe(allPath(WORKSPACE));
+      expect(within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole("button", { name: "Decisions" }).getAttribute("aria-pressed")).toBe("true");
+      expect(stateFilter(host).value).toBe("changed-after-approval");
+      expect(filter(host).value).toBe("Current");
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("ascending");
+    };
+    await traverseHistory("back");
+    assertRestored();
+    await traverseHistory("forward");
+    if (entry === "Back to workspace") {
+      await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
+    }
+    await act(async () => within(host).getByRole("button", { name: entry === "All docs" ? entry : /^Back to / }).click());
+    const assertDefaults = (): void => {
+      expect(window.location.pathname).toBe(entry === "All docs" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
+      expect(within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole("button", { name: "Working" }).getAttribute("aria-pressed")).toBe("true");
+      expect(filter(host).value).toBe("");
+      expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Last changed/ }).getAttribute("aria-sort")).toBe("descending");
+    };
+    assertDefaults();
+    await traverseHistory("back");
+    if (entry === "Back to workspace") await traverseHistory("back");
+    await traverseHistory("back");
+    assertRestored();
+    await traverseHistory("forward");
+    if (entry === "Back to workspace") await traverseHistory("forward");
+    await traverseHistory("forward");
+    assertDefaults();
+    await chooseDecisions(host);
+    expect(stateFilter(host).value).toBe("all");
+  });
+});
+
 describe("the filter", () => {
   it("opens on Working and keeps each type mode to its own rows", async () => {
     const peer = peerOf(directoryDoc());
@@ -736,9 +1050,7 @@ describe("the filter", () => {
     ).toEqual(["Product · planned", "Product"]);
     await act(async () => mode("Decisions")?.click());
     expect(rowTitles(host)).toEqual(["Cache choice"]);
-    expect(lifecycleBadges(host)[0]?.textContent).toBe(
-      "Decision · open",
-    );
+    expect(documentTable(host).textContent).toContain("Not yet decided");
   });
 
   it("keeps the rows whose title contains the text, and nothing a description says", async () => {
@@ -931,10 +1243,13 @@ describe("an empty list", () => {
     );
   }
 
-  it("says the workspace is empty only once the directory has synced", async () => {
+  it.each([
+    { scenario: "no entries", entries: [] },
+    { scenario: "only archived entries", entries: [entry({ uuid: GONE, title: "Archived", deleted: true })] },
+  ])("says the workspace is empty only once the directory has synced with $scenario", async ({ entries }) => {
     // Nothing heard yet is not an answer: a workspace full of documents would
     // otherwise be told it has none.
-    const waiting = await open(false, []);
+    const waiting = await open(false, entries);
     expect(documentTable(waiting)).not.toBeNull();
     expect(pinUnavailable(waiting)).toBeNull();
     expect(within(waiting).getByText(/has not synced/).textContent).toContain(
@@ -942,7 +1257,7 @@ describe("an empty list", () => {
     );
     unmount();
 
-    const synced = await open(true, []);
+    const synced = await open(true, entries);
     expect(pinUnavailable(synced)).toBeNull();
     expect(within(synced).getByText("No documents in this workspace yet.").textContent).toBe(
       "No documents in this workspace yet.",

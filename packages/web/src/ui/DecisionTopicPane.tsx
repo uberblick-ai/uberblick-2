@@ -7,14 +7,7 @@ import { EditorPane } from "./EditorPane.js";
 import { decisionRecordPath, docPath } from "./route.js";
 import type { Navigate } from "./route.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
-
-const TOPIC_STATES = {
-  conflict: "Conflict",
-  "under-review": "Under review",
-  "agent-stance": "Agent stance",
-  "in-force": "In force",
-  "not-yet-decided": "Not yet decided",
-};
+import { TOPIC_STATES } from "./decision-state.js";
 
 function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

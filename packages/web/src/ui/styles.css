@@ -2186,7 +2186,7 @@ h3.ub-heading {
 }
 
 .ub-docs-mode-fieldset {
-  width: min(24rem, 100%);
+  max-width: 100%;
 }
 
 /* The search-label wrapper keeps a full-width box for its input. */
@@ -2254,6 +2254,24 @@ h3.ub-heading {
 
 .ub-docs-title {
   flex: 1 1 auto;
+}
+
+.ub-docs-open--topic {
+  flex-wrap: wrap;
+}
+
+.ub-docs-open--topic .ub-docs-title {
+  flex-basis: 100%;
+}
+
+.ub-docs-topic-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.4rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 
 .ub-docs-group,
