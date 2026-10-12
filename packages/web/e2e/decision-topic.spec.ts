@@ -82,9 +82,8 @@ async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
   await expect(pin).toBeVisible();
   await expect(pin).toHaveText("Initial topic title");
   await expect(pin).toHaveAttribute("aria-current", "page");
-  if (await page.getByRole("dialog", { name: "Sidebar", exact: true }).isVisible()) {
-    await activateControl(page.getByRole("button", { name: "Hide document list", exact: true }), { touch });
-  }
+  const close = page.getByRole("button", { name: "Close document list", exact: true });
+  if (await close.isVisible()) await activateControl(close, { touch });
 }
 
 async function topicPins(writer: McpSession, records: string[]): Promise<string[]> {
