@@ -60,7 +60,15 @@ person explicitly adopts it from their own account.
 ## Challenge a decided record
 
 Create an `open` successor through `create_doc`, with `supersedes` naming the
-decided record and prose stating the challenge, evidence and recommendation.
+decided record. State the proposed short answer and a brief reason for the change
+in one to three short answer blocks, without a TL;DR, separate decision line,
+headings or a Links section. Put detailed options, evidence and debate in a
+connected RFC or the linked GitHub item; link that GitHub item with ordinary
+external link marks in the answer prose. Set `discussion` when an existing RFC
+is connected; successors do not inherit it. The successor inherits its related
+page unless `related` names another. This route grants no authority to create an
+RFC. Keep proposed guidance for the related page in the implementation PR's
+`Corpus update`.
 Do not edit the decided record or work around it. Stop only work depending on
 that decision until a person answers, and continue independent work. The prior
 answer stays in force until the person approves a successor; read the live topic's

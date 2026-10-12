@@ -42,17 +42,18 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   this sentence is not), plus `repo` (root config, CI, top-level docs).
   Grammar: `^Touches: [a-z0-9-]+(, [a-z0-9-]+)*$`, every name from that list.
 - **`Implements`** — optional, and the only header line that may repeat: one
-  line per requirement document, the repeated lines contiguous, directly after
-  `Touches`. Grammar:
-  `^Implements: <uuid>( \[<block-id>(, <block-id>)*\])?$`, the requirement
+  line per regular document, normally the RFC, with repeated lines contiguous,
+  directly after `Touches`. Grammar:
+  `^Implements: <uuid>( \[<block-id>(, <block-id>)*\])?$`, the regular
   document's uuid and optionally the ids of the outcome blocks this issue
   covers. Both are read from the live workspace; the repository holds no uuid
-  table. It supports exact requirement-to-issue retrieval and alone activates
+  table. It supports exact document-to-issue retrieval and alone activates
   the approval gate below. A misplaced, malformed or
   non-contiguous line fails the lint below rather than being interpreted; never
-  guess which requirement was meant.
+  guess which document was meant. Existing lines naming former requirement
+  UUIDs remain valid because those documents now read as regular documents.
 
-  A requirement cited only under **Pointers** stays background reading, with no
+  A document cited only under **Pointers** stays background reading, with no
   lifecycle and no approval effect: citing a uuid there declares nothing and
   gates nothing.
 
@@ -60,7 +61,7 @@ Implements: 4f1b7c2e-8a30-4d51-9e6b-2c7a1d55f0a3
   `ready` only while a person has approved the outcomes it names, in a comment
   from their own account on the issue or its parent — never `uberblick-agent`
   or a bot. Approval lives in GitHub, never in a document field any client can
-  write, so a requirement's `status` authorizes nothing. Whether the approval
+  write; the regular document has no lifecycle status. Whether the approval
   really covers the outcomes named is a judgment for whoever grants `ready`.
 
 ### Gate check

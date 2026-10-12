@@ -101,8 +101,9 @@ planned or duplicate. [Preparation](issue-preparation.md) owns `wontfix`, splits
 the final verdict, correctable review findings and
 [return repair and escalation](issue-preparation.md#challenge-and-resume).
 The [implementer](../roles/implementer.md#outcomes) owns the return-summary format.
-[Shaping](issue-shaping.md) owns draft-versus-intake choice and requirement
-resumption; neither exit grants `ready`.
+[Shaping](issue-shaping.md) owns RFC-versus-intake choice and routes RFC
+resumption and intakes through [the RFC procedure](rfc-resumption.md);
+neither exit grants `ready`.
 
 ## Parents and programs
 
