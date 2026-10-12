@@ -10,12 +10,15 @@
  * Sort state, title-only filtering, its absence of search requests, list
  * content, creation and lifecycle rendering stay in the jsdom suite. Each
  * native sort activation checks only the row order witnessing that input.
+ * Decision topics retain their current answer and list filters across a topic
+ * visit, with keyboard/pointer and iPad touch input in light and dark.
  */
 
-import { expect, test } from "@playwright/test";
-import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import { devices, expect, test } from "@playwright/test";
+import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
+import type { McpSession } from "./mcp-agent.js";
 
 const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
@@ -137,3 +140,122 @@ test("an external status write reaches the open document and the directory", asy
     page.locator(".ub-docs-row", { hasText: title }).locator(".ub-lifecycle-badge"),
   ).toHaveText("Product · implementing");
 });
+
+interface DecisionFixture {
+  uuid: string;
+  blocks: Array<{ id: string; text: string }>;
+}
+
+async function decision(
+  writer: McpSession,
+  title: string,
+  text: string,
+  fields: Record<string, unknown> = {},
+): Promise<DecisionFixture> {
+  return writer.call<DecisionFixture>("create_doc", {
+    title, kind: "decision", description: "Browser acceptance fixture.",
+    blocks: [{ type: "paragraph", text }], ...fields,
+  });
+}
+
+for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
+  test(`decision list filters and returns to topics on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+    const writer = agent().open({ name: "decision-list-e2e" });
+    const prefix = docTitle("decision-list");
+    const approval = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
+    const first = await decision(writer, `${prefix} earlier title`, "Earlier answer is history.", {
+      status: "decided", answer: approval,
+    });
+    const currentTitle = `${prefix} current title`;
+    const currentAnswer = "Current answer stays in force during review.";
+    const current = await decision(writer, currentTitle, currentAnswer, {
+      status: "decided", supersedes: first.uuid, answer: approval,
+    });
+    const pending = await decision(writer, `${prefix} pending title`, "Pending proposal must not become the list answer.", {
+      supersedes: current.uuid,
+    });
+    for (const record of [first, current, pending]) {
+      const block = record.blocks[0];
+      if (block === undefined) throw new Error("e2e: the decision has no answer");
+      await writer.call("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 7, text: "A cached conversation." });
+    }
+    const undecidedTitle = `${prefix} unanswered title`;
+    await decision(writer, undecidedTitle, "This proposal is not an answer in force.");
+    const stanceTitle = `${prefix} stance title`;
+    await decision(writer, stanceTitle, "The agent recommends this answer.", { status: "decided" });
+    const archived = await decision(writer, `${prefix} archived title`, "The whole topic will be archived.", {
+      status: "decided", answer: approval,
+    });
+    await decision(writer, `${prefix} archived successor`, "An archived topic includes later proposals.", { supersedes: archived.uuid });
+    await writer.call("archive_doc", { uuid: archived.uuid });
+
+    const page = await openApp(browser, `/${harness().workspace}/all`, {
+      upstream: true,
+      readySelector: ".ub-docs-heading",
+      contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+    });
+    const type = page.getByRole("button", { name: "Decisions", exact: true });
+    await activateControl(type, { touch });
+    const titleFilter = page.getByRole("searchbox", { name: "Filter this list by title" });
+    await titleFilter.fill(prefix);
+    const state = page.getByRole("combobox", { name: "Decision state" });
+    await expect(state).toHaveValue("all");
+    await expect(state.getByRole("option")).toHaveText([
+      "All", "Not yet decided", "Under review", "Agent stance", "Conflict", "Changed after approval",
+    ]);
+    await expect.poll(async () => (await listedTitles(page).allTextContents()).sort())
+      .toEqual([currentTitle, undecidedTitle, stanceTitle].sort());
+    await expect(page.getByRole("columnheader", { name: /^Last changed/ })).toHaveAttribute("aria-sort", "descending");
+
+    // Native select input and row activation are real on each supported device;
+    // the full cached state matrix and room-join invariant belong to unit tests.
+    if (touch) {
+      await state.tap();
+      await state.selectOption("under-review");
+    } else {
+      await state.focus();
+      await page.keyboard.press("Space");
+      await page.keyboard.press("u");
+      await page.keyboard.press("Enter");
+    }
+    await expect(state).toHaveValue("under-review");
+    await expect(listedTitles(page)).toHaveText([currentTitle]);
+    const row = page.locator(".ub-docs-row");
+    await expect(row).toContainText("Under review");
+    await expect(row).toContainText(currentAnswer);
+    await expect(row).not.toContainText("Pending proposal must not become the list answer.");
+    await expect(row).toContainText("3 comments");
+    await expect(row.locator("time")).toBeVisible();
+    const screenshot = test.info().outputPath("decision-list.png");
+    await page.screenshot({ path: screenshot, fullPage: true });
+    await test.info().attach(`decision-list-${touch ? "ipad" : "desktop"}-${appearance}`, {
+      path: screenshot, contentType: "image/png",
+    });
+    const open = row.locator(".ub-docs-open");
+    if (touch) await open.tap();
+    else { await open.focus(); await page.keyboard.press("Enter"); }
+    await expect(page).toHaveURL(new RegExp(`/${first.uuid}$`));
+    await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
+    await expect(editor(page)).toHaveText(currentAnswer);
+    await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
+
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
+    await expect(type).toHaveAttribute("aria-pressed", "true");
+    await expect(state).toHaveValue("under-review");
+    await expect(titleFilter).toHaveValue(prefix);
+    await expect(listedTitles(page)).toHaveText([currentTitle]);
+
+    await activateControl(state, { touch });
+    await state.selectOption("agent-stance");
+    await expect(listedTitles(page)).toHaveText([stanceTitle]);
+    await expect(page.locator(".ub-docs-row")).toContainText("Agent stance");
+    await expect(page.locator(".ub-docs-row")).not.toContainText("In force");
+    await titleFilter.fill(currentTitle);
+    await expect(page.locator(".ub-docs-empty")).toContainText("Agent stance");
+    await expect(page.locator(".ub-docs-empty")).not.toContainText("No decision records in this workspace");
+    await titleFilter.fill(prefix);
+    await state.selectOption("changed-after-approval");
+    await expect(page.locator(".ub-docs-empty")).toContainText("Changed after approval");
+  });
+}

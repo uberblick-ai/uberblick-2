@@ -3,8 +3,9 @@
  * sidebar groups supply pin labels. Kind modes and title filtering use cached
  * data only, equally for local and direct serving. Working includes unknown kinds.
  * Before directory sync, empty/filter messages describe only what has arrived.
- * Sort starts last-changed first; pane state preserves it through filtering and
- * updates but not reload. Stamps are greatest-authored cache hints, not history;
+ * Sort starts last-changed first; shell state preserves filters and sorting
+ * through topic visits, but not reload or workspace switches.
+ * Stamps are greatest-authored cache hints, not history;
  * a future-skewed clock can pin one. Missing stamps sort last only by changed.
  * Ages turn absolute at 30 days and refresh at most a minute late. dateTime
  * stays exact; relative ages expose exact time on hover.
@@ -12,10 +13,12 @@
 
 import { useId, useMemo, useState } from "react";
 import type { ReactElement } from "react";
-import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, resolveDecisionTopics } from "@uberblick/schema";
+import type { DecisionTopicState, DirectoryEntry, SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/LifecycleBadge.js";
+import { TOPIC_STATES } from "../ui/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { foldForTitleMatch } from "../title-fold.js";
 
@@ -63,8 +66,35 @@ const MODE_LABELS: Record<Mode, string> = {
 const MODE_EMPTY_LABELS: Record<Mode, string> = {
   working: "working documents",
   requirement: "product documents",
-  decision: "decision records",
+  decision: "decision topics",
 };
+
+const STATE_FILTERS = ["all", "not-yet-decided", "under-review", "agent-stance", "conflict", "changed-after-approval"] as const;
+type StateFilter = (typeof STATE_FILTERS)[number];
+const STATE_LABELS: Record<StateFilter, string> = {
+  all: "All",
+  "not-yet-decided": TOPIC_STATES["not-yet-decided"],
+  "under-review": TOPIC_STATES["under-review"],
+  "agent-stance": TOPIC_STATES["agent-stance"],
+  conflict: TOPIC_STATES.conflict,
+  "changed-after-approval": "Changed after approval",
+};
+
+export interface DocumentListState {
+  query: string;
+  mode: Mode;
+  stateFilter: StateFilter;
+  sort: { order: Order; direction: Direction };
+}
+
+export const INITIAL_DOCUMENT_LIST_STATE: DocumentListState = {
+  query: "",
+  mode: "working",
+  stateFilter: "all",
+  sort: { order: "changed", direction: INITIAL_DIRECTION.changed },
+};
+
+type ListRow = DirectoryEntry & { topicState?: DecisionTopicState; pinned: boolean; groupName: string | undefined };
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
   return mode === "working" ? entry.kind === undefined : entry.kind === mode;
@@ -84,11 +114,11 @@ function titleMatches(entry: DirectoryEntry, needle: string): boolean {
  * Missing/unusable stamps sort last only in changed order; title order still
  * sorts them by title. Absence must not masquerade as an ancient timestamp.
  */
-export function sortDirectory(
-  entries: readonly DirectoryEntry[],
+export function sortDirectory<T extends DirectoryEntry>(
+  entries: readonly T[],
   order: Order,
   direction: Direction,
-): DirectoryEntry[] {
+): T[] {
   if (order === "title") {
     return [...entries].sort((a, b) =>
       direction === "ascending" ? byTitle(a, b) : byTitle(b, a),
@@ -154,26 +184,31 @@ export function DocumentList({
   groups,
   onSelect,
   onTogglePin,
+  state,
+  onStateChange,
 }: {
   /** Directory sync distinguishes an empty corpus from a not-yet-arrived listing. */
   connection: RoomConnection | null;
-  /** The directory's non-deleted stubs, live — `useDirectory` in the shell. */
+  /** Include tombstones: only the first record's tombstone archives its topic. */
   entries: readonly DirectoryEntry[];
   /** The sidebar as it stands: which group, if any, a row is pinned in. */
   groups: readonly SidebarGroup[];
   onSelect: (uuid: string) => void;
   /** Pin or unpin a row, or null until the sidebar is writable and synced. */
   onTogglePin: ((uuid: string) => void) | null;
+  state?: DocumentListState;
+  onStateChange?: (state: DocumentListState) => void;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const pinUnavailableId = useId();
-  const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<Mode>("working");
-  /** Keep query and sort independent in pane state; persist neither across reload. */
-  const [sort, setSort] = useState<{ order: Order; direction: Direction }>({
-    order: "changed",
-    direction: INITIAL_DIRECTION.changed,
-  });
+  const [localState, setLocalState] = useState(INITIAL_DOCUMENT_LIST_STATE);
+  const listState = state ?? localState;
+  const { query, mode, stateFilter, sort } = listState;
+  const updateState = (patch: Partial<DocumentListState>): void => {
+    const next = { ...listState, ...patch };
+    setLocalState(next);
+    onStateChange?.(next);
+  };
   const now = useTimestampClock();
   /** Read actual sidebar groups; first group wins if a UUID appears twice. */
   const groupOf = useMemo(() => {
@@ -183,21 +218,50 @@ export function DocumentList({
     }
     return named;
   }, [groups]);
+  const modeRows = useMemo<ListRow[]>(() => {
+    if (mode !== "decision") return entries.filter((entry) => !entry.deleted && inMode(entry, mode))
+      .map((entry) => ({ ...entry, pinned: groupOf.has(entry.uuid), groupName: groupOf.get(entry.uuid) }));
+    return resolveDecisionTopics(entries).filter((topic) => !topic.archived).flatMap((topic) => {
+      const current = decisionCurrentRecord(topic);
+      if (current === null) return [];
+      const stamps = topic.records.flatMap((record) => {
+        const stamp = usableStamp(record.updatedAt);
+        return stamp === undefined ? [] : [stamp];
+      });
+      const pinnedRecord = topic.records.find((record) => groupOf.has(record.uuid));
+      return [{
+        uuid: topic.topic,
+        title: current.title,
+        tags: current.tags,
+        kind: "decision" as const,
+        topicState: decisionTopicState(topic),
+        ...(topic.inForce?.answerPreview == null ? {} : { answerPreview: topic.inForce.answerPreview }),
+        approvalChanged: [topic.inForce, ...topic.conflicts].some((record) => record?.approvalChanged === true),
+        ...(topic.records.every((record) => record.commentCount !== undefined)
+          ? { commentCount: topic.records.reduce((total, record) => total + (record.commentCount ?? 0), 0) } : {}),
+        ...(stamps.length === 0 ? {} : { updatedAt: Math.max(...stamps) }),
+        pinned: pinnedRecord !== undefined,
+        groupName: pinnedRecord === undefined ? undefined : groupOf.get(pinnedRecord.uuid),
+      }];
+    });
+  }, [entries, mode, groupOf]);
   const needle = foldForTitleMatch(query.trim());
   const rows = useMemo(
     () =>
       sortDirectory(
-        entries.filter((entry) => inMode(entry, mode) && titleMatches(entry, needle)),
+        modeRows.filter((entry) => titleMatches(entry, needle) && (mode !== "decision" || stateFilter === "all"
+          || (stateFilter === "changed-after-approval" ? entry.approvalChanged : entry.topicState === stateFilter))),
         sort.order,
         sort.direction,
       ),
-    [entries, mode, needle, sort],
+    [modeRows, mode, needle, stateFilter, sort],
   );
 
   return (
     <section className="ub-pane">
       <div className="ub-column ub-docs">
         <h1 className="ub-docs-heading">Documents</h1>
+        <div className="flex flex-wrap items-center gap-2">
         <fieldset className="ub-docs-mode-fieldset">
           <legend className="ub-sr-only">Document type</legend>
           <div className="ub-docs-modes">
@@ -207,13 +271,28 @@ export function DocumentList({
                 type="button"
                 className="ub-docs-mode cursor-pointer border border-r-0 border-(--border) bg-transparent px-[0.55rem] py-[0.3rem] [font:inherit] text-(--muted-foreground) first:rounded-[var(--radius-sm)_0_0_var(--radius-sm)] last:rounded-[0_var(--radius-sm)_var(--radius-sm)_0] last:border-r hover:bg-(--accent) hover:text-(--accent-foreground) aria-pressed:bg-(--brand-subtle) aria-pressed:text-(--brand-ink)"
                 aria-pressed={option === mode}
-                onClick={() => setMode(option)}
+                onClick={() => updateState({ mode: option })}
               >
                 {MODE_LABELS[option]}
               </button>
             ))}
           </div>
         </fieldset>
+        {mode === "decision" && <label className="flex items-center gap-2 text-sm text-(--muted-foreground)">
+          State
+          <select
+            aria-label="Decision state"
+            className="min-h-8 [@media(any-pointer:coarse)]:min-h-11 rounded-(--radius-sm) border border-(--border) bg-(--background) px-2 py-1 [font:inherit] text-(--foreground)"
+            value={stateFilter}
+            onChange={(event) => {
+              const value = STATE_FILTERS.find((option) => option === event.currentTarget.value);
+              if (value !== undefined) updateState({ stateFilter: value });
+            }}
+          >
+            {STATE_FILTERS.map((option) => <option key={option} value={option}>{STATE_LABELS[option]}</option>)}
+          </select>
+        </label>}
+        </div>
         {/* Enabled from first paint, whatever this page is connected to: the
             rows it narrows are already here, so there is nothing to wait for
             and no state in which it is unavailable. */}
@@ -224,7 +303,7 @@ export function DocumentList({
             className="ub-docs-search"
             placeholder={FILTER_HINT}
             value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
+            onChange={(event) => updateState({ query: event.currentTarget.value })}
           />
         </label>
         {onTogglePin === null && rows.length > 0 && (
@@ -251,17 +330,17 @@ export function DocumentList({
                     type="button"
                     className={`ub-docs-sort flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 w-full cursor-pointer items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
                     onClick={() =>
-                      setSort((current) =>
-                        current.order === option
+                      updateState({ sort:
+                        sort.order === option
                           ? {
                               order: option,
                               direction:
-                                current.direction === "ascending"
+                                sort.direction === "ascending"
                                   ? "descending"
                                   : "ascending",
                             }
                           : { order: option, direction: INITIAL_DIRECTION[option] },
-                      )
+                      })
                     }
                   >
                     {ORDER_LABELS[option]}
@@ -283,7 +362,9 @@ export function DocumentList({
               <tr>
                 <td colSpan={3} className="ub-docs-empty-cell">
                   <p className="ub-muted ub-docs-empty">
-                    {needle !== ""
+                    {mode === "decision" && stateFilter !== "all"
+                      ? `No decision topics${status.synced ? "" : " synced so far"} match state “${STATE_LABELS[stateFilter]}”${needle === "" ? "." : " and the title filter."}`
+                      : needle !== ""
                       ? status.synced
                         ? `No ${MODE_EMPTY_LABELS[mode]} have a matching title.`
                         : `No ${MODE_EMPTY_LABELS[mode]} synced so far have a matching title.`
@@ -306,20 +387,30 @@ export function DocumentList({
                   <th scope="row" className="ub-docs-title-cell">
                     <button
                       type="button"
-                      className="ub-docs-open min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11"
+                      className={`ub-docs-open ${entry.topicState === undefined ? "" : "ub-docs-open--topic"} min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11`}
                       onClick={() => onSelect(entry.uuid)}
                       title={entry.uuid}
                     >
                       <span className="ub-docs-title">
                         {entry.title === "" ? <em>Untitled</em> : entry.title}
                       </span>
-                      <LifecycleBadge kind={entry.kind} status={entry.status} />
+                      {entry.topicState === undefined
+                        ? <LifecycleBadge kind={entry.kind} status={entry.status} />
+                        : <span className="text-sm text-(--muted-foreground)">{TOPIC_STATES[entry.topicState]}</span>}
+                      {entry.topicState !== undefined && entry.approvalChanged && (
+                        <span className="text-sm text-(--muted-foreground)">Changed after approval</span>
+                      )}
                       {/* Where the sidebar carries this document, when it does.
                           Blank is the honest answer for the long tail. */}
-                      {groupOf.has(entry.uuid) && (
-                        <span className="ub-docs-group">{groupOf.get(entry.uuid)}</span>
+                      {entry.groupName !== undefined && (
+                        <span className="ub-docs-group">{entry.groupName}</span>
                       )}
                     </button>
+                    {entry.topicState !== undefined && <div className="ub-docs-topic-detail">
+                      {entry.topicState === "conflict" ? <span>Nothing is in force.</span>
+                        : entry.answerPreview != null && <span>{entry.answerPreview}</span>}
+                      {entry.commentCount !== undefined && <span>{entry.commentCount} {entry.commentCount === 1 ? "comment" : "comments"}</span>}
+                    </div>}
                   </th>
                   <td className="ub-docs-age-cell">
                     <ChangedStamp at={entry.updatedAt} now={now} />
@@ -334,20 +425,20 @@ export function DocumentList({
                       className="ub-docs-pin min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent p-1 font-[inherit] text-(--muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-docs-row:hover_&]:opacity-100 [.ub-docs-row:focus-within_&]:opacity-100 aria-pressed:opacity-100 hover:text-(--foreground)"
                       disabled={onTogglePin === null}
                       aria-describedby={onTogglePin === null ? pinUnavailableId : undefined}
-                      aria-pressed={groupOf.has(entry.uuid)}
+                      aria-pressed={entry.pinned}
                       aria-label={
                         onTogglePin === null
-                          ? `${pinLabel(entry, groupOf.has(entry.uuid))} unavailable while sidebar is not ready to write`
-                          : pinLabel(entry, groupOf.has(entry.uuid))
+                          ? `${pinLabel(entry, entry.pinned)} unavailable while sidebar is not ready to write`
+                          : pinLabel(entry, entry.pinned)
                       }
                       title={
                         onTogglePin === null
                           ? "Pin unavailable while the sidebar is not ready to write"
-                          : pinLabel(entry, groupOf.has(entry.uuid))
+                          : pinLabel(entry, entry.pinned)
                       }
                       onClick={() => onTogglePin?.(entry.uuid)}
                     >
-                      <PinIcon active={groupOf.has(entry.uuid)} />
+                      <PinIcon active={entry.pinned} />
                     </button>
                   </td>
                 </tr>

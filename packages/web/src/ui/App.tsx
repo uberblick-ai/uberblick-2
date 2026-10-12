@@ -66,7 +66,8 @@ import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
 import { useServingAccount } from "./serving-account.js";
 import { createAccountClient } from "../shell/account.js";
-import { DocumentList } from "../shell/DocumentList.js";
+import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../shell/DocumentList.js";
+import type { DocumentListState } from "../shell/DocumentList.js";
 import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
   allPath,
@@ -394,6 +395,15 @@ export function App(): ReactElement {
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
+  const [documentList, setDocumentList] = useState({ workspaceUuid, state: INITIAL_DOCUMENT_LIST_STATE });
+  useEffect(() => {
+    setDocumentList({ workspaceUuid, state: INITIAL_DOCUMENT_LIST_STATE });
+  }, [workspaceUuid]);
+  const documentListState = documentList.workspaceUuid === workspaceUuid
+    ? documentList.state : INITIAL_DOCUMENT_LIST_STATE;
+  const onDocumentListStateChange = (state: DocumentListState): void => {
+    setDocumentList({ workspaceUuid, state });
+  };
   const [narrowSidebar, setNarrowSidebar] = useState(
     () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );
@@ -722,9 +732,15 @@ export function App(): ReactElement {
       ) {
         return;
       }
-      togglePin(sidebar.ydoc, uuid);
+      const target = topics.find((candidate) => candidate.topic === uuid);
+      const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
+        .filter((pinnedUuid) => target?.records.some((record) => record.uuid === pinnedUuid));
+      if (pins.length === 0) togglePin(sidebar.ydoc, uuid);
+      else sidebar.ydoc.transact(() => {
+        for (const pinnedUuid of pins) unpinDoc(sidebar.ydoc, pinnedUuid);
+      });
     },
-    [sidebar],
+    [sidebar, topics],
   );
   /** Header pinning follows the topic while its displayed answer changes. */
   const onTogglePin = useCallback(() => {
@@ -732,17 +748,8 @@ export function App(): ReactElement {
       if (selected !== null) onTogglePinDoc(selected);
       return;
     }
-    if (sidebar === null || !sidebar.status.writable || !sidebar.status.synced) return;
-    const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
-      .filter((uuid) => topic.records.some((record) => record.uuid === uuid));
-    if (pins.length === 0) {
-      togglePin(sidebar.ydoc, topic.topic);
-    } else {
-      sidebar.ydoc.transact(() => {
-        for (const uuid of pins) unpinDoc(sidebar.ydoc, uuid);
-      });
-    }
-  }, [onTogglePinDoc, selected, sidebar, topic]);
+    onTogglePinDoc(topic.topic);
+  }, [onTogglePinDoc, selected, topic]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -1002,16 +1009,16 @@ export function App(): ReactElement {
           />
         ) : listing ? (
           /*
-           * Key filters by workspace UUID: a real switch clears them, while
-           * decorated spellings and the two listing routes retain the same
-           * query.
+           * Shell state survives opening a topic and returning to the list.
            */
           <DocumentList
             key={workspace?.uuid}
             connection={directory}
-            entries={entries}
+            entries={allEntries}
             groups={sidebarGroups}
             onSelect={onSelect}
+            state={documentListState}
+            onStateChange={onDocumentListStateChange}
             onTogglePin={
               sidebarStatus.writable && sidebarStatus.synced
                 ? onTogglePinDoc
