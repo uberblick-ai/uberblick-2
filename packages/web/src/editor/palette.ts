@@ -17,7 +17,7 @@ import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, isBlockType, readsAsMark, isSup
 import type { CardPart } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
-/** The node names the editor may render. Identical to the schema's block types. */
+/** Stored block names, including types the editor cannot bind yet. */
 export const BLOCK_NODE_NAMES: readonly string[] = BLOCK_TYPES;
 
 /**
@@ -106,6 +106,11 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
     const id = child.getAttribute("id") ?? null;
     if (!isBlockType(child.nodeName)) {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
+      continue;
+    }
+    // Figma has no editor node; even an element without children is unsafe to bind.
+    if (child.nodeName === "figma") {
+      foreign.push({ index, nodeName: "figma", id, preview: previewOf(child) });
       continue;
     }
     if (child.nodeName === "table") {

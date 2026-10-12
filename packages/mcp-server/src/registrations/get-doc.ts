@@ -9,22 +9,20 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
   server.registerTool("get_doc", {
     title: "Read a document",
     description:
-      "Read metadata, blocks and annotation threads with lifecycle and decision context. " +
-      "Decisions hold one to three short answer blocks with a brief reason; related pages hold guidance, " +
-      "RFCs discussion. Regular pages return related topics first, then topics linked by any record, " +
-      "with relations marked. Decision metadata returns discussion: connected RFC UUID or null; every " +
-      "decision entry caches it, null for none and absent if unknown. Discussion is a derived effective link, " +
-      "separate from curated links and recorded answer. The RFC returns its topic marked linked unless it is " +
-      "also the related page. Cached answerPreview when known: " +
-      "legacy TL;DR, else the first paragraph or list shortened to 300 characters. " +
-      "Missing description and TL;DR return null. Structured data is summarized by collection names and record " +
-      "counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is " +
-      "canonical GFM; card content orders optional button: [Text](destination) after footer. It has nonempty " +
-      "plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. " +
-      "Both have formatting-sensitive rev; other " +
-      "text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links " +
-      "have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts " +
-      "toward this process's briefing. Edit with the returned text and rev." +
+      "Read metadata, blocks and threads before editing. Regular pages return related then linked decision " +
+      "topics; decisions return discussion (RFC UUID or null), separately from curated links and " +
+      "recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first " +
+      "paragraph/list, shortened to 300 characters). Missing description/TL;DR returns null; data lists " +
+      "collection names/counts for deliberate get_data reads. Blocks include rev. Tables return canonical " +
+      "GFM; cards return container content with optional button after footer. Figma returns :::figma content " +
+      "without delimiters: normalized url, optional plain title and height, blank line and marked caption. " +
+      "The read-only figma object has kind (frame, file, prototype, board, slides or community file), file, " +
+      "optional fileName (decoded, dashes as spaces) and optional node (12:345 form). Saving retained only " +
+      "Figma view paths and node-id, starting-point-node-id, version-id on https://www.figma.com; markdown " +
+      "help specifies accepted links, keys and invalid_figma refusals. Tables/cards/Figma have formatting-sensitive " +
+      "rev; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread " +
+      "ranges name their part; Figma ranges name caption with caption-text offsets. This read makes no " +
+      "Figma request; eligible guidance counts toward this process's briefing." +
       helpPointer("get_doc"),
     outputSchema: outputSchemas.get_doc,
     inputSchema,

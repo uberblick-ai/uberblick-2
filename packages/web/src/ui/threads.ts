@@ -53,6 +53,7 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   terminal: "Terminal demo",
   chart: "Line chart",
   card: "Card",
+  figma: "Figma",
 };
 
 /** Use one-based kind and position labels in both composer and cards. */

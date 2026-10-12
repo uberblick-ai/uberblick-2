@@ -6,11 +6,12 @@
 
 import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
-import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, InvalidCardError, InvalidTableError } from "./errors.js";
+import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, FigmaAnnotationError, InvalidCardError, InvalidFigmaError, InvalidTableError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
 import { tableCellTexts, tableRows } from "./table.js";
 import { CARD_PARTS, cardPartTexts } from "./card.js";
 import type { CardPart } from "./card.js";
+import { figmaCaptionTexts } from "./figma.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
@@ -27,7 +28,7 @@ export interface CommentRun {
   /** Table projection coordinates; absent for a block-level text range. */
   row?: number;
   column?: number;
-  part?: CardPart;
+  part?: CardPart | "caption";
   start: number;
   end: number;
 }
@@ -90,8 +91,11 @@ function annotationTexts(element: Y.XmlElement): Array<{
   texts: Y.XmlText[];
   row?: number;
   column?: number;
-  part?: CardPart;
+  part?: CardPart | "caption";
 }> {
+  if (element.nodeName === "figma") {
+    return [{ texts: figmaCaptionTexts(element), part: "caption" }];
+  }
   if (element.nodeName === "card") {
     return CARD_PARTS.map((part) => ({ texts: cardPartTexts(element, part), part }));
   }
@@ -173,7 +177,7 @@ export function createAnnotation(
   endIndex: number,
   author: string,
   text: string,
-  target?: { row: number; column: number } | { part: CardPart },
+  target?: { row: number; column: number } | { part: CardPart | "caption" },
 ): Annotation {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
@@ -194,8 +198,14 @@ export function createAnnotation(
     if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
       throw new InvalidTableError();
     }
+  } else if (element.nodeName === "figma") {
+    if (target === undefined || !("part" in target) || target.part !== "caption") throw new FigmaAnnotationError(blockId);
+    texts = figmaCaptionTexts(element);
+    if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
+      throw new InvalidFigmaError("The caption contains unsupported embedded content");
+    }
   } else if (element.nodeName === "card") {
-    if (target === undefined || !("part" in target) || !CARD_PARTS.includes(target.part)) throw new CardAnnotationError(blockId);
+    if (target === undefined || !("part" in target) || target.part === "caption" || !CARD_PARTS.includes(target.part)) throw new CardAnnotationError(blockId);
     texts = cardPartTexts(element, target.part);
     if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
       throw new InvalidCardError("The card part contains unsupported embedded content");

@@ -12,8 +12,8 @@ export function registerLinkRange(server: ToolRegistrar, context: ToolContext): 
       "Mark selected prose text as a document reference without changing its characters or rev. start/end are " +
       "character offsets measured against the required rev; stale_block returns currentText/currentRev for " +
       "remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document " +
-      "references are retargeted; external links, source blocks, tables and cards refuse. Write card links " +
-      "as inline Markdown in the card text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses " +
+      "references are retargeted; external links, source blocks, tables, cards and Figma blocks refuse. Write card and Figma caption links " +
+      "as inline Markdown in their container text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses " +
       "before writing; archived targets are accepted. The answer includes the target title, but the label stays " +
       "the selected text and does not follow renames. Backlinks update without changing curated meta.links." +
       helpPointer("link_range"),
