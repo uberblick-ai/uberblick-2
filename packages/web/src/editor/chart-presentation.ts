@@ -1,5 +1,33 @@
 // Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
-import type { ChartSeriesMapping } from "./chart-data.js";
+import type { ChartSeries, ChartSeriesMapping } from "./chart-data.js";
+
+export interface ChartPanelRange { min: number; max: number }
+
+/** Explicit bounds keep separate Chart.js instances comparable within a unit. */
+export function chartPanelRanges(series: ChartSeries[]): ChartPanelRange[] {
+  const groups = new Map<string, ChartPanelRange>();
+  for (const entry of series) {
+    const unit = entry.unit || "";
+    for (const point of entry.points) {
+      if (point.y === null) continue;
+      const range = groups.get(unit);
+      if (range === undefined) groups.set(unit, { min: point.y, max: point.y });
+      else { range.min = Math.min(range.min, point.y); range.max = Math.max(range.max, point.y); }
+    }
+  }
+  for (const range of groups.values()) {
+    if (range.min >= 0) range.min = 0;
+    if (range.min === range.max) {
+      if (range.min === 0) range.max = 1;
+      else {
+        const padding = Math.max(Math.abs(range.min) * 0.05, Number.MIN_VALUE);
+        range.min = Math.max(-Number.MAX_VALUE, range.min - padding);
+        range.max = Math.min(Number.MAX_VALUE, range.max + padding);
+      }
+    }
+  }
+  return series.map(entry => groups.get(entry.unit || "") ?? { min: 0, max: 1 });
+}
 
 export interface ChartAxes {
   seriesAxes: ("y" | "yRight")[];

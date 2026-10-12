@@ -15,6 +15,7 @@ export interface ChartConfig {
   y: ChartSeriesMapping[];
   title?: string;
   limit?: number;
+  layout?: "overlay" | "panels";
   missing: "gap" | "connect";
 }
 export interface ChartPoint { x: number; y: number | null; id: string }
@@ -55,7 +56,7 @@ export function parseChartConfig(source: string):
   let value: unknown;
   try { value = JSON.parse(source); }
   catch { return { ok: false, message: "Invalid chart configuration: source must be JSON." }; }
-  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "title", "missing", "limit"]) ||
+  if (!object(value) || !keys(value, ["version", "type", "collection", "x", "y", "title", "missing", "limit", "layout"]) ||
       value.version !== 1 || value.type !== "line" || !name(value.collection) ||
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
@@ -64,11 +65,12 @@ export function parseChartConfig(source: string):
         name(series.field) && optionalText(series, "label") && optionalText(series, "unit")) ||
       !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
+      (Object.hasOwn(value, "layout") && value.layout !== "overlay" && value.layout !== "panels") ||
       (Object.hasOwn(value, "missing") && value.missing !== "gap" && value.missing !== "connect")) {
     return { ok: false, message: "Invalid chart configuration: expected a version 1 line mapping with one x field, one to eight y series and optional positive integer limit; unknown keys are not supported." };
   }
   // Defaulting is a detached view value, never a write to the source block.
-  return { ok: true, config: { ...value, missing: value.missing ?? "gap" } as ChartConfig };
+  return { ok: true, config: { ...value, missing: value.missing ?? "gap", layout: value.layout ?? "overlay" } as ChartConfig };
 }
 
 const DAY = 86_400_000;

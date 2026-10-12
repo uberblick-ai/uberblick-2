@@ -11,6 +11,8 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) | ![Dark daily desktop chart](daily-desktop-dark.png) |
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
 | 360 px, three percentage series | ![Light phone chart](phone-light.png) | ![Dark phone chart](phone-dark.png) |
+| Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
+| Three percentage panels, 360 px | ![Light phone panels](panels-phone-light.png) | ![Dark phone panels](panels-phone-dark.png) |
 
 The browser suite covers source insertion and keyboard/pointer access, live
 data and mapping updates, canvas names/descriptions, appearance changes, reopen,
@@ -29,9 +31,15 @@ contexts run in both appearances, with paired Chromium and WebKit coverage.
 The suite also checks legend placement, opposite-side unit ticks, the editor's
 font, same-x tooltips for sparse series and a visible single-x point.
 The compact controls are checked on charts, tables and empty chart panels.
+Panel fixtures check one accessible image, ordered series headers, the latest
+plotted tooltip values, an empty series, comparable unit-group ranges,
+observation-only labels, per-panel hover, mapping/layout changes and zero
+renderer writes. Equal-width percentage panels show matching labels and ticks
+in both appearances; panel canvases remain hidden from accessibility APIs.
 Timing fixtures contain a 2.7 MB area with
 4,400 records and a 365-record/three-series chart, plus 5,001 stored records
-limited to the latest 5,000/eight series. Chromium uses a 1366×768 viewport,
+limited to the latest 5,000/eight series in both overlay and panels layouts.
+Chromium uses a 1366×768 viewport,
 en-US locale and twofold CPU throttling; the PR records the measured values and
 the host class. Unit suites defend value semantics, non-destructive invalid
 merges, zero renderer writes, frame coalescing, observer release and old-client
@@ -41,6 +49,10 @@ The committed [representative timing capture](timing-representative.json) and
 [5,000-record timing capture](timing-bound.json) were recorded on macOS Apple
 Silicon with the suite's twofold Chromium CPU throttling. They are observations
 from this host, not a cross-host performance guarantee.
+The [5,000-record panels capture](timing-bound-panels.json) was recorded on
+Linux x86_64 with an AMD EPYC-Genoa processor and the same twofold Chromium CPU
+throttling. Its complete eight-panel block first drew in 639.5 ms; all ten
+live redraws took 297.7–393.4 ms, with a 330.0 ms median.
 
 Regenerate the chart screenshots and timing attachments, with shared-frame
 table regression coverage:
@@ -74,3 +86,14 @@ recorded budgets on a benchmark host, run
 `env UB_CHART_TIMING_BUDGETS=1 mise run e2e -- chart.spec.ts --project=chromium --workers=1`.
 That opt-in requires representative first draw within 500 ms and median redraw
 within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.
+The panels variant enforces the same bounded budget for the complete block,
+including all eight Chart.js instances.
+
+Regenerate and copy the four panel screenshots with the chart suite above:
+
+```sh
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["panels-desktop-light", "panels-desktop-dark", "panels-phone-light", "panels-phone-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+```
+
+The timing test also attaches `chart-timing-bound-panels.json`; its ten live
+redraws measure complete panel redraws rather than an individual canvas.

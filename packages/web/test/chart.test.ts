@@ -8,7 +8,18 @@ import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import type { ChartConfiguration } from "chart.js";
 
-const charts = vi.hoisted(() => ({ instances: [] as Array<{ data: unknown; options: unknown; updates: number; destroyed: boolean }> }));
+type RecordedChart = typeof charts.instances[number];
+type PanelData = { datasets: { label: string; yAxisID: string; data: { x: number; y: number | null }[]; borderColor: string;
+  pointRadius: number | ((context: { dataIndex: number }) => number) }[] };
+type PanelOptions = { interaction: unknown; scales: {
+  x: { min: number; max: number; title: { display: boolean; text: string };
+    afterBuildTicks: (scale: unknown) => void; afterFit: (scale: unknown) => void;
+    ticks: { callback: (value: number) => unknown } };
+  y: { min: number; max: number; beginAtZero: boolean; ticks: {
+    callback: (value: number, index: number, ticks: { value: number }[]) => string } };
+}; plugins: { tooltip: { callbacks: { label: (item: { datasetIndex: number; parsed: { y: number | null } }) => string } } } };
+
+const charts = vi.hoisted(() => ({ instances: [] as Array<{ canvas: unknown; data: unknown; options: unknown; updates: number; destroyed: boolean }> }));
 vi.mock("@uberblick/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/schema")>();
   return { ...actual, readDocData: vi.fn(actual.readDocData) };
@@ -16,11 +27,13 @@ vi.mock("@uberblick/schema", async (importOriginal) => {
 vi.mock("chart.js", () => {
   class Chart {
     static register() {}
+    canvas: unknown;
     data: unknown;
     options: unknown;
     updates = 0;
     destroyed = false;
-    constructor(_canvas: unknown, config: { data: unknown; options: unknown }) {
+    constructor(canvas: unknown, config: { data: unknown; options: unknown }) {
+      this.canvas = canvas;
       this.data = config.data;
       this.options = config.options;
       charts.instances.push(this);
@@ -45,6 +58,30 @@ function fixture() {
   applyDocData(doc, directory, [{ collection: "trend", schema, upsert: [{ id: "a", value: { day: 1, value: 3 } }] }]);
   return { doc, directory, id };
 }
+function panelFixture() {
+  const result = fixture();
+  const source = JSON.stringify({ version: 1, type: "line", collection: "trend", layout: "panels",
+    x: { field: "day", type: "number", label: "Observation" }, y: [
+      { field: "value", label: "Autonomous", unit: "%" },
+      { field: "secondary", label: "Wasted", unit: "%" },
+      { field: "third", label: "Denials", unit: "requests" },
+      { field: "empty", label: "No observations" },
+    ] });
+  editBlock(result.doc, result.id, mapping, source);
+  applyDocData(result.doc, result.directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+    { id: "first", value: { day: 1, value: 10, secondary: 30, third: 5_000 } },
+    { id: "gap", value: { day: 3, value: null, secondary: null, third: null } },
+    { id: "last", value: { day: 6, value: null, secondary: -20, third: 9_000 } },
+  ] }]);
+  return { ...result, source };
+}
+function panelOptions(chart: RecordedChart): PanelOptions { return chart.options as PanelOptions; }
+function panelData(chart: RecordedChart): PanelData { return chart.data as PanelData; }
+function panelPointRadius(chart: RecordedChart, dataIndex: number): number {
+  const radius = panelData(chart).datasets[0]?.pointRadius;
+  if (radius === undefined) throw new Error("Panel dataset is absent");
+  return typeof radius === "number" ? radius : radius({ dataIndex });
+}
 let frames: Map<number, FrameRequestCallback>;
 function flush() {
   const pending = [...frames.values()];
@@ -56,10 +93,13 @@ beforeEach(() => {
   let next = 0;
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++next, callback); return next; });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }),
+  } as CanvasRenderingContext2D);
     charts.instances = [];
     vi.mocked(readDocData).mockClear();
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("the chart's derived lifecycle", () => {
   it("switches table and line presentation with the source while preserving annotation and source access", async () => {
@@ -628,5 +668,257 @@ describe("the chart's derived lifecycle", () => {
     expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(mapping);
     expect(readDocData(doc)).toEqual(storedData);
     editor.destroy(); doc.destroy(); directory.destroy();
+  });
+});
+
+describe("the panel chart's shared presentation and lifecycle", () => {
+  it("draws ordered panels with shared ranges and observation labels as one accessible image", () => {
+    const { doc, directory, id, source } = panelFixture();
+    const overlay = JSON.stringify({ ...JSON.parse(source), layout: "overlay" });
+    editBlock(doc, id, source, overlay);
+    const { editor } = mountEditor(doc);
+    flush();
+    const root = editor.view.dom.querySelector(".ub-chart") as HTMLElement;
+    const overlayImage = root.querySelector("canvas") as HTMLCanvasElement;
+    const accessibleName = overlayImage.getAttribute("aria-label");
+    const accessibleDescription = root.querySelector(".ub-chart-description")?.textContent;
+    const overlayChart = charts.instances[0];
+    editBlock(doc, id, overlay, source);
+    flush();
+
+    expect(overlayChart?.destroyed).toBe(true);
+    const live = charts.instances.filter(chart => !chart.destroyed);
+    expect(live).toHaveLength(4);
+    const panels = [...root.querySelectorAll(".ub-chart-series-panel")];
+    expect(panels).toHaveLength(4);
+    expect(panels.map(panel => panel.querySelector(".ub-chart-series-header")?.textContent)).toEqual([
+      expect.stringContaining("Autonomous"), expect.stringContaining("Wasted"),
+      expect.stringContaining("Denials"), expect.stringContaining("No observations"),
+    ]);
+    expect(panels[0]?.querySelector(".ub-chart-series-header")?.textContent).toContain("10 %");
+    expect(panels[1]?.querySelector(".ub-chart-series-header")?.textContent).toContain("-20 %");
+    expect(panels[2]?.querySelector(".ub-chart-series-header")?.textContent).toContain("9,000 requests");
+    expect(panels[3]?.querySelector(".ub-chart-series-header")?.textContent).toContain("no plotted value");
+    const image = root.querySelector(".ub-chart-panels") as HTMLElement;
+    expect(image.getAttribute("role")).toBe("img");
+    expect(image.getAttribute("aria-label")).toBe(accessibleName);
+    expect(image.getAttribute("aria-describedby")).toBe(root.querySelector(".ub-chart-description")?.id);
+    expect(root.querySelector(".ub-chart-description")?.textContent).toBe(accessibleDescription);
+    expect([...root.querySelectorAll('[role="img"]')].filter(element => !element.closest("[hidden]"))).toEqual([image]);
+
+    const tickSelections: number[][] = [];
+    live.forEach((chart, index) => {
+      const options = panelOptions(chart), data = panelData(chart);
+      expect(data.datasets).toHaveLength(1);
+      expect(data.datasets[0]).toMatchObject({ yAxisID: "y" });
+      expect(options).toMatchObject({ interaction: { mode: "nearest", axis: "x", intersect: false },
+        plugins: { legend: { display: false } }, scales: {
+          x: { min: 1, max: 6, title: { display: true, text: "Observation" }, grid: { display: false }, border: { display: false } },
+          y: { ticks: { maxTicksLimit: 3 }, border: { display: false } },
+        } });
+      expect(options.scales).not.toHaveProperty("yRight");
+      expect(options.scales.y).not.toHaveProperty("title");
+      const scale = { min: 1, max: 6, width: 180, ticks: [] as { value: number }[],
+        chart: { ctx: { save() {}, restore() {}, font: "", measureText: (text: string) => ({ width: text.length * 6 }) } } };
+      options.scales.x.afterBuildTicks(scale);
+      options.scales.x.afterFit(scale);
+      tickSelections.push(scale.ticks.map(tick => tick.value));
+      expect(options.scales.x.ticks.callback(1)).toEqual(["1"]);
+      const canvas = panels[index]?.querySelector("canvas");
+      expect(chart.canvas).toBe(canvas);
+      expect(canvas?.getAttribute("role")).toBeNull();
+      expect(canvas?.getAttribute("aria-hidden")).toBe("true");
+      const header = panels[index]?.querySelector(".ub-chart-series-header") as HTMLElement;
+      const color = document.createElement("span");
+      color.style.color = data.datasets[0]?.borderColor ?? "";
+      expect(header.style.color).toBe(color.style.color);
+    });
+    expect(tickSelections).toEqual(Array(4).fill([1, 6]));
+    const [first, second, third] = live.map(panelOptions);
+    expect(first?.scales.y.min).toBe(second?.scales.y.min);
+    expect(first?.scales.y.max).toBe(second?.scales.y.max);
+    expect(first?.scales.y.min).toBeLessThanOrEqual(-20);
+    expect(first?.scales.y.max).toBeGreaterThanOrEqual(30);
+    expect(first?.scales.y.beginAtZero).toBe(false);
+    expect(third?.scales.y.min).toBe(0);
+    expect(third?.scales.y.max).toBeGreaterThanOrEqual(9_000);
+    expect(third?.scales.y.beginAtZero).toBe(true);
+    const sharedTicks = [{ value: first?.scales.y.min ?? 0 }, { value: 0 }, { value: first?.scales.y.max ?? 0 }];
+    expect(first?.scales.y.ticks.callback(0, 1, sharedTicks)).toBe("0%");
+    expect(third?.scales.y.ticks.callback(9_000, 2, [{ value: 0 }, { value: 5_000 }, { value: 10_000 }])).toBe("9K requests");
+    expect(first?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 10 } })).toBe("Autonomous: 10 %");
+    expect(second?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: -20 } })).toBe("Wasted: -20 %");
+    expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 9_000 } })).toBe("Denials: 9,000 requests");
+    expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: null } })).toBe("");
+    expect(root.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open chart source");
+    expect(root.querySelector(":scope > .ub-copy")).not.toBeNull();
+    expect(root.querySelectorAll(".ub-chart-diagnostics")).toHaveLength(1);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("retains single-x points in every panel and applies the point rule per series", () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), layout: "panels", y: [
+      { field: "value", label: "Delivery" }, { field: "secondary", label: "Other" },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "only", value: { day: 1, value: 3, secondary: 7 } }],
+    }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(charts.instances).toHaveLength(2);
+    for (const chart of charts.instances) {
+      expect(panelOptions(chart).scales.x).toMatchObject({ min: 0, max: 2 });
+      expect(panelData(chart).datasets[0]?.data).toHaveLength(1);
+      expect(panelPointRadius(chart, 0)).toBe(2);
+    }
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: Array.from({ length: 41 }, (_, index) => ({
+      id: `point-${index}`, value: { day: index + 1, value: index, ...(index === 20 ? { secondary: 7 } : {}) },
+    })) }]);
+    flush();
+    expect(panelPointRadius(charts.instances[0] as RecordedChart, 20)).toBe(0);
+    expect(panelPointRadius(charts.instances[1] as RecordedChart, 20)).toBe(2);
+    expect(panelPointRadius(charts.instances[1] as RecordedChart, 0)).toBe(0);
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: Array.from({ length: 45 }, (_, index) => ({
+      id: `point-${index}`, value: { day: index + 1, value: index, ...(index === 19 || index === 21 ? {} : { secondary: index }) },
+    })) }]);
+    flush();
+    expect(panelPointRadius(charts.instances[0] as RecordedChart, 20)).toBe(0);
+    expect(panelPointRadius(charts.instances[1] as RecordedChart, 20)).toBe(2);
+    expect(panelPointRadius(charts.instances[1] as RecordedChart, 18)).toBe(0);
+    expect(panelPointRadius(charts.instances[1] as RecordedChart, 19)).toBe(0);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("coalesces data, mapping, theme, appearance and font redraws through one binding without writes", async () => {
+    const { doc, directory, id, source } = panelFixture();
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const data = doc.getMap("data");
+    const observe = vi.spyOn(data, "observe"), unobserve = vi.spyOn(data, "unobserve");
+    let local = 0, appearanceChanged: (() => void) | undefined, fontReady: (() => void) | undefined;
+    doc.on("update", (_update, _origin, _doc, transaction: Y.Transaction) => { if (transaction.local) local += 1; });
+    vi.stubGlobal("matchMedia", () => ({ addEventListener: (_name: string, callback: () => void) => { appearanceChanged = callback; }, removeEventListener() {} }));
+    const originalFonts = Object.getOwnPropertyDescriptor(document, "fonts");
+    Object.defineProperty(document, "fonts", { configurable: true, value: { ready: new Promise<void>(resolve => { fontReady = resolve; }) } });
+    const originalTheme = document.documentElement.getAttribute("data-theme");
+    const { editor } = mountEditor(doc);
+    try {
+      const before = Y.encodeStateAsUpdate(doc);
+      flush();
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(readDocData).toHaveBeenCalledTimes(1);
+      expect(charts.instances).toHaveLength(4);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      for (let value = 31; value < 35; value += 1) {
+        applyDocData(peer, directory, [{ collection: "trend", upsert: [{ id: "last", value: { day: 6, value, secondary: -20, third: 9_000 } }] }]);
+        Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+      }
+      editBlock(peer, id, source, source.replace("Autonomous", "Shipped"));
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
+      appearanceChanged?.();
+      document.documentElement.setAttribute("data-theme", "dark");
+      fontReady?.();
+      await Promise.resolve();
+      expect(charts.instances.map(chart => chart.updates)).toEqual([0, 0, 0, 0]);
+      expect(frames.size).toBe(1);
+      const beforeDraw = Y.encodeStateAsUpdate(doc);
+      flush();
+      expect(charts.instances.map(chart => chart.updates)).toEqual([1, 1, 1, 1]);
+      expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+      expect(readDocData).toHaveBeenCalledTimes(2);
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(editor.view.dom.querySelector(".ub-chart-series-header")?.textContent).toContain("Shipped");
+      expect(editor.view.dom.querySelector(".ub-chart-series-header")?.textContent).toContain("34 %");
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(beforeDraw);
+      expect(local).toBe(0);
+      appearanceChanged?.();
+      document.documentElement.setAttribute("data-theme", "light");
+      await Promise.resolve();
+      flush();
+      expect(charts.instances.map(chart => chart.updates)).toEqual([2, 2, 2, 2]);
+      expect(readDocData).toHaveBeenCalledTimes(2);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(beforeDraw);
+      expect(local).toBe(0);
+    } finally {
+      editor.destroy();
+      if (originalFonts) Object.defineProperty(document, "fonts", originalFonts);
+      else Reflect.deleteProperty(document, "fonts");
+      if (originalTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", originalTheme);
+      doc.destroy(); peer.destroy(); directory.destroy();
+    }
+    expect(unobserve).toHaveBeenCalledTimes(1);
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(frames.size).toBe(0);
+    expect(local).toBe(0);
+  });
+
+  it("replaces instances on layout and series-count changes and releases all panels for problem states", () => {
+    const { doc, directory, id, source } = panelFixture();
+    const { editor } = mountEditor(doc);
+    flush();
+    const first = [...charts.instances];
+    const shorter = JSON.stringify({ ...JSON.parse(source), y: JSON.parse(source).y.slice(0, 2) });
+    editBlock(doc, id, source, shorter);
+    flush();
+    expect(first.every(chart => chart.destroyed)).toBe(true);
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(2);
+    expect(editor.view.dom.querySelectorAll(".ub-chart-series-panel")).toHaveLength(2);
+    const overlay = JSON.stringify({ ...JSON.parse(shorter), layout: "overlay" });
+    editBlock(doc, id, shorter, overlay);
+    flush();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(1);
+    expect(editor.view.dom.querySelector(".ub-chart-panels")).toBeNull();
+    expect(editor.view.dom.querySelector(".ub-chart-screen > canvas")?.getAttribute("role")).toBe("img");
+    editBlock(doc, id, overlay, source);
+    flush();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+    editBlock(doc, id, source, "not JSON");
+    const before = Y.encodeStateAsUpdate(doc);
+    flush();
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(editor.view.dom.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("invalid-configuration");
+    expect(editor.view.dom.querySelector(".ub-chart-message")?.textContent).toContain("Invalid chart configuration");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    editBlock(doc, id, "not JSON", source);
+    flush();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+    applyDocData(doc, directory, [{ collection: "trend", replaceRecords: [] }]);
+    flush();
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(editor.view.dom.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("no-records");
+    expect(editor.view.dom.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open chart source");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("releases every instance and its one observer on removal, remount and document switch", () => {
+    const { doc, directory, source } = panelFixture();
+    const observe = vi.spyOn(doc.getMap("data"), "observe"), unobserve = vi.spyOn(doc.getMap("data"), "unobserve");
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+    getBlocksFragment(doc).delete(1, 1);
+    flush();
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(unobserve).toHaveBeenCalledTimes(1);
+    appendBlock(doc, { type: "chart", text: source });
+    flush();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(readDocData).toHaveBeenCalledTimes(2);
+    editor.destroy();
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(unobserve).toHaveBeenCalledTimes(2);
+    const next = panelFixture();
+    const mounted = mountEditor(next.doc);
+    flush();
+    expect(charts.instances.filter(chart => !chart.destroyed)).toHaveLength(4);
+    mounted.editor.destroy();
+    expect(charts.instances.every(chart => chart.destroyed)).toBe(true);
+    expect(frames.size).toBe(0);
+    doc.destroy(); directory.destroy(); next.doc.destroy(); next.directory.destroy();
   });
 });
