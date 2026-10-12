@@ -84,6 +84,23 @@ export function resolveDecisionTopics(
   return out.sort((left, right) => compareAge(left.first ?? left.representative, right.first ?? right.representative));
 }
 
+export type DecisionTopicState = "conflict" | "under-review" | "agent-stance" | "in-force" | "not-yet-decided";
+
+/** Topic presentation preserves conflict safety and the answer during reconsideration. */
+export function decisionTopicState(resolution: DecisionTopicResolution): DecisionTopicState {
+  if (resolution.conflicts.length > 0) return "conflict";
+  if (resolution.inForce !== null) {
+    if (resolution.pending.length > 0) return "under-review";
+    return resolution.inForce.agentStance === true ? "agent-stance" : "in-force";
+  }
+  return "not-yet-decided";
+}
+
+/** The web opens the answer in force, or the latest stored record without one. */
+export function decisionCurrentRecord(resolution: DecisionTopicResolution): DirectoryEntry | null {
+  return resolution.inForce ?? resolution.records.at(-1) ?? null;
+}
+
 /** Related-page membership may be on any record; topics stay oldest first. */
 export function readDecisions(doc: Y.Doc, directory?: Y.Doc): DecisionTopicResolution[] {
   if (directory === undefined) return [];

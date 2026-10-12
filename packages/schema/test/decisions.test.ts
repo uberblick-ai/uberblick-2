@@ -9,8 +9,10 @@ import {
   editBlock,
   setAnnotationResolved,
   decisionDirectoryFields,
+  decisionCurrentRecord,
   decisionRelations,
   decisionTopicArchived,
+  decisionTopicState,
   directoryStubDiffers,
   exportMarkdown,
   getDirectoryEntry,
@@ -334,6 +336,37 @@ describe("decision metadata and caches", () => {
 });
 
 describe("stubs-only topic resolution", () => {
+  it("derives topic states with conflict precedence and preserves the answer during review", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { createdAt: 10, agentStance: true });
+    expect(decisionTopicState(resolveDecisionTopics(directory)[0]!)).toBe("agent-stance");
+    stub(directory, A, { agentStance: false });
+    expect(decisionTopicState(resolveDecisionTopics(directory)[0]!)).toBe("in-force");
+    stub(directory, B, { status: "open", supersedes: A, createdAt: 20 });
+    const underReview = resolveDecisionTopics(directory)[0]!;
+    expect(decisionTopicState(underReview)).toBe("under-review");
+    expect(decisionCurrentRecord(underReview)?.uuid).toBe(A);
+    stub(directory, C, { supersedes: A, createdAt: 30 });
+    stub(directory, D, { supersedes: A, createdAt: 40 });
+    const conflict = resolveDecisionTopics(directory)[0]!;
+    expect(conflict.pending).toHaveLength(1);
+    expect(decisionTopicState(conflict)).toBe("conflict");
+    expect(decisionCurrentRecord(conflict)?.uuid).toBe(D);
+  });
+
+  it("shows unanswered topics as not yet decided and opens the latest stored record", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { status: "open", createdAt: 10 });
+    stub(directory, B, { status: "rejected", supersedes: A, createdAt: 20 });
+    stub(directory, C, { status: "withdrawn", supersedes: B, createdAt: 30 });
+    const topic = resolveDecisionTopics(directory)[0]!;
+    expect(decisionTopicState(topic)).toBe("not-yet-decided");
+    expect(topic.pending).toHaveLength(1);
+    expect(topic.representative.uuid).toBe(A);
+    expect(decisionCurrentRecord(topic)?.uuid).toBe(C);
+    expect(decisionCurrentRecord({ ...topic, records: [] })).toBeNull();
+  });
+
   it("preserves the B/C/D fork and resolves through rejected intermediates without timestamp winners", () => {
     const directory = fork();
     const topic = resolveDecisionTopics(directory)[0]!;

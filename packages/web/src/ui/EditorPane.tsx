@@ -6,7 +6,6 @@
 import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import {
-  decisionContentLocked,
   getAnnotation,
   getBlocksFragment,
   getMeta,
@@ -56,8 +55,8 @@ import { threadIdFromActivation, threadIdFromTarget } from "./threads.js";
 import type { SelectThread, ThreadView } from "./threads.js";
 
 /** Read the document itself, including before its React subscription answers. */
-function isDecided(connection: RoomConnection): boolean {
-  return decisionContentLocked(getMeta(connection.ydoc));
+function isDecision(connection: RoomConnection): boolean {
+  return getMeta(connection.ydoc).kind === "decision";
 }
 
 /**
@@ -101,9 +100,7 @@ function ArchivedBanner({
   }, [focusRestore, onRestoreFocused]);
   return (
     <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] leading-[1.5] text-(--foreground)">
-      <strong className="font-medium">Archived.</strong> This document is tombstoned in the directory:
-      it is read-only here and hidden from the document list. Restore it to edit
-      it again.
+      <span><strong className="font-medium">Archived.</strong> Read-only and hidden from the document list.</span>
       <button
         ref={restore}
         type="button"
@@ -514,14 +511,14 @@ function LinkConflictRepair({
 }): ReactElement | null {
   const { conflicts, refresh } = useLinkConflicts(connection);
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
-    // Guard the write too: the record may have been decided since rendering.
-    if (contentReadOnly || isDecided(connection) || !connection.status.writable) return;
+    // Guard the write too: the room can become a decision before React observes it.
+    if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
     repairLinkConflict(conflict, keep);
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
   };
-  // Restoring an archive never permits edits to decided content.
+  // Restoring an archive never permits edits to decision content.
   if (contentReadOnly || !writable || conflicts.length === 0) return null;
   const name = (docId: string): string => docLinks?.lookup(docId).title ?? docId;
   return (
@@ -647,7 +644,7 @@ const BoundEditor = memo(function BoundEditor({
       element,
       fragment: getBlocksFragment(connection.ydoc),
       awareness: connection.provider.awareness,
-      editable: !readContentReadOnly() && !isDecided(connection) && connection.status.writable,
+      editable: !readContentReadOnly() && !isDecision(connection) && connection.status.writable,
       canWrite: () => connection.status.writable,
       canNormalize: () => connection.status.writable && connection.status.synced,
       onUnbind: () => {
@@ -759,14 +756,14 @@ const BoundEditor = memo(function BoundEditor({
    */
   useLayoutEffect(() => {
     if (editor === null || editor.isDestroyed) return;
-    editor.setEditable(!contentReadOnly && writable);
+    editor.setEditable(!contentReadOnly && !isDecision(connection) && writable);
     if (!archived && writable) {
       // A repair suppressed while the link was gone gets another plugin pass
       // as soon as the admitted room is writable again. Automatic block-id
-      // maintenance remains independent of decided content permissions.
+      // maintenance remains independent of decision content permissions.
       editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true));
     }
-  }, [editor, archived, contentReadOnly, writable]);
+  }, [editor, connection, archived, contentReadOnly, writable]);
 
   return (
     <>
@@ -777,10 +774,10 @@ const BoundEditor = memo(function BoundEditor({
         {editor !== null && !contentReadOnly && writable && (
           <CodeLanguageControl
             editor={editor}
-            canWrite={() => !contentReadOnly && !isDecided(connection) && connection.status.writable}
+            canWrite={() => !contentReadOnly && !isDecision(connection) && connection.status.writable}
           />
         )}
-        {/* Decided content offers no editing controls, but discussion stays
+        {/* Decision content offers no editing controls, but discussion stays
             open. An archive also withholds the comment composer. */}
         {editor !== null && !contentReadOnly && writable && (
           <BlockMenu editor={editor} host={frame} />
@@ -839,6 +836,12 @@ export function EditorPane({
   threadsOpen = false,
   onToggleThreads,
   syncDetails = false,
+  header,
+  beforeAnswer,
+  afterAnswer,
+  answerClassName,
+  copyPath,
+  decisionView = false,
 }: {
   connection: RoomConnection | null;
   /** The workspace as the address spells it — see {@link DocMetaLine}. */
@@ -886,6 +889,15 @@ export function EditorPane({
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
   syncDetails?: boolean;
+  /** Topic pages supply their own read-only title and related-page link. */
+  header?: ReactNode;
+  beforeAnswer?: ReactNode;
+  afterAnswer?: ReactNode;
+  answerClassName?: string;
+  /** Copy the topic or explicit history selection currently displayed. */
+  copyPath?: string;
+  /** A known decision route stays read-only while its room metadata catches up. */
+  decisionView?: boolean;
 }): ReactElement {
   const pane = useRef<HTMLElement | null>(null);
   const [tldrEditorRoom, setTldrEditorRoom] = useState<string | null>(null);
@@ -906,8 +918,8 @@ export function EditorPane({
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
-  const decided = meta !== null && decisionContentLocked(meta);
-  const contentReadOnly = archived || decided;
+  const decision = decisionView || meta?.kind === "decision";
+  const contentReadOnly = archived || decision;
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
@@ -952,7 +964,8 @@ export function EditorPane({
           meta={meta}
           archived={archived}
           readOnly={!writable}
-          contentReadOnly={decided}
+          contentReadOnly={decision}
+          copyPath={copyPath}
           pinned={pinned}
           onTogglePin={onTogglePin}
           onArchive={onArchive}
@@ -960,20 +973,20 @@ export function EditorPane({
           hasTldr={meta?.tldr != null}
           onEditTldr={() => setTldrEditorRoom(connection.room)}
         />
-        <input
+        {header ?? <input
           className="ub-title"
           value={meta?.title ?? ""}
           placeholder="Untitled"
           // `readOnly`, not `disabled`: the title is still the document's name
           // and still worth selecting and copying — it just cannot be retyped.
           readOnly={contentReadOnly || !writable}
-          // Guard the live write too: a document may become decided before
+          // Guard the live write too: a document may become a decision before
           // this readOnly render updates.
           onChange={(event) => {
-            if (archived || isDecided(connection) || !connection.status.writable) return;
+            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
             setTitle(connection.ydoc, event.target.value);
           }}
-        />
+        />}
         {/* The editor draws only for a document that is here: `RoutePane` sends
             everything else to the waiting screen. */}
         <StatusLine
@@ -988,36 +1001,40 @@ export function EditorPane({
           syncDetails={syncDetails}
           onActivatePresence={revealPresence}
         />
-        <TldrCallout
-          key={connection.room}
-          connection={connection}
-          tldr={meta?.tldr ?? null}
-          editing={editingTldr}
-          archived={archived}
-          decision={meta?.kind === "decision"}
-          writable={writable}
-          onEditingChange={(editing) =>
-            setTldrEditorRoom(editing ? connection.room : null)
-          }
-        />
-        {foreign.length > 0 ? (
-          <ForeignFallback
+        {beforeAnswer}
+        <div className={answerClassName}>
+          <TldrCallout
+            key={connection.room}
             connection={connection}
-            summary={describeForeignBlocks(foreign, { repairable: !archived, decided })}
-            contentReadOnly={contentReadOnly}
-            writable={writable}
-            docLinks={docLinks}
-          />
-        ) : (
-          <BoundEditor
-            connection={connection}
-            author={author}
+            tldr={meta?.tldr ?? null}
+            editing={editingTldr}
             archived={archived}
-            contentReadOnly={contentReadOnly}
-            docLinks={docLinks}
-            onSelectThread={onSelectThread}
+            decision={decision}
+            writable={writable}
+            onEditingChange={(editing) =>
+              setTldrEditorRoom(editing ? connection.room : null)
+            }
           />
-        )}
+          {foreign.length > 0 ? (
+            <ForeignFallback
+              connection={connection}
+              summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decided: decision })}
+              contentReadOnly={contentReadOnly}
+              writable={writable}
+              docLinks={docLinks}
+            />
+          ) : (
+            <BoundEditor
+              connection={connection}
+              author={author}
+              archived={archived}
+              contentReadOnly={contentReadOnly}
+              docLinks={docLinks}
+              onSelectThread={onSelectThread}
+            />
+          )}
+        </div>
+        {afterAnswer}
       </div>
     </section>
   );

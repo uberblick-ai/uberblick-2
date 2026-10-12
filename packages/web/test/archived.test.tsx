@@ -219,7 +219,7 @@ function prose(host: HTMLElement): HTMLElement | null {
 }
 
 function banner(host: HTMLElement): HTMLElement | null {
-  return within(host).queryByText(/This document is tombstoned in the directory:/);
+  return within(host).queryByText((_, element) => element?.tagName === "SPAN" && element.textContent === "Archived. Read-only and hidden from the document list.");
 }
 
 function restoreButton(host: HTMLElement): HTMLButtonElement | null {
@@ -254,6 +254,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       upsertDirectoryEntry(directory, {
         uuid, title: uuid === UUID ? "New lease" : "Original lease",
         kind: "decision", status: "open", topic: OTHER,
+        createdAt: uuid === UUID ? 2 : 1,
         ...(uuid === UUID ? { supersedes: OTHER } : {}),
       });
     }
@@ -262,13 +263,13 @@ describe("an archived document is readable, says so, and offers one way back", (
     pinDoc(sidebar, group, UUID);
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
 
-    // A foreign/partial write to a mirror cannot make the record read-only.
+    // A foreign/partial tombstone on a mirror cannot archive the topic.
     const map = getDirectoryMap(directory);
     act(() => {
       map.set(UUID, { ...(map.get(UUID) as object), deleted: true });
     });
     expect(banner(host)).toBeNull();
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
     openActions(host);
     act(() => action("Archive document")?.click());
     act(() => screen.getByRole("button", { name: "Archive document" }).click());
@@ -281,15 +282,16 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, OTHER)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(banner(host)).toBeNull();
-    expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
+    expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
 
-    // A first-record tombstone alone closes the successor's editing surface.
+    // A first-record tombstone alone archives every successor.
     act(() => map.set(OTHER, { ...(map.get(OTHER) as object), deleted: true }));
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(banner(host)).not.toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
-    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(true);
-    act(() => typeInto(within(host).getByPlaceholderText<HTMLInputElement>("Untitled"), "changed"));
+    const title = host.querySelector<HTMLElement>(".ub-title");
+    expect(title instanceof HTMLInputElement ? title.readOnly : title?.tagName === "H1").toBe(true);
+    if (title instanceof HTMLInputElement) act(() => typeInto(title, "changed"));
     expect(getMeta(ydoc).title).toBe("New lease");
     act(() => restoreButton(host)?.click());
     expect(banner(host)).toBeNull();

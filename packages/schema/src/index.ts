@@ -26,7 +26,8 @@ export {
 export type { DataCollection, DataIssue, DataOperation, DataRecord, DocData } from "./data.js";
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
-export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
+export { decisionCurrentRecord, decisionRelations, decisionTopicState, readDecisions, resolveDecisionTopics } from "./decisions.js";
+export type { DecisionTopicState } from "./decisions.js";
 export {
   decisionAnswerFailure, decisionAnswerShapeFailure, decisionDocAnswerFailure,
 } from "./decision-answer.js";
