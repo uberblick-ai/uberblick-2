@@ -19,7 +19,7 @@ export interface Workspace {
 }
 
 /** The destinations inside workspace settings. */
-export type SettingsPage = "general" | "tags" | "access";
+export type SettingsPage = "general" | "tags" | "access" | "hub-admins" | "hub-workspaces";
 
 /**
  * Invalid describes link syntax, never an unseen valid document UUID.
@@ -117,6 +117,9 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     }
     if (segments.length === 3 && page === ACCESS_SETTINGS_SEGMENT) {
       return { kind: "settings", workspace, page: "access" };
+    }
+    if (segments.length === 3 && (page === "hub-admins" || page === "hub-workspaces")) {
+      return { kind: "settings", workspace, page };
     }
     return {
       kind: "invalid",

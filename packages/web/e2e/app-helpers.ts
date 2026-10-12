@@ -18,7 +18,9 @@ interface OpenAppOptions {
 export function setupHarness(options: {
   scope?: "file" | "test";
   app?: OpenAppOptions;
-  accessRole?: "admin" | "member";
+  accessRole?: "admin" | "member" | "none";
+  hubAdmin?: boolean;
+  localWorkspace?: boolean;
   gitUserName?: string;
 } = {}) {
   let started: Harness | null = null;
@@ -34,6 +36,8 @@ export function setupHarness(options: {
   const start = async (): Promise<void> => {
     started = await startHarness({
       ...(options.accessRole === undefined ? {} : { accessRole: options.accessRole }),
+      ...(options.hubAdmin === undefined ? {} : { hubAdmin: options.hubAdmin }),
+      ...(options.localWorkspace === undefined ? {} : { localWorkspace: options.localWorkspace }),
       ...(options.gitUserName === undefined ? {} : { gitUserName: options.gitUserName }),
     });
   };

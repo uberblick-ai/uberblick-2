@@ -1,14 +1,16 @@
 /** Reserve a new workspace for one authenticated promotion, atomically. */
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
+import { HubAdminRegistry } from "./hub-admins.js";
 
-export type PromotionResult = "created" | "resumed" | "member-required" | "workspace-conflict";
+export type PromotionResult = "created" | "resumed" | "hub-admin-required" | "workspace-conflict";
 
 export class WorkspacePromotions {
   constructor(
     private readonly database: HubDatabase,
     private readonly memberships: MembershipRegistry,
     private readonly hasLiveDocuments: (workspaceId: string) => boolean,
+    private readonly admins = new HubAdminRegistry(database),
   ) {
     database.connection.exec(`CREATE TABLE IF NOT EXISTS hub_workspace_promotions (
       attempt_id TEXT PRIMARY KEY NOT NULL,
@@ -21,18 +23,16 @@ export class WorkspacePromotions {
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
-      // Current membership, not a credential's issuance snapshot, grants this
-      // authority. A login alone cannot create workspaces.
-      if (this.memberships.workspacesFor(principalId).length === 0) {
-        db.exec("ROLLBACK");
-        return "member-required";
-      }
       const receipt = db.prepare("SELECT * FROM hub_workspace_promotions WHERE attempt_id = ?").get(attemptId);
       if (receipt !== undefined) {
         const own = receipt.workspace_id === workspaceId && receipt.principal_id === principalId &&
           this.memberships.roleFor(workspaceId, principalId) === "admin";
         db.exec("ROLLBACK");
         return own ? "resumed" : "workspace-conflict";
+      }
+      if (!this.admins.isAdmin(principalId)) {
+        db.exec("ROLLBACK");
+        return "hub-admin-required";
       }
       const prefix = `${workspaceId}/`;
       if (this.memberships.hasMembership(workspaceId) || this.hasLiveDocuments(workspaceId) ||

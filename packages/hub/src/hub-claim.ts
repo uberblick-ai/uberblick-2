@@ -4,13 +4,15 @@ import { setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
+import { HubAdminRegistry } from "./hub-admins.js";
 
 const HUB_DATA_TABLES = [
-  "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants",
+  "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins", "hub_workspace_promotions",
 ] as const;
 
 export class HubClaimState {
-  constructor(private readonly database: HubDatabase) {
+  constructor(private readonly database: HubDatabase,
+    private readonly admins = new HubAdminRegistry(database)) {
     const db = database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -59,6 +61,7 @@ export class HubClaimState {
     if (row === undefined) return undefined;
     const workspaceId = row.default_workspace_id as string;
     memberships.grant({ workspaceId, principalId, role: "admin" });
+    this.admins.grant(principalId);
     this.close();
     return workspaceId;
   }

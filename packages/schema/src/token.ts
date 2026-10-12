@@ -70,6 +70,10 @@ export type RequestAction =
   | { operation: "renew-credential" }
   | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
   | { operation: "list-devices" }
+  | { operation: "own-hub-role" }
+  | { operation: "list-hub-admins"; cursor?: string }
+  | { operation: "list-hub-workspaces"; cursor?: string }
+  | { operation: "remove-hub-admin"; principalId: string }
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
   | { operation: "list-members"; workspaceId: string }
@@ -338,11 +342,11 @@ async function signClaims(
   return minted;
 }
 
-const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId"] as const;
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId", "cursor"] as const;
 
 /** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
 export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
-  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId } = payload;
+  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId, cursor } = payload;
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
@@ -353,7 +357,17 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       action = { operation, workspaceId, attemptId };
       break;
     case "list-devices":
+    case "own-hub-role":
       action = { operation };
+      break;
+    case "list-hub-admins":
+    case "list-hub-workspaces":
+      if (Object.hasOwn(payload, "cursor") && (typeof cursor !== "string" || cursor.length < 1 || cursor.length > 160)) return null;
+      action = { operation, ...(cursor === undefined ? {} : { cursor: cursor as string }) };
+      break;
+    case "remove-hub-admin":
+      if (!isSubject(principalId)) return null;
+      action = { operation, principalId };
       break;
     case "revoke-device":
       if (!isSubject(deviceId)) return null;
@@ -404,6 +418,7 @@ function parseRequestProofClaims(
     !UUID.test(kid) ||
     action === null ||
     expectedAction === null ||
+    Object.keys(action).length !== Object.keys(expectedAction).length ||
     Object.entries(expectedAction).some(([field, value]) => (action as Record<string, unknown>)[field] !== value) ||
     !isEpochSeconds(iat) ||
     !isEpochSeconds(exp) ||

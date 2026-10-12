@@ -712,6 +712,7 @@ describe("direct GitHub account grants", () => {
   it("keeps every other management operation local and preserves its existing answer", async () => {
     const { hub, github } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(admin.principal.id);
     const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
     const spare = hub.credentials!.issue({ principalId: admin.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     expect(await manage(hub, admin.issued, { operation: "list-devices" })).toMatchObject({ code: 200, result: { status: "ok" } });
@@ -731,15 +732,152 @@ describe("direct GitHub account grants", () => {
   });
 });
 
-describe("workspace promotion authority", () => {
-  it("creates for a current member, and resumes only the same principal and attempt", async () => {
+describe("hub administration", () => {
+  it("requires current hub authority independently of workspace membership and credential workspace snapshots", async () => {
     const { hub } = await rig();
-    const actor = person(hub, "1201", "promoter", [[WORKSPACE, "member"]]);
+    const admin = person(hub, "1234", "hub-admin");
+    const workspaceAdmin = person(hub, "5678", "workspace-admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "9012", "member", [[WORKSPACE, "member"]]);
+    const outsider = person(hub, "3456", "signed-in");
+    hub.hubAdmins!.grant(admin.principal.id);
+    const actions: Action[] = [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
+      { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: admin.principal.id }];
+    for (const actor of [workspaceAdmin, member, outsider]) {
+      for (const action of actions) {
+        expect(await manage(hub, actor.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
+      }
+    }
+    expect(await manage(hub, admin.issued, { operation: "own-hub-role" }))
+      .toEqual({ code: 200, result: { status: "ok", role: "admin" } });
+    expect(await manage(hub, admin.issued, { operation: "list-hub-admins" })).toEqual({ code: 200,
+      result: { status: "ok", admins: [{ principalId: admin.principal.id, githubAccountId: "1234", githubUsername: "hub-admin",
+        workspaces: 0, lastSignedInAt: admin.issued.record.issuedAt, current: true }], nextCursor: null } });
+    expect(await manage(hub, admin.issued, { operation: "list-hub-workspaces" })).toEqual({ code: 200,
+      result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["workspace-admin"] }], nextCursor: null } });
+    expect(hub.memberships!.workspacesFor(admin.principal.id)).toEqual([]);
+    expect(admin.issued.record.workspaces).toEqual([]);
+    const refused = connect(hub, testRoom(), await roomToken(admin.issued));
+    expect(await refused.denied).toBe("device-credential-refused");
+    expect(await manage(hub, admin.issued, { operation: "own-role", workspaceId: WORKSPACE }))
+      .toEqual({ code: 403, result: { status: "forbidden" } });
+  });
+
+  it("binds page cursors and checks current hub authority for every continuation", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "first", [[WORKSPACE, "admin"]]);
+    const backup = person(hub, "5678", "second", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    hub.hubAdmins!.grant(backup.principal.id);
+    for (const operation of ["list-hub-admins", "list-hub-workspaces"] as const) {
+      const cursor = Buffer.from(JSON.stringify(operation === "list-hub-admins" ? [1] : [0, 1])).toString("base64url");
+      const action = { operation, cursor };
+      const signed = await proof(owner.issued, action);
+      expect(await post(hub, envelope(signed, { operation })))
+        .toEqual({ code: 401, result: { status: "sign-in-required" } });
+      expect(await manage(hub, owner.issued, action)).toMatchObject({ code: 200, result: { status: "ok", nextCursor: null } });
+      for (const position of [[], [-1], [1.5], [Number.MAX_SAFE_INTEGER], [0, -1], [0, 50]]) {
+        const malformed = Buffer.from(JSON.stringify(position)).toString("base64url");
+        expect(await manage(hub, owner.issued, { operation, cursor: malformed }))
+          .toEqual({ code: 400, result: { status: "invalid-request" } });
+      }
+      expect(await manage(hub, owner.issued, { operation, cursor: "not-a-cursor" }))
+        .toEqual({ code: 400, result: { status: "invalid-request" } });
+    }
+    hub.hubAdmins!.remove(backup.principal.id, owner.principal.id);
+    for (const operation of ["list-hub-admins", "list-hub-workspaces"] as const) {
+      const cursor = Buffer.from(JSON.stringify(operation === "list-hub-admins" ? [1] : [0, 1])).toString("base64url");
+      expect(await manage(hub, owner.issued, { operation, cursor })).toEqual({ code: 403, result: { status: "forbidden" } });
+    }
+  });
+
+  it("lists the newest device sign-in, including revoked devices and excluding renewals", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "hub-admin", [[WORKSPACE, "member"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1_000);
+    const second = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    hub.credentials!.revoke(second.record.id);
+    clock.mockReturnValue(second.record.issuedAt + 1_000);
+    const renewal = await mintRequestProof(await importCredentialKey(owner.issued.keyBytes), {
+      kid: owner.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+    });
+    const renewed = await hub.credentials!.renew(renewal, hub.memberships!);
+    if (renewed.status !== "renewed") throw new Error("credential did not renew");
+    const replacement = { record: renewed.credential.record, keyBytes: Buffer.from(renewed.credential.key, "base64url") };
+    expect(await manage(hub, replacement, { operation: "list-hub-admins" })).toMatchObject({ code: 200,
+      result: { admins: [{ lastSignedInAt: second.record.issuedAt, workspaces: 1 }] } });
+    // Insertion order still identifies the newest login when the clock moves backwards.
+    clock.mockReturnValue(owner.issued.record.issuedAt - 1_000);
+    const third = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    clock.mockRestore();
+    expect(await manage(hub, replacement, { operation: "list-hub-admins" })).toMatchObject({ code: 200,
+      result: { admins: [{ lastSignedInAt: third.record.issuedAt }] } });
+  });
+
+  it("removes only another hub admin, preserves workspace access, and cannot lose the last admin under mutual removal", async () => {
+    const { hub } = await rig();
+    const first = person(hub, "1234", "first", [[WORKSPACE, "admin"]]);
+    const second = person(hub, "5678", "second", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(first.principal.id);
+    hub.hubAdmins!.grant(second.principal.id);
+    expect(await manage(hub, first.issued, { operation: "remove-hub-admin", principalId: first.principal.id }))
+      .toEqual({ code: 409, result: { status: "self-admin" } });
+    expect(await manage(hub, first.issued, { operation: "remove-hub-admin", principalId: randomUUID() }))
+      .toEqual({ code: 404, result: { status: "admin-not-found" } });
+    const results = await Promise.all([
+      manage(hub, first.issued, { operation: "remove-hub-admin", principalId: second.principal.id }),
+      manage(hub, second.issued, { operation: "remove-hub-admin", principalId: first.principal.id }),
+    ]);
+    expect(results.map(result => result.code).sort()).toEqual([200, 403]);
+    const survivor = hub.hubAdmins!.isAdmin(first.principal.id) ? first : second;
+    const removed = survivor === first ? second : first;
+    expect(await manage(hub, survivor.issued, { operation: "remove-hub-admin", principalId: survivor.principal.id }))
+      .toEqual({ code: 409, result: { status: "self-admin" } });
+    for (const operation of ["own-hub-role", "list-hub-admins", "list-hub-workspaces"] as const) {
+      expect(await manage(hub, removed.issued, { operation })).toEqual({ code: 403, result: { status: "forbidden" } });
+    }
+    expect(hub.memberships!.roleFor(WORKSPACE, removed.principal.id)).toBe("admin");
+    expect(await manage(hub, removed.issued, { operation: "list-members", workspaceId: WORKSPACE }))
+      .toMatchObject({ code: 200, result: { members: expect.any(Array) } });
+    expect(hub.credentials!.get(removed.issued.record.id)).toEqual(removed.issued.record);
+  });
+
+  it("binds hub operation and removal target, and rechecks hub authority after proof verification", async () => {
+    const { hub } = await rig();
+    const first = person(hub, "1234", "first");
+    const second = person(hub, "5678", "second");
+    hub.hubAdmins!.grant(first.principal.id);
+    hub.hubAdmins!.grant(second.principal.id);
+    const action = { operation: "remove-hub-admin", principalId: second.principal.id } as const;
+    const signed = await proof(first.issued, action);
+    expect(await post(hub, envelope(signed, { ...action, principalId: first.principal.id })))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(await post(hub, envelope(signed, { operation: "list-hub-admins" })))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    const original = hub.credentials!.verifyRequest.bind(hub.credentials!);
+    vi.spyOn(hub.credentials!, "verifyRequest").mockImplementationOnce(async (...args) => {
+      const verified = await original(...args);
+      hub.hubAdmins!.remove(second.principal.id, first.principal.id);
+      return verified;
+    });
+    expect(await post(hub, envelope(signed, action))).toEqual({ code: 403, result: { status: "forbidden" } });
+    expect(hub.hubAdmins!.isAdmin(second.principal.id)).toBe(true);
+  });
+});
+
+describe("workspace promotion authority", () => {
+  it("creates only for a current hub admin without needing membership, and resumes only the same principal and attempt", async () => {
+    const { hub } = await rig();
+    const actor = person(hub, "1201", "promoter");
     const admin = person(hub, "1202", "administrator", [[WORKSPACE, "admin"]]);
     const stranger = person(hub, "1203", "signed-in");
     const other = person(hub, "1204", "other-admin", [[OTHER_WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(actor.principal.id);
+    hub.hubAdmins!.grant(other.principal.id);
     const action = { operation: "promote-workspace", workspaceId: randomUUID(), attemptId: randomUUID() } as const;
-    expect(await manage(hub, stranger.issued, action)).toMatchObject({ code: 403, result: { status: "member-required" } });
+    for (const nonAdmin of [stranger, admin]) {
+      expect(await manage(hub, nonAdmin.issued, action)).toMatchObject({ code: 403, result: { status: "hub-admin-required" } });
+    }
     expect(hub.memberships!.hasMembership(action.workspaceId)).toBe(false);
     // The credential does not include the new UUID; current hub authority does.
     expect(await manage(hub, actor.issued, action)).toMatchObject({ code: 200, result: { status: "created" } });
@@ -753,14 +891,20 @@ describe("workspace promotion authority", () => {
     ] as const) {
       expect(await manage(hub, requestActor.issued, request)).toMatchObject({ code: 409, result: { status: "workspace-conflict" } });
     }
-    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(2);
+    hub.hubAdmins!.remove(other.principal.id, actor.principal.id);
+    expect(await manage(hub, actor.issued, action)).toMatchObject({ code: 200, result: { status: "resumed" } });
+    expect(await manage(hub, actor.issued, { ...action, workspaceId: randomUUID(), attemptId: randomUUID() }))
+      .toMatchObject({ code: 403, result: { status: "hub-admin-required" } });
+    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
     expect(hub.memberships!.workspacesFor(stranger.principal.id)).toEqual([]);
   });
 
-  it("binds the proof to both targets and refuses revoked devices or withdrawn membership", async () => {
+  it("binds the proof to both targets and refuses revoked devices or withdrawn hub authority", async () => {
     const { hub } = await rig();
     const admin = person(hub, "1201", "promoter", [[WORKSPACE, "admin"]]);
     const second = person(hub, "1202", "other-admin", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(admin.principal.id);
+    hub.hubAdmins!.grant(second.principal.id);
     const action = { operation: "promote-workspace", workspaceId: randomUUID(), attemptId: randomUUID() } as const;
     const signed = await proof(admin.issued, action);
     for (const changed of [{ ...action, workspaceId: randomUUID() }, { ...action, attemptId: randomUUID() }]) {
@@ -770,13 +914,12 @@ describe("workspace promotion authority", () => {
     const original = hub.credentials!.verifyRequest.bind(hub.credentials!);
     vi.spyOn(hub.credentials!, "verifyRequest").mockImplementationOnce(async (...args) => {
       const result = await original(...args);
-      hub.memberships!.remove({ workspaceId: WORKSPACE, actorPrincipalId: second.principal.id,
-        principalId: admin.principal.id });
+      hub.hubAdmins!.remove(second.principal.id, admin.principal.id);
       return result;
     });
-    expect(await post(hub, envelope(signed, action))).toMatchObject({ code: 403, result: { status: "member-required" } });
+    expect(await post(hub, envelope(signed, action))).toMatchObject({ code: 403, result: { status: "hub-admin-required" } });
     expect(hub.credentials!.get(admin.issued.record.id)!.workspaces).toContain(WORKSPACE);
-    expect(hub.memberships!.workspacesFor(admin.principal.id)).toEqual([]);
+    expect(hub.memberships!.workspacesFor(admin.principal.id)).toEqual([WORKSPACE]);
     hub.credentials!.revokeDevice(second.principal.id, second.issued.record.deviceId);
     expect(await manage(hub, second.issued, action)).toMatchObject({ code: 401 });
     expect(hub.memberships!.hasMembership(action.workspaceId)).toBe(false);
@@ -785,6 +928,7 @@ describe("workspace promotion authority", () => {
   it("serializes competing attempts and rejects a UUID with an existing membership", async () => {
     const { hub } = await rig();
     const admin = person(hub, "1201", "promoter", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(admin.principal.id);
     const workspaceId = randomUUID();
     const requests = [randomUUID(), randomUUID()].map(attemptId =>
       manage(hub, admin.issued, { operation: "promote-workspace", workspaceId, attemptId }));

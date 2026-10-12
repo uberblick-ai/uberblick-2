@@ -27,6 +27,7 @@
 @source "./CaretMenu.tsx";
 @source "./MentionMenu.tsx";
 @source "./WorkspaceSettings.tsx";
+@source "./HubSettings.tsx";
 @source "./WorkspaceSwitcher.tsx";
 @source "./UserMenu.tsx";
 @source "./OutlinePane.tsx";

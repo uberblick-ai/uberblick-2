@@ -18,6 +18,9 @@ const login: StoredHubLogin = {
 };
 const member = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername: "octocat", role: "member" };
 const device = { deviceId: DEVICE, signedInAt: Date.now(), current: true };
+const admin = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername: "octocat",
+  workspaces: 0, lastSignedInAt: Date.now(), current: true };
+const workspace = { workspaceId: WORKSPACE, name: "Example project", members: 2, admins: ["octocat"] };
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -97,6 +100,10 @@ describe("management replies exposed to a browser", () => {
   );
 
   it.each([
+    [{ operation: "own-hub-role" }, { status: "ok", role: "admin" }],
+    [{ operation: "list-hub-admins" }, { status: "ok", admins: [admin], nextCursor: null }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace], nextCursor: null }],
+    [{ operation: "remove-hub-admin", principalId: PRINCIPAL }, { status: "ok" }],
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "admin" }],
     [{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, { status: "ok", githubAccountId: "1234", githubUsername: "octocat" }],
     [{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, { status: "already-member", member }],
@@ -110,8 +117,25 @@ describe("management replies exposed to a browser", () => {
     privateBody.message = "private-provider-message";
     if (Array.isArray(privateBody.devices)) privateBody.devices = privateBody.devices.map(value => ({ ...value as Record<string, unknown>, key: "private-device-key", workspaces: [WORKSPACE] }));
     if (Array.isArray(privateBody.members)) privateBody.members = privateBody.members.map(value => ({ ...value as Record<string, unknown>, token: "private-token" }));
+    if (Array.isArray(privateBody.admins)) privateBody.admins = privateBody.admins.map(value => ({ ...value as Record<string, unknown>, credential: login.credential }));
+    if (Array.isArray(privateBody.workspaces)) privateBody.workspaces = privateBody.workspaces.map(value => ({ ...value as Record<string, unknown>, documents: "private-document-content" }));
     if (typeof privateBody.member === "object") privateBody.member = { ...privateBody.member as Record<string, unknown>, key: "private-member-key" };
     expect(sanitizeManagementReply(action, { status: 200, body: privateBody }, login)).toEqual({ status: 200, body: publicBody });
+  });
+
+  it("projects continuation pages without requiring the current admin in every page", () => {
+    const other = { ...admin, principalId: WORKSPACE, current: false };
+    expect(sanitizeManagementReply({ operation: "list-hub-admins", cursor: "WzFd" },
+      { status: 200, body: { status: "ok", admins: [other], nextCursor: null, key: "private" } }, login))
+      .toEqual({ status: 200, body: { status: "ok", admins: [other], nextCursor: null } });
+    expect(sanitizeManagementReply({ operation: "list-hub-workspaces" },
+      { status: 200, body: { status: "ok", workspaces: [workspace], nextCursor: "WzEsMF0" } }, login))
+      .toEqual({ status: 200, body: { status: "ok", workspaces: [workspace], nextCursor: "WzEsMF0" } });
+    for (const nextCursor of [undefined, "", "private/token", "a".repeat(161), 1, login.credential.key]) {
+      expect(() => sanitizeManagementReply({ operation: "list-hub-workspaces" },
+        { status: 200, body: { status: "ok", workspaces: [workspace], nextCursor } }, login))
+        .toThrow(ManagementResponseError);
+    }
   });
 
   it.each([
@@ -138,6 +162,14 @@ describe("management replies exposed to a browser", () => {
   });
 
   it.each([
+    [{ operation: "own-hub-role" }, { status: "ok", role: "member" }],
+    [{ operation: "list-hub-admins" }, { status: "ok", admins: [{ ...admin, current: false }] }],
+    [{ operation: "list-hub-admins" }, { status: "ok", admins: [admin, admin] }],
+    [{ operation: "list-hub-admins" }, { status: "ok", admins: [{ ...admin, workspaces: -1 }] }],
+    [{ operation: "list-hub-admins" }, { status: "ok", admins: [{ ...admin, lastSignedInAt: "private" }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace, workspace] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, members: 1.5 }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, admins: ["private/token"] }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, current: false }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, signedInAt: "private" }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [device, device] }],
@@ -149,5 +181,24 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-devices" }, { status: "last-admin" }],
   ] satisfies [ManagementAction, Record<string, unknown>][]) ("refuses malformed or mismatched %j replies", (action, body) => {
     expect(() => sanitizeManagementReply(action, { status: 200, body }, login)).toThrow(ManagementResponseError);
+  });
+
+  it("keeps unsigned display names out of the hub workspace projection without dropping rows", () => {
+    for (const name of [undefined, 7, "", " name ", "line\nname", login.credential.key]) {
+      expect(sanitizeManagementReply({ operation: "list-hub-workspaces" }, { status: 200,
+        body: { status: "ok", workspaces: [{ ...workspace, name }], nextCursor: null } }, login)).toEqual({ status: 200,
+        body: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["octocat"] }], nextCursor: null } });
+    }
+  });
+
+  it("preserves fixed hub admin removal refusals without provider text", () => {
+    const action = { operation: "remove-hub-admin", principalId: PRINCIPAL } as const;
+    for (const [status, state] of [[409, "self-admin"], [409, "last-admin"], [404, "admin-not-found"]] as const) {
+      expect(sanitizeManagementReply(action, { status, body: { status: state, key: login.credential.key } }))
+        .toEqual({ status, body: { status: state } });
+    }
+    expect(sanitizeManagementReply({ operation: "list-hub-admins" }, { status: 200,
+      body: { status: "ok", admins: [{ ...admin, lastSignedInAt: null }], nextCursor: null } }, login).body.admins)
+      .toEqual([{ ...admin, lastSignedInAt: null }]);
   });
 });

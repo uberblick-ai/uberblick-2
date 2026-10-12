@@ -167,6 +167,10 @@ async function startOpen(
 export interface Harness {
   /** Public fixture identities for access-control browser proofs. */
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
+  /** Remove the browser account's hub role while its devices and memberships stay. */
+  removeCurrentHubAdmin(): void;
+  /** Populate enough real membership-backed workspaces to require inventory pages. */
+  seedHubInventory(count: number): { workspaceIds: string[]; unpagedBytes: number };
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /**
@@ -359,7 +363,10 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 }
 
 export async function startHarness(options: {
-  accessRole?: "admin" | "member";
+  accessRole?: "admin" | "member" | "none";
+  hubAdmin?: boolean;
+  /** Keep a real stored hub login while serving an entirely local workspace. */
+  localWorkspace?: boolean;
   /** A real git default isolated from the developer's own configuration. */
   gitUserName?: string;
   /** Only the deep-link proof of a compiled loopback fallback needs this. */
@@ -429,23 +436,28 @@ export async function startHarness(options: {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
       join(runDir, ".uberblick.json"),
-      `${JSON.stringify({ workspaceId: workspace, hubUrl }, null, 2)}\n`,
+      `${JSON.stringify({ workspaceId: workspace, hubUrl: options.localWorkspace === true ? null : hubUrl }, null, 2)}\n`,
       { mode: 0o600 },
     );
     const credentials = join(configDir, "credentials.json");
     let storedCredentials: unknown = { signingSecret: SECRET };
     let access: Harness["access"];
     if (accessRole !== undefined) {
-      const { principals, memberships, credentials: registry } = hub;
+      const { principals, memberships, credentials: registry, hubAdmins } = hub;
       if (principals === undefined || memberships === undefined || registry === undefined) {
         throw new Error("Access browser fixture needs GitHub registries");
       }
       const principal = principals.identify("1234", "browser-person");
-      memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: accessRole });
+      if (accessRole !== "none") memberships.grant({ workspaceId: workspaceUuid, principalId: principal.id, role: accessRole });
       const foreign = principals.identify("5678", "other-admin");
       memberships.grant({ workspaceId: workspaceUuid, principalId: foreign.id, role: "admin" });
+      if (options.hubAdmin === true) {
+        if (hubAdmins === undefined) throw new Error("Hub admin browser fixture needs the hub registry");
+        hubAdmins.grant(principal.id);
+        hubAdmins.grant(foreign.id);
+      }
       const issue = (principalId: string, deviceName?: string) => registry.issue({ principalId, deviceId: randomUUID(),
-        workspaces: [workspaceUuid], ...(deviceName === undefined ? {} : { deviceName }) });
+        workspaces: principalId === principal.id && accessRole === "none" ? [] : [workspaceUuid], ...(deviceName === undefined ? {} : { deviceName }) });
       const deviceName = "browser-laptop";
       const current = issue(principal.id, deviceName);
       const other = issue(principal.id, deviceName);
@@ -526,6 +538,24 @@ export async function startHarness(options: {
       workspace,
       workspaceUuid,
       secondWorkspace,
+      removeCurrentHubAdmin() {
+        const { principals, hubAdmins } = hub ?? {};
+        if (principals === undefined || hubAdmins === undefined) throw new Error("Hub admin fixture is missing");
+        hubAdmins.remove(principals.identify("5678", "other-admin").id, principals.identify("1234", "browser-person").id);
+      },
+      seedHubInventory(count) {
+        const { principals, memberships } = hub ?? {};
+        if (principals === undefined || memberships === undefined) throw new Error("Hub inventory fixture is missing");
+        const admins = [principals.identify("9012", "inventory-alpha".padEnd(39, "a")),
+          principals.identify("3456", "inventory-beta".padEnd(39, "b"))];
+        const workspaceIds = Array.from({ length: count }, () => randomUUID());
+        for (const workspaceId of workspaceIds) {
+          for (const principal of admins) memberships.grant({ workspaceId, principalId: principal.id, role: "admin" });
+        }
+        const workspaces = workspaceIds.map((workspaceId) => ({ workspaceId, members: 2,
+          admins: admins.map((principal) => principal.githubUsername) }));
+        return { workspaceIds, unpagedBytes: Buffer.byteLength(JSON.stringify({ status: "ok", workspaces })) };
+      },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);

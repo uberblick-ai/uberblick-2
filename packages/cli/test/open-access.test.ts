@@ -55,6 +55,44 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
 }
 
 describe("ub open: live Access bridge", () => {
+  it("uses current hub authority independently of workspace membership and credential scope", async () => {
+    const { app, post, hub, login, other, origin } = await rig(null, []);
+    hub.hubAdmins!.grant(login.identity.id);
+    hub.hubAdmins!.grant(other.identity.id);
+    try {
+      expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
+      expect(await post({ operation: "own-hub-role" })).toEqual({ code: 200,
+        body: { status: "ok", role: "admin", hub: origin } });
+      expect((await post({ operation: "list-hub-admins" })).body).toMatchObject({ status: "ok", admins: [
+        { principalId: other.identity.id, current: false, workspaces: 1 },
+        { principalId: login.identity.id, current: true, workspaces: 0 },
+      ] });
+      expect((await post({ operation: "list-hub-workspaces" })).body).toMatchObject({ status: "ok", workspaces:
+        expect.arrayContaining([{ workspaceId: WORKSPACE, members: 1, admins: ["other-admin"] }]) });
+      expect((await post({ operation: "remove-hub-admin", principalId: login.identity.id })).body.status).toBe("self-admin");
+      hub.hubAdmins!.remove(other.identity.id, login.identity.id);
+      for (const action of [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
+        { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: other.identity.id }]) {
+        expect((await post(action)).body).toEqual({ status: "forbidden", hub: origin });
+      }
+      expect((await post({ operation: "list-devices" })).body.status).toBe("ok");
+      expect(hub.memberships!.roleFor(WORKSPACE, other.identity.id)).toBe("admin");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("never borrows another hub's login or accepts workspace targets for hub operations", async () => {
+    const { app, post, hub, login, box, origin } = await rig();
+    try {
+      expect((await post({ operation: "own-hub-role" })).body).toEqual({ status: "forbidden", hub: origin });
+      const verify = vi.spyOn(hub.credentials!, "verifyRequest");
+      expect((await post({ operation: "own-hub-role", workspaceId: WORKSPACE })).body.status).toBe("invalid-request");
+      expect(verify).not.toHaveBeenCalled();
+      await writeHubLogin("https://another-hub.example", login, box.env);
+      await removeHubLogin(origin, box.env);
+      expect((await post({ operation: "own-hub-role" })).body).toEqual({ status: "sign-in-required", hub: origin });
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("relays own device names beside legacy rows with no new upstream fields", async () => {
     const { app, post, hub, login, other, origin } = await rig("member");
     const named = hub.credentials!.issue({ principalId: login.identity.id, deviceId: crypto.randomUUID(),
@@ -284,7 +322,7 @@ describe("ub open: live Access bridge", () => {
       writeFileSync(path, JSON.stringify({ ...outcome, status: "hub-down", retryAt: Date.now() + 60_000 }));
       const verify = vi.spyOn(hub.credentials!, "verifyRequest");
       expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
-      expect(verify).toHaveBeenCalledOnce();
+      expect(verify).toHaveBeenCalledWith(expect.any(String), { operation: "own-role", workspaceId: WORKSPACE });
       expect((await post({ operation: "list-devices" })).body).toMatchObject({ status: "ok", devices: [
         { deviceId: login.credential.record.deviceId, current: true },
       ] });

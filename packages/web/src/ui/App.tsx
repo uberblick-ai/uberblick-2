@@ -65,6 +65,8 @@ import { focusThread } from "./threads.js";
 import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
 import { useServingAccount } from "./serving-account.js";
+import { useHubAdministration } from "./hub-administration.js";
+import { HubSettings } from "./HubSettings.js";
 import { createAccountClient } from "../shell/account.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../shell/DocumentList.js";
 import type { DocumentListState } from "../shell/DocumentList.js";
@@ -390,6 +392,7 @@ export function App(): ReactElement {
     [identity.name, serving, workspaceUuid],
   );
   const account = useServingAccount(accountClient);
+  const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
   const routedSelection = route.kind === "doc" ? route.uuid : route.kind === "decision" ? route.record : null;
   const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
@@ -980,12 +983,15 @@ export function App(): ReactElement {
           allOpen={listing}
           settingsOpen={settings}
           settingsPage={route.kind === "settings" ? route.page : null}
+          hubAdmin={hubAdministration.admin}
         />
         {/*
             * Both workspace addresses render the document list directly; RoutePane
             * handles document-address resolution.
          */}
-        {settings ? (
+        {settings && (route.page === "hub-admins" || route.page === "hub-workspaces") ? (
+          <HubSettings key={`${route.workspace.uuid}:${route.page}`} page={route.page} administration={hubAdministration} />
+        ) : settings ? (
           <WorkspaceSettings
             key={route.workspace.uuid}
             page={route.page}

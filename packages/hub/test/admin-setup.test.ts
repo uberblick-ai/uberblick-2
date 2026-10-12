@@ -443,6 +443,7 @@ describe("host-only first-admin setup", () => {
     const grants = rows(testRig).memberships;
     expect(grants).toHaveLength(1);
     expect(grants[0]!.workspace_id).toBe(defaultId);
+    expect(testRig.database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
   });
 
   it("a public claim wins over an earlier host approval still fetching identity", async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { HubClaimState } from "../src/hub-claim.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { WorkspacePromotions } from "../src/workspace-promotion.js";
@@ -15,6 +16,7 @@ it("persists receipts through restart without touching default workspace or clai
   const claims = new HubClaimState(db);
   const members = new MembershipRegistry(db);
   const principal = randomUUID();
+  new HubAdminRegistry(db).grant(principal);
   const authority = randomUUID();
   members.grant({ workspaceId: authority, principalId: principal, role: "admin" });
   const promotions = new WorkspacePromotions(db, members, () => false);
@@ -43,6 +45,7 @@ it("refuses live or persisted rooms and rolls back a grant if receipt persistenc
   try {
     const members = new MembershipRegistry(db);
     const principal = randomUUID();
+    new HubAdminRegistry(db).grant(principal);
     members.grant({ workspaceId: randomUUID(), principalId: principal, role: "admin" });
     const live = randomUUID();
     const stored = randomUUID();
