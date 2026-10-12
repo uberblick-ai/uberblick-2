@@ -942,6 +942,12 @@ h3.ub-heading {
 }
 .ProseMirror-focused .ub-card[data-card-focused="true"] [data-empty="true"] { display: block; }
 .ProseMirror-focused .ub-card[data-card-focused="true"] .ub-card-parts > .ub-card-title { margin-top: 6px; }
+/* Editor focus must not move a selected footer action during a native press. */
+.ProseMirror[contenteditable="true"]:not(.ProseMirror-focused) .ub-card[data-card-button][data-card-focused="true"] [data-empty="true"]:not(.ub-card-title) {
+  display: block;
+  visibility: hidden;
+}
+.ProseMirror[contenteditable="true"]:not(.ProseMirror-focused) .ub-card[data-card-button][data-card-focused="true"] .ub-card-parts > .ub-card-title { margin-top: 6px; }
 
 /* Lists are flat sibling blocks: suppress native markers and draw each
    item's ::before from data-list and data-indent. Ordered markers read

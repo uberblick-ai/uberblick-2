@@ -54,6 +54,8 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(card.getByRole("button", { name: "Discuss in Codex", exact: true })).toHaveCount(0);
     await page.getByLabel("Button destination", { exact: true }).fill("codex://new?prompt=synthetic%20recommendation");
     await activate(page.getByRole("button", { name: "Save button", exact: true }), touch);
+    await expect(page.locator('[data-slot="popover-content"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit button", exact: true })).toBeFocused();
     const action = card.getByRole("button", { name: "Discuss in Codex", exact: true });
     await expect(action).toBeVisible();
     await expect(action).toHaveText("Discuss in Codex");
@@ -73,10 +75,16 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       }, true);
     });
     const before = page.url();
+    await page.bringToFront();
     await activate(action, touch);
+    await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(1);
     if (!touch) {
       await action.focus();
+      await expect(action).toBeFocused();
       await page.keyboard.press("Enter");
+      await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(2);
+      await action.focus();
+      await expect(action).toBeFocused();
       await page.keyboard.press("Space");
     }
     await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(touch ? 1 : 3);
@@ -93,6 +101,9 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     expect(page.context().pages()).toHaveLength(1);
     await writer.call("restore_doc", { uuid: created.uuid });
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await activate(page.locator(".ub-title"), touch);
+    await activate(action, touch);
+    await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(touch ? 3 : 5);
 
     await placeCaretIn(card.locator(".ub-card-body p"), { touch, edge: "end" });
     await page.keyboard.type(" More detail.");
@@ -112,7 +123,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const popup = await popupPromise;
     await popup.waitForLoadState();
     expect(await popup.evaluate(() => ({ opener: window.opener, referrer: document.referrer }))).toEqual({ opener: null, referrer: "" });
-    expect(referrer).toBeUndefined();
+    expect(referrer ?? "").toBe("");
     await popup.close();
     expect(page.url()).toBe(before);
 
