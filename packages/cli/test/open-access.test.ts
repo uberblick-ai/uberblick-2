@@ -322,7 +322,7 @@ describe("ub open: live Access bridge", () => {
       writeFileSync(path, JSON.stringify({ ...outcome, status: "hub-down", retryAt: Date.now() + 60_000 }));
       const verify = vi.spyOn(hub.credentials!, "verifyRequest");
       expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
-      expect(verify).toHaveBeenCalledOnce();
+      expect(verify).toHaveBeenCalledWith(expect.any(String), { operation: "own-role", workspaceId: WORKSPACE });
       expect((await post({ operation: "list-devices" })).body).toMatchObject({ status: "ok", devices: [
         { deviceId: login.credential.record.deviceId, current: true },
       ] });
