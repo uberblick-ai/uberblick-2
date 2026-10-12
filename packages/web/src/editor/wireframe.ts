@@ -5,8 +5,22 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
-import { parseWireframe, renderWireframe, summarizeWireframe } from "@uberblick/wireframe";
 import { codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+
+type WireframeRenderer = typeof import("@uberblick/wireframe");
+
+// The renderer carries the full icon catalog, about half the app's script.
+// Load it when the first wireframe mounts; later drawings stay synchronous.
+let renderer: WireframeRenderer | null = null;
+let loading: Promise<WireframeRenderer> | null = null;
+
+function loadRenderer(): Promise<WireframeRenderer> {
+  loading ??= import("@uberblick/wireframe").then(
+    module => (renderer = module),
+    (cause: unknown) => { loading = null; throw cause; },
+  );
+  return loading;
+}
 
 export function wireframeBlockView(): NodeViewRenderer {
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
@@ -43,6 +57,7 @@ export function wireframeBlockView(): NodeViewRenderer {
     viewport.tabIndex = 0;
     viewport.setAttribute("role", "region");
     viewport.setAttribute("aria-label", "Wireframe preview");
+    viewport.hidden = true;
     const fit = document.createElement("div");
     fit.className = "ub-wireframe-fit";
     const drawing = document.createElement("div");
@@ -78,11 +93,23 @@ export function wireframeBlockView(): NodeViewRenderer {
     const draw = (): void => {
       pending = null;
       if (destroyed) return;
-      const result = parseWireframe(current.textContent);
-      const rendered = renderWireframe(result, document);
+      if (renderer === null) {
+        loadRenderer().then(() => { if (pending === null) draw(); }, (cause: unknown) => {
+          if (destroyed || pending !== null) return;
+          const item = document.createElement("li");
+          const message = cause !== null && typeof cause === "object" && "message" in cause
+            ? String(cause.message) : String(cause);
+          item.textContent = `Preview cannot be loaded: ${message}`;
+          diagnostics.replaceChildren(item);
+          diagnostics.hidden = false;
+        });
+        return;
+      }
+      const result = renderer.parseWireframe(current.textContent);
+      const rendered = renderer.renderWireframe(result, document);
       if (rendered !== null) {
         drawing.replaceChildren(rendered);
-        drawing.setAttribute("aria-label", summarizeWireframe(result));
+        drawing.setAttribute("aria-label", renderer.summarizeWireframe(result));
         hasDrawing = true;
       }
       viewport.hidden = !hasDrawing;
