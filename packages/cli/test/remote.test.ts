@@ -919,6 +919,9 @@ describe("ub workspace use <link>", () => {
 
   it("moves an archived document room and restores it from a fresh replica", async () => {
     const local = sandbox();
+    // Fresh-client verification reads several rooms; allow healthy CI scheduling
+    // beyond the ordinary refusal fixtures' 400 ms ceiling.
+    const transferWaits = { UB_TEST_MAX_WAIT_MS: "5000" };
     const archived = await withMcp(
       local,
       { WORKSPACE_ID: WORKSPACE },
@@ -949,6 +952,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, local, OTHER_SECRET),
       ],
       local,
+      transferWaits,
     );
     expect(moved.status, moved.output).toBe(0);
     expect(moved.stdout).toContain(": 1 document, 1 archived");
@@ -965,6 +969,7 @@ describe("ub workspace use <link>", () => {
         localJoinUrl(remote, fresh, OTHER_SECRET),
       ],
       fresh,
+      transferWaits,
     );
     expect(joined.status, joined.output).toBe(0);
     expect(joined.stderr.trim().split("\n")).toHaveLength(1);
