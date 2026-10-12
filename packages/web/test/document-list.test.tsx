@@ -956,7 +956,7 @@ describe("decision topics in the list", () => {
     await chooseDecisions(host);
     await chooseState(host, "changed-after-approval");
     await act(async () => typeInto(filter(host), "Current"));
-    await act(async () => within(documentTable(host)).getByRole("button", { name: "Title", exact: true }).click());
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
     await act(async () => openButtons(host)[0]?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
     expect(within(host).getByRole("heading", { name: "Current answer", level: 1 }).textContent).toBe("Current answer");
@@ -972,7 +972,7 @@ describe("decision topics in the list", () => {
     assertRestored();
     await traverseHistory("forward");
     if (entry === "Back to workspace") {
-      await act(async () => within(host).getByRole("button", { name: "Workspace settings", exact: true }).click());
+      await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
     }
     await act(async () => within(host).getByRole("button", { name: entry === "All docs" ? entry : /^Back to / }).click());
     const assertDefaults = (): void => {
