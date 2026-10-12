@@ -1763,7 +1763,7 @@ h3.ub-heading {
   padding: 0;
 }
 
-.ub-decisions-list > li + li {
+.ub-decisions-list > :where(li + li) {
   border-block-start: 1px solid var(--border);
 }
 
