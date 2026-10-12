@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   CARD_PARTS, appendBlock, cardPartElement, cardPartTexts, createAnnotation,
-  getBlocks, getBlocksFragment, initDoc, listAnnotationRanges,
+  getBlocks, getBlocksFragment, initDoc, listAnnotationRanges, writeCardButton,
 } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -47,6 +47,23 @@ describe("card editor", () => {
     expect(updates).toBe(0);
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     for (const part of CARD_PARTS) expect(cardPartTexts(card, part)).toHaveLength(1);
+  });
+
+  it("preserves the atomic button through binding and prose edits and refuses invalid local button changes", () => {
+    const button = "[Discuss in Codex](codex://new?prompt=Review%20this)";
+    const { ydoc, card } = cardDoc(`title: A title\nfooter: Metadata\nbutton: ${button}\n\nBody words`);
+    const before = Y.encodeStateAsUpdate(ydoc);
+    const { editor } = mountEditor(ydoc);
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    expect(editor.state.doc.child(0).attrs.button).toBe(button);
+    editor.view.dispatch(editor.state.tr.insertText(" more", position(editor, "title") + 7));
+    expect(card.getAttribute("button")).toBe(button);
+    const valid = writeCardButton({ text: "Reader's **literal** text", href: "claude-cli://open?q=Review" });
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(0, undefined, { ...editor.state.doc.child(0).attrs, button: valid }));
+    expect(card.getAttribute("button")).toBe(valid);
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(0, undefined, { ...editor.state.doc.child(0).attrs, button: "[Settings](codex://settings)" }));
+    expect(card.getAttribute("button")).toBe(valid);
+    expect(findForeignBlocks(getBlocksFragment(ydoc))).toEqual([]);
   });
 
   it.each(CARD_PARTS)("edits, formats and anchors comments in the %s part", (part) => {
