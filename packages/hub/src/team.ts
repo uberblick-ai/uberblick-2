@@ -61,7 +61,7 @@ function createTeamExtension(
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
-    admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
+    admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log }, hubAdmins);
   }
 
   let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;

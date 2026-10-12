@@ -62,3 +62,36 @@ it("refuses live or persisted rooms and rolls back a grant if receipt persistenc
     expect(db.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual([]);
   } finally { db.close(); }
 });
+
+it("suspension blocks a new reservation and the committed receipt, then restores the same interrupted attempt", () => {
+  const path = tempDatabasePath();
+  const database = new HubDatabase(path, error => { throw error; });
+  database.open();
+  const memberships = new MembershipRegistry(database);
+  const registry = new HubAdminRegistry(database);
+  registry.grant("owner");
+  registry.grant("backup");
+  const promotions = new WorkspacePromotions(database, memberships, () => false, registry);
+  const workspaceId = randomUUID();
+  const attemptId = randomUUID();
+  expect(promotions.reserve(workspaceId, attemptId, "owner")).toBe("created");
+  registry.setWorkspaceStatus("backup", workspaceId, "suspended");
+  const before = database.connection.prepare("SELECT * FROM hub_workspace_promotions").all();
+  registry.remove("backup", "owner");
+  for (const attempt of [attemptId, randomUUID()]) {
+    expect(promotions.reserve(workspaceId, attempt, "owner")).toBe("workspace-suspended");
+  }
+  expect(database.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
+  expect(memberships.roleFor(workspaceId, "owner")).toBe("admin");
+  database.close();
+  const reopened = new HubDatabase(path, error => { throw error; });
+  reopened.open();
+  try {
+    const restored = new HubAdminRegistry(reopened);
+    const resumed = new WorkspacePromotions(reopened, new MembershipRegistry(reopened), () => false, restored);
+    expect(resumed.reserve(workspaceId, attemptId, "owner")).toBe("workspace-suspended");
+    restored.setWorkspaceStatus("backup", workspaceId, "active");
+    expect(resumed.reserve(workspaceId, attemptId, "owner")).toBe("resumed");
+    expect(reopened.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
+  } finally { reopened.close(); }
+});

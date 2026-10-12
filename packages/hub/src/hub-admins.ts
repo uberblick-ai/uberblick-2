@@ -4,7 +4,7 @@ import type { HubDatabase } from "./persistence.js";
 import { WorkspaceNameReader } from "./workspace-names.js";
 
 export class HubAdminRefusal extends Error {
-  constructor(readonly code: "hub-admin-required" | "self-admin" | "last-admin" | "admin-not-found" | "invalid-request") {
+  constructor(readonly code: "hub-admin-required" | "self-admin" | "last-admin" | "admin-not-found" | "workspace-not-found" | "invalid-request") {
     super(`Hub administration: ${code}`);
     this.name = "HubAdminRefusal";
   }
@@ -21,6 +21,7 @@ export interface HubAdminRecord {
 
 export interface HubWorkspaceRecord {
   workspaceId: string;
+  status: "active" | "suspended";
   name?: string;
   members: number;
   admins: string[];
@@ -48,10 +49,15 @@ function readCursor(cursor: string | undefined, fields: 1 | 2): [number, number]
 }
 
 export class HubAdminRegistry {
+  private readonly suspendListeners = new Set<(workspaceId: string) => void>();
+
   constructor(private readonly database: HubDatabase,
     private readonly workspaceNames = new WorkspaceNameReader(database)) {
     database.connection.exec(`CREATE TABLE IF NOT EXISTS hub_admins (
       principal_id TEXT PRIMARY KEY NOT NULL CHECK(length(principal_id) > 0)
+    )`);
+    database.connection.exec(`CREATE TABLE IF NOT EXISTS hub_workspace_suspensions (
+      workspace_id TEXT PRIMARY KEY NOT NULL
     )`);
   }
 
@@ -67,6 +73,39 @@ export class HubAdminRegistry {
 
   requireAdmin(principalId: string): void {
     if (!this.isAdmin(principalId)) throw new HubAdminRefusal("hub-admin-required");
+  }
+
+  isSuspended(workspaceId: string): boolean {
+    return this.database.connection.prepare("SELECT 1 FROM hub_workspace_suspensions WHERE workspace_id = ?")
+      .get(workspaceId) !== undefined;
+  }
+
+  availableWorkspaces(workspaces: readonly string[]): string[] {
+    return workspaces.filter(workspaceId => !this.isSuspended(workspaceId));
+  }
+
+  /** Commit before fencing every room. A retry repeats closure after a listener failure. */
+  setWorkspaceStatus(actorPrincipalId: string, workspaceId: string, status: "active" | "suspended"): void {
+    this.requireAdmin(actorPrincipalId);
+    if (!this.workspaceIds().includes(workspaceId)) throw new HubAdminRefusal("workspace-not-found");
+    const db = this.database.connection;
+    if (status === "active") {
+      db.prepare("DELETE FROM hub_workspace_suspensions WHERE workspace_id = ?").run(workspaceId);
+      return;
+    }
+    if (status !== "suspended") throw new HubAdminRefusal("invalid-request");
+    db.prepare("INSERT INTO hub_workspace_suspensions (workspace_id) VALUES (?) ON CONFLICT DO NOTHING").run(workspaceId);
+    const failures: unknown[] = [];
+    for (const listener of this.suspendListeners) {
+      try { listener(workspaceId); }
+      catch (error) { failures.push(error); }
+    }
+    if (failures.length > 0) throw new AggregateError(failures, "Hub administration: suspension closure failed");
+  }
+
+  onSuspend(listener: (workspaceId: string) => void): () => void {
+    this.suspendListeners.add(listener);
+    return () => this.suspendListeners.delete(listener);
   }
 
   listAdmins(actorPrincipalId: string): HubAdminRecord[] {
@@ -129,8 +168,26 @@ export class HubAdminRegistry {
   listWorkspaces(actorPrincipalId: string): HubWorkspaceRecord[] {
     this.requireAdmin(actorPrincipalId);
     const db = this.database.connection;
+    return this.workspaceIds().map(workspaceId => {
+      let name: string | undefined;
+      const storedName = this.workspaceNames.read(workspaceId);
+      try {
+        if (storedName !== null && validateWorkspaceName(storedName) === storedName) name = storedName;
+      } catch { /* Invalid display data leaves the workspace unnamed. */ }
+      const members = db.prepare("SELECT COUNT(*) AS count FROM hub_memberships WHERE workspace_id = ?").get(workspaceId)?.count as number;
+      const admins = db.prepare(`SELECT principal.github_username FROM hub_memberships AS member
+        JOIN hub_principals AS principal ON principal.id = member.principal_id
+        WHERE member.workspace_id = ? AND member.role = 'admin' ORDER BY principal.github_username, principal.id`)
+        .all(workspaceId).map(admin => admin.github_username as string);
+      return { workspaceId, status: this.isSuspended(workspaceId) ? "suspended" : "active",
+        ...(name === undefined ? {} : { name }), members, admins };
+    });
+  }
+
+  private workspaceIds(): string[] {
+    const db = this.database.connection;
     const sources = ["SELECT substr(name, 1, instr(name, '/') - 1) AS workspace_id FROM documents WHERE instr(name, '/') > 0"];
-    for (const table of ["hub_memberships", "hub_workspace_promotions", "hub_admin_setup_grants"] as const) {
+    for (const table of ["hub_memberships", "hub_workspace_promotions", "hub_admin_setup_grants", "hub_workspace_suspensions"] as const) {
       if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined) {
         sources.push(`SELECT workspace_id FROM ${table}`);
       }
@@ -142,18 +199,8 @@ export class HubAdminRegistry {
       const workspaceId = row.workspace_id as string;
       try { if (parseWorkspaceId(workspaceId).uuid !== workspaceId) return []; }
       catch { return []; }
-      let name: string | undefined;
-      const storedName = this.workspaceNames.read(workspaceId);
-      try {
-        if (storedName !== null && validateWorkspaceName(storedName) === storedName) name = storedName;
-      } catch { /* Invalid display data leaves the workspace unnamed. */ }
-      const members = db.prepare("SELECT COUNT(*) AS count FROM hub_memberships WHERE workspace_id = ?").get(workspaceId)?.count as number;
-      const admins = db.prepare(`SELECT principal.github_username FROM hub_memberships AS member
-        JOIN hub_principals AS principal ON principal.id = member.principal_id
-        WHERE member.workspace_id = ? AND member.role = 'admin' ORDER BY principal.github_username, principal.id`)
-        .all(workspaceId).map(admin => admin.github_username as string);
-      return [{ workspaceId, ...(name === undefined ? {} : { name }), members, admins }];
-    }).sort((left, right) => left.workspaceId.localeCompare(right.workspaceId));
+      return [workspaceId];
+    }).sort((left, right) => left.localeCompare(right));
   }
 
   pageWorkspaces(actorPrincipalId: string, cursor?: string): { workspaces: HubWorkspaceRecord[]; nextCursor: string | null } {

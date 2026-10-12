@@ -24,6 +24,7 @@ import {
 } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import {
@@ -73,6 +74,8 @@ async function startServer(
   database.open();
   const registry = new CredentialRegistry(database);
   const memberships = new MembershipRegistry(database);
+  const hubAdmins = new HubAdminRegistry(database);
+  hubAdmins.grant("hub-admin");
   for (const workspaceId of [WORKSPACE, OTHER_WORKSPACE]) {
     memberships.grant({ workspaceId, principalId: "admin", role: "admin" });
     memberships.grant({ workspaceId, principalId: "person", role: "member" });
@@ -82,7 +85,7 @@ async function startServer(
   const admission = new CredentialAdmission(registry, memberships, {
     protocolVersion: SYNC_PROTOCOL_VERSION,
     log: (record) => logs.push(record),
-  });
+  }, hubAdmins);
   const server = new Server<CredentialContext>({
     port: 0,
     address: "127.0.0.1",
@@ -100,6 +103,7 @@ async function startServer(
     database,
     registry,
     memberships,
+    hubAdmins,
     admission,
     hocuspocus,
     logs,
@@ -110,13 +114,15 @@ function issue(registry: CredentialRegistry, deviceId: string, workspaces = [WOR
   return registry.issue({ principalId, deviceId, workspaces });
 }
 
-type AccessEnd = "revocation" | "membership removal" | "replacement";
+type AccessEnd = "revocation" | "membership removal" | "replacement" | "suspension";
 
 async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: AccessEnd, credential: IssuedCredential) {
   if (kind === "revocation") {
     rig.registry.revoke(credential.record.id);
   } else if (kind === "membership removal") {
     rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: credential.record.principalId });
+  } else if (kind === "suspension") {
+    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
   } else {
     const proof = await mintRequestProof(await importCredentialKey(credential.keyBytes), {
       kid: credential.record.id,
@@ -129,6 +135,7 @@ async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: Acc
 
 function accessEndCause(kind: AccessEnd) {
   if (kind === "membership removal") return "missing-membership";
+  if (kind === "suspension") return "workspace-suspended";
   return kind === "revocation" ? "revoked-credential" : "replaced-credential";
 }
 
@@ -438,7 +445,7 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "membership removal"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
+  it.each(["revocation", "membership removal", "suspension"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
     const rig = await startServer();
     const held = gate();
     const verified = gate();
@@ -461,6 +468,7 @@ describe("credential admission on a composed server", () => {
       expect(await waitFor("the authenticating device to be refused", sender.denied)).toBe("device-credential-refused");
       expect(sender.authenticated).not.toHaveBeenCalled();
       expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
+      if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
       const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
       const observer = connect({ port: rig.port, room, token: await credentialToken(peer) });
       await waitFor("the unaffected member to open the room", observer.synced);
@@ -504,9 +512,8 @@ describe("credential admission on a composed server", () => {
     expect(rig.logs.at(-1)).toMatchObject({ cause: accessEndCause(accessEnd) });
   });
 
-  // Every access end converges on the same latch (`closeWhere`) and the same
-  // per-frame check, so the frame variants run under revocation; membership
-  // removal arrives through its own subscription and keeps one variant.
+  // Held apply hooks expose the gap after authorization through real sockets;
+  // both update forms must respect the shared apply fence after access ends.
   describe("ended access fences", () => {
     it.each([
       ["revocation", "a live update", messageYjsUpdate, false],
@@ -514,6 +521,10 @@ describe("credential admission on a composed server", () => {
       ["revocation", "a detached connection's live update", messageYjsUpdate, true],
       ["revocation", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
       ["membership removal", "a live update", messageYjsUpdate, false],
+      ["suspension", "a live update", messageYjsUpdate, false],
+      ["suspension", "a reconnect diff", messageYjsSyncStep2, false],
+      ["suspension", "a detached connection's live update", messageYjsUpdate, true],
+      ["suspension", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
     ] as const)("%s fences %s already past the admission check and the burst queued behind it", async (accessEnd, _label, type, detachBeforeAccessEnd) => {
       const held = gate();
       const entered = gate();
@@ -575,7 +586,8 @@ describe("credential admission on a composed server", () => {
           expect(serverDocument.getConnections().map((connection) => connection.context.credentialId)).toEqual([phone.record.id]);
         }
         await endAccess(rig, accessEnd, laptop);
-        expect(serverDocument.getConnections().map((connection) => connection.context.credentialId)).toEqual([phone.record.id]);
+        expect(serverDocument.getConnections().map((connection) => connection.context.credentialId))
+          .toEqual(accessEnd === "suspension" ? [] : [phone.record.id]);
         const appliedAfterAccessEnd: Uint8Array[] = [];
         const onUpdate = (update: Uint8Array) => appliedAfterAccessEnd.push(update);
         serverDocument.on("update", onUpdate);
@@ -587,17 +599,25 @@ describe("credential admission on a composed server", () => {
         expect(observer.text.toString()).toBe("preserved content");
         expect(appliedAfterAccessEnd).toEqual([]);
         serverDocument.off("update", onUpdate);
-        observer.text.insert(observer.text.length, " + other device still writes");
+        let activeObserver = observer;
+        if (accessEnd === "suspension") {
+          rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+          activeObserver = connect({ port: rig.port, room, token: await credentialToken(phone) });
+          await waitFor("the restored workspace to admit the same device", activeObserver.synced);
+        }
+        activeObserver.text.insert(activeObserver.text.length, " + other device still writes");
         await waitUntil("the other device's acknowledged update after the burst", () =>
-          serverDocument.getText(TEXT_KEY).toString() === "preserved content + other device still writes" && !observer.provider.hasUnsyncedChanges);
+          rig.hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() === "preserved content + other device still writes" && !activeObserver.provider.hasUnsyncedChanges);
       } finally {
         held.open();
         logged.mockRestore();
       }
     });
 
-    it.each(["authentication", "document loading"] as const)("refuses queued writes when access ends during %s", async (phase) => {
-      const accessEnd = "revocation";
+    it.each([
+      ["revocation", "authentication"], ["revocation", "document loading"],
+      ["suspension", "authentication"], ["suspension", "document loading"],
+    ] as const)("refuses queued writes when %s happens during %s", async (accessEnd, phase) => {
       const held = gate();
       const entered = gate();
       const room = testRoom();
@@ -624,6 +644,7 @@ describe("credential admission on a composed server", () => {
         await endAccess(rig, accessEnd, laptop);
         held.open();
         await waitFor("the suspended admission to be refused", sender.denied);
+        if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
         const observer = connect({ port: rig.port, room, token: await credentialToken(phone) });
         await waitFor("the unaffected device to open the refused room", observer.synced);
         expect(observer.text.toString()).toBe("");
@@ -634,6 +655,52 @@ describe("credential admission on a composed server", () => {
         logged.mockRestore();
       }
     });
+  });
+
+  it("suspends every account's rooms while preserving the same devices' other workspace, local edits and sign-ins", async () => {
+    const rig = await startServer();
+    const laptop = issue(rig.registry, "laptop", [WORKSPACE, OTHER_WORKSPACE]);
+    const phone = issue(rig.registry, "phone");
+    const peer = issue(rig.registry, "peer", [WORKSPACE], "observer");
+    const socket = sharedSocket(rig.port);
+    const rooms = [testRoom(), testRoom(OTHER_WORKSPACE), testRoom()];
+    const first = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(laptop), websocketProvider: socket });
+    const other = connect({ port: rig.port, room: rooms[1]!, token: await credentialToken(laptop, OTHER_WORKSPACE), websocketProvider: socket });
+    const second = connect({ port: rig.port, room: rooms[2]!, token: await credentialToken(phone), websocketProvider: socket });
+    const observer = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(peer) });
+    await socket.connect();
+    await waitFor("all devices and rooms to sync", Promise.all([first.synced, other.synced, second.synced, observer.synced]));
+    first.text.insert(0, "retained content");
+    await waitUntil("the original document to converge", () => observer.text.toString() === "retained content" && !first.provider.hasUnsyncedChanges);
+    other.doc.getMap("hub_workspace_suspensions").set(WORKSPACE, { suspended: true });
+    await waitUntil("suspension-shaped content to be acknowledged without governing the hub", () => !other.provider.hasUnsyncedChanges);
+    expect(rig.hubAdmins.isSuspended(WORKSPACE)).toBe(false);
+    const memberships = rig.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all();
+    const closedConnections = rooms.filter(room => room !== rooms[1]).flatMap(room => rig.hocuspocus.documents.get(room!)!.getConnections());
+    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+    expect(closedConnections.every(connection => !connection.context.authorization.active && connection.readOnly)).toBe(true);
+    expect(rig.hocuspocus.documents.get(rooms[0]!)!.getConnectionsCount()).toBe(0);
+    expect(rig.hocuspocus.documents.get(rooms[2]!)!.getConnectionsCount()).toBe(0);
+    expect(rig.hocuspocus.documents.get(rooms[1]!)!.getConnectionsCount()).toBe(1);
+    for (const credential of [laptop, phone, peer]) expect(rig.registry.get(credential.record.id)).toEqual(credential.record);
+    expect(rig.database.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all()).toEqual(memberships);
+    first.text.insert(first.text.length, " + offline edit");
+    expect(first.text.toString()).toBe("retained content + offline edit");
+    expect(rig.hocuspocus.documents.get(rooms[0]!)!.getText(TEXT_KEY).toString()).toBe("retained content");
+    other.doc.getMap("hub_workspace_suspensions").set(WORKSPACE, { suspended: false });
+    other.text.insert(0, "other workspace stays writable");
+    await waitUntil("the same device's other workspace to acknowledge updates", () => !other.provider.hasUnsyncedChanges);
+    expect(rig.hubAdmins.isSuspended(WORKSPACE)).toBe(true);
+    for (const credential of [laptop, phone, peer]) {
+      const refused = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(credential) });
+      expect(await waitFor("every member to be refused while suspended", refused.denied)).toBe("device-credential-refused");
+    }
+    rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
+    const restored = connect({ port: rig.port, room: rooms[0]!, token: await credentialToken(laptop), document: first.doc });
+    await waitFor("the same device to resume without signing in", restored.synced);
+    await waitUntil("the local edit to arrive after restore", () =>
+      rig.hocuspocus.documents.get(rooms[0]!)!.getText(TEXT_KEY).toString() === "retained content + offline edit" && !restored.provider.hasUnsyncedChanges);
+    expect(closedConnections.every(connection => !connection.context.authorization.active)).toBe(true);
   });
 
   it("removes every device's workspace rooms while preserving credentials, peers, other memberships and content", async () => {

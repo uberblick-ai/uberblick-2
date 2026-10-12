@@ -601,6 +601,8 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
       case "own-hub-role":
       case "list-hub-admins":
       case "list-hub-workspaces":
+      case "suspend-workspace":
+      case "restore-workspace":
       case "remove-hub-admin": body = { status: "forbidden", hub: ACCESS_HUB }; break;
       case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
       case "list-devices": body = { status: "ok", hub: ACCESS_HUB, devices: [...devices] }; break;

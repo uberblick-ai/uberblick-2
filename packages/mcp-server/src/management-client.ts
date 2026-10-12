@@ -95,12 +95,13 @@ function hubAdmin(value: unknown, login?: StoredHubLogin): Record<string, unknow
 
 function hubWorkspace(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
   if (!object(value) || !uuid(value.workspaceId) || !count(value.members) ||
+      (value.status !== "active" && value.status !== "suspended") ||
       !Array.isArray(value.admins) || !value.admins.every(isGithubUsername)) {
     throw new ManagementResponseError();
   }
   const name = sanitizeWorkspaceNames({ [value.workspaceId]: value.name }, [value.workspaceId],
     login?.credential.key ?? "\u0000")?.[value.workspaceId];
-  return { workspaceId: value.workspaceId, members: value.members, admins: value.admins,
+  return { workspaceId: value.workspaceId, status: value.status, members: value.members, admins: value.admins,
     ...(name === undefined ? {} : { name }) };
 }
 
@@ -124,7 +125,7 @@ export function sanitizeManagementReply(
     if (version !== null) return result({ status: state, reason: `protocol-mismatch:${version}` });
   }
   if (status === 500 && state === "closure-failed" && body.applied === true &&
-      (action.operation === "remove-member" || action.operation === "revoke-device")) {
+      (action.operation === "remove-member" || action.operation === "revoke-device" || action.operation === "suspend-workspace")) {
     return result({ status: state, applied: true });
   }
   switch (action.operation) {
@@ -146,6 +147,13 @@ export function sanitizeManagementReply(
         const workspaces = body.workspaces.map(value => hubWorkspace(value, login));
         if (new Set(workspaces.map(row => row.workspaceId)).size !== workspaces.length) throw new ManagementResponseError();
         return result({ status: state, workspaces, nextCursor: nextCursor(body.nextCursor, login) });
+      }
+      break;
+    case "suspend-workspace":
+    case "restore-workspace":
+      if (status === 200 && state === "ok" && body.workspaceId === action.workspaceId &&
+          body.workspaceStatus === (action.operation === "suspend-workspace" ? "suspended" : "active")) {
+        return result({ status: state, workspaceId: body.workspaceId, workspaceStatus: body.workspaceStatus });
       }
       break;
     case "resolve-account":
@@ -205,6 +213,8 @@ export function sanitizeManagementReply(
   }
   if (status === 404 && state === "device-not-found" && action.operation === "revoke-device") return result({ status: state });
   if (status === 404 && state === "member-not-found" && action.operation === "change-role") return result({ status: state });
+  if (status === 404 && state === "workspace-not-found" &&
+      (action.operation === "suspend-workspace" || action.operation === "restore-workspace")) return result({ status: state });
   if (action.operation === "remove-hub-admin" &&
       ((status === 404 && state === "admin-not-found") ||
        (status === 409 && (state === "self-admin" || state === "last-admin")))) return result({ status: state });

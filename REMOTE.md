@@ -773,7 +773,8 @@ probe failures leave sign-in's existing diagnostics in charge.
 
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the
-same principal and device and exactly its current memberships, including none.
+same principal and device and its current memberships in active workspaces,
+including none. Suspended workspaces stay out of issued snapshots.
 It grants no membership. Retirement closes and fences any rooms admitted under
 the old credential on a remote hub.
 Both a `complete` sign-in collection and a `renewed` reply can include names
@@ -786,7 +787,7 @@ the reply without names fits; it preserves the full credential and workspace
 list. Names refresh only when an existing renewal trigger or sign-in stores a
 new credential. A rename or new grant can therefore remain absent from status
 until then, and promotion initially shows the UUID alone. Conditional renewal
-with unchanged memberships still returns only `{status: "unchanged"}`.
+with unchanged available workspaces still returns only `{status: "unchanged"}`.
 Replaying a verified proof under that retired credential returns
 `already-replaced`; unknown, revoked or unverifiable credentials return
 `sign-in-required`, revealing no identity or workspace. If the replacement
@@ -797,13 +798,14 @@ the same `not-configured` result as sign-in. Remote clients renew stored logins
 without another GitHub approval, including to discover later membership grants.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
-credential for its workspace memberships. Only the first completed sign-in
+credential for its memberships in active workspaces. Only the first completed sign-in
 on a fresh, unclaimed hub grants hub administration and creates the default
 workspace's admin membership; later sign-ins grant neither role nor membership.
-Remote hubs require these credentials for live sync and re-check membership.
-Revocation or membership removal closes existing sessions. MCP and `ub open`
+Remote hubs require these credentials for live sync and re-check membership
+and suspension. Revocation, membership removal or workspace suspension closes
+existing sessions. MCP and `ub open`
 keep their downloaded documents and pending edits locally; sign-in or restored
-membership resumes sharing without fetching again. Loopback-only hubs retain local
+membership, or workspace restore, resumes sharing without fetching again. Loopback-only hubs retain local
 signing-secret admission and need no GitHub, membership or login.
 
 ### Manage members and devices
@@ -846,6 +848,8 @@ may repeat its effect; there is no replay cache.
 | `list-hub-admins` | optional `cursor` | `{status: "ok", admins, nextCursor}` |
 | `remove-hub-admin` | `principalId` | `{status: "ok"}` |
 | `list-hub-workspaces` | optional `cursor` | `{status: "ok", workspaces, nextCursor}` |
+| `suspend-workspace` | `workspaceId` | `{status: "ok", workspaceId, workspaceStatus: "suspended"}` |
+| `restore-workspace` | `workspaceId` | `{status: "ok", workspaceId, workspaceStatus: "active"}` |
 | `own-role` | `workspaceId` | `{status: "ok", role}` |
 | `list-members` | `workspaceId` | `{status: "ok", members}` |
 | `resolve-account` | `workspaceId`, `githubUsername` | `{status: "ok", githubAccountId, githubUsername}` |
@@ -877,10 +881,27 @@ and roles. Self-removal returns 409 `self-admin`; an absent target returns 404
 the same transaction, so mutual removals cannot empty the registry.
 
 Workspace inventory rows contain `workspaceId`, optional valid `name`,
-`members` (count) and `admins` (workspace-admin handles). The inventory includes
+`members` (count), `admins` (workspace-admin handles) and `status` (`active` or
+`suspended`). The inventory includes
 the default workspace and UUIDs present in stored document prefixes,
 memberships, promotion receipts or first-admin setup grants. Names come from
 each workspace's readable `_settings`; no other document content is returned.
+
+In `ub open`, Hub → Workspaces lets a current hub administrator suspend or
+restore a workspace after confirmation. Administration always targets the open
+workspace's bound hub and remains available from that workspace while it is
+suspended. Workspace administrators and other signed-in accounts cannot change
+this state. An absent workspace returns 404 `workspace-not-found`.
+
+Suspension is stored only in the hub-private `hub_workspace_suspensions` table.
+It fences pending updates, closes that workspace's live rooms, and refuses new
+admission and promotion reservation or resumption. Other workspaces stay served.
+Documents, memberships, roles and device sign-ins stay on the hub; downloaded
+copies remain usable. Issued credentials omit suspended workspaces. A refused
+device renews once, then conditional checks leave its credential and healthy
+rooms alone until restore makes access available again. Restore lets the same
+members discover access through renewal without another sign-in or grant.
+Loopback hubs using the local signing secret do not use this administration.
 
 Both hub lists use bounded pages. Omit `cursor` for the first request, then
 sign each returned opaque `nextCursor` in the next request until it is null.
@@ -965,8 +986,9 @@ everyone can see their own role and list or revoke their own devices.
 
 The browser calls only the local `ub open` process. Its management route
 requires the served host, exact served origin and existing local browser
-authentication, and accepts operations only for the served workspace on its
-bound hub. Device credentials and management proofs stay in that process.
+authentication, and accepts workspace operations only for the served workspace
+on its bound hub. Hub suspend and restore operations may target any workspace
+on that same hub. Device credentials and management proofs stay in that process.
 Every visit and change needs a reachable hub; access state is never saved in
 collaborative settings, stored locally or queued for later. Local-only
 workspaces have no members until `ub workspace promote` shares them, and hubs
@@ -976,8 +998,9 @@ Settings also shows **Hub → Admins** and **Hub → Workspaces** to current hub
 administrators, even without membership in the open workspace. These pages
 manage only that workspace's bound hub; another stored login is never a
 fallback. Admins lists accounts, membership counts and relative last sign-in
-dates, with confirmation before removing another administrator. Workspaces is
-read-only. Hub role changes are enforced immediately on every hub request;
+dates, with confirmation before removing another administrator. Workspaces shows
+Active or Suspended and asks before Suspend or Restore. Its actions remain
+reachable from the suspended workspace itself. Hub role changes are enforced immediately on every hub request;
 the browser rechecks authority during navigation, on focus and while open.
 
 Removing a member ends that account's access to this workspace on every device.
@@ -1427,7 +1450,7 @@ reconnect, and the corpus comes back off that replica.
 What no replica gives you is **point-in-time recovery** — yesterday's text of a
 document somebody has since mangled, in a system where every mangling replicates
 within a second. Backups also preserve the hub's private principal, credential
-membership and hub-administrator registries, default workspace identity and claim state in
+membership and hub-administrator registries, workspace suspension state, default workspace identity and claim state in
 `hub.sqlite`. Client replicas cannot restore those private records; restoring
 an older backup also restores its older access state. The default workspace's
 name lives in its synchronized settings room and is included in the same backup.
@@ -1468,7 +1491,9 @@ same recorded promotion attempt: after a failure or interruption, rerun the
 command on this machine. Keep its private saved attempt with the local data;
 the hub stores its receipt atomically with the grant. Resuming still requires
 the receipt's account to administer that workspace, even if its hub administration
-has been removed. The project binding stays unchanged on failure and local work
+has been removed. A suspended workspace refuses both reservation and resumption;
+restore it through Hub → Workspaces before rerunning the same saved attempt.
+The project binding stays unchanged on failure and local work
 remains available. Close other clients while
 promoting. A workspace already bound to a hub cannot be promoted. The reservation
 itself does not change the hub's default workspace, first-claim state or other
