@@ -20,8 +20,8 @@ declare module "@tiptap/core" {
 
 export const CaretMenuKeys = Extension.create<Record<string, never>, CaretMenuStorage>({
   name: "caretMenuKeys",
-  // Ahead of core Enter, list bindings and collaboration's keymap.
-  priority: 1000,
+  // Ahead of table limits, core Enter, lists and collaboration's keymap.
+  priority: 1200,
   addStorage: () => ({ menus: new Set() }),
   addProseMirrorPlugins() {
     const { menus } = this.storage;

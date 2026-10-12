@@ -13,9 +13,9 @@ import { ySyncPluginKey } from "y-prosemirror";
 import { InvalidTableError, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
 import type { GfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
+import { singleLine } from "./table-text.js";
 
 const CELL_MARKS = new Set<string>(TABLE_CELL_MARKS);
-const singleLine = (text: string): string => text.replace(/[\r\n]+/g, " ");
 
 function inTable(state: EditorState): boolean {
   return state.selection.$from.depth > 1 && state.selection.$from.node(1).type.name === "table";

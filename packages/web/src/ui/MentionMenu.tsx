@@ -43,6 +43,8 @@ export function MentionMenu({
   openDocId: string | null;
 }): ReactElement | null {
   const [session, setSession] = useState<MentionSession | null>(null);
+  // Transaction listeners invalidate a session before React publishes a render.
+  const liveSession = useRef<MentionSession | null>(null);
   /** The highlighted entry, and the list it was highlighted in. */
   const [highlight, setHighlight] = useState<{ list: string; index: number; keyboard: boolean }>({
     list: "",
@@ -61,40 +63,61 @@ export function MentionMenu({
   // qualifying local transaction.
   useEffect(() => {
     // Without a workspace, skip the session and its per-keystroke rendering.
-    if (docLinks === null) return;
+    const publish = (next: MentionSession | null): void => {
+      liveSession.current = next;
+      setSession(next);
+    };
+    if (docLinks === null) {
+      publish(null);
+      return;
+    }
     const read = (transaction: Transaction | null): void => {
       const trigger = mentionTriggerAt(editor);
       if (trigger === null) {
         dismissed.current = false;
-        setSession(null);
+        publish(null);
         return;
       }
       if (dismissed.current) {
-        setSession(null);
+        publish(null);
         return;
       }
-      setSession((current) => {
-        const here = { trigger };
-        if (current === null) {
-          return transaction !== null && opensMentionSession(transaction, trigger)
-            ? here
-            : null;
-        }
-        // Map this @ through transactions and compare its position; moving to
-        // another trigger closes instead of re-aiming the session.
-        const carried =
-          transaction === null
-            ? current.trigger.from
-            : transaction.mapping.map(current.trigger.from);
-        return carried === trigger.from ? here : null;
-      });
+      const current = liveSession.current;
+      const here = { trigger };
+      if (current === null) {
+        publish(transaction !== null && opensMentionSession(transaction, trigger)
+          ? here
+          : null);
+        return;
+      }
+      // Map the occurrence and its enclosing cell. Removed boundaries cannot
+      // identify a successor cell, even when it holds the same query.
+      const carried = transaction === null
+        ? { pos: current.trigger.from, deleted: false }
+        : transaction.mapping.mapResult(current.trigger.from, 1);
+      const cell = current.trigger.cell;
+      const start = cell === null ? null : transaction?.mapping.mapResult(cell.from, 1);
+      const end = cell === null ? null : transaction?.mapping.mapResult(cell.to, -1);
+      const sameCell = cell === null
+        ? trigger.cell === null
+        : trigger.cell !== null && !start?.deleted && !end?.deleted
+          && (start?.pos ?? cell.from) === trigger.cell.from
+          && (end?.pos ?? cell.to) === trigger.cell.to;
+      publish(!carried.deleted && carried.pos === trigger.from
+        && current.trigger.blockId === trigger.blockId && sameCell ? here : null);
     };
     read(null);
     const onTransaction = ({ transaction }: { transaction: Transaction }): void =>
       read(transaction);
+    const onUpdate = (): void => {
+      if (!editor.isEditable) read(null);
+    };
     editor.on("transaction", onTransaction);
+    editor.on("update", onUpdate);
     return () => {
       editor.off("transaction", onTransaction);
+      editor.off("update", onUpdate);
+      liveSession.current = null;
     };
   }, [editor, docLinks]);
 
@@ -129,11 +152,12 @@ export function MentionMenu({
 
   const choose = useCallback(
     (docId: string | undefined): void => {
-      if (docId === undefined || session === null) return;
+      if (docId === undefined || session === null || liveSession.current !== session) return;
       // Close after either a pick or refusal. Do not remember dismissal: a
       // successful reference removes the trigger, and retaining it would
       // suppress the next @.
       linkMentionAtTrigger(editor, session.trigger, docId, docLinks);
+      liveSession.current = null;
       setSession(null);
     },
     [editor, session, docLinks],
@@ -153,8 +177,10 @@ export function MentionMenu({
    */
   const handleKey = useCallback(
     (key: string): boolean => {
+      if (session === null || liveSession.current !== session) return false;
       if (key === "Escape") {
         dismissed.current = true;
+        liveSession.current = null;
         setSession(null);
         return true;
       }
@@ -173,7 +199,7 @@ export function MentionMenu({
       }
       return false;
     },
-    [step, choose, entries, active],
+    [step, choose, entries, active, session],
   );
 
   const { listId, activeId } = useCaretMenuIds(active);
@@ -186,6 +212,7 @@ export function MentionMenu({
       open={open}
       onDismiss={() => {
         dismissed.current = true;
+        liveSession.current = null;
         setSession(null);
       }}
       listKey={list}
