@@ -42,6 +42,7 @@ function metadata(read: any) {
     tldr: read.tldr,
     tags: read.tags,
     links: read.links,
+    ...(read.discussion === undefined ? {} : { discussion: read.discussion }),
   };
 }
 
@@ -196,6 +197,7 @@ describe("set_metadata", () => {
       { required: ["tldr"] },
       { required: ["tags"] },
       { required: ["links"] },
+      { required: ["discussion"] },
     ]);
     const before = state(rig, source.uuid);
     const empty = await rig.call("set_metadata", { uuid: source.uuid });
@@ -354,6 +356,7 @@ describe("set_metadata", () => {
       { tldr: null },
       { tags: [] },
       { links: [] },
+      { discussion: null },
       { title: "Archived title", description: "Archived description.", tldr: null, tags: [], links: [] },
     ]) {
       const refused = await refuseUnchanged(rig, { uuid: archived.uuid, ...args }, "doc_archived", archived.uuid);

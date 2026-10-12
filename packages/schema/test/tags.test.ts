@@ -8,6 +8,8 @@ import {
   createTagCatalogEntry,
   getMeta,
   getMetaMap,
+  getTagCatalogFlags,
+  getTagCatalogIdentities,
   initDoc,
   isTagCatalogSeeded,
   listTagCatalog,
@@ -170,12 +172,58 @@ describe("workspace tag catalog", () => {
       "billing",
       "mcp",
       "permissions",
+      "rfc",
       "sync",
     ]);
 
     restoreTagCatalogEntry(retired, EXAMPLE_TAGS[0].id);
     expect(listTagCatalog(retired).find((entry) => entry.name === "auth")?.state)
       .toBe("active");
+  });
+
+  it("seeds the ordinary rfc tag with one fixed identity, including concurrent first seeds", () => {
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    seedTagCatalog(first);
+    seedTagCatalog(second);
+    syncDocs(first, second);
+    const rfc = { id: "00000000-0000-4000-8000-000000000006", name: "rfc", state: "active" };
+    expect(listTagCatalog(first).filter((entry) => entry.name === "rfc")).toEqual([rfc]);
+    expect(listTagCatalog(second)).toEqual(listTagCatalog(first));
+    const doc = document();
+    assignDocumentTags(doc, first, [rfc.id]);
+    expect(readDocumentTags(doc, first)).toEqual([rfc]);
+    first.destroy();
+    second.destroy();
+    doc.destroy();
+  });
+
+  it("does not add rfc to an already seeded catalog or recreate a retired or deleted rfc", () => {
+    const older = new Y.Doc();
+    for (const example of EXAMPLE_TAGS.filter((entry) => entry.name !== "rfc")) {
+      createTagCatalogEntry(older, example.name, example.id);
+    }
+    getTagCatalogFlags(older).set("examples-seeded", true);
+    const before = Y.encodeStateAsUpdate(older);
+    seedTagCatalog(older);
+    expect(Y.encodeStateAsUpdate(older)).toEqual(before);
+    expect(listTagCatalog(older).some((entry) => entry.name === "rfc")).toBe(false);
+
+    const current = new Y.Doc();
+    seedTagCatalog(current);
+    const rfc = listTagCatalog(current).find((entry) => entry.name === "rfc")!;
+    retireTagCatalogEntry(current, rfc.id);
+    const retired = Y.encodeStateAsUpdate(current);
+    seedTagCatalog(current);
+    expect(Y.encodeStateAsUpdate(current)).toEqual(retired);
+    expect(listTagCatalog(current).find((entry) => entry.name === "rfc")?.state).toBe("retired");
+    getTagCatalogIdentities(current).delete(rfc.id);
+    const deleted = Y.encodeStateAsUpdate(current);
+    seedTagCatalog(current);
+    expect(Y.encodeStateAsUpdate(current)).toEqual(deleted);
+    expect(listTagCatalog(current).some((entry) => entry.name === "rfc")).toBe(false);
+    older.destroy();
+    current.destroy();
   });
 
   it("resolves UUID assignments for documents and directory stubs", () => {

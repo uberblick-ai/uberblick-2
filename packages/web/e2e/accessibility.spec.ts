@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { EXAMPLE_TAGS } from "@uberblick/schema";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { assertNoViolations, unexpectedViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { scanExclusions } from "./accessibility-exclusions.js";
@@ -94,10 +95,10 @@ for (const colorScheme of ["light", "dark"] as const) {
 
       const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href;
       await page.goto(tagsUrl);
-      await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(5);
+      await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
       await page.goto(documentUrl);
       await page.getByRole("button", { name: "Edit tags" }).click();
-      await expect(page.getByRole("option")).toHaveCount(5);
+      await expect(page.getByRole("option")).toHaveCount(EXAMPLE_TAGS.length);
       await scan("tag picker — list");
       await page.keyboard.press("Escape");
       await page.goto(tagsUrl);

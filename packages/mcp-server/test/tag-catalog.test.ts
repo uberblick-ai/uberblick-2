@@ -159,7 +159,7 @@ describe("the workspace tag catalog", () => {
     await first.ok("create_doc", {
       title: "Tags are not navigation",
       description: "A tagged document leaves explicit sidebar curation alone.",
-      tags: ["auth"],
+      tags: ["rfc"],
     });
     expect((await first.ok("get_sidebar")).groups).toEqual([]);
     await first.close();

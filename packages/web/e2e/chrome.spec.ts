@@ -49,6 +49,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
+  EXAMPLE_TAGS,
   appendBlock,
   assignDocumentTags,
   createAnnotation,
@@ -104,7 +105,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
-  ).toHaveCount(5);
+  ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
     new URL(`/${harness().workspace}`, harness().appUrl).href,
@@ -1883,7 +1884,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   // A long tag selection, because that is what pushes this row around.
   const editTags = page.getByRole("button", { name: "Edit tags" });
   await editTags.click();
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await editTags.click();
@@ -2258,16 +2259,16 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   });
   for (const viewport of [375, 1280]) {
     await page.setViewportSize({ width: viewport, height: 620 });
-    await expect.poll(comfortableList).toEqual({ inside: true, names: [true, true, true, true, true] });
+    await expect.poll(comfortableList).toEqual({ inside: true, names: EXAMPLE_TAGS.map(() => true) });
   }
 
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
 
-  // Narrow enough that five pills cannot sit on one line. They take a second
+  // Narrow enough that the seeded pills cannot sit on one line. They take a second
   // line inside the row and the row grows to hold them; the scroller that used
   // to hide the overflow is gone, so nothing is out of sight.
   await page.getByRole("button", { name: "Hide document list" }).click();
@@ -2331,13 +2332,13 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByLabel("Create a tag").fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("button", { name: `Retire ${longest}` })).toBeVisible();
-  // On its own, because one name is the case: with the five short ones beside
+  // On its own, because one name is the case: with the seeded short ones beside
   // it the oversized pill is carried onto a line of its own below the machine
   // facts, and misses them without being any better contained.
   await page.goto(documentUrl);
   await trigger.click();
   await page.getByRole("option", { name: longest, exact: true }).click();
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await page.keyboard.press("Escape");
@@ -2383,7 +2384,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   }
   await expect(
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
-  ).toHaveCount(5);
+  ).toHaveCount(EXAMPLE_TAGS.length);
 });
 
 test("Workspace Settings uses the shared touch floors in narrow and wide layouts", async ({ browser }) => {

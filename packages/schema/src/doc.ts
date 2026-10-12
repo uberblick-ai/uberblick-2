@@ -199,6 +199,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const decision = lifecycle.kind === "decision";
   const supersedes = decision ? readSupersedes(meta, uuid) : undefined;
   const governs = decision ? canonicalDocumentUuid(meta.get("governs")) : null;
+  const discussion = decision ? canonicalDocumentUuid(meta.get("discussion")) : null;
   const topic = decision ? (canonicalDocumentUuid(meta.get("topic")) ?? canonicalDocumentUuid(uuid)) : null;
   const agentStance = meta.get("agentStance");
   const decidedBy = readDecisionString(meta.get("decidedBy"));
@@ -216,6 +217,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     ...lifecycle,
     ...(supersedes === undefined ? {} : { supersedes }),
     ...(governs === null ? {} : { governs }),
+    ...(decision ? { discussion } : {}),
     ...(topic === null ? {} : { topic }),
     ...(decision && typeof agentStance === "boolean" ? { agentStance } : {}),
     ...(decision && decidedBy !== undefined ? { decidedBy } : {}),
@@ -225,7 +227,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     ...(decision && rejectionReason !== undefined ? { rejectionReason } : {}),
     links: effectiveLinks(
       readStringArray(meta.get("links")),
-      [governs, supersedes].filter((link): link is string => typeof link === "string"),
+      [governs, supersedes, discussion].filter((link): link is string => typeof link === "string"),
     ),
   };
 }
@@ -268,6 +270,14 @@ export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("tldr", tldr);
+  });
+}
+
+/** The MCP boundary validates targets and permits changes only while open. */
+export function setDiscussion(ydoc: Y.Doc, discussion: string | null): void {
+  const meta = getMetaMap(ydoc);
+  ydoc.transact(() => {
+    meta.set("discussion", discussion);
   });
 }
 
@@ -319,7 +329,7 @@ function readDecisionString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-/** Curated edges plus the record's own governing and predecessor references. */
+/** Curated edges plus the record's related page, predecessor and discussion. */
 function effectiveLinks(curated: string[], derived: string[]): string[] {
   if (derived.length === 0) return curated;
   const derivedSet = new Set(derived);

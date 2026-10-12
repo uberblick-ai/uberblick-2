@@ -174,6 +174,14 @@ const EXPECTED: Record<
     recoveryClass: "reread",
     detail: ["related", "kind"],
   },
+  discussion_not_regular_document: {
+    recoveryClass: "reread",
+    detail: ["discussion", "kind"],
+  },
+  discussion_not_writable: {
+    recoveryClass: "manual",
+    detail: ["uuid", "kind", "status", "field"],
+  },
   decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
@@ -431,6 +439,13 @@ describe("the failure contract", () => {
     })).payload);
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
     record((await rig.call("set_metadata", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
+    record((await rig.call("set_metadata", { uuid: requirement.uuid, discussion: null })).payload);
+    record((await rig.call("create_doc", {
+      title: "Wrong discussion kind",
+      description: "Discussion belongs on a regular document.",
+      kind: "decision",
+      discussion: firstDecision.uuid,
+    })).payload);
     record(
       (
         await rig.call("create_doc", {

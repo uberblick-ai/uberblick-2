@@ -307,7 +307,7 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only. Create an open superseding record " +
+      "A decided record's title, answer blocks, legacy TL;DR, structured data and discussion reference are read-only. Create an open superseding record " +
       "for any content change, then record a person's answer to decide it. Comments stay open.",
   },
   decision_answer_required: {
@@ -332,6 +332,18 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Choose a live regular document UUID from list_docs, then call create_doc again. " +
       "Nothing was created by this refused call.",
+  },
+  discussion_not_regular_document: {
+    recoveryClass: "reread",
+    guidance:
+      "Choose a live, locally readable document that is not a decision record for discussion, then call again. " +
+      "No reference or document was written by this refused call.",
+  },
+  discussion_not_writable: {
+    recoveryClass: "manual",
+    guidance:
+      "Only an open decision record accepts a discussion change. Create an open decision record or successor " +
+      "to connect a new discussion; rejected and withdrawn references stay in history. Nothing was written.",
   },
   decision_answer_empty: {
     recoveryClass: "manual",

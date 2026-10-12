@@ -175,6 +175,7 @@ describe("document round-trip", () => {
           kind: "decision",
           status: "open",
           topic: UUID,
+          discussion: null,
           links: [target],
         });
         expect(getMetaMap(replica).get("changelogSuggestion")).toBe(legacy);

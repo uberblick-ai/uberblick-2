@@ -34,7 +34,21 @@ export const toolHelpDetails = {
     "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering " +
     "it. Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as " +
     "proposals. A decided successor without an answer is refused before allocating a UUID or writing any " +
-    "room. Directory decision entries derive answerPreview from the legacy TL;DR or first paragraph/list; " +
+    "room. Optional `discussion` names a live, locally readable non-decision document, including a " +
+    "requirement, for this record's RFC. Create or reuse it first as an ordinary regular document. New " +
+    "workspaces include an ordinary `rfc` tag to apply deliberately; connecting never requires or applies " +
+    "that tag, creates an RFC or edits the RFC or related page. A decision target refuses with " +
+    "`discussion_not_regular_document`; archived, unknown or unhydrated targets refuse with `doc_archived`, " +
+    "`doc_not_found` or `doc_not_hydrated`, before a UUID is allocated or a room is written. `discussion` " +
+    "without `kind: \"decision\"` is an argument error. For a new topic, create an open first record with " +
+    "related and discussion; it has no answer until one is recorded. For reconsideration, create an open " +
+    "successor with supersedes and discussion; the current answer stays in force. A record created decided " +
+    "can also name its discussion. Successors never inherit discussion, even when they inherit the related " +
+    "page. set_metadata can correct or clear it only while open; set_status settles, rejects or withdraws " +
+    "under the existing recorded-answer contract. The reference is fixed once the record leaves open. " +
+    "It is returned separately from curated links and recorded answer attribution. Directory decision " +
+    "entries cache discussion, null for none and absent when unknown, and derive answerPreview from the " +
+    "legacy TL;DR or first paragraph/list; " +
     "get_doc on the related page returns its topic marked related, and other linking topics marked linked.\n\n" +
     "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is " +
     "created unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group " +
@@ -45,7 +59,7 @@ export const toolHelpDetails = {
     "brings a group into being. The answer echoes the placement it made as `sidebar: {group: {id, name}, " +
     "position}`.\n\n" +
     "This call writes up to three independently persisted rooms — the document, the directory, and the " +
-    "sidebar when you place it — so it reports them one by one. The related page is never written. " +
+    "sidebar when you place it — so it reports them one by one. The related page and RFC are never written. " +
     "If the local update log refuses a write part-way, the call fails with `persistence_failed` carrying the " +
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
@@ -59,7 +73,14 @@ export const toolHelpDetails = {
     "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
     "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
     "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
-    "Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph/list as plain " +
+    "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
+    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
+    "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
+    "derived outbound edge in effective links, separately from curated links and recorded answer " +
+    "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
+    "linked unless it is also the topic's related page. Renaming or archiving the RFC preserves each " +
+    "reference, and an archived RFC remains readable. Decision entries include a cached answerPreview: " +
+    "legacy TL;DR or the first paragraph/list as plain " +
     "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
     "It is null without a paragraph or list, or absent when the cache is unknown. Decision answers use " +
     "one to three short answer blocks with a brief reason; guidance belongs on the related page and " +
@@ -105,7 +126,11 @@ export const toolHelpDetails = {
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
     "synced. Decision answers use one to three short blocks with a brief reason, with guidance on their " +
-    "related regular page and discussion in an RFC. Every decision directory entry carries a derived " +
+    "related regular page and discussion in an explicitly connected RFC. Every decision directory entry, " +
+    "including inForce, pending and conflicts, caches `discussion` as the RFC UUID, null when none or " +
+    "absent when unknown until a newer client repairs the stub. Each pending proposal therefore names " +
+    "its own discussion without opening its room. The reference is distinct from curated links and " +
+    "recorded answer attribution. Every decision directory entry also carries a derived " +
     "answerPreview when known: legacy TL;DR, else plain text of the first paragraph or list, list items " +
     "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
     "neither exists, and absent when unknown. Page get_doc reads mark related and linked topics separately; " +
@@ -262,7 +287,8 @@ export const toolHelpDetails = {
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:
-    "Update one or more of `title`, `description`, `tldr`, `tags` and curated `links` together. At least one " +
+    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links` and decision `discussion` " +
+    "together. At least one " +
     "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
     "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
     "refusals keep their usual shape.\n\n" +
@@ -284,11 +310,21 @@ export const toolHelpDetails = {
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
-    "effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc " +
+    "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
+    "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
-    "A decided record refuses title or tldr with `decision_read_only` and the refused field, but accepts " +
-    "description, tags and links. An archived document refuses all five. A success returns uuid and all " +
-    "five fields as get_doc would read them, including unchanged values, plus shared write durability and " +
+    "An open decision accepts `discussion` as a live, locally readable non-decision document UUID, including " +
+    "a requirement, or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
+    "A decision target refuses with `discussion_not_regular_document`; archived, unknown and unhydrated " +
+    "targets refuse with `doc_archived`, `doc_not_found` and `doc_not_hydrated`, each naming field discussion. " +
+    "Rejected or withdrawn records and non-decision documents refuse with `discussion_not_writable` and " +
+    "`field: \"discussion\"`. The reference is fixed once the record leaves open. Changing or clearing " +
+    "it never creates a document, tags or edits the RFC or related page, or changes approvalFingerprint " +
+    "or approvalChanged. It is distinct from curated links and recorded answer attribution.\n\n" +
+    "A decided record refuses title, tldr or discussion with `decision_read_only` and the refused field, " +
+    "but accepts description, tags and links. An archived document refuses every metadata field. A success " +
+    "returns uuid and the metadata fields as get_doc would read them, including unchanged values and " +
+    "discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +

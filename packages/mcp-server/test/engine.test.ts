@@ -317,7 +317,7 @@ describe("transport-free MCP engine", () => {
     engines.push(engine);
     expect(isTagCatalogSeeded(engine.replicas.settings().doc)).toBe(true);
     expect(listTagCatalog(engine.replicas.settings().doc).map((tag) => tag.name))
-      .toEqual(["auth", "billing", "mcp", "permissions", "sync"]);
+      .toEqual(["auth", "billing", "mcp", "permissions", "rfc", "sync"]);
     expect(readSidebar(engine.replicas.sidebar().doc)).toHaveLength(0);
 
     let ticks = 0;

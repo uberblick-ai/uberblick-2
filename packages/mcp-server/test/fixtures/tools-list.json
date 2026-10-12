@@ -212,6 +212,12 @@
           "format": "uuid",
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
         },
+        "discussion": {
+          "description": "Live, locally readable regular document UUID holding this record's RFC discussion. Accepted only with `kind: decision`; never inherited. Correct or clear with set_metadata only while open; fixed after leaving open. Does not create or tag a document.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
         "supersedes": {
           "description": "Earlier decision UUID this new decision replaces. Immutable and accepted only with `kind: decision`.",
           "type": "string",
@@ -364,7 +370,8 @@
             },
             "related": false,
             "supersedes": false,
-            "answer": false
+            "answer": false,
+            "discussion": false
           }
         },
         {
@@ -374,7 +381,8 @@
             "status": false,
             "related": false,
             "supersedes": false,
-            "answer": false
+            "answer": false,
+            "discussion": false
           }
         }
       ]
@@ -591,6 +599,17 @@
         },
         "supersedes": {
           "type": "string"
+        },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
         },
         "tldr": {
           "anyOf": [
@@ -932,7 +951,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create a document and directory stub with optional seed blocks and regular-page TL;DR. Nonblank title and description are required. Tags select active catalog ids or exact names; unknown or retired selections refuse creation. A kind defaults to its first status; incompatible kind/status refuses. Decisions use one to three short answer blocks with a brief reason, with guidance on the related regular page and discussion in an RFC; they refuse TL;DR, unsupported blocks and excess answer blocks. related selects one live, locally readable regular page; successors inherit it unless another is given. Decisions start open or decided; deciding requires a non-blank valid answer without TL;DR or data. supersedes names a hydrated decision in a live topic. Invalid targets or a decided successor without a person's answer refuse before writes. Optional sidebar placement pins into a get_sidebar group id; unknown or empty ids return group_not_found and create nothing. Omit placement to create unpinned. Rooms persist independently; partial persistence_failed carries uuid, completed and failed rooms, rolledBack: false and stage-aware recovery that avoids duplicate creation. Directory answerPreview uses legacy TL;DR or the first paragraph/list; page get_doc reads mark topics related or linked. Answer blocks differ from recorded answer attribution {who, when, where}.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated decision in a live topic. Invalid targets refuse before writes. discussion connects a live, readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. Discussion never inherits; set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, absent if unknown. Page get_doc marks topics related or linked.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -1078,6 +1097,17 @@
         },
         "supersedes": {
           "type": "string"
+        },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
         },
         "agentStance": {
           "type": "boolean"
@@ -1234,6 +1264,17 @@
                   }
                 ]
               },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "agentStance": {
                 "type": "boolean"
               },
@@ -1372,6 +1413,17 @@
                       },
                       "answerPreview": {
                         "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -1543,6 +1595,17 @@
                         }
                       ]
                     },
+                    "discussion": {
+                      "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentStance": {
                       "type": "boolean"
                     },
@@ -1691,6 +1754,17 @@
                     },
                     "answerPreview": {
                       "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "discussion": {
+                      "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                       "anyOf": [
                         {
                           "type": "string"
@@ -1884,6 +1958,17 @@
                   }
                 ]
               },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "agentStance": {
                 "type": "boolean"
               },
@@ -2032,6 +2117,17 @@
               },
               "answerPreview": {
                 "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -2199,6 +2295,17 @@
                     }
                   ]
                 },
+                "discussion": {
+                  "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "agentStance": {
                   "type": "boolean"
                 },
@@ -2337,6 +2444,17 @@
                         },
                         "answerPreview": {
                           "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                           "anyOf": [
                             {
                               "type": "string"
@@ -2508,6 +2626,17 @@
                           }
                         ]
                       },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "agentStance": {
                         "type": "boolean"
                       },
@@ -2656,6 +2785,17 @@
                       },
                       "answerPreview": {
                         "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -3123,7 +3263,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Decision records hold one to three short answer blocks with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Regular pages return live topics first as related to this page, then as linked to it by any record, with each relation marked. Directory decision entries include a cached answerPreview when known: legacy TL;DR, else the first paragraph or list shortened to 300 characters. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks and annotation threads with lifecycle and decision context. Decisions hold one to three short answer blocks with a brief reason; related pages hold guidance, RFCs discussion. Regular pages return live related topics first, then topics linked by any record, with relations marked. Decision metadata returns discussion: connected RFC UUID or null; every decision entry caches it, null for none and absent if unknown. Discussion is a derived effective link, separate from curated links and recorded answer. The RFC returns its topic marked linked unless it is also the related page; rename or archive preserves the reference. Cached answerPreview when known: legacy TL;DR, else the first paragraph or list shortened to 300 characters. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -3848,6 +3988,17 @@
                       }
                     ]
                   },
+                  "discussion": {
+                    "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "agentStance": {
                     "type": "boolean"
                   },
@@ -4007,6 +4158,17 @@
                       }
                     ]
                   },
+                  "discussion": {
+                    "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "agentStance": {
                     "type": "boolean"
                   },
@@ -4145,6 +4307,17 @@
                           },
                           "answerPreview": {
                             "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "discussion": {
+                            "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
                             "anyOf": [
                               {
                                 "type": "string"
@@ -4316,6 +4489,17 @@
                             }
                           ]
                         },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "agentStance": {
                           "type": "boolean"
                         },
@@ -4473,6 +4657,17 @@
                             }
                           ]
                         },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "agentStance": {
                           "type": "boolean"
                         },
@@ -4599,7 +4794,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List workspace documents from directory stubs without opening document rooms. Decision topics summarize one to three short answer blocks and a brief reason; their related page holds guidance and an RFC holds discussion. Read a regular page with get_doc for related or linked topics. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph or list, null when neither exists and absent when unknown. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "description": "List directory stubs without opening rooms. Decision answers use one to three short blocks with a brief reason; guidance is on the related page, discussion in an RFC. get_doc on regular pages marks related or linked topics. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph or list, null when neither exists and absent when unknown. Every decision entry, including inForce, pending and conflicts, also caches discussion as its RFC UUID, null for none and absent when unknown. Each pending proposal names its own explicitly connected discussion, separately from curated links and recorded answer. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -5889,6 +6084,20 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
             "description": "Target document UUID."
           }
+        },
+        "discussion": {
+          "description": "RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged.",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "Document UUID."
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5920,6 +6129,11 @@
         {
           "required": [
             "links"
+          ]
+        },
+        {
+          "required": [
+            "discussion"
           ]
         }
       ]
@@ -6097,6 +6311,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
         }
       },
       "required": [
@@ -6113,7 +6338,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set a non-empty subset of `title`, `description`, `tldr`, `tags` and curated `links`; omitted fields keep their values. All named fields validate before writes; refusals change nothing and field failures name `field`. The answer returns all five fields with durability and no TL;DR review reminder.\n\nTitle and description must be nonempty and cannot be cleared; `tldr: null` clears the person-facing summary. Tags and links replace complete curated sets; `[]` clears one. list_tags supplies active ids or exact names; assigned retired or unresolved ids can be preserved. New link UUIDs must be known to this replica's directory; archived targets and unchanged existing targets are accepted.\n\nAn open decision refuses non-null tldr with decision_tldr_unsupported; null clears a legacy TL;DR. A decided record refuses any call naming title or tldr, while description, tags and links remain writable. Decisions hold one to three short answer blocks with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Their derived directory answerPreview uses legacy TL;DR or the first paragraph/list. Page get_doc reads mark topics related or linked; answer blocks differ from recorded answer attribution {who, when, where}. Archived documents refuse every metadata field; status changes use set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer {who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

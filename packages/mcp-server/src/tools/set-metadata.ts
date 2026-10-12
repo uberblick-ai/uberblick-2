@@ -3,6 +3,7 @@ import {
   getMeta,
   getMetaMap,
   setDescription,
+  setDiscussion,
   setLinks,
   setTitle,
   setTldr,
@@ -13,8 +14,9 @@ import { strictInput } from "../inputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import { documentOperation } from "./operation.js";
 import { descriptionArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
+import { discussionTarget } from "./discussion.js";
 
-const fields = ["title", "description", "tldr", "tags", "links"] as const;
+const fields = ["title", "description", "tldr", "tags", "links", "discussion"] as const;
 const linkArg = z
   .uuid("a link is a target document UUID, never a path or a title")
   .describe("Target document UUID.");
@@ -26,12 +28,13 @@ export const inputSchema = strictInput({
   tldr: tldrArg.optional(),
   tags: z.array(z.string().min(1)).optional(),
   links: z.array(linkArg).optional(),
+  discussion: uuidArg.nullable().optional().describe("RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged."),
 })
   .superRefine((args, ctx) => {
     if (fields.every((field) => args[field] === undefined)) {
       ctx.addIssue({
         code: "custom",
-        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags` or `links`",
+        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links` or `discussion`",
       });
     }
   })
@@ -45,7 +48,11 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
     if (error instanceof ToolError && (
       error.code === "decision_read_only" ||
       error.code === "invalid_tag_assignment" ||
-      error.code === "doclink_target_not_known_locally"
+      error.code === "doclink_target_not_known_locally" ||
+      error.code === "discussion_not_regular_document" ||
+      error.code === "doc_archived" ||
+      error.code === "doc_not_found" ||
+      error.code === "doc_not_hydrated"
     )) {
       throw new ToolError(error.code, error.message, { ...error.detail, field });
     }
@@ -54,14 +61,23 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
 }
 
 export const setMetadataOperation = documentOperation("set_metadata", inputSchema, (context, args, _request, replica) => {
-  const { uuid, title, description, tldr, tags, links } = args;
-  // The document-level gate already ran. Only these two named fields request
-  // the decided-record content lock; metadata outside the answer stays writable.
+  const { uuid, title, description, tldr, tags, links, discussion } = args;
+  const current = getMeta(replica.doc);
+  if (discussion !== undefined && (current.kind !== "decision" || current.status !== "open")) {
+    const code = current.kind === "decision" && current.status === "decided" ? "decision_read_only" : "discussion_not_writable";
+    throw new ToolError(code, "Only an open decision record's discussion reference can change; settled references remain in history.", {
+      uuid, kind: current.kind ?? null, status: current.status ?? null, field: "discussion",
+    });
+  }
+  const discussionUuid = discussion === undefined || discussion === null ? discussion :
+    forField("discussion", () => discussionTarget(context, discussion));
+  // The document-level gate already ran; title and legacy TL;DR also request
+  // the decided-record content lock.
   const contentField = title !== undefined ? "title" : tldr !== undefined ? "tldr" : undefined;
   if (contentField !== undefined) {
     forField(contentField, () => context.requireWritableDoc(uuid, true));
   }
-  if (getMeta(replica.doc).kind === "decision" && tldr !== undefined && tldr !== null) {
+  if (current.kind === "decision" && tldr !== undefined && tldr !== null) {
     throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", { uuid, field: "tldr" });
   }
   const tagIds = tags === undefined ? undefined : forField("tags", () =>
@@ -87,6 +103,7 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     if (description !== undefined) setDescription(replica.doc, description);
     if (tldr !== undefined) setTldr(replica.doc, tldr);
     if (links !== undefined) setLinks(replica.doc, links);
+    if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
   });
   const meta = getMeta(replica.doc);
   return {
@@ -96,5 +113,6 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     tldr: meta.tldr,
     tags: context.documentTags(replica),
     links: meta.links,
+    ...(meta.kind === "decision" ? { discussion: meta.discussion } : {}),
   };
 });

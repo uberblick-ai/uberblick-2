@@ -149,6 +149,7 @@ describe("create_doc lifecycle arguments", () => {
           related: false,
           supersedes: false,
           answer: false,
+          discussion: false,
         },
       },
       {
@@ -159,6 +160,7 @@ describe("create_doc lifecycle arguments", () => {
           related: false,
           supersedes: false,
           answer: false,
+          discussion: false,
         },
       },
     ]);
