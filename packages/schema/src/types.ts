@@ -1,3 +1,5 @@
+import type { FigmaFields } from "./providers/figma.js";
+
 /** Block types. The set is closed; a block type is a Y.XmlElement nodeName. */
 export const BLOCK_TYPES = [
   "paragraph",
@@ -10,6 +12,7 @@ export const BLOCK_TYPES = [
   "terminal",
   "chart",
   "card",
+  "figma",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -22,7 +25,7 @@ export function isBlockType(value: string): value is BlockType {
 
 /**
  * Prose admits inline marks and Markdown syntax; source blocks admit only comment.
- * Tables and cards admit marks per cell or part, with no block-level offsets.
+ * Tables, cards and Figma captions admit marks per cell or part, with no block-level offsets.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",
@@ -102,8 +105,8 @@ export interface Block {
   id: string;
   type: BlockType;
   /**
-   * Prose is plain text, marks excluded. Tables and cards are canonical Markdown
-   * projections from cell or part text and inline marks.
+   * Prose is plain text, marks excluded. Tables, cards and Figma blocks are
+   * canonical Markdown projections from cell or part text and inline marks.
    */
   text: string;
   /**
@@ -116,6 +119,8 @@ export interface Block {
   list?: ListStyle;
   /** List items only: nesting depth, 0–3. */
   indent?: ListIndent;
+  /** Figma blocks only: read-only view identity derived from the stored link. */
+  figma?: FigmaFields;
 }
 
 /** The shape accepted when creating a block. */
@@ -132,7 +137,7 @@ export interface BlockInput {
   indent?: number;
   /**
    * Overrides text for prose only; callers setting both must keep them consistent.
-   * Source blocks ignore it. Tables and cards use Markdown from their text instead.
+   * Source blocks ignore it. Tables, cards and Figma blocks use Markdown from text instead.
    */
   inline?: InlineRun[];
 }
@@ -283,10 +288,10 @@ export function isCommentMark(value: unknown): value is CommentMark {
   return typeof threadId === "string" && threadId !== "";
 }
 
-/** A resolved range inside block, table-cell or card-part text. */
+/** A resolved range inside block, table-cell, card-part or Figma-caption text. */
 export interface AnnotationRange {
-  /** Card prose part; absent for prose and table ranges. */
-  part?: "label" | "title" | "body" | "footer";
+  /** Structured prose part; absent for prose and table ranges. */
+  part?: "label" | "title" | "body" | "footer" | "caption";
   /** Table-cell coordinates in the GFM projection; absent for prose ranges. */
   row?: number;
   column?: number;

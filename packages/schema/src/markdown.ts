@@ -21,6 +21,7 @@ import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
 import { parseGfmTable, writeGfmTable } from "./table.js";
 import { escapeContainerLines, parseCardInput, writeCardText } from "./card.js";
+import { parseFigmaInput, writeFigmaText } from "./figma.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
@@ -553,6 +554,8 @@ function renderBlock(
       return block.text;
     case "card":
       return `:::card\n${block.text}\n:::`;
+    case "figma":
+      return `:::figma\n${block.text}\n:::`;
     case "paragraph":
       return escapeContainerLines(renderInline(inline));
   }
@@ -1361,7 +1364,7 @@ function startsBlock(line: string): boolean {
     HEADING_LINE.test(trimmed) ||
     FENCE_LINE.test(trimmed) ||
     COMMENT_LINE.test(trimmed)
-    || line === ":::card"
+    || line === ":::card" || line === ":::figma"
   );
 }
 
@@ -1438,13 +1441,15 @@ export function importMarkdown(markdown: string): ImportedDoc {
       continue;
     }
 
-    if (line === ":::card") {
+    if (line === ":::card" || line === ":::figma") {
       flush();
       openItems = [];
       const container = readContainer(lines, i);
       try {
-        if (!container.closed) throw new Error("Unclosed card");
-        blocks.push({ type: "card", text: writeCardText(parseCardInput(container.source)) });
+        if (!container.closed) throw new Error("Unclosed container");
+        blocks.push(line === ":::card"
+          ? { type: "card", text: writeCardText(parseCardInput(container.source)) }
+          : { type: "figma", text: writeFigmaText(parseFigmaInput(container.source)) });
       } catch {
         // Invalid containers are literal prose, including syntax that would
         // otherwise start headings, code blocks or comments and lose source.

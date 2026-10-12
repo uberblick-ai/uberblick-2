@@ -171,8 +171,8 @@ export function docFingerprint(doc: Y.Doc): string {
         start: run.start,
         end: run.end,
       })),
-      ...(block.type === "table" || block.type === "card" ? {
-        // GFM/rev can lose edge whitespace and marks. Stored cell deltas retain
+      ...(block.type === "table" || block.type === "card" || block.type === "figma" ? {
+        // Canonical text/rev can lose edge whitespace and marks. Stored part deltas retain
         // those characters, formatting and comment-anchor deletions for verification.
         cells: structuredContent(findBlockElement(doc, block.id)),
       } : {}),

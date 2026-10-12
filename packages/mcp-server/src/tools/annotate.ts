@@ -77,6 +77,9 @@ export const annotateOperation = documentOperation("annotate", inputSchema, (con
   if (getBlock(replica.doc, block_id as string)?.type === "card") {
     throw new ToolError("annotation_card", "Open new card comment threads in the web editor; MCP supports replies to existing card threads.", { blockId: block_id });
   }
+  if (getBlock(replica.doc, block_id as string)?.type === "figma") {
+    throw new ToolError("annotation_figma", "MCP cannot open a new Figma caption thread; it supports replies to existing Figma threads.", { blockId: block_id });
+  }
   if ((row === undefined) !== (column === undefined)) {
     throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
   }

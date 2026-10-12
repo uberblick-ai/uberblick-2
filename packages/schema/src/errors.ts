@@ -43,6 +43,32 @@ export class CardConversionError extends Error {
   }
 }
 
+/** A Figma write does not match its closed header and provider link grammar. */
+export class InvalidFigmaError extends Error {
+  constructor(reason = "A url header is required") {
+    super(reason);
+    this.name = "InvalidFigmaError";
+  }
+}
+
+/** Block offsets cannot address the separately stored caption. */
+export class FigmaAnnotationError extends Error {
+  readonly blockId: string;
+  constructor(blockId: string) {
+    super("New comment threads on Figma blocks require the caption part and are unavailable through MCP");
+    this.name = "FigmaAnnotationError";
+    this.blockId = blockId;
+  }
+}
+
+/** A Figma block has no conversion to or from another block type. */
+export class FigmaConversionError extends Error {
+  constructor() {
+    super("Figma blocks cannot be converted to or from another block type; insert a new block instead");
+    this.name = "FigmaConversionError";
+  }
+}
+
 /** Structural or batched table edits need the caller's surviving identities. */
 export class TableMappingRequiredError extends Error {
   constructor() {

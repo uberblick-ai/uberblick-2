@@ -1,0 +1,227 @@
+import * as Y from "yjs";
+import { describe, expect, it } from "vitest";
+import {
+  FigmaAnnotationError, FigmaConversionError, InlineLinkRangeError, InvalidFigmaError,
+  OldTextMismatchError, StaleBlockError, addComment, appendBlock, createAnnotation,
+  deleteAnnotation, editBlock, figmaCaptionElement, figmaCaptionTexts, figmaInline,
+  findBlockElement, getBlock, getBlocks, getBlocksWithInline, getBlockText,
+  initDoc, insertBlock, isSupportedFigma, listAnnotationRanges, normalizeFigmaLink,
+  parseFigmaInput, resolveAnnotationRange, setAnnotationResolved, setBlockType,
+  setInlineLink, writeFigmaText,
+} from "../src/index.js";
+import { replicaPair, syncDocs } from "./helpers.js";
+
+const UUID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const TARGET = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const URL = "https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345";
+const SOURCE = `url: ${URL}\ntitle: Payment, mobile\nheight: 560\n\nCard form after the address step.`;
+
+function fixture(source = SOURCE): { doc: Y.Doc; id: string; figma: Y.XmlElement } {
+  const doc = new Y.Doc();
+  initDoc(doc, { uuid: UUID, title: "Designs" });
+  const id = appendBlock(doc, { type: "figma", text: source });
+  return { doc, id, figma: findBlockElement(doc, id)! };
+}
+
+describe("Figma provider link identity", () => {
+  it("drops tracking and fragments, canonicalizes the host, and exposes the view identity", () => {
+    const first = normalizeFigmaLink(`${URL}&t=AbC123-1&starting-point-node-id=12%3A401&version-id=987#private`);
+    expect(first).toEqual({
+      url: `${URL}&starting-point-node-id=12%3A401&version-id=987`,
+      figma: { kind: "frame", file: "k3Lm9QzT2x", fileName: "Checkout flow", node: "12:345" },
+    });
+    expect(normalizeFigmaLink(`${URL.replace("www.figma.com", "figma.com")}&t=another`)).toEqual(normalizeFigmaLink(URL));
+  });
+
+  it.each([
+    ["design/key", "file"], ["file/key", "file"],
+    ["design/key?node-id=12-345", "frame"], ["file/key?node-id=12%3A345", "frame"],
+    ["proto/key?node-id=12-345", "prototype"], ["board/key", "board"],
+    ["slides/key", "slides"], ["community/file/123456", "community file"],
+  ] as const)("derives the accepted kind for %s", (path, kind) => {
+    const fields = normalizeFigmaLink(`https://www.figma.com/${path}`).figma;
+    expect(fields.kind).toBe(kind);
+    expect(fields.file).toBe(path.startsWith("community") ? "123456" : "key");
+    expect(fields.fileName).toBeUndefined();
+    expect(fields.node).toBe(path.includes("node-id") ? "12:345" : undefined);
+  });
+
+  it("decodes the optional name without treating it as inline Markdown", () => {
+    expect(normalizeFigmaLink("https://figma.com/community/file/123/Checkout-%E2%9C%93").figma).toEqual({
+      kind: "community file", file: "123", fileName: "Checkout ✓",
+    });
+    expect(normalizeFigmaLink("https://figma.com/design/key/UI%2FUX").figma.fileName).toBe("UI/UX");
+    expect(() => normalizeFigmaLink("HTTPS://figma.com/design/key/../other")).toThrow(InvalidFigmaError);
+  });
+
+  it.each([
+    "http://www.figma.com/design/key", "https://other.test/design/key", "https://figma.com.other.test/design/key",
+    "https://user:secret@figma.com/design/key", "https://figma.com:9999/design/key", "not a link",
+  ])("refuses a non-Figma address with the exact recovery message: %s", (url) => {
+    expect(() => normalizeFigmaLink(url)).toThrow("figma blocks take figma.com links only; use a plain link for other sites");
+  });
+
+  it.each([
+    "/deck/key", "/design/key/branch/other", "/design/key/name/extra", "/unknown/key",
+    "/design/", "/design/key/", "/community/file/", "/community/file/123/name/extra",
+    "/design/key/../other", "/design/key/%2e%2e/other",
+  ])("names the accepted kinds when the path is unsupported: %s", (path) => {
+    expect(() => normalizeFigmaLink(`https://figma.com${path}`)).toThrow(/\/design\/.*\/file\/.*\/proto\/.*\/board\/.*\/slides\/.*\/community\/file\//);
+  });
+});
+
+describe("Figma block contract", () => {
+  it("stores only kept identity, literal title, explicit height and a marked caption", () => {
+    const title = `**Literal** [target](${TARGET})`;
+    const { doc, id, figma } = fixture(`height: 560\ntitle:${title}\nurl: ${URL}&t=discarded\n\nA **bold** caption with [doc](${TARGET}).`);
+    expect(figma.getAttributes()).toEqual({ id, url: URL, title, height: "560" });
+    expect(isSupportedFigma(figma)).toBe(true);
+    expect(figma.toArray().map((part) => (part as Y.XmlElement).nodeName)).toEqual(["figmaCaption"]);
+    expect(getBlock(doc, id)).toMatchObject({ type: "figma", figma: { kind: "frame", file: "k3Lm9QzT2x", fileName: "Checkout flow", node: "12:345" } });
+    expect(getBlockText(doc, id)).toBe(`url: ${URL}\ntitle: ${title}\nheight: 560\n\nA **bold** caption with [doc](${TARGET}).`);
+    expect(getBlocksWithInline(doc)[0]!.figma).toEqual({ caption: [
+      { text: "A ", marks: {} }, { text: "bold", marks: { bold: true } },
+      { text: " caption with ", marks: {} }, { text: "doc", marks: { docLink: TARGET } }, { text: ".", marks: {} },
+    ] });
+    expect(getBlocksWithInline(doc)[0]!.inline).toEqual([]);
+  });
+
+  it("omits absent or empty title and height while seeding an empty caption", () => {
+    const { doc, id, figma } = fixture(`url: ${URL}\ntitle:\n\n`);
+    expect(getBlockText(doc, id)).toBe(`url: ${URL}\n\n`);
+    expect(figma.getAttributes()).toEqual({ id, url: URL });
+    expect(figmaCaptionTexts(figma)).toHaveLength(1);
+    expect(parseFigmaInput(`url:${URL}`)).toEqual({ url: URL, caption: "" });
+    expect(writeFigmaText({ url: URL, title: "First\nSecond", caption: "" })).toBe(`url: ${URL}\ntitle: First Second\n\n`);
+    figma.setAttribute("title", "First\nSecond");
+    expect(getBlockText(doc, id)).toBe(`url: ${URL}\ntitle: First Second\n\n`);
+    const before = getBlockText(doc, id);
+    editBlock(doc, id, before, `${before}New caption`);
+    expect(figma.getAttribute("title")).toBe("First\nSecond");
+    const captionEdit = getBlockText(doc, id);
+    editBlock(doc, id, captionEdit, captionEdit.replace("First Second", "Changed title"));
+    expect(figma.getAttribute("title")).toBe("Changed title");
+  });
+
+  it.each([
+    "", "title: Missing url", `url: ${URL}\nurl: ${URL}`, `url: ${URL}\ntitle: A\ntitle: B`,
+    `url: ${URL}\nheight: 480\nheight: 560`, `url: ${URL}\nunknown: key`, `Url: ${URL}`, `url: ${URL}\nnot a header`,
+    `url: ${URL}\nheight:`, `url: ${URL}\nheight: 239`, `url: ${URL}\nheight: 961`,
+    `url: ${URL}\nheight: -480`, `url: ${URL}\nheight: 480.0`, `url: ${URL}\nheight: 5e2`, `url: ${URL}\nheight: NaN`,
+  ])("rejects invalid insert and edit text before any write: %s", (source) => {
+    const { doc, id } = fixture();
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(() => insertBlock(doc, id, { type: "figma", text: source })).toThrow(InvalidFigmaError);
+    expect(() => editBlock(doc, id, SOURCE, source)).toThrow(InvalidFigmaError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(getBlocks(doc)).toHaveLength(1);
+  });
+
+  it("accepts only the specified inclusive whole-pixel height range", () => {
+    expect(parseFigmaInput(`url: ${URL}\nheight:240`).height).toBe(240);
+    expect(parseFigmaInput(`url: ${URL}\nheight:960`).height).toBe(960);
+  });
+
+  it("refuses conversions, block annotations and link ranges without writes", () => {
+    const { doc, id } = fixture();
+    const prose = appendBlock(doc, { type: "paragraph", text: "prose" });
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(() => setBlockType(doc, id, "paragraph")).toThrow(FigmaConversionError);
+    expect(() => setBlockType(doc, prose, "figma")).toThrow(FigmaConversionError);
+    expect(() => setBlockType(doc, id, "figma")).not.toThrow();
+    expect(() => createAnnotation(doc, id, 0, 2, "Reader", "question")).toThrow(FigmaAnnotationError);
+    expect(() => setInlineLink(doc, id, { start: 0, end: 2 }, TARGET)).toThrow(InlineLinkRangeError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
+
+  it("preserves stale-edit priority and refuses unsupported stored shapes", () => {
+    const { doc, id, figma } = fixture();
+    const rev = getBlock(doc, id)!.rev;
+    expect(() => editBlock(doc, id, SOURCE, "invalid", { rev: "stale" })).toThrow(StaleBlockError);
+    expect(() => editBlock(doc, id, "wrong", "invalid", { rev })).toThrow(OldTextMismatchError);
+    figma.setAttribute("future", "shape");
+    expect(isSupportedFigma(figma)).toBe(false);
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(() => editBlock(doc, id, SOURCE, SOURCE.replace("mobile", "desktop"))).toThrow(InvalidFigmaError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
+
+  it("changes only requested headers and preserves caption text, marks and anchors", () => {
+    const { doc, id, figma } = fixture(SOURCE.replace("Card form", "**Card form**"));
+    const text = figmaCaptionTexts(figma)[0]!;
+    const thread = createAnnotation(doc, id, 5, 9, "Reader", "question", { part: "caption" });
+    const delta = text.toDelta();
+    const before = getBlockText(doc, id);
+    editBlock(doc, id, before, before.replace("Payment, mobile", "Payment, desktop").replace("height: 560", "height: 600"));
+    expect(figmaCaptionTexts(figma)[0]).toBe(text);
+    expect(text.toDelta()).toEqual(delta);
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ part: "caption", start: 5, end: 9, collapsed: false });
+    const header = figma.getAttributes();
+    const current = getBlockText(doc, id);
+    editBlock(doc, id, current, current.replace("address step", "address screen"));
+    expect(figma.getAttributes()).toEqual(header);
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ part: "caption", start: 5, end: 9, collapsed: false });
+    expect(figmaInline(figma).caption[0]).toEqual({ text: "Card form", marks: { bold: true } });
+  });
+
+  it("includes caption formatting in rev and retains anchors during formatting-only edits", () => {
+    const { doc, id } = fixture();
+    const thread = createAnnotation(doc, id, 0, 4, "Reader", "question", { part: "caption" });
+    const rev = getBlock(doc, id)!.rev;
+    editBlock(doc, id, SOURCE, SOURCE.replace("Card form", "**Card form**"));
+    expect(getBlock(doc, id)!.rev).not.toBe(rev);
+    expect(resolveAnnotationRange(doc, thread.id)).toEqual({ part: "caption", start: 0, end: 4, collapsed: false });
+    expect(listAnnotationRanges(doc, id)[0]).toMatchObject({ threadId: thread.id, part: "caption" });
+    expect(addComment(doc, thread.id, "Agent", "reply")!.comments).toHaveLength(2);
+    expect(setAnnotationResolved(doc, thread.id, true)!.resolved).toBe(true);
+    expect(setAnnotationResolved(doc, thread.id, false)!.resolved).toBe(false);
+    expect(deleteAnnotation(doc, thread.id)).toBe(true);
+    expect(listAnnotationRanges(doc, id)).toEqual([]);
+  });
+
+  it("removes optional headers without creating a default height attribute", () => {
+    const { doc, id, figma } = fixture();
+    editBlock(doc, id, SOURCE, SOURCE.replace("title: Payment, mobile\nheight: 560\n", ""));
+    expect(figma.getAttributes()).toEqual({ id, url: URL });
+    expect(getBlockText(doc, id)).toBe(`url: ${URL}\n\nCard form after the address step.`);
+  });
+
+  it("keeps first concurrent caption writes and independent header edits", () => {
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Designs" });
+      id = appendBlock(doc, { type: "figma", text: `url: ${URL}\n\n` });
+    });
+    const first = findBlockElement(a, id)!;
+    const second = findBlockElement(b, id)!;
+    figmaCaptionTexts(first)[0]!.insert(0, "Agent A ");
+    figmaCaptionTexts(second)[0]!.insert(0, "Agent B ");
+    const oldText = getBlockText(a, id);
+    editBlock(a, id, oldText, oldText.replace(`url: ${URL}`, `url: ${URL}\ntitle: Shared design`));
+    syncDocs(a, b);
+    expect(getBlockText(a, id)).toBe(getBlockText(b, id));
+    expect(figmaCaptionTexts(first)).toHaveLength(1);
+    expect(getBlockText(a, id)).toContain("Agent A ");
+    expect(getBlockText(a, id)).toContain("Agent B ");
+    expect(first.getAttribute("title")).toBe("Shared design");
+  });
+
+  it("rejects foreign caption grammar before rewriting it", () => {
+    const mutations = [
+      (figma: Y.XmlElement) => figma.delete(0, 1),
+      (figma: Y.XmlElement) => figma.insert(0, [new Y.XmlText("stray")]),
+      (figma: Y.XmlElement) => figmaCaptionElement(figma)!.setAttribute("future", "shape"),
+      (figma: Y.XmlElement) => figmaCaptionTexts(figma)[0]!.insertEmbed(0, { hidden: true }),
+      (figma: Y.XmlElement) => figmaCaptionTexts(figma)[0]!.format(0, 1, { future: {} }),
+    ];
+    for (const mutate of mutations) {
+      const { doc, id, figma } = fixture();
+      mutate(figma);
+      expect(isSupportedFigma(figma)).toBe(false);
+      const before = Y.encodeStateAsUpdate(doc);
+      const oldText = getBlockText(doc, id);
+      expect(() => editBlock(doc, id, oldText, oldText.replace("mobile", "desktop"))).toThrow(InvalidFigmaError);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    }
+  });
+});
