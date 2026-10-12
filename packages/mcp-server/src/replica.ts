@@ -587,13 +587,14 @@ export class Replicas {
    */
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
+    const tags = resolveTagAssignments(this.settings().doc, meta.tags);
     this.store.indexDoc(
       {
         uuid: meta.uuid,
         title: meta.title,
-        tags: resolveTagAssignments(this.settings().doc, meta.tags).map(
-          (entry) => entry.id,
-        ),
+        kind: meta.kind === "decision" ? "decision" : "regular",
+        tags: tags.map((entry) => entry.id),
+        tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
         description: meta.description ?? "",
         links: [
           ...meta.links,

@@ -62,6 +62,19 @@ const tag = z.union([
   z.object({ id: z.string(), name: z.null(), state: z.literal("unresolved") }).strict(),
 ]);
 const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
+const searchHitFields = { uuid, title: z.string(), description, tags, snippet: z.string() };
+const searchHit = z.union([
+  z.object({
+    ...searchHitFields,
+    kind: z.literal("regular").describe("A regular document, including a stored requirement."),
+  }).strict(),
+  z.object({
+    ...searchHitFields,
+    kind: z.literal("decision").describe("A decision record."),
+    state: z.enum(["in-force", "superseded", "open", "rejected", "withdrawn", "conflict"])
+      .describe("Resolved from current topic records: in-force is the current answer; superseded is a replaced answer; conflict marks competing approved answers; open, rejected and withdrawn are proposal states."),
+  }).strict(),
+]);
 
 const directoryEntry = z.object({
   uuid,
@@ -282,8 +295,9 @@ export const outputSchemas = {
   }).strict(),
   search: z.object({
     query: z.string(),
-    tag: z.string().optional(),
-    hits: z.array(z.object({ uuid, title: z.string(), description, tags, snippet: z.string() }).strict()),
+    tag: z.union([z.string(), z.array(z.string())]).optional(),
+    kind: z.enum(["regular", "decision"]).optional(),
+    hits: z.array(searchHit),
   }).strict(),
   backlinks: z.object({
     uuid,

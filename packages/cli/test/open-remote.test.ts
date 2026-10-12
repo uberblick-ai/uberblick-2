@@ -586,6 +586,30 @@ describe("ub open: sharing through the upstream hub", () => {
       const content = result.content as { text?: string }[];
       const created = JSON.parse(content[0]?.text ?? "null") as { uuid: string };
       const auth = await authMessage(localBrowserKey(WORKSPACE, box.env));
+      const mcpUuids = async (query: string, limit?: number): Promise<string[]> => {
+        const result = await client.callTool({
+          name: "search",
+          arguments: { query, ...(limit === undefined ? {} : { limit }) },
+        });
+        expect(result.isError).not.toBe(true);
+        const payload = result.structuredContent as { hits: { uuid: string }[] };
+        return payload.hits.map(({ uuid }) => uuid);
+      };
+      const servedSearch = async (query: string): Promise<{
+        hits: { uuid: string }[];
+        limit: number;
+        capped: boolean;
+      }> => {
+        const response = await fetch(`${app.url}api/search?q=${encodeURIComponent(query)}`, {
+          headers: bearer(auth),
+        });
+        expect(response.status).toBe(200);
+        return await response.json() as {
+          hits: { uuid: string }[];
+          limit: number;
+          capped: boolean;
+        };
+      };
 
       const found = await fetch(`${app.url}api/search?q=offline+badg*`, {
         headers: bearer(auth),
@@ -598,6 +622,34 @@ describe("ub open: sharing through the upstream hub", () => {
         limit: 100,
         capped: false,
       });
+
+      const fixtures = [
+        { title: "Launching guide", description: "Initial delivery overview.", text: "Details for maintainers." },
+        { title: "Delivery guide", description: "Launched changes overview.", text: "Details for maintainers." },
+        { title: "Delivery overview", description: "Initial changes overview.", text: "Launch details for maintainers." },
+        { title: "Interface notes", description: "Tool protocol usage.", text: "École worktree workspace", tags: ["mcp"] },
+      ];
+      const fixtureUuids: string[] = [];
+      for (const { text, ...metadata } of fixtures) {
+        const result = await client.callTool({
+          name: "create_doc",
+          arguments: { ...metadata, blocks: [{ type: "paragraph", text }] },
+        });
+        expect(result.isError).not.toBe(true);
+        fixtureUuids.push((result.structuredContent as { uuid: string }).uuid);
+      }
+
+      for (const query of ["launch neverindexedword", "launched", "mcp", "ecole", "work*", "badg*"]) {
+        const served = await servedSearch(query);
+        expect(served.hits.map(({ uuid }) => uuid)).toEqual(await mcpUuids(query, 100));
+        expect(served).toMatchObject({ limit: 100, capped: false });
+        expect(served.hits.length).toBeGreaterThan(0);
+      }
+      const launchUuids = (await servedSearch("launch neverindexedword")).hits.map(({ uuid }) => uuid);
+      expect(launchUuids).toHaveLength(3);
+      expect(launchUuids[0]).toBe(fixtureUuids[0]);
+      expect(new Set(launchUuids)).toEqual(new Set(fixtureUuids.slice(0, 3)));
+      expect((await servedSearch("mcp")).hits).toEqual([{ uuid: fixtureUuids[3] }]);
 
       for (let index = 0; index <= 100; index += 1) {
         instance.store.indexDoc(
@@ -625,6 +677,8 @@ describe("ub open: sharing through the upstream hub", () => {
         capped: true,
       });
       expect(cappedBody.hits).toHaveLength(100);
+      expect(cappedBody.hits.map(({ uuid }) => uuid)).toEqual(await mcpUuids("capacityneedle", 100));
+      expect(await mcpUuids("capacityneedle")).toHaveLength(20);
       expect(cappedBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
         .toBe(true);
 

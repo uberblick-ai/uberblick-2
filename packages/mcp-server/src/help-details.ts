@@ -158,22 +158,31 @@ export const toolHelpDetails = {
     "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
     "state.",
   search:
-    "Full-text search over document titles, descriptions and block text, from the local FTS5 index. The index " +
+    "Full-text search over live document titles, descriptions, content and assigned tag names, from the local FTS5 index. The index " +
     "is derived from the replicas and updated as updates are observed, so it reflects edits from any client " +
-    "this replica has seen.\n\n" +
-    "Matching is all-terms: every searchable term in `query` must occur in one and the same document. Letters " +
+    "this replica has seen. Archived documents stay out until restored; use `list_docs` with `include_deleted` " +
+    "to find them.\n\n" +
+    "Matching is any-word: any searchable word in `query` can match a document. Letters " +
     "and digits make a term; punctuation and emoji are not terms, so a query holding only those matches " +
     "nothing. An underscore-separated group matches its words as an adjacent phrase: `list_docs` matches both " +
-    "`list_docs` and `list docs`, but not `a list of docs`. Case and accents are folded, but nothing is " +
-    "stemmed — `withdrawal` does not find a document that says `withdrawing`. A trailing `*` loosens one term " +
-    "to a prefix match, which is how to reach an inflection: `withdraw*` finds both `withdrawal` and " +
-    "`withdrawing`. No hits means no indexed document matched the whole query under those rules; it does not " +
+    "`list_docs` and `list docs`, but not `a list of docs`. English word forms use FTS5's Porter stemmer: " +
+    "`launch` finds `launching` and `launched`. Other languages match exact words or prefixes. Case and accents " +
+    "fold, so `ecole` finds `École`. A trailing `*` makes a prefix match: `work*` finds `worktree` and `workspace`; " +
+    "prefixes match stems, so `withdraw*` also finds `withdrawal` and `withdrawing`. No hits means no indexed " +
+    "document matched any query word under those rules; it does not " +
     "by itself mean the index is empty.\n\n" +
-    "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
-    "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
-    "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
-    "restrict hits to that assignment; a value this catalog does not have is refused rather than answered " +
-    "with no hits.",
+    "Results use title-weighted bm25 relevance: a title word weighs more than the same word elsewhere, " +
+    "without guaranteeing that every title match beats a body-only match or that more matched words come first. " +
+    "Pass `kind: regular` for regular documents, including stored requirements, or `kind: decision` for all " +
+    "decision records, including superseded, rejected and withdrawn records. Pass `tag` as one catalog id or " +
+    "exact current name, or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
+    "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
+    "refuse.\n\n" +
+    "Every hit carries `kind`, `description` (null when unwritten), a snippet and canonical tag assignments " +
+    "with current names and retirement state. Every decision hit carries `state`: `in-force`, `superseded`, " +
+    "`open`, `rejected`, `withdrawn` or `conflict`. State is resolved from the current topic records, so a " +
+    "previously indexed answer can become superseded without being edited. Tag-name matching uses the names " +
+    "the hit shows, updated when catalog tags are renamed.",
   find_decisions:
     "Find every live decision record whose prose links one GitHub issue or pull request. This replica-local " +
     "derived index reads only external link hrefs in decision prose; display labels, unlinked text, source " +
