@@ -17,7 +17,6 @@ export function NotificationToaster(): ReactElement {
       theme={appearance}
       position="bottom-right"
       duration={TRANSIENT_DURATION}
-      // Decision: eb98aea4-ca81-4883-a044-a87e684b4e5a.
       hotkey={["shiftKey", "F8"]}
       customAriaLabel="Notifications (Shift+F8)"
       closeButton

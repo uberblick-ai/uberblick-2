@@ -74,7 +74,6 @@
    */
   --card-accent: light-dark(oklch(0.92 0.015 75), oklch(0.275 0.015 75));
 
-  /* Decision: 3b99506a-1ccd-453b-b01d-0eadef56f12f. */
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
 
@@ -127,7 +126,6 @@
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
 
-  /* Decision: 7fde74ef-5f4e-45bf-83ce-73354e2f38f1. */
   /* UI and prose use Geist; machine text uses Geist Mono. The document title
      and TL;DR heading share the Fraunces display stack. System fallbacks cover
      the font-swap period. */

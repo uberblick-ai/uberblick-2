@@ -1,4 +1,3 @@
-// Closed data vocabulary: 0c739c87-e48e-4981-a316-617448c2e15d
 export type JSONScalar = string | number | boolean | null;
 export type JSONValue = JSONScalar | JSONObject | JSONValue[];
 export interface JSONObject { [key: string]: JSONValue }

@@ -1,4 +1,3 @@
-// Data layout and validation: 0c739c87-e48e-4981-a316-617448c2e15d
 import type * as Y from "yjs";
 import { decisionContentLocked, getMeta } from "./doc.js";
 import { decisionTopicArchived } from "./directory.js";
