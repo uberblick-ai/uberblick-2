@@ -9,17 +9,12 @@ import {
 } from "@uberblick/schema";
 import { z } from "zod";
 
-// Identity is UUIDs, so the boundary checks for one. A tool that accepted any
-// string would let an agent persist an identity nothing can ever resolve.
+// Refuse identities that cannot resolve as document UUIDs.
 export const uuidArg = z.uuid().describe("Document UUID.");
 
 /**
- * `trim` before the length checks, and the order is the point: it makes both
- * bounds measure the description rather than the whitespace around it. Without
- * it `"   "` is a legal description — it would pass `min(1)`, be stored in the
- * document and the stub, and silence the very nudge that exists to get a real
- * one written. The parsed value is the trimmed one, so what is stored is what
- * was checked.
+ * Trim before measuring and storing; whitespace must not satisfy the minimum
+ * or silence the missing-description nudge.
  */
 export const descriptionArg = z
   .string({
@@ -60,16 +55,8 @@ export const decisionAnswerArg = z.object({
 export type DecisionAnswer = z.infer<typeof decisionAnswerArg>;
 
 /**
- * A title, trimmed before it is measured — the same discipline
- * {@link descriptionArg} has, and for the same reason: `"   "` would otherwise
- * be a legal title, stored in the document, cached in the stub, and answered
- * with by every discovery surface. Length is not bounded, because nothing
- * bounds a title anywhere else; emptiness is the only thing that makes a
- * document unfindable in a listing.
- *
- * `create_doc` and `set_metadata` share it so the MCP surface has one rule for
- * titles: neither tool can put a document into a state the other refuses to
- * leave it in.
+ * create_doc and set_metadata share one title rule: trim before measuring,
+ * refuse emptiness and impose no length bound.
  */
 export const titleArg = z
   .string()
@@ -85,37 +72,25 @@ export const documentStatusArg = z
   .enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES])
   .describe("The recorded lifecycle state. Its kind owns the legal values.");
 
-/** What `inline` is for, in the words an agent reads. */
 const INLINE_RUNS =
   "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: " +
   "`[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) " +
   "and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the " +
   "run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; " +
-  "tables also ignore it and take exactly one GFM table through `text`.\n\n" +
+  "tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\n" +
   "A `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", " +
   "marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this " +
   "replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes " +
   "nothing; an archived target is fine.";
 
 /**
- * `link`'s boundary check, kept identical to the schema's `isExternalHref`.
- *
- * At the input boundary rather than in the handler on purpose: a target the
- * model refuses is a wrong argument, and the MCP layer rejects those before a
- * handler runs and therefore before anything durable could change.
+ * Match the model's isExternalHref at the input boundary, before any writes.
  */
 const EXTERNAL_HREF = /^https?:\/\/\S+$/i;
 
 /**
- * A document reference's target, canonicalised at the boundary.
- *
- * One document has one spelling. An upper-cased uuid names the same document —
- * room names are case-sensitive keys, so `A…` and `a…` would be two rooms
- * holding one document — and the schema canonicalises it down at the write. Do
- * it here instead, once, so the directory lookup, the label, the write and the
- * answer all speak the id the model stores rather than the one the caller
- * happened to type. The refusal branch is `z.uuid`'s leftovers: this is the
- * model's own rule, not a second one.
+ * Canonicalize through the model before lookups and writes: case-sensitive
+ * room keys must not split one UUID into multiple rooms.
  */
 export const docLinkTargetArg = z
   .uuid("a document reference is a target document UUID, never a path or a title")
@@ -146,9 +121,7 @@ export const inlineArg = z
             docLink: docLinkTargetArg.optional(),
           })
           .strict()
-          // Refused as the wrong argument it is, not as a range conflict: one
-          // run carrying both link marks has no honest rendering, and there is
-          // nothing to re-read that would make the call valid.
+          // Both link marks are invalid input; rereading cannot repair the call.
           .refine(
             (marks) => marks.link === undefined || marks.docLink === undefined,
             "a run is an external link or a document reference, never both",
@@ -162,7 +135,7 @@ export const inlineArg = z
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+    "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
   ),
   level: z
     .number()
@@ -178,8 +151,5 @@ export const blockShape = {
   inline: inlineArg,
 };
 
-// Strict, like the sibling placement object: `create_doc`'s guarantee has to
-// reach inside the array, or a block carrying a key the schema never declared
-// is created with the key discarded. `insert_block` spreads the same shape at
-// its top level, where strictInput already applies the rule.
+// create_doc's nested seeds must refuse unknown keys as insert_block's root does.
 export const blockInputSchema = z.object(blockShape).strict();

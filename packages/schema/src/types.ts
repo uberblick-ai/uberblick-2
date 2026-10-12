@@ -1,10 +1,3 @@
-/**
- * The vocabulary of the uberblick document model.
- *
- * Terminology is stable and shared by every package: block, block id, block
- * type, annotation thread, directory entry, sidebar group.
- */
-
 /** Block types. The set is closed; a block type is a Y.XmlElement nodeName. */
 export const BLOCK_TYPES = [
   "paragraph",
@@ -16,6 +9,7 @@ export const BLOCK_TYPES = [
   "table",
   "terminal",
   "chart",
+  "card",
 ] as const;
 
 export type BlockType = (typeof BLOCK_TYPES)[number];
@@ -27,12 +21,8 @@ export function isBlockType(value: string): value is BlockType {
 }
 
 /**
- * The block types whose text is prose: they carry the inline mark set, and the
- * markdown reader resolves inline syntax inside them.
- *
- * `code`, `mermaid`, `terminal` and `chart` carry source text and only `comment`.
- * Tables carry structured cells with the same inline mark set; they
- * do not expose block-level link ranges or prose offsets.
+ * Prose admits inline marks and Markdown syntax; source blocks admit only comment.
+ * Tables and cards admit marks per cell or part, with no block-level offsets.
  */
 export const PROSE_BLOCK_TYPES = [
   "paragraph",
@@ -48,9 +38,7 @@ export function isProseBlockType(value: string): value is ProseBlockType {
 }
 
 /**
- * What a `list-item` block's marker looks like. A "list" is a run of adjacent
- * list-item blocks — markdown's own model, and the reason the document stays
- * flat: there is no list node to nest into.
+ * A list is adjacent flat list-item blocks; no list container node is stored.
  */
 export const LIST_STYLES = ["bullet", "ordered"] as const;
 
@@ -66,17 +54,9 @@ export type ListIndent = 0 | 1 | 2 | 3;
 export const MAX_LIST_INDENT = 3;
 
 /**
- * Inline formatting marks. The set is closed; a mark name is a Yjs text
- * formatting key on a block's Y.XmlText — see `marks.ts`.
- *
- * `comment` is not in here: it is the annotation anchor, not formatting, and it
- * is the one mark a `code` or `mermaid` block may carry.
- *
- * Inline code is `inlineCode`, not `code`, and the reason is structural rather
- * than stylistic: ProseMirror refuses a schema where one name is both a node and
- * a mark ("code can not be both a node and a mark"), and `code` is a block type.
- * A mark's name *is* its Yjs formatting key — y-prosemirror derives one from the
- * other in both directions — so the mark is what has to give way.
+ * Closed Yjs formatting keys, matching editor mark names. comment is an anchor,
+ * excluded from formatting; it alone is allowed on source blocks. Use inlineCode
+ * because ProseMirror disallows a node and mark sharing the name code.
  */
 export const INLINE_MARKS = [
   "bold",
@@ -94,13 +74,8 @@ export function isInlineMark(value: string): value is InlineMarkName {
 }
 
 /**
- * The inline marks covering one run of text.
- *
- * Four of them are flags; the two link marks carry a target. `link` is always
- * an external `http(s)` URL, and `docLink` is always a document uuid — an
- * inline doc-to-doc reference. They are the same affordance over two disjoint
- * target spaces, which is why nothing carries both: a write refuses the pair,
- * and a read resolves it in `docLink`'s favour (see `marks.ts`).
+ * Flags and disjoint link targets for one run. Writers refuse link/docLink
+ * pairs; merged pairs read as docLink (see marks.ts).
  */
 export interface InlineMarkSet {
   bold?: boolean;
@@ -120,23 +95,19 @@ export interface InlineRun {
 }
 
 /**
- * A block as read out of the document.
- *
- * `level` is present exactly for `heading`, `language` exactly for `code`
- * (possibly the empty string when no language was set), and `list`/`indent`
- * exactly for `list-item`.
+ * Read attributes appear only for their type: heading level, code language
+ * (empty if unset), or list-item list/indent.
  */
 export interface Block {
   id: string;
   type: BlockType;
   /**
-   * Prose is plain text, marks excluded. A table is canonical GFM projected
-   * from its cell text and inline marks. Prose marks use `getBlockInline`.
+   * Prose is plain text, marks excluded. Tables and cards are canonical Markdown
+   * projections from cell or part text and inline marks.
    */
   text: string;
   /**
-   * Content hash of type + text + attributes, for optimistic concurrency.
-   * Pass it back to `editBlock` to assert nothing changed since this read.
+   * Type/text/attribute hash for the local-replica edit guard; see rev.ts.
    */
   rev: string;
   level?: HeadingLevel;
@@ -160,27 +131,18 @@ export interface BlockInput {
   /** List items only. Clamped to 0–3, defaults to 0. Ignored for other types. */
   indent?: number;
   /**
-   * Formatted content, for the prose block types only — see
-   * {@link PROSE_BLOCK_TYPES}. When present it *replaces* `text`, so a caller
-   * setting both must keep them consistent; `importMarkdown` does.
-   *
-   * Ignored for source blocks and tables. A table input's `text` is GFM,
-   * with inline markdown in each cell supplying its text and marks.
+   * Overrides text for prose only; callers setting both must keep them consistent.
+   * Source blocks ignore it. Tables and cards use Markdown from their text instead.
    */
   inline?: InlineRun[];
 }
 
 /**
- * How long a document description may be.
- *
- * One or two sentences is the shape asked for; this is the ceiling that keeps a
- * listing readable, not a target. A description is written for an agent scanning
- * `list_docs` or `search` — it has to fit beside the title, or it stops being
- * cheaper than opening the document.
+ * Listing-description ceiling, not a target; use one or two sentences beside the title.
  */
 export const MAX_DESCRIPTION_LENGTH = 300;
 
-/** How long a person-facing document summary may be. */
+/** Ceiling for a person-facing summary of one or two plain-English sentences. */
 export const MAX_TLDR_LENGTH = 300;
 
 /** The document shapes whose lifecycle the schema records. */
@@ -217,11 +179,8 @@ export function isDocumentStatusForKind(
 }
 
 /**
- * The tolerant lifecycle read shared by a document and its directory stub.
- *
- * `kind` is valid on its own, while `status` is meaningful only for that kind.
- * A malformed or merged-mismatched status therefore disappears without hiding
- * a valid kind.
+ * Drop malformed or mismatched status without hiding a valid kind, in both
+ * document metadata and directory stubs.
  */
 export function readDocumentLifecycle(
   kind: unknown,
@@ -244,16 +203,11 @@ export interface DocMeta {
    */
   tags: string[];
   /**
-   * One or two sentences saying what this document is for, so a reader can
-   * judge relevance from a listing without opening it. Null when nobody has
-   * written one — documents created in the web UI start that way, and MCP's
-   * `create_doc` refuses to.
+   * Null if unwritten: the web allows it, while MCP create_doc requires one.
    */
   description: string | null;
   /**
-   * One or two plain-English sentences for a person opening the document.
-   * Optional for additive consumers; `getMeta` normalizes an unwritten value to
-   * null.
+   * Optional for additive consumers; getMeta normalizes unwritten values to null.
    */
   tldr?: string | null;
   /** The record shape. Absent means an ordinary document. */
@@ -266,6 +220,8 @@ export interface DocMeta {
   topic?: string;
   /** Earlier decision this decision replaces, by immutable document UUID. */
   supersedes?: string;
+  /** Explicit discussion document; null means this record has none. */
+  discussion?: string | null;
   /** Whether the answer records an agent's initial stance. */
   agentStance?: boolean;
   /** Person whose answer was recorded. */
@@ -274,7 +230,7 @@ export interface DocMeta {
   decidedAt?: string;
   /** Where the person's answer was given. */
   decidedWhere?: string;
-  /** Approved title, decision line and ordered block text; a change detector. */
+  /** Approved title, decision line, ordered block text and structured data; a change detector. */
   approvalFingerprint?: string;
   /** Why a person rejected the proposal. */
   rejectionReason?: string;
@@ -300,7 +256,7 @@ export interface DecisionTopicResolution {
   archived: boolean;
 }
 
-/** One topic in a requirement's derived decision log. */
+/** One topic in a regular page's derived decision log. */
 export type DecisionReference = DecisionTopicResolution;
 
 export interface AnnotationComment {
@@ -311,15 +267,8 @@ export interface AnnotationComment {
 }
 
 /**
- * One annotation thread as a reader sees it: the materialised view of the
- * thread's own Y.Map in the `annotations` Y.Map, with the comments Yjs holds
- * nested inside it flattened into a plain array. Reading this shape is not
- * writing it — `annotations.ts` owns the stored layout and the rules that come
- * with it.
- *
- * The thread carries no positions. Its range lives in the document text as a
- * `comment` formatting mark holding this thread's id, so the range survives
- * concurrent edits, block splits and re-types — see `annotations.ts`.
+ * Materialized read, not the stored write shape; annotations.ts owns the nested
+ * Y.Map/Y.Array layout. Positions live in text marks, never in this thread value.
  */
 export interface Annotation {
   id: string;
@@ -329,12 +278,7 @@ export interface Annotation {
 }
 
 /**
- * The formatting-mark key that anchors annotation ranges.
- *
- * Not one of {@link INLINE_MARKS}: it is the one mark every block type may
- * carry, formatting or not. It lives here rather than in `annotations.ts` because
- * the marks module has to know the name to tell an anchor apart from formatting,
- * and vocabulary belongs in the vocabulary module.
+ * Shared anchor key, distinct from INLINE_MARKS and allowed on every block type.
  */
 export const COMMENT_MARK = "comment";
 
@@ -350,17 +294,17 @@ export function isCommentMark(value: unknown): value is CommentMark {
   return typeof threadId === "string" && threadId !== "";
 }
 
-/** A resolved range inside a block's text, or one projected table cell's text. */
+/** A resolved range inside block, table-cell or card-part text. */
 export interface AnnotationRange {
+  /** Card prose part; absent for prose and table ranges. */
+  part?: "label" | "title" | "body" | "footer";
   /** Table-cell coordinates in the GFM projection; absent for prose ranges. */
   row?: number;
   column?: number;
   start: number;
   end: number;
   /**
-   * True when the marked span resolves to zero length. Not reachable through
-   * this package's own writers — a fully deleted span loses its mark and
-   * resolves to `null` instead — but a foreign writer can leave one behind.
+   * Foreign zero-length span. Local full deletions lose the mark and resolve to null.
    */
   collapsed: boolean;
 }
@@ -373,23 +317,17 @@ export interface DirectoryEntry {
   tags: string[];
   deleted?: boolean;
   /**
-   * When the document was created, epoch ms on the creating replica's clock.
-   * Absent for stubs written before the field existed, until something
-   * backfills them.
+   * Epoch ms on the creating replica's clock; absent until supplied or backfilled.
    */
   createdAt?: number;
   /**
-   * When a replica authored a document change, epoch ms on that replica's
-   * clock. Concurrent candidates resolve to the greater finite stamp. Coarse
-   * by design and cache-quality: a freshness hint to sort by, never history.
-   * Absent until something stamps it.
+   * Authoring replica's epoch ms; greater finite concurrent stamps win. A coarse
+   * freshness hint, never history; absent until stamped.
    */
   updatedAt?: number;
   /**
-   * The document's description, mirrored here like the title so a listing can
-   * answer with it without opening a single room. `meta.description` in the
-   * document is authoritative; this is a cache repaired on write and on
-   * connect. Absent when the document has none.
+   * Listing cache of authoritative meta.description, repaired on write/connect.
+   * Absent when the document has no description.
    */
   description?: string;
   /** Cached record shape; absent means an ordinary document. */
@@ -400,7 +338,11 @@ export interface DirectoryEntry {
   governs?: string;
   topic?: string;
   supersedes?: string;
+  /** Explicit discussion; absence means an older client has not cached it. */
+  discussion?: string | null;
   tldr?: string;
+  /** Derived answer text; absence means an older client has not cached it. */
+  answerPreview?: string | null;
   agentStance?: boolean;
   decidedBy?: string;
   decidedAt?: string;

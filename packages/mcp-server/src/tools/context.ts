@@ -1,6 +1,7 @@
 import {
   decisionApprovalChanged,
   decisionApprovalFingerprint,
+  decisionContentLocked,
   decisionRelations,
   decisionTopicArchived,
   getBlocksWithInline,
@@ -10,6 +11,9 @@ import {
   isProseBlockType,
   parseTableCell,
   parseTableInput,
+  parseCardInput,
+  parseInline,
+  CARD_PARTS,
   readDirectoryTags,
   readDocumentTags,
   resolveAnnotationRange,
@@ -54,12 +58,7 @@ const TLDR_MISSING_NUDGE =
   "English for a person opening it.";
 
 /**
- * One input run's marks as the model's mark set.
- *
- * Zod spells an optional property `T | undefined`; the model spells it absent —
- * and absent is what the model means, since a flag it reads as anything but
- * `true` is not that mark. So a key nobody set, and a flag explicitly set to
- * `false`, both simply do not appear.
+ * Only true flags are model marks; omit false and undefined input properties.
  */
 function inlineMarks(
   marks: NonNullable<z.infer<typeof inlineArg>>[number]["marks"],
@@ -75,12 +74,7 @@ function inlineMarks(
 }
 
 /**
- * One block input, ready for the schema.
- *
- * `inline` arrives already resolved — see `resolveInline`, which fills an empty
- * docLink label with the target's title and refuses a target this replica has
- * never heard of. Resolution happens before this because it can fail, and a
- * refusal must leave nothing written.
+ * Inline runs must already be resolved; target refusals must precede all writes.
  */
 function toBlockInput(
   input: z.infer<typeof blockInputSchema>,
@@ -98,6 +92,7 @@ function toBlockInput(
 }
 
 /** Shared per-server helpers; each closure keeps the registering replica and briefing. */
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing, work: ServerWork, help = new HelpCatalog()) {
 
   /** One refusal builder; callers retain their original message and identity field. */
@@ -119,13 +114,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Resolve a document, or fail with a hub-aware message: a uuid in the
-   * directory whose room has not reached this replica yet is a different
-   * problem from a uuid nobody has heard of, and saying which is more useful
-   * than "not found".
-   *
-   * A uuid nobody has heard of must not be opened as a room: joining one would
-   * create an empty document on the hub for what is almost certainly a typo.
+   * Refuse unknown UUIDs before joining a room: a typo would create an empty
+   * document on the hub. Known but unhydrated rooms get a separate refusal.
    */
   const requireDoc = (uuid: string): Replica => {
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
@@ -135,17 +125,11 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
     const replica = replicas.replica(uuid);
     if (getMeta(replica.doc).uuid !== "") {
-      // This boundary is what "working in a document" means: every tool that
-      // reads or writes the room comes through here, and the ones that answer
-      // from the derived index or the directory stub — `list_docs`, `search`,
-      // `backlinks`, `archive_doc`, `restore_doc` — deliberately do not.
+      // Touch only tools that access the document room; directory/index reads
+      // and archive/restore do not announce document activity.
       replicas.touch(replica);
       return replica;
     }
-    // Whether waiting can work is a fact about the hub, not about the document:
-    // a room arrives over a connection, so a replica with none is not waiting
-    // for anything. `hydrationRecovery` turns the hub state this failure is
-    // already carrying into the class and the sentence that go with it.
     const hub = replicas.sync.state();
     throw new ToolError(
       "doc_not_hydrated",
@@ -160,18 +144,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Resolve a document for an operation that writes only its directory stub.
-   *
-   * Deliberately weaker than {@link requireDoc}: archiving and restoring change
-   * the directory, not the document, so demanding that the document itself have
-   * reached this replica would strand exactly the case that needs the tool — a
-   * fresh server that knows an archived document only from the directory could
-   * never restore it, because an archived room is not one `adoptKnownDocs`
-   * attaches.
-   *
-   * A uuid the directory has never seen is still refused. Tombstoning a typo
-   * would publish an entry for a document that never existed, and a tombstone
-   * is sticky.
+   * Archive/restore need only a directory stub; archived rooms may never attach.
+   * Refuse unknown UUIDs to avoid publishing sticky tombstones for typos.
    */
   const requireStub = (uuid: string): DirectoryEntry => {
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
@@ -182,22 +156,9 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Resolve a document for a write. The one choke point every mutator that
-   * touches a document goes through — archived means read-only. Content
-   * mutators also request the decided-record refusal; comments and metadata
-   * outside the approved content need only the archive check.
-   *
-   * The archive check comes before {@link requireDoc} on purpose: an archived
-   * room is not one `adoptKnownDocs` attaches, so a replica that knows the
-   * document only from the directory would otherwise answer `doc_not_hydrated`
-   * — technically true, and useless. The caller needs to hear `restore_doc`.
-   *
-   * Scope, as the lifecycle help topic states it to agents:
-   * this reads THIS replica's stub at call time. There is no cross-replica
-   * lock, so an edit racing an archive that has not arrived yet is an ordinary
-   * CRDT write and merges. Enforcement is refusal-at-call — a client
-   * convention, which is all the spike has; real enforcement belongs to the
-   * hosted-auth era.
+   * Check archive state before hydration so detached archived rooms say restore.
+   * Only content mutators request the decided-record lock. These checks use
+   * local state at call time; they do not lock out concurrent remote edits.
    */
   const requireWritableDoc = (uuid: string, contentMutation = false): Replica => {
     if (decisionTopicArchived(replicas.directory().doc, uuid)) {
@@ -209,8 +170,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
     const replica = requireDoc(uuid);
     const meta = getMeta(replica.doc);
-    if (contentMutation && meta.kind === "decision" && meta.status === "decided") {
-      throw new ToolError("decision_read_only", "A decided record's title, decision line, blocks and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
+    if (contentMutation && decisionContentLocked(meta)) {
+      throw new ToolError("decision_read_only", "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
     return replica;
   };
@@ -238,8 +199,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * The document's own title where this replica holds it, the stub's cached one
-   * otherwise — `meta.title` wins whenever there is a document to ask.
+   * Prefer hydrated metadata over the directory's cached title.
    */
   const titleFor = (uuid: string, stub: DirectoryEntry): string =>
     replicas.hydrated(uuid)
@@ -249,6 +209,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   /** The settings doc is the one catalog authority every tag path resolves. */
   const tagCatalog = () => replicas.settings().doc;
 
+  /** Normalize directory descriptions and resolve tags through the settings catalog. */
   const decisionEntryJson = (entry: DirectoryEntry) => ({
     ...entry, tags: readDirectoryTags(entry, tagCatalog()),
     ...(entry.kind === "decision" ? { deleted: decisionTopicArchived(replicas.directory().doc, entry.uuid) } : {}),
@@ -272,18 +233,12 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     };
   };
 
-  /** A document's assignments in the public id/name/state shape. */
   const documentTags = (replica: Replica) =>
     readDocumentTags(replica.doc, tagCatalog());
 
   /**
-   * The title an inline reference to `docId` is written with, or a refusal.
-   *
-   * Refusing is the honest half: offline the directory hydrates from the log
-   * like any other document, so "this replica has never heard of it" is not
-   * "it does not exist" — hence the named code and the hub state, rather than
-   * `doc_not_found`. An ARCHIVED target resolves: a tombstoned stub is still a
-   * document, and reading one is allowed.
+   * Local absence is not global absence; retain the doclink-specific refusal
+   * and hub state. Archived targets still resolve through their stubs.
    */
   const linkTitle = (docId: string): string => {
     const stub = getDirectoryEntry(replicas.directory().doc, docId);
@@ -294,14 +249,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * Resolve an input's inline runs before a single byte is written.
-   *
-   * The one write that resolves a title: an empty-labelled docLink run gets the
-   * target's current title, because a label is display text fixed at the moment
-   * the link is made. A resolved title that is itself empty — a document the
-   * web UI created and nobody has named — falls back to the uuid, since
-   * `applyInlineRuns` drops an empty run and a dropped run is a link silently
-   * lost.
+   * Resolve labels before writing: use the target's current title, fixed when
+   * linked. Fall back to its UUID if empty, since applyInlineRuns drops empty runs.
    */
   const resolveInline = (
     runs: z.infer<typeof inlineArg>,
@@ -310,8 +259,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       const marks = inlineMarks(run.marks);
       const docId = marks.docLink;
       if (docId === undefined) return { text: run.text, marks };
-      // Resolved even when a label is already written: an unknown target is
-      // refused either way, so a citation never points at nothing.
+      // Validate targets even when the caller supplies a label.
       const title = linkTitle(docId);
       if (run.text !== "") return { text: run.text, marks };
       return { text: title === "" ? docId : title, marks };
@@ -336,6 +284,19 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
   };
 
+  /** Existing targets in a part survive even when this replica no longer knows them. */
+  const validateCardTargets = (source: string, previous?: string): void => {
+    const card = parseCardInput(source);
+    const oldCard = previous === undefined ? undefined : parseCardInput(previous, false);
+    for (const part of CARD_PARTS) {
+      if (card[part] === oldCard?.[part]) continue;
+      const oldTargets = new Set(parseInline(oldCard?.[part] ?? "").map(run => run.marks.docLink));
+      for (const run of parseInline(card[part])) {
+        if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
+      }
+    }
+  };
+
   /**
    * Resolve `inline` only for prose; source blocks ignore it, and tables read
    * their cell marks from GFM. Validate all seeds before create_doc opens a room.
@@ -343,10 +304,9 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   const blockInputFor = (
     block: z.infer<typeof blockInputSchema>,
   ): BlockInput => {
-    // Validate every seed before create_doc opens its first room. Schema also
-    // checks at its write boundary, but a bad later seed must not leave an
-    // earlier block or document metadata behind.
+    // A bad later seed must not leave earlier blocks or metadata behind.
     if (block.type === "table") validateTableTargets(block.text ?? "");
+    if (block.type === "card") validateCardTargets(block.text ?? "");
     return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
@@ -354,11 +314,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /**
-   * A document's blocks as a read answers with them: every block exactly as it
-   * has always been, plus the inline references it carries.
-   *
-   * `doc_links` names prose character ranges; table cell links are carried by
-   * their inline markdown in `text`, which also determines the table's `rev`.
+   * doc_links exposes prose ranges; table links stay in GFM text and its rev.
    */
   const blocksJson = (replica: Replica): Record<string, unknown>[] =>
     getBlocksWithInline(replica.doc).map(({ block, inline }) => {
@@ -367,19 +323,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     });
 
   /**
-   * The backfill nudge, on every mutating answer for a document that has no
-   * description.
-   *
-   * Enforcement is asymmetric on purpose: `create_doc` refuses without one, but
-   * the web UI creates documents that have none, and refusing to edit those
-   * would punish the agent for somebody else's omission. So a write succeeds and
-   * says what is missing — and it says it to exactly the right party, since an
-   * agent already working inside a document is the one who can describe it.
-   *
-   * Sitting in {@link durability} rather than in each handler is deliberate:
-   * every mutator that touches a document goes through it, including ones
-   * written later. The workspace's own rooms are skipped — the directory and
-   * the sidebar are not documents and have no description to miss.
+   * create_doc requires a description, but existing documents may lack one.
+   * All document writes nudge without refusing; workspace-owned rooms are exempt.
    */
   const descriptionGap = (replica: Replica): Record<string, unknown> => {
     if (replica.isDirectory || replica.isSidebar || replica.isSettings) {
@@ -407,20 +352,13 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** A non-blocking reminder returned only after document content changes. */
   const tldrReview = (replica: Replica): Record<string, unknown> =>
-    getMeta(replica.doc).tldr === null
+    getMeta(replica.doc).kind === "decision" ? {} : getMeta(replica.doc).tldr === null
       ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
       : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };
 
   /**
-   * What a mutating tool owes its caller: the write landed locally, and whether
-   * it has reached the hub — which, right after a write, it has not.
-   *
-   * `synced` is "the hub acknowledged it", never "the hub stored it"; see
-   * the tool-contracts help topic for the window that distinction leaves open.
-   *
-   * `assertHealthy` runs here, after the write: an append that failed during
-   * *this* call must not be reported as applied. It throws, so the tool answers
-   * with `persistence_failed` instead.
+   * Check health after the write: a refused append must not report applied.
+   * synced means hub acknowledgement, never hub storage.
    */
   const durability = (replica: Replica): Record<string, unknown> => {
     replicas.assertHealthy();
@@ -440,15 +378,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   });
 
   /**
-   * The same honesty for a call that mutated more than one room.
-   *
-   * The rooms are independently logged, independently sent and independently
-   * acknowledged, so one boolean cannot describe them: `rooms` says where each
-   * one stands, and the aggregate `synced` is the AND over all of them — never
-   * true while a room this call touched is still pending. `applied` stays a
-   * single word because it is one: {@link Replicas.assertHealthy} throws unless
-   * every append reached the log, so the call either answers with all of them
-   * durable or fails as `persistence_failed`.
+   * Rooms persist and sync independently; report each and AND their synced flags.
+   * Check health first so applied: true requires every append to be durable.
    */
   const durabilityAcross = (
     primary: Replica,
@@ -500,6 +431,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     decisionReadJson,
     annotationJson,
     validateTableTargets,
+    validateCardTargets,
     contentDurability,
     titleFor,
     linkTitle,

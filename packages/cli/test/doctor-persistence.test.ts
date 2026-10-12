@@ -17,8 +17,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
-import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
 import {
   directoryRoom,
@@ -35,7 +35,8 @@ import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
 import type { Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
+import { DEAD_HUB_URL, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "c4ee1905-90e4-42df-8a4c-ed6ce9cbe531";
 const DOCUMENT = "13b04df6-1c7b-45f1-9ec9-5f22034f71d3";
@@ -52,7 +53,7 @@ async function database(
   box: Sandbox,
   env: NodeJS.ProcessEnv = {},
 ): Promise<{ check: Check; report: DoctorReport; status: number | null }> {
-  const run = await runUbAsync(["doctor", "--json"], box, {
+  const run = await runInProcess(["doctor", "--json"], box, {
     PORT: "1",
     HUB_HOST: "127.0.0.1",
     ...env,
@@ -520,7 +521,7 @@ describe("ub doctor observational database reading", () => {
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const env = { UBERBLICK_DB: databasePath, UB_TEST_MAX_WAIT_MS: "2000" };
 
-    const status = await runUbAsync(["status", "--json"], box, env);
+    const status = await runInProcess(["status", "--json"], box, env);
     const snapshot = JSON.parse(status.stdout);
     expect(status.status).toBe(0);
     expect(snapshot.connection.state).toBe("failed");
@@ -531,7 +532,7 @@ describe("ub doctor observational database reading", () => {
     expect(report.persistence?.message).toContain(REFUSED);
     expect(report.hub.status).toBe("quarantined");
 
-    const human = await runUbAsync(["status"], box, env);
+    const human = await runInProcess(["status"], box, env);
     expect(human.status).toBe(0);
     expect(human.stdout).toContain("problems    local persistence failed\n              → ub doctor for details\n");
     expect(human.stdout).not.toContain(directoryRoom(WORKSPACE));

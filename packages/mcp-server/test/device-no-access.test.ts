@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { readHubLogins, writeHubLogin } from "@uberblick/hub/auth-store";
+import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import type { Rig } from "./helpers.js";

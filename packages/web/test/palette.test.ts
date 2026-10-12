@@ -42,6 +42,11 @@ import { mountEditor } from "./helpers.js";
 describe("the palette is exactly the schema's block types", () => {
   it("declares the schema's block nodes, seven marks, and nothing else", () => {
     expect(Object.keys(uberblickSchema.nodes).sort()).toEqual([
+      "card",
+      "cardBody",
+      "cardFooter",
+      "cardLabel",
+      "cardTitle",
       "chart",
       "code",
       "doc",
@@ -67,6 +72,7 @@ describe("the palette is exactly the schema's block types", () => {
       "table",
       "terminal",
       "chart",
+      "card",
     ]);
     // The closed mark set: the schema package's six inline marks, plus the
     // annotation anchor.
@@ -98,7 +104,7 @@ describe("the palette is exactly the schema's block types", () => {
   it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
-    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table")) {
+    for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card")) {
       const type = uberblickSchema.nodes[name];
       expect(type).toBeDefined();
       expect(type?.allowsMarkType(uberblickSchema.marks[COMMENT_MARK]!)).toBe(true);
@@ -168,7 +174,7 @@ describe("the palette is exactly the schema's block types", () => {
    * bindable (the gate opens), renders as marked text carrying its class, and
    * one whose target the schema package's reader rejects keeps the editor shut
    * — a web `Y.Text` write bypasses the model boundary, so the gate is where
-   * the shape is checked. Input rules and navigation are #444's.
+   * the shape is checked. Input rules and navigation are tested separately.
    */
   it("binds and renders a stored docLink, and refuses a malformed one", () => {
     const target = "0189abcd-2222-4333-8444-555566667777";
@@ -481,7 +487,7 @@ describe("foreign blocks already in the document", () => {
     // The reason is its own, and so is what the reader is told: `link` is a
     // supported mark, so calling this an unsupported type would name the wrong
     // thing and leave nobody anything to do about it.
-    // …and what it leaves the reader to do is now in the browser (#451), not in
+    // …and what it leaves the reader to do is available in the browser, not in
     // a tool suite they may not have. An archived document, which takes no
     // write at all, is pointed at Restore instead.
     const said = describeForeignBlocks(foreign);
@@ -520,7 +526,7 @@ describe("foreign blocks already in the document", () => {
   });
 
   /**
-   * The repair's own scan, and why it is not the gate's (#451).
+   * The repair's own scan, and why it is not the gate's.
    *
    * `findForeignBlocks` reports one reason per top-level block and stops at the
    * first, because the banner counts blocks. A repair list built on that would

@@ -9,26 +9,27 @@ import type { Server, Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
-import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/hub/protocol";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import type { HubFailureCause } from "@uberblick/mcp-server";
-import { CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/hub/token";
+import { CLOCK_SKEW_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import * as budget from "../src/budget.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
-import { doctorReport, renderDoctor } from "../src/doctor.js";
+import { doctorCommand, doctorReport, renderDoctor } from "../src/doctor.js";
 import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
 import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
-import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
+import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const PINNED = "3e8b1d09-47af-4c62-8f10-95d3c7b6a204";
 const SECRET = "doctor-test-signing-secret-4b91c7";
-const NAMES = ["workspace", "login", "database", "hub", "clock", "local hub", "mcp"];
+const NAMES = ["workspace", "login", "database", "hub", "clock", "local hub", "web server", "mcp"];
 const hubs: Hub[] = [];
 const deviceHubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
 const servers: { server: Server | HttpServer; sockets: Socket[] }[] = [];
@@ -45,6 +46,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const hub of hubs.splice(0)) await hub.stop();
   for (const hub of deviceHubs.splice(0)) await hub.close();
   for (const { server, sockets } of servers.splice(0)) {
@@ -98,7 +100,9 @@ async function silentServer(offsetSeconds: number | null = 0): Promise<{ port: n
 
 async function doctor(box: Sandbox, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ report: DoctorReport; checks: Map<string, Check>; ok: boolean }> {
   const { report } = await doctorReport({ env: { ...box.env, PORT: "1234", HUB_HOST: "127.0.0.1", CODEX_HOME: join(homeOf(box), ".codex"), ...extraEnv }, cwd: box.cwd });
+  expect(report.checks.map(one => one.name)).toEqual(NAMES);
   for (const one of report.checks) {
+    expect(Object.keys(one).sort()).toEqual(["fix", "name", "reason", "status"]);
     expect(one.status).toMatch(/^(pass|warn|fail|skipped)$/);
     expect(one).toHaveProperty("fix");
     expect(one).not.toHaveProperty("remedy");
@@ -106,14 +110,14 @@ async function doctor(box: Sandbox, extraEnv: NodeJS.ProcessEnv = {}): Promise<{
       expect(one.fix).toEqual(expect.any(String));
       expect(one.fix).not.toBe("");
     } else expect(one.fix).toBeNull();
-    for (const line of [one, ...(one.listeners ?? [])]) {
-      expect(line.reason).not.toMatch(/[`\r\n]/);
-      if (line.fix !== null) {
-        expect(line.fix).not.toMatch(/[`\r\n]/);
-        expect(line.fix).not.toBe(line.reason);
-      }
+    expect(one.reason).not.toMatch(/[`\r\n]/);
+    if (one.fix !== null) {
+      expect(one.fix).not.toMatch(/[`\r\n]/);
+      expect(one.fix).not.toBe(one.reason);
     }
   }
+  const local = report.checks.find(one => one.name === "local hub");
+  expect(`${local?.reason} ${local?.fix ?? ""}`).not.toMatch(/web server|web app/);
   expect(report.ok).toBe(!report.checks.some((one) => one.status === "fail"));
   return { report, checks: new Map(report.checks.map((one) => [one.name, one])), ok: report.ok };
 }
@@ -124,18 +128,6 @@ function check(checks: Map<string, Check>, name: string): Check {
   return found;
 }
 
-function listener(checks: Map<string, Check>, name: "web server" | "hub listener"): Check {
-  const combined = check(checks, "local hub");
-  const detail = combined.listeners?.find((one) => one.name === name);
-  if (detail !== undefined) return detail;
-  // Equal listener verdicts share one serialized row; select its relevant
-  // reason without letting the other listener's text affect assertions.
-  const marker = `${name}: `;
-  const start = combined.reason.indexOf(marker);
-  return start === -1 ? combined : { ...combined,
-    reason: combined.reason.slice(start + marker.length).split("; hub listener: ")[0] ?? "" };
-}
-
 async function mcpDoctor(
   box: Sandbox,
   extraEnv: NodeJS.ProcessEnv = {},
@@ -143,14 +135,16 @@ async function mcpDoctor(
   // PORT and HUB_HOST are the hub's half of the port configuration, and a
   // developer's shell may well have them: every test names them itself so the
   // listener checks answer about the fixture rather than about the machine.
-  const run = await runUbAsync(["doctor", "--json"], box, {
+  const run = await runInProcess(["doctor", "--json"], box, {
     PORT: "1",
     HUB_HOST: "127.0.0.1",
     CODEX_HOME: join(homeOf(box), ".codex"),
     ...extraEnv,
   });
   const report = JSON.parse(run.stdout) as { ok: boolean; checks: Check[] };
+  expect(report.checks.map(one => one.name)).toEqual(NAMES);
   for (const one of report.checks) {
+    expect(Object.keys(one).sort()).toEqual(["fix", "name", "reason", "status"]);
     expect(one.status).toMatch(/^(pass|warn|fail|skipped)$/);
     expect(one).toHaveProperty("fix");
     expect(one).not.toHaveProperty("remedy");
@@ -236,8 +230,9 @@ function deviceBox(endpoint: string, username = "doctor-person"): Sandbox {
 }
 
 describe("ub doctor", () => {
-  it("reports exactly the seven ordered checks without configuration", async () => {
-    const { checks, ok } = await doctor(unboundSandbox());
+  it("reports exactly the eight ordered checks without configuration and probes only the web port", async () => {
+    const dial = vi.spyOn(probes, "probeHubState");
+    const { checks, ok } = await doctor(unboundSandbox(), { PORT: "invalid" });
     expect([...checks.keys()]).toEqual(NAMES);
     for (const one of checks.values()) expect(one.reason).not.toBe("");
     expect(check(checks, "workspace")).toEqual({
@@ -245,6 +240,10 @@ describe("ub doctor", () => {
       fix: "ub workspace create <name>, or ub workspace use <link|id>",
     });
     expect(ok).toBe(false);
+    expect(check(checks, "local hub")).toEqual({ name: "local hub", status: "skipped",
+      reason: "no workspace is configured", fix: null });
+    expect(dial).not.toHaveBeenCalled();
+    expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
   });
 
   it("skips login, hub and clock for local admission without reading a clock", async () => {
@@ -260,7 +259,7 @@ describe("ub doctor", () => {
     expect(hubProbe).not.toHaveBeenCalled();
     expect(clockProbe).not.toHaveBeenCalled();
     expect(server.clockRequests).toBe(0);
-    expect(listener(checks, "hub listener").reason).toMatch(/without a signing secret/);
+    expect(check(checks, "local hub").reason).toMatch(/without a signing secret/);
   });
 
   it("reports the default database path and absent local secret", async () => {
@@ -268,9 +267,9 @@ describe("ub doctor", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${port}` } });
     const { checks } = await doctor(box, { PORT: String(port) });
     expect(check(checks, "database").reason).toContain(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`));
-    expect(listener(checks, "hub listener").status).toBe("skipped");
-    expect(listener(checks, "hub listener").reason).toMatch(/no signing secret in force/);
-    expect(listener(checks, "hub listener").reason).not.toMatch(/ub open starts/);
+    expect(check(checks, "local hub").status).toBe("skipped");
+    expect(check(checks, "local hub").reason).toMatch(/no signing secret in force/);
+    expect(check(checks, "local hub").reason).not.toMatch(/ub open starts/);
   });
 
   it("reports the complete environment binding ahead of the project file", async () => {
@@ -368,7 +367,7 @@ describe("ub doctor", () => {
       ...(host === "ws://127.0.0.1" ? { userConfig: { hubAdmissions: { [endpoint]: "device" } } } : {}),
       credentials: { signingSecret: SECRET } });
     const dial = vi.spyOn(probes, "probeHubState");
-    const { checks } = await doctor(box);
+    const { checks } = await doctor(box, { PORT: "invalid" });
     expect(check(checks, "login")).toEqual({ name: "login", status: "fail",
       reason: `not signed in to ${authenticationOrigin(endpoint)}`, fix: `ub auth login ${authenticationOrigin(endpoint)}` });
     expect(check(checks, "hub").status).toBe("skipped");
@@ -376,6 +375,9 @@ describe("ub doctor", () => {
     expect(check(checks, "clock").status).toBe("skipped");
     expect(dial).not.toHaveBeenCalled();
     expect(server.clockRequests).toBe(0);
+    expect(check(checks, "local hub")).toEqual({ name: "local hub", status: "skipped",
+      reason: `no local hub is used; this workspace syncs through ${authenticationOrigin(endpoint)}`, fix: null });
+    expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
   });
 
   it.each(["ws://0.0.0.0", "ws://127.0.0.1"])("passes stored login and real device admission through %s", async host => {
@@ -395,7 +397,8 @@ describe("ub doctor", () => {
     expect(remote.authentications.length).toBeGreaterThan(0);
     expect(JSON.stringify(report)).not.toContain(SECRET);
     expect(JSON.stringify(report)).not.toContain(login.credential.key);
-    expect(check(checks, "local hub").listeners).toBeUndefined();
+    expect(check(checks, "local hub")).toEqual({ name: "local hub", status: "skipped",
+      reason: `no local hub is used; this workspace syncs through ${authenticationOrigin(endpoint)}`, fix: null });
   });
 
   it("keeps a stopped device hub as a warning after a ready login", async () => {
@@ -529,7 +532,7 @@ describe("ub doctor", () => {
     },
   );
 
-  it("skips a free local listener and renders one line when both listeners skip", async () => {
+  it("skips each free local listener and renders one line for each check", async () => {
     const port = await freePort();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${port}` }, credentials: { signingSecret: SECRET } });
     const { report, checks } = await doctor(box, { PORT: String(port) });
@@ -537,6 +540,9 @@ describe("ub doctor", () => {
     expect(check(checks, "local hub").reason).toMatch(/ub open/);
     expect(check(checks, "local hub").reason).toMatch(/not running/);
     expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+local hub\s/.test(line))).toHaveLength(1);
+    expect(check(checks, "web server").status).toBe("skipped");
+    expect(check(checks, "web server").reason).toMatch(/not running.*ub open starts it/);
+    expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+web server\s/.test(line))).toHaveLength(1);
   });
 
   it("passes a running local hub and skips its clock check", async () => {
@@ -547,8 +553,7 @@ describe("ub doctor", () => {
     expect(check(checks, "hub").status).toBe("skipped");
     expect(check(checks, "clock").status).toBe("skipped");
     expect(check(checks, "local hub").status).toBe("pass");
-    expect(listener(checks, "hub listener").status).toBe("pass");
-    expect(listener(checks, "hub listener").reason).toMatch(/held by an uberblick hub/);
+    expect(check(checks, "local hub").reason).toMatch(/held by an uberblick hub/);
   });
 
   it("names both causes when the local hub refuses the secret", async () => {
@@ -569,7 +574,7 @@ describe("ub doctor", () => {
     pointAt(box, `ws://[::1]:${hub.port}`);
     const { checks } = await doctor(box, { PORT: String(hub.port), HUB_HOST: undefined });
     expect(check(checks, "hub").status).toBe("skipped");
-    const local = listener(checks, "hub listener");
+    const local = check(checks, "local hub");
     expect(local.status).toBe(status);
     expect(local.reason).toContain(`[::1]:${hub.port}`);
     expect(local.reason).toMatch(status === "pass" ? /held by an uberblick hub/ : /refused the signing secret/);
@@ -628,7 +633,7 @@ describe("ub doctor", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://[::1]:${port}` }, credentials: signingSecret === undefined ? undefined : { signingSecret } });
     const dial = vi.spyOn(probes, "probeHubState");
     const { checks } = await doctor(box, { PORT: String(port), HUB_HOST: undefined });
-    const local = listener(checks, "hub listener");
+    const local = check(checks, "local hub");
     expect(local.status).toBe(status);
     expect(local.reason).toContain(`[::1]:${port}`);
     expect(local.reason).toMatch(status === "fail" ? /not an uberblick hub/ : /without a signing secret/);
@@ -661,14 +666,14 @@ describe("ub doctor", () => {
     const { checks } = await doctor(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } }));
     expect(check(checks, "local hub").status).toBe("fail");
     expect(check(checks, "local hub").reason).toMatch(/websocket|ws:/);
-    expect(listener(checks, "hub listener").reason).not.toMatch(/ub open starts/);
+    expect(check(checks, "local hub").reason).not.toMatch(/ub open starts/);
   });
 
   it("does not promise ub open will start a refused secure local endpoint", async () => {
     const port = await freePort();
     const { checks } = await doctor(sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `wss://127.0.0.1:${port}` }, credentials: { signingSecret: SECRET } }), { PORT: String(port) });
-    expect(listener(checks, "hub listener").reason).not.toMatch(/ub open starts/);
-    expect(listener(checks, "hub listener").reason).toMatch(/wss|TLS|secure/i);
+    expect(check(checks, "local hub").reason).not.toMatch(/ub open starts/);
+    expect(check(checks, "local hub").reason).toMatch(/wss|TLS|secure/i);
   });
 
   it.each([["62s fast", -62, "ahead of"], ["62s slow", 62, "behind"]] as const)("fails a device workspace clock %s", async (_name, offsetSeconds, direction) => {
@@ -729,52 +734,78 @@ describe("ub doctor", () => {
     expect(server.clockRequests).toBe(1);
   });
 
-  it.each([["ub-open", "pass"], ["foreign", "fail"], ["unidentified", "skipped"]] as const)("reports the default web port held by %s as %s for a device workspace", async (holder, status) => {
+  describe.each(["local", "device", "unconfigured"] as const)("web server for a %s workspace", kind => {
     const endpoint = "wss://hub.example.invalid";
-    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
-    vi.mocked(probes.probePort).mockResolvedValue({ host: open.WEB_HOST, port: open.DEFAULT_WEB_PORT, state: "in-use", code: null });
-    const identify = vi.spyOn(open, "whoHoldsPort").mockResolvedValue(holder);
-    const { checks } = await doctor(deviceBox(endpoint), { PORT: "invalid" });
-    expect(probes.probePort).toHaveBeenCalledExactlyOnceWith("127.0.0.1", open.DEFAULT_WEB_PORT);
-    expect(identify).toHaveBeenCalledExactlyOnceWith(open.DEFAULT_WEB_PORT);
-    expect(check(checks, "local hub").status).toBe(status);
-    expect(check(checks, "local hub").reason).toContain(String(open.DEFAULT_WEB_PORT));
+    const boxForKind = () => kind === "device" ? deviceBox(endpoint)
+      : kind === "local" ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }) : unboundSandbox();
+
+    it.each([["ub-open", "pass"], ["foreign", "fail"], ["unidentified", "skipped"]] as const)("reports the default web port held by %s as %s", async (holder, status) => {
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+      vi.mocked(probes.probePort).mockResolvedValue({ host: open.WEB_HOST, port: open.DEFAULT_WEB_PORT, state: "in-use", code: null });
+      const identify = vi.spyOn(open, "whoHoldsPort").mockResolvedValue(holder);
+      const { checks } = await doctor(boxForKind(), { PORT: "invalid" });
+      expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
+      expect(identify).toHaveBeenCalledExactlyOnceWith(open.DEFAULT_WEB_PORT);
+      expect(probes.probeHubState).toHaveBeenCalledTimes(kind === "device" ? 1 : 0);
+      expect(check(checks, "web server")).toEqual({ name: "web server", status,
+        reason: `${open.WEB_HOST}:${open.DEFAULT_WEB_PORT} ${holder === "ub-open" ? "is already serving an uberblick web app"
+          : holder === "foreign" ? "is in use by a process that is not ub open" : "is in use, but its holder could not be identified"}`,
+        fix: holder === "foreign" ? "stop that process, then run ub open" : null });
+      if (kind !== "local") expect(check(checks, "local hub").status).toBe("skipped");
+    });
+
+    it.each(["free", "unknown"] as const)("skips a %s default web port without trying to identify its holder", async state => {
+      const identify = vi.spyOn(open, "whoHoldsPort");
+      vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
+      vi.mocked(probes.probePort).mockResolvedValue({ host: open.WEB_HOST, port: open.DEFAULT_WEB_PORT, state, code: state === "unknown" ? "EACCES" : null });
+      const { checks } = await doctor(boxForKind(), { PORT: "invalid" });
+      expect(check(checks, "web server")).toEqual({ name: "web server", status: "skipped",
+        reason: `${open.WEB_HOST}:${open.DEFAULT_WEB_PORT} ${state === "free" ? "is not running; ub open starts it" : "could not be tested (EACCES)"}`, fix: null });
+      expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
+      expect(identify).not.toHaveBeenCalled();
+    });
   });
 
-  it("skips a free default web port without trying to identify its holder", async () => {
-    const identify = vi.spyOn(open, "whoHoldsPort");
-    const endpoint = "wss://hub.example.invalid";
-    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "hub-down", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
-    const { checks } = await doctor(deviceBox(endpoint));
-    expect(check(checks, "local hub").status).toBe("skipped");
-    expect(check(checks, "local hub").reason).toMatch(/not running.*ub open/);
-    expect(identify).not.toHaveBeenCalled();
-  });
-
-  it.each(["web server", "hub listener"] as const)("fails the combined check when the %s fails and prints both listener verdicts", async failed => {
+  it.each(["web server", "local hub", "both"] as const)("fails and exits 1 when %s fails, counting each listener separately", async failed => {
     const port = await freePort();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${port}` }, credentials: { signingSecret: SECRET } });
-    vi.mocked(probes.probePort).mockImplementation((host, candidate) => Promise.resolve({ host, port: candidate, state: candidate === open.DEFAULT_WEB_PORT ? "in-use" : "free", code: null }));
-    vi.spyOn(open, "whoHoldsPort").mockResolvedValue(failed === "web server" ? "foreign" : "ub-open");
-    const { report, checks } = await doctor(box, { PORT: failed === "hub listener" ? "1" : String(port) });
-    expect(check(checks, "local hub").status).toBe("fail");
-    const lines = renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+local hub\s/.test(line));
-    expect(lines).toHaveLength(2);
-    expect(lines.some(line => line.includes("web server"))).toBe(true);
-    expect(lines.some(line => line.includes("hub listener"))).toBe(true);
-    expect(lines.find(line => line.includes(failed))).toMatch(/^FAIL/);
-    expect(report.checks.filter(one => one.name === "local hub")).toHaveLength(1);
+    wireMcp(box);
+    vi.mocked(probes.probePort).mockImplementation((host, candidate) => Promise.resolve({ host, port: candidate, state: "in-use", code: null }));
+    vi.spyOn(open, "whoHoldsPort").mockResolvedValue(failed === "local hub" ? "ub-open" : "foreign");
+    vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: `ws://127.0.0.1:${port}`, protocolVersion: SYNC_PROTOCOL_VERSION });
+    const hubPort = failed === "web server" ? String(port) : "invalid";
+    const { report, checks } = await doctor(box, { PORT: hubPort });
+    expect(check(checks, "local hub").status).toBe(failed === "web server" ? "pass" : "fail");
+    expect(check(checks, "web server").status).toBe(failed === "local hub" ? "pass" : "fail");
+    expect(report.ok).toBe(false);
+    const text = renderDoctor(report);
+    const lines = text.split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s/.test(line));
+    expect(lines).toHaveLength(8);
+    for (const [index, name] of NAMES.entries()) expect(lines[index]).toContain(name);
+    const failures = failed === "both" ? 2 : 1;
+    expect(text.match(/→ /g)).toHaveLength(failures);
+    expect(text).toContain(`${failures} failed, 0 warnings, ${4 - failures} passed, 4 skipped\n`);
+
+    for (const key of new Set([...Object.keys(process.env), ...Object.keys(box.env)])) vi.stubEnv(key, box.env[key]);
+    vi.stubEnv("PORT", hubPort);
+    vi.stubEnv("HUB_HOST", "127.0.0.1");
+    vi.stubEnv("CODEX_HOME", join(homeOf(box), ".codex"));
+    vi.spyOn(process, "cwd").mockReturnValue(box.cwd);
+    let output = "";
+    expect(await doctorCommand(["--json"], { out: text => { output += text; }, err: () => {} })).toBe(1);
+    expect(JSON.parse(output)).toEqual(report);
   });
 
-  it.each(["pass", "fail"] as const)("renders one local hub line when both listeners %s", async status => {
+  it.each(["pass", "fail"] as const)("renders each listener once when both %s", async status => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
     vi.mocked(probes.probePort).mockImplementation((host, port) => Promise.resolve({ host, port, state: "in-use", code: null }));
     vi.spyOn(open, "whoHoldsPort").mockResolvedValue(status === "pass" ? "ub-open" : "foreign");
     vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: status === "pass" ? "connected" : "auth-failed", url: "ws://localhost:1234", protocolVersion: SYNC_PROTOCOL_VERSION });
     const { report, checks } = await doctor(box);
     expect(check(checks, "local hub").status).toBe(status);
-    expect(check(checks, "local hub").listeners).toBeUndefined();
+    expect(check(checks, "web server").status).toBe(status);
     expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+local hub\s/.test(line))).toHaveLength(1);
+    expect(renderDoctor(report).split("\n").filter(line => /^(?:ok|warn|FAIL|skip)\s+web server\s/.test(line))).toHaveLength(1);
   });
 
   it.skipIf(process.getuid?.() === 0)("fails database when its nearest existing directory is not writable", async () => {
@@ -791,11 +822,12 @@ describe("ub doctor", () => {
     } finally { chmodSync(readOnly, 0o700); }
   });
 
-  it("writes one JSON object with seven checks and its matching exit status", async () => {
+  it("writes one JSON object with eight four-field checks and its matching exit status", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } });
-    const run = await runUbAsync(["doctor", "--json"], box, { PORT: "1234", HUB_HOST: "127.0.0.1" });
+    const run = await runInProcess(["doctor", "--json"], box, { PORT: "1234", HUB_HOST: "127.0.0.1" });
     const report = JSON.parse(run.stdout) as DoctorReport;
     expect(report.checks.map(one => one.name)).toEqual(NAMES);
+    for (const one of report.checks) expect(Object.keys(one).sort()).toEqual(["fix", "name", "reason", "status"]);
     expect(report.ok).toBe(!report.checks.some(one => one.status === "fail"));
     expect(run.status).toBe(report.ok ? 0 : 1);
     expect(run.output).not.toContain(SECRET);
@@ -876,7 +908,7 @@ describe("ub doctor MCP setup", () => {
 
     expect(check(wired.checks, "mcp").status).toBe("pass");
     expect(check(wired.checks, "mcp").reason).toBe("Claude Code (.mcp.json)");
-    const human = await runUbAsync(["doctor"], box, { PORT: "1" });
+    const human = await runInProcess(["doctor"], box, { PORT: "1" });
     expect(human.stdout).toContain("ok    mcp         Claude Code (.mcp.json)\n");
   });
 
@@ -1179,7 +1211,7 @@ describe("ub doctor MCP setup", () => {
       name: "mcp", status: "warn", reason: "could not read Codex (.codex/config.toml)",
       fix: "repair or move the file named above, then ub mcp install claude   (or codex)",
     });
-    const human = await runUbAsync(["doctor"], box, {
+    const human = await runInProcess(["doctor"], box, {
       PORT: "1", HUB_HOST: "127.0.0.1", CODEX_HOME: join(homeOf(box), ".codex"),
     });
     expect(human.stdout).toContain("warn  mcp         could not read Codex (.codex/config.toml)\n");
@@ -1244,7 +1276,7 @@ describe("ub doctor MCP setup", () => {
 
   it("renders the same verdicts for a human, with the fix under the warning", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    const run = await runUbAsync(["doctor"], box, { PORT: "1" });
+    const run = await runInProcess(["doctor"], box, { PORT: "1" });
 
     expect(run.stdout).toMatch(/ok {4}workspace/);
     expect(run.stdout).toMatch(/skip {2}login/);

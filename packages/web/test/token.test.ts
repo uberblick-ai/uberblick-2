@@ -2,7 +2,7 @@
 /**
  * The hub token, as the client mints it.
  *
- * `src/collab/token.ts` re-exports `@uberblick/hub/token` — one definition of
+ * `src/collab/token.ts` re-exports `@uberblick/schema/token` — one definition of
  * the wire format, shared by the minter and the verifier. This suite is the
  * cross-package check that the client's call site actually produces something
  * the hub accepts: it mints through the client's import and verifies with the
@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { verifyToken } from "@uberblick/hub/token";
+import { verifyToken } from "@uberblick/schema/token";
 import {
   MAX_TOKEN_LIFETIME_SECONDS,
   importRootSecret,

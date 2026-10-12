@@ -5,7 +5,7 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { createDoc, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext } = setupHarness();
 
@@ -215,6 +215,53 @@ test("a touch caret exposes a 44px gutter without moving prose, follows edits, a
   await expect(gutter(page)).toHaveCSS("opacity", "0");
 });
 
+test("touch selects below, keyboard and mouse select above, and touch toolbar controls fit the viewport", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info);
+  const text = "before selected words after";
+  const selected = "selected words";
+  await openDoc(page, [text]);
+  const paragraph = editor(page).locator(":scope > p").first();
+  await paragraph.tap();
+  await selectBlock(paragraph, "touch", { start: 7, end: 21 });
+  const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
+  await expect(toolbar).toBeVisible();
+  await expect(card(page)).toHaveAttribute("data-placement", "below");
+  await insideVisibleArea(page);
+  const selection = await selectionBox(page);
+  const below = await card(page).boundingBox();
+  if (below === null) throw new Error("e2e: missing touch toolbar");
+  expect(below.y).toBeGreaterThan(selection.bottom);
+  await minimumTargets(toolbar.getByRole("button"), 44, true);
+
+  for (const [name, mark] of [["Bold", "strong"], ["Italic", "em"], ["Strikethrough", "s"], ["Inline code", "code"]] as const) {
+    const control = toolbar.getByRole("button", { name, exact: true });
+    await control.tap();
+    await expect(paragraph.locator(mark)).toHaveText(selected);
+    await expect(control).toHaveAttribute("aria-pressed", "true");
+    await expect(paragraph).toHaveText(text);
+    expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
+    await expect(editor(page)).toBeFocused();
+    // A second native tap removes it once, from the same retained range.
+    await control.tap();
+    await expect(paragraph.locator(mark)).toHaveCount(0);
+    await expect(control).toHaveAttribute("aria-pressed", "false");
+    expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(selected);
+    await expect(editor(page)).toBeFocused();
+  }
+
+  await page.keyboard.press("Shift+ArrowLeft");
+  await expect(card(page)).toHaveAttribute("data-placement", "above");
+  await selectBlock(paragraph, "mouse");
+  await expect(card(page)).toHaveAttribute("data-placement", "above");
+  // A touch on prose can start scrolling without adjusting the selected
+  // range. Its placement still belongs to the input that selected it.
+  await paragraph.dispatchEvent("pointerdown", { pointerType: "touch" });
+  await paragraph.dispatchEvent("pointerup", { pointerType: "touch" });
+  await expect(card(page)).toHaveAttribute("data-input", "fine");
+  await insideVisibleArea(page);
+  await minimumTargets(toolbar.getByRole("button"), 24, true);
+});
+
 test("touch link Cancel and Apply and Comment keep the selected words as their write range", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   const text = "before selected words after";
@@ -323,6 +370,33 @@ test("focused link and comment fields follow visual viewport resize and scroll w
   const field = await comment.boundingBox();
   if (field === null) throw new Error("e2e: missing comment field");
   expect(field.y + field.height).toBeLessThanOrEqual(keyboardHeight + 1);
+});
+
+test("selection chrome follows a peer edit within a line without an editor resize", { tag: "@webkit" }, async ({ browser }, info) => {
+  const context = trackContext(await browser.newContext(info.project.name === "chromium"
+    ? { viewport: { width: 1280, height: 800 } }
+    : {}));
+  const page = await context.newPage();
+  await openDoc(page, [""]);
+  await page.keyboard.type("/co");
+  await page.getByRole("option", { name: "Code", exact: true }).click();
+  await page.keyboard.insertText("preface selected end");
+  const paragraph = editor(page).locator(":scope > pre").first();
+  await selectBlock(paragraph.locator("code"), "mouse", { start: 8, end: 16 });
+  await expect(card(page)).toBeVisible();
+  const before = await card(page).boundingBox();
+  const blockBefore = await paragraph.boundingBox();
+  if (before === null || blockBefore === null) throw new Error("e2e: missing selection geometry");
+
+  // A range can move inside one line while ResizeObserver sees the same editor
+  // box. Transactions must refresh its virtual reference without frame polling.
+  const peer = await context.newPage();
+  await peer.goto(page.url());
+  await placeCaretIn(editor(peer).locator(":scope > pre > code").first(), { edge: "start" });
+  await peer.keyboard.insertText("moving prefix ");
+  await expect(paragraph).toContainText("moving prefix ");
+  expect(await paragraph.boundingBox()).toEqual(blockBefore);
+  await expect.poll(async () => (await card(page).boundingBox())?.x ?? before.x).toBeGreaterThan(before.x + 10);
 });
 
 test("a code selection has a 44px Comment-only affordance below it on touch", { tag: "@webkit-touch" }, async ({ browser }, info) => {

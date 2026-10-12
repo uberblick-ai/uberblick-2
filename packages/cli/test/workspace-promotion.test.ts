@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHub, silentLogger, type Hub } from "@uberblick/hub";
-import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
-import { ensureDeviceLogin } from "@uberblick/hub/device-login";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
 import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UB_BIN, removeTempDirs, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 import { readWorkspaceHub } from "../src/workspace-registry.js";
 
 const hubs: Hub[] = [];
@@ -25,7 +27,7 @@ function offline(box: Sandbox) {
 }
 async function localWorkspace(name = "Project notes") {
   const box = unboundSandbox();
-  const result = await runUbAsync(["workspace", "create", name], box);
+  const result = await runInProcess(["workspace", "create", name], box);
   expect(result.status, result.output).toBe(0);
   expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   return box;
@@ -57,7 +59,7 @@ function accessRows(hub: Hub) {
 
 describe("workspace creation and promotion", () => {
   it("shows accepted hub forms and complete promotion examples", async () => {
-    const result = await runUbAsync(["workspace", "promote", "--help"], sandbox());
+    const result = await runInProcess(["workspace", "promote", "--help"], sandbox());
     expect(result.status, result.output).toBe(0);
     expect(result.stdout).toContain("bare host, an HTTP(S) URL or a WS(S) endpoint");
     expect(result.stdout).toContain("ub workspace promote https://hub.example.com");
@@ -86,7 +88,7 @@ describe("workspace creation and promotion", () => {
     const pins = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" } } } });
     writeFileSync(join(child, ".mcp.json"), pins);
     const childBox = { ...box, cwd: child };
-    const result = await runUbAsync(["workspace", "create", " New project "], childBox,
+    const result = await runInProcess(["workspace", "create", " New project "], childBox,
       { UB_WORKSPACE_ID: old.workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
@@ -113,7 +115,7 @@ describe("workspace creation and promotion", () => {
     const previous = { workspaceId: randomUUID(), hubUrl: "wss://old.example.test/ws" };
     const box = sandbox({ projectBinding: previous });
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBeUndefined();
-    const result = await runUbAsync(["workspace", "create", "Second"], box);
+    const result = await runInProcess(["workspace", "create", "Second"], box);
     expect(result.status, result.output).toBe(0);
     expect(selected(box).workspaceId).not.toBe(previous.workspaceId);
     expect(readWorkspaceHub(previous.workspaceId, box.env)).toBe(previous.hubUrl);
@@ -121,7 +123,7 @@ describe("workspace creation and promotion", () => {
     expect(existsSync(join(box.dataHome, "uberblick", `${previous.workspaceId}.sqlite`))).toBe(false);
     expect(result.stdout).toContain(`Previous workspace ${previous.workspaceId} (${previous.hubUrl})`);
     expect(result.stdout).toContain(`Switch back: ub workspace use ${previous.workspaceId}\n`);
-    const switched = await runUbAsync(["workspace", "use", previous.workspaceId], box);
+    const switched = await runInProcess(["workspace", "use", previous.workspaceId], box);
     expect(switched.status, switched.output).toBe(0);
     expect(selected(box)).toEqual(previous);
   });
@@ -131,7 +133,7 @@ describe("workspace creation and promotion", () => {
     const { hub, endpoint } = await hubFor(box);
     const mcpEntry = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" } } } });
     writeFileSync(join(box.cwd, ".mcp.json"), mcpEntry);
-    const result = await runUbAsync(["workspace", "promote", endpoint], box);
+    const result = await runInProcess(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).not.toContain("MCP registrations");
     expect(result.stderr).not.toContain("ub mcp install");
@@ -139,7 +141,7 @@ describe("workspace creation and promotion", () => {
     expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
-    const status = await runUbAsync(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
+    const status = await runInProcess(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
     expect(JSON.parse(status.stdout).connection.state).toBe("refused");
     expect(JSON.parse(status.stdout).account).toBeNull();
     expect(status.stdout).toContain("ub auth login");
@@ -174,7 +176,7 @@ describe("workspace creation and promotion", () => {
   it("refuses a different environment binding before reserving or replacing the project selection", async () => {
     const box = await localWorkspace("Project A");
     const original = bindingBytes(box);
-    const created = await runUbAsync(["workspace", "create", "Project B"], box);
+    const created = await runInProcess(["workspace", "create", "Project B"], box);
     expect(created.status, created.output).toBe(0);
     const other = selected(box).workspaceId;
     writeFileSync(join(box.cwd, ".uberblick.json"), original);
@@ -183,7 +185,7 @@ describe("workspace creation and promotion", () => {
     const child = join(box.cwd, "nested");
     mkdirSync(child);
     for (const cwd of [box.cwd, child]) {
-      const result = await runUbAsync(["workspace", "promote", endpoint], { ...box, cwd },
+      const result = await runInProcess(["workspace", "promote", endpoint], { ...box, cwd },
         { UB_WORKSPACE_ID: other, UB_HUB_URL: "local" });
       expect(result.status, result.output).toBe(1);
       expect(result.stderr).toContain("environment selects a different binding");
@@ -198,7 +200,7 @@ describe("workspace creation and promotion", () => {
     const original = JSON.stringify({ workspaceId: randomUUID(), hubUrl: "local" });
     writeFileSync(join(box.cwd, ".uberblick.json"), original);
     for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await runUbAsync(["workspace", "create", "Unused workspace"], box);
+      const result = await runInProcess(["workspace", "create", "Unused workspace"], box);
       expect(result.status, result.output).toBe(1);
       expect(bindingBytes(box)).toBe(original);
       expect(existsSync(join(box.dataHome, "uberblick"))).toBe(false);
@@ -217,7 +219,7 @@ describe("workspace creation and promotion", () => {
     const before = accessRows(hub);
     // An earlier no-access check must not suppress renewal after the grant.
     expect((await ensureDeviceLogin(endpoint, selected(box).workspaceId, { env: box.env })).status).toBe("no-access");
-    const result = await runUbAsync(["workspace", "promote", endpoint], box,
+    const result = await runInProcess(["workspace", "promote", endpoint], box,
       { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" });
     expect(result.status, result.output).toBe(0);
     expect(result.stderr).toContain("environment binding still takes precedence");
@@ -244,7 +246,7 @@ describe("workspace creation and promotion", () => {
     const freshCredential = hub.credentials!.issue({ principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
-    const joined = await runUbAsync(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other);
+    const joined = await runInProcess(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other);
     expect(joined.status, joined.output).toBe(0);
     expect(selected(other).workspaceId).toBe(selected(box).workspaceId);
     const hydrated = await syncWorkspace(offline(other));
@@ -257,7 +259,7 @@ describe("workspace creation and promotion", () => {
     const { hub, endpoint } = await hubFor(box, null);
     const before = accessRows(hub);
     const binding = bindingBytes(box);
-    const result = await runUbAsync(["workspace", "promote", endpoint], box);
+    const result = await runInProcess(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(1);
     expect(result.stderr).toContain("currently belong to at least one workspace");
     expect(result.stderr).not.toContain("rerun this command");
@@ -272,14 +274,14 @@ describe("workspace creation and promotion", () => {
     hub.memberships!.grant({ workspaceId: selected(box).workspaceId, principalId: login.identity.id, role: "admin" });
     const before = accessRows(hub);
     const binding = bindingBytes(box);
-    const conflict = await runUbAsync(["workspace", "promote", endpoint], box);
+    const conflict = await runInProcess(["workspace", "promote", endpoint], box);
     expect(conflict.status, conflict.output).toBe(1);
     expect(conflict.stderr).toContain("already holds this workspace UUID");
     expect(conflict.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
     writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ ...selected(box), hubUrl: endpoint }));
-    const bound = await runUbAsync(["workspace", "promote", endpoint], box);
+    const bound = await runInProcess(["workspace", "promote", endpoint], box);
     expect(bound.status).toBe(1);
     expect(bound.stderr).toContain("already has a hub");
     expect(bound.stderr).not.toContain("rerun this command");
@@ -307,7 +309,7 @@ describe("workspace creation and promotion", () => {
     expect(bindingBytes(box)).toBe(binding);
     const before = accessRows(hub);
     expect(before.receipts).toHaveLength(1);
-    const retried = await runUbAsync(["workspace", "promote", endpoint], box);
+    const retried = await runInProcess(["workspace", "promote", endpoint], box);
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);
     expect(selected(box).hubUrl).toBe(endpoint);
@@ -315,8 +317,8 @@ describe("workspace creation and promotion", () => {
 
   it("validates names and URLs without side effects or echoing pasted credentials", async () => {
     const box = unboundSandbox();
-    for (const name of ["", "bad\nname", "x".repeat(65)]) expect((await runUbAsync(["workspace", "create", name], box)).status).toBe(2);
-    const result = await runUbAsync(["workspace", "promote", "https://user:private-paste@hub.test"], box);
+    for (const name of ["", "bad\nname", "x".repeat(65)]) expect((await runInProcess(["workspace", "create", name], box)).status).toBe(2);
+    const result = await runInProcess(["workspace", "promote", "https://user:private-paste@hub.test"], box);
     expect(result.status).toBe(2);
     expect(result.output).not.toContain("private-paste");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
@@ -357,7 +359,7 @@ it.each(["missing", "revoked"])("refuses promotion with a %s login without start
     return handler(payload);
   });
   const origin = `http://127.0.0.1:${hub.port}`;
-  const result = await runUbAsync(["workspace", "promote", origin], box);
+  const result = await runInProcess(["workspace", "promote", origin], box);
   expect(result.status, result.output).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toBe(`error: you are not signed in to ${origin}\n` +
@@ -383,7 +385,7 @@ it.each(["missing", "revoked"])("refuses promotion with a %s login without start
 it("prints the corpus sign-in refusal verbatim", async () => {
   const box = await localWorkspace("My Workspace");
   const before = bindingBytes(box);
-  const result = await runUbAsync(["workspace", "promote", "https://hub.uberblick.ai"], box);
+  const result = await runInProcess(["workspace", "promote", "https://hub.uberblick.ai"], box);
   expect(result.status, result.output).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toBe("error: you are not signed in to https://hub.uberblick.ai\n" +
@@ -400,7 +402,7 @@ it("uses the workspace id without a readable name and shell-quotes the original 
   finally { await local.close(); }
   const workspaceId = selected(box).workspaceId;
   const before = bindingBytes(box);
-  const result = await runUbAsync(["workspace", "promote", " https://[::1]:8080 "], box);
+  const result = await runInProcess(["workspace", "promote", " https://[::1]:8080 "], box);
   expect(result.status, result.output).toBe(1);
   expect(result.stdout).toBe("");
   expect(result.stderr).toBe("error: you are not signed in to https://[::1]:8080\n" +
@@ -426,7 +428,7 @@ it("silently renews a refused stored credential and retries promotion without Gi
     }
     return handler(payload);
   });
-  const result = await runUbAsync(["workspace", "promote", endpoint], box);
+  const result = await runInProcess(["workspace", "promote", endpoint], box);
   expect(result.status, result.output).toBe(0);
   expect(reservations).toBe(2);
   expect(renewals).toBe(2); // Retry the refused key, then admit the newly granted workspace.
@@ -448,7 +450,7 @@ it("refuses before upload if the stored device is revoked immediately after rese
       }
     }
   });
-  const result = await runUbAsync(["workspace", "promote", endpoint], box);
+  const result = await runInProcess(["workspace", "promote", endpoint], box);
   const origin = `http://127.0.0.1:${hub.port}`;
   expect(result.status, result.output).toBe(1);
   expect(result.stdout).toBe("");
@@ -476,13 +478,13 @@ it("resumes a lost grant reply using another URL spelling of the same authentica
     });
     return handler(payload);
   });
-  const lost = await runUbAsync(["workspace", "promote", endpoint], box);
+  const lost = await runInProcess(["workspace", "promote", endpoint], box);
   expect(lost.status, lost.output).toBe(1);
   expect(lost.output).toContain("resume the same attempt");
   expect(bindingBytes(box)).toBe(before);
   const reserved = accessRows(hub);
   expect(reserved.receipts).toHaveLength(1);
-  const retry = await runUbAsync(["workspace", "promote", endpoint.replace("ws:", "http:")], box);
+  const retry = await runInProcess(["workspace", "promote", endpoint.replace("ws:", "http:")], box);
   expect(retry.status, retry.output).toBe(0);
   expect(accessRows(hub)).toEqual(reserved);
 });

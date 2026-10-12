@@ -23,13 +23,15 @@ export const inputSchema = strictInput({
 });
 
 export const editBlockOperation = documentOperation("edit_block", inputSchema, (context, { uuid, block_id, old_text, new_text, rev, table_mapping }, _request, replica) => {
-  const { replicas, validateTableTargets } = context;
+  const { replicas, validateTableTargets, validateCardTargets } = context;
 
   const current = getBlock(replica.doc, block_id);
   // Keep stale assertions ahead of content validation, as editBlock does.
   // Validate before its transaction: a Yjs write cannot be rolled back.
   if (current?.type === "table" && current.text === old_text &&
       (rev === undefined || current.rev === rev)) validateTableTargets(new_text, old_text, table_mapping);
+  if (current?.type === "card" && current.text === old_text &&
+      (rev === undefined || current.rev === rev)) validateCardTargets(new_text, old_text);
   editBlock(replica.doc, block_id, old_text, new_text, {
     ...(rev === undefined ? {} : { rev }),
     ...(table_mapping === undefined ? {} : { tableMapping: table_mapping }),

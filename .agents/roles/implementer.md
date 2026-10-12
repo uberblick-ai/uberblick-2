@@ -71,8 +71,10 @@ finish `integrate` and state `none owed (<reason>)`. Require agent review when
 you can name a concrete unresolved risk that warrants it. Copilot is optional
 under that policy and is not requested automatically.
 
-When the change makes a corpus claim wrong, or adds behavior a corpus
-document should describe, draft the rewrite under the pull request's
+Find the pages that describe what the change touches: search the corpus for
+each changed command, tool or screen by name, beyond the issue's Pointers.
+When the change makes a claim on one of them wrong, or adds behavior no page
+describes yet, draft the rewrite under the pull request's
 `Corpus update`: each document by title and UUID, the block, and its new text,
 following [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action)
 and any governing authoring guidance discovered by purpose. The integrator applies it after merge,
@@ -86,8 +88,9 @@ own whether to record and whether a first record is `decided` as an agent
 stance or `open` with a recommendation on a topic reserved to a human. Read its
 live corpus sources rather than treating a pointer as the record.
 
-Write a new `decided` implementation stance as a complete draft in this same PR's
-`Corpus update`, including its topic, decision line, enduring reasons,
+When code need not cite it, write a new `decided` implementation stance as a
+complete draft in this same PR's `Corpus update`, including its topic, decision
+line, enduring reasons,
 guidance, governing requirement when applicable, Links and intended creation
 status (`decided` stance). The integrator creates it through
 `create_doc` after merge; name a new record as new rather than inventing its
@@ -96,13 +99,23 @@ decision-authoring guidance through the live corpus.
 Keep the draft current through review; do not create an immutable decided
 stance before reviewers can correct it.
 
-Create a new boundary `open` record now through `create_doc`, with its
-recommendation and the same complete content, and cite its title and UUID in
-this same PR. While it remains open, keep the record current with corrections
-through review; if a person decides it first, use the
+When this PR's code must cite a new implementation stance, or the topic is
+reserved to a person, create the first record now through `create_doc` as
+`open`, with its recommendation and the same complete content. In this PR's
+`Corpus update`, cite its title, record UUID and topic UUID and state its
+post-merge disposition: initial agent stance to be decided, or boundary topic
+to remain open until a person answers. Code cites the topic UUID, the first
+record's UUID retained by successors. While it remains open, keep the record
+current with corrections through review; if a person decides it first, use the
 [shared decided-record challenge procedure](../protocols/human-decisions.md#challenge-a-decided-record).
 Use its returned topic UUID in the built-on line and link the
 GitHub item in its Links under the procedure below, without a post-merge fix-up.
+
+If the PR closes without merging, the maintainer closing it re-reads and
+withdraws any still-`open` record created solely for that PR through
+`set_status` with `status: withdrawn` and no answer. Retain records that other
+linked work relies on or that are already decided, rejected or withdrawn,
+and record that disposition on the PR.
 
 ### Build on an open decision
 
@@ -142,7 +155,8 @@ Continue the pull request's remote head; never rebase or force-push it.
   once, as `corrected in <sha>` or `answered: <evidence>`. Finish `review` when
   the protocol's Rounds rule requires a second round, or when a correction
   carries risk of its own; otherwise finish `integrate`.
-- **An integrator's `changes`:** fix what it names and finish `integrate`.
+- **An integrator's `changes`,** or ub-agents' `changes` for a PR GitHub reports
+  as conflicting: fix what it names and finish `integrate`.
 - **A person's answer:** act on it, and finish `review` when the answer asks
   for verification or the Rounds rule still requires a second round, otherwise
   `integrate`. When it leaves nothing to change, finish without a commit.
@@ -208,7 +222,7 @@ Closes #N
 None. | <material facts or links; no merge-tier ruling>
 
 ## Corpus update
-None — <why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
+None — <pages searched, and why no documented claim changes> | <title> (<uuid>), block <id>: <new text>
 
 ## Self-review
 KISS: <why this is the least defensible change>

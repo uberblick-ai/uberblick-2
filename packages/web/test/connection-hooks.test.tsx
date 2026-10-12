@@ -25,7 +25,7 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../src/collab/identity.js";
-import { readPresence } from "../src/ui/doc-chrome.js";
+import { presenceKey, readPresence } from "../src/ui/doc-chrome.js";
 import { AGENT_CURSOR_GRACE_MS, agentCursorAwareness } from "../src/editor/collaboration.js";
 import {
   useAgentSessions,
@@ -126,11 +126,12 @@ function publish(fix: Fixture, state: Record<string, unknown>): void {
   );
 }
 
-function join(fix: Fixture, state: Record<string, unknown>): {
+function join(fix: Fixture, state: Record<string, unknown>, clientId?: number): {
   clientId: number;
   publish: (next: Record<string, unknown>) => void;
 } {
   const ydoc = new Y.Doc();
+  if (clientId !== undefined) ydoc.clientID = clientId;
   const awareness = new Awareness(ydoc);
   remotePeers.push({ ydoc, awareness });
   const publishState = (next: Record<string, unknown>): void => {
@@ -438,6 +439,66 @@ describe("connection-scoped readings", () => {
     act(() => vi.advanceTimersByTime(1));
     expect(reading!.titlePresence).toEqual([]);
     expect(cursorView.getStates().has(fix.peer.clientID)).toBe(false);
+  });
+
+  it("groups only explicit agent sessions and preserves their order through reconnects", () => {
+    vi.useFakeTimers();
+    const fix = fixture(`${WORKSPACE}/sessions`);
+    initDoc(fix.ydoc, { uuid: UUID, title: "Sessions" });
+    appendBlock(fix.ydoc, { type: "paragraph", text: "first" });
+    appendBlock(fix.ydoc, { type: "paragraph", text: "second" });
+    const state = { user: { name: "Agent", color: "#123456" }, client: AGENT_CLIENT };
+    const cursorAt = (index: number) => ({ anchor: Y.relativePositionToJSON(
+      Y.createRelativePositionFromTypeIndex(textAt(fix.ydoc, index), 0),
+    ) });
+    const first = join(fix, { ...state, session: "run-a", cursor: cursorAt(0) }, 20);
+    join(fix, { ...state, session: "run-b", cursor: cursorAt(1) }, 40);
+    join(fix, state, 60);
+    join(fix, state, 70);
+    join(fix, { ...state, client: "web", session: "run-a" }, 80);
+    join(fix, { ...state, client: "web", session: "run-a" }, 90);
+    let reading: Pick<ReturnType<typeof useReading>, "titlePresence" | "presence" | "agentSessions">;
+    function Probe(): null {
+      reading = {
+        titlePresence: useTitlePresence(fix.connection),
+        presence: usePresence(fix.connection),
+        agentSessions: useAgentSessions(fix.connection),
+      };
+      return null;
+    }
+    render(<Probe />);
+    const originalOrder = reading!.titlePresence.map(presenceKey);
+    expect(originalOrder).toEqual(["session:run-a", "session:run-b", "60", "70", "80", "90"]);
+    act(() => removeAwarenessStates(fix.awareness, [first.clientId], "test"));
+    expect(reading!.titlePresence[0]?.departed).toBe(true);
+    expect(reading!.presence).toHaveLength(5);
+    expect(reading!.agentSessions).toBe(3);
+
+    let second: ReturnType<typeof join>;
+    act(() => { second = join(fix, { ...state, session: "run-a" }, 10); });
+    expect(reading!.titlePresence.map(presenceKey)).toEqual(originalOrder);
+    expect(reading!.titlePresence[0]).toMatchObject({ clientId: 10, session: "run-a" });
+    expect(reading!.titlePresence[0]?.departed).toBeUndefined();
+    expect(reading!.presence).toHaveLength(6);
+    expect(reading!.agentSessions).toBe(4);
+    const cursorView = agentCursorAwareness(fix.awareness);
+    expect(cursorView.isDeparted(first.clientId)).toBe(true);
+
+    act(() => second!.publish({ ...state, session: "run-a", cursor: cursorAt(1) }));
+    expect(cursorView.getStates().has(first.clientId)).toBe(false);
+    expect(reading!.titlePresence[0]?.block).toBe(2);
+    act(() => { join(fix, { ...state, session: "run-a", cursor: cursorAt(0) }, 30); });
+    expect(reading!.titlePresence.map(presenceKey)).toEqual(originalOrder);
+    expect(reading!.titlePresence).toHaveLength(6);
+    expect(reading!.presence).toHaveLength(7);
+    expect(reading!.agentSessions).toBe(5);
+    act(() => removeAwarenessStates(fix.awareness, [10], "test"));
+    expect(reading!.titlePresence[0]?.departed).toBeUndefined();
+    act(() => removeAwarenessStates(fix.awareness, [30], "test"));
+    expect(reading!.titlePresence[0]?.departed).toBe(true);
+    expect(reading!.titlePresence.map(presenceKey)).toEqual(originalOrder);
+    act(() => vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS));
+    expect(reading!.titlePresence.map(presenceKey)).toEqual(originalOrder.slice(1));
   });
 
   it("clears retained title and cursor readings when leaving and reopening the document", () => {

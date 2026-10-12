@@ -1,7 +1,7 @@
 /**
  * Where `ub` puts a user's files, and what it says about it.
  *
- * The layout itself is proved in `@uberblick/hub`'s suite; this one is about
+ * The layout itself is proved in the CLI storage-layout suite; this one is about
  * the commands: that whoever creates the tree first leaves it owner-only, that
  * `ub workspace status` reports the resolved replica path, and that there is
  * no layout question left for `ub doctor` to have an opinion about.
@@ -12,21 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createHub, silentLogger } from "@uberblick/hub";
-import { hubDatabasePath } from "@uberblick/hub/config";
+import { hubDatabasePath } from "../src/hub-config.js";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
 import { renderWorkspaceStatus } from "../src/workspace-status.js";
-import {
-  DEAD_HUB_URL,
-  REPO_ROOT,
-  SECRET_IN_ENV,
-  SECRET_ON_FILE,
-  removeTempDirs,
-  runUbAsync,
-  sandbox,
-  tracesOf,
-} from "./helpers.js";
+import { DEAD_HUB_URL, REPO_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, tracesOf } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 const WORKSPACE = "0d4a1e7c-2b93-4f18-9a55-6c7e8d1b2f30";
 /** A second workspace, for the case where two layers name different ones. */
@@ -140,9 +132,8 @@ describe("workspace storage and selection", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
     });
 
-    // Async, not `runUb`: this suite owns an in-process hub in the ordering
-    // test above, and spawnSync would block the event loop it runs on.
-    const run = await runUbAsync(["workspace", "status"], box);
+    // The command must yield while this worker's hub answers it.
+    const run = await runInProcess(["workspace", "status"], box);
     expect(run.status).toBe(0);
     const { report } = await statusReport({ env: box.env, cwd: box.cwd });
     if (report.workspace === null) throw new Error("expected the project binding");
@@ -169,14 +160,14 @@ describe("workspace storage and selection", () => {
     });
     const pinned = { HUB_AUTH_TOKEN: SECRET_IN_ENV };
 
-    const text = await runUbAsync(["status"], box, pinned);
+    const text = await runInProcess(["status"], box, pinned);
     expect(text.status).toBe(0);
     expect(text.stderr).toContain("holds a different signing secret");
     expect(text.stdout).not.toMatch(/shadowed|credential/);
     expect(tracesOf(SECRET_IN_ENV, text.output)).toEqual([]);
     expect(tracesOf(SECRET_ON_FILE, text.output)).toEqual([]);
 
-    const json = await runUbAsync(["status", "--json"], box, pinned);
+    const json = await runInProcess(["status", "--json"], box, pinned);
     expect(json.status).toBe(0);
     const { report } = await statusReport({ env: { ...box.env, ...pinned }, cwd: box.cwd });
     if (report.workspace === null) throw new Error("expected the project binding");
@@ -210,7 +201,7 @@ describe("workspace storage and selection", () => {
 
   it("keeps database and storage paths outside the human overview", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    const run = await runUbAsync(["status"], box);
+    const run = await runInProcess(["status"], box);
 
     expect(run.status).toBe(0);
     expect(run.stdout).not.toMatch(/^storage|^database/m);
@@ -235,6 +226,7 @@ describe("`ub doctor`", () => {
       "hub",
       "clock",
       "local hub",
+      "web server",
       "mcp",
     ]);
   });

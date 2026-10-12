@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { chartAxes, chartPointRadius, formatChartTick } from "../src/editor/chart-presentation.js";
+import { chartAxes, chartPanelRanges, chartPointRadius, formatChartTick } from "../src/editor/chart-presentation.js";
+import type { ChartSeries } from "../src/editor/chart-data.js";
+
+describe("panel unit ranges", () => {
+  const series = (values: (number | null)[], unit?: string): ChartSeries => ({
+    field: "value", label: "Value", ...(unit !== undefined ? { unit } : {}),
+    points: values.map((y, x) => ({ x, y, id: String(x) })),
+  });
+
+  it("shares nonadjacent units and treats absent and empty units as one group", () => {
+    expect(chartPanelRanges([series([20, 40], "%"), series([1_000], "ms"), series([null, 90], "%"), series([5]), series([12], "")])).toEqual([
+      { min: 0, max: 90 }, { min: 0, max: 1_000 }, { min: 0, max: 90 }, { min: 0, max: 12 }, { min: 0, max: 12 },
+    ]);
+  });
+
+  it("applies the zero rule per group, keeping all-negative ranges below zero", () => {
+    expect(chartPanelRanges([series([-10, -2], "ms"), series([20], "%"), series([-8], "ms"), series([-1, 4])])).toEqual([
+      { min: -10, max: -2 }, { min: 0, max: 20 }, { min: -10, max: -2 }, { min: -1, max: 4 },
+    ]);
+  });
+
+  it("retains empty panels and shares degenerate extrema for native scale expansion", () => {
+    const ranges = chartPanelRanges([series([null]), series([0], "%"), series([-10], "ms"), series([null], "ms")]);
+    expect(ranges).toEqual([{ min: 0, max: 1 }, { min: 0, max: 0 }, { min: -10, max: -10 }, { min: -10, max: -10 }]);
+  });
+});
 
 describe("chart axis and legend units", () => {
   it("keeps a single shared unit on the axis and names even a single series", () => {

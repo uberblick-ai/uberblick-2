@@ -1,54 +1,17 @@
 /**
- * Editor selections, as the annotation API wants them.
+ * Translate PM positions to visible character offsets for one block or cell.
+ * Clamp cross-block/cell selections to the first target in document order and
+ * quote only that range. Flat text preserves PM/Yjs offsets; inline nodes do not.
  *
- * `createAnnotation` anchors a thread in one text block or table cell at character
- * offsets into its visible text, while a ProseMirror selection is a pair of document
- * positions. Translating between them is this module's whole job.
- *
- * Two facts make the translation exact rather than approximate:
- *
- * 1. Prose targets are flat text blocks (see editor/nodes.ts), so an inline
- *    position resolves at depth 1 and `parentOffset` is the block offset. Cell
- *    targets use their paragraph's content start and the table's row and column.
- * 2. The palette has no inline nodes other than text, so a ProseMirror content
- *    offset counts the same characters a Y.XmlText index does. An inline node
- *    would count as one position and two indices would drift apart — which is
- *    why the palette gate (palette.ts) refusing foreign content also protects
- *    this mapping.
- *
- * A selection spanning blocks or cells is clamped to its first block or cell,
- * and says so. First in document order — the range's
- * `$from`, whichever way the drag went, so a backwards drag clamps to the block
- * it ended in rather than the one it started in. A thread has exactly one
- * anchor block, so the honest choices are clamping or refusing; clamping keeps
- * the gesture working, and the composer quotes the clamped text back so nothing
- * is annotated unseen.
- *
- * Fact 2 above is checked rather than assumed, because the palette gate does
- * not cover every way the two index spaces drift apart. That gate refuses
- * foreign content before binding *and* unbinds the editor when a transaction
- * delivers some (see guarded-binding.ts) — but a block element carrying two
- * Y.XmlText children is not foreign to it: both children are plain text with
- * declared marks, so every question the gate asks answers "fine". One can
- * arrive from a peer at any moment, and ProseMirror then shows the two texts
- * concatenated while `createAnnotation` indexes only the first, so an offset
- * read off the editor would mark the wrong characters — or none.
- *
- * So the block's Y index space is measured on every read and the target refused
- * unless it agrees with ProseMirror's: the same character count, with nothing
- * in it but string insertions. Length alone is not enough — an embed occupies
- * one Y index and has no ProseMirror representation at all, so a block holding
- * one can agree on length while the two sides count different characters. That
- * half is defence in depth: as things stand an embed never reaches this
- * function — the gate unbinds the editor on the transaction that delivers one,
- * and y-prosemirror empties the whole block rather than rendering a text run it
- * cannot build, which the length alone would catch. Both are somebody else's
- * implementation detail, and this read is cheap enough not to rest on either.
+ * Verify string-only Y text and matching lengths on every read. A block with
+ * multiple text children passes the palette gate but PM concatenates them while
+ * prose annotation APIs address the first. Embeds can share the same length
+ * while counting different characters, so length alone is insufficient.
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
-import type { BlockType } from "@uberblick/schema";
+import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
+import type { BlockType, CardPart } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 import { CellSelection } from "@tiptap/pm/tables";
@@ -69,6 +32,46 @@ export interface CellTextTarget {
   blockType: "table";
   blockIndex: number;
   clamped: boolean;
+}
+
+/** Character offsets are scoped to one of the card's four paragraphs. */
+export interface CardTextTarget extends Omit<CellTextTarget, "kind" | "cellPos" | "row" | "column" | "blockType"> {
+  kind: "card";
+  part: CardPart;
+  blockType: "card";
+}
+
+function cardCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | null {
+  const { selection, doc } = editor.state;
+  if (!(selection instanceof TextSelection) || selection.empty) return null;
+  const { $from } = selection;
+  if ($from.depth !== 3 || $from.node(1).type.name !== "card") return null;
+  const card = $from.node(1);
+  const part = CARD_PARTS[$from.index(1)];
+  if (part === undefined || typeof card.attrs.id !== "string" || card.attrs.id === "") return null;
+  const contentStart = $from.start(3);
+  const contentEnd = contentStart + $from.parent.content.size;
+  const to = Math.min(selection.to, contentEnd);
+  if (to <= selection.from) return null;
+  let length = 0;
+  let matched = false;
+  for (const child of getBlocksFragment(ydoc).toArray()) {
+    if (!(child instanceof Y.XmlElement) || child.getAttribute("id") !== card.attrs.id) continue;
+    for (const text of cardPartTexts(child, part)) {
+      for (const op of text.toDelta() as Array<{ insert?: unknown }>) {
+        if (typeof op.insert !== "string") return null;
+        length += op.insert.length;
+      }
+    }
+    matched = true;
+    break;
+  }
+  if (!matched || length !== $from.parent.content.size) return null;
+  return {
+    kind: "card", part, blockId: card.attrs.id, start: selection.from - contentStart,
+    end: to - contentStart, text: doc.textBetween(selection.from, to), contentStart,
+    blockType: "card", blockIndex: $from.index(0), clamped: selection.to > contentEnd,
+  };
 }
 
 function cellDepth($pos: ResolvedPos): number | null {
@@ -190,21 +193,14 @@ export interface CommentTarget {
   /** The selection reached outside this block; only this block is annotated. */
   clamped: boolean;
   /**
-   * Document position of the block's first character, so the caret can be put
-   * back at `contentStart + end` — the end of the range actually marked, which
-   * for a clamped selection is not where the selection ended.
+   * Restore the caret at contentStart + end, including for clamped selections.
    */
   contentStart: number;
 }
 
 /**
- * A block's FIRST Y.XmlText — the only one the schema package reads or marks —
- * or null when the block is not in the fragment or has no text child yet.
- *
- * The first element to claim an id is the visible block, so the walk stops at
- * the first match, the same rule the schema package's own walk follows. Sibling
- * by sibling rather than over `toArray()`, which would materialise every block
- * in the document before the first one could be looked at.
+ * Use the first matching block and its first Y.XmlText, matching prose annotation
+ * APIs. Walk siblings so finding an early block does not materialize the fragment.
  */
 function anchorText(ydoc: Y.Doc, blockId: string): Y.XmlText | null {
   // `!= null` and not `!== null`: a Y.XmlHook has no `nextSibling` at all, so
@@ -223,11 +219,8 @@ function anchorText(ydoc: Y.Doc, blockId: string): Y.XmlText | null {
 }
 
 /**
- * The length of a block's text in the index space `createAnnotation` uses,
- * counted over the insertions of {@link anchorText}. Null when there is no such
- * text, or when it inserts anything but strings: an embed is one Y index and no
- * ProseMirror position at all, so a block holding one can match ProseMirror's
- * length while the two sides count different characters.
+ * Count only string inserts in the annotation API's text. An embed counts one
+ * Y index with no PM position and must refuse even if total lengths agree.
  */
 function anchorTextLength(ydoc: Y.Doc, blockId: string): number | null {
   const text = anchorText(ydoc, blockId);
@@ -241,27 +234,14 @@ function anchorTextLength(ydoc: Y.Doc, blockId: string): number | null {
 }
 
 /**
- * The current selection as a comment target, or null when there is nothing to
- * annotate: an empty selection, a selection over a whole node rather than
- * inside one, a block with no id (a block the editor has not yet stamped — see
- * block-ids.ts — cannot be named by a thread), or a block whose Y text the
- * editor is not showing one-for-one.
- *
- * The composer runs this on every editor transaction, so the order of the
- * checks is the cost: every ProseMirror-side question is answered first, off
- * state already in memory, and the Yjs walk happens only once all of them have
- * passed. Typing with a collapsed caret — the overwhelmingly common
- * transaction — returns at the first line and reads no Y type at all; the walk
- * is O(blocks up to the anchor) and only while a real selection stands.
+ * Reject empty/node selections, unnamed blocks and PM/Y text mismatches.
+ * Run cheap PM checks first; collapsed typing must not walk the Yjs fragment.
  */
-export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | null {
+export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | null {
   const { selection, doc } = editor.state;
   if (selection.empty) return null;
 
-  // `$from`, not `$anchor`: the anchor block is the first block of the *range*,
-  // so a backwards drag clamps to where it ended. Direction is a gesture, and
-  // "the earlier of the two ends" is the description a reader can check against
-  // the highlight.
+  // Use $from so backward drags also clamp to the first block in document order.
   const $from = selection.$from;
   if ($from.depth < 1) return null;
   const blockPos = $from.before(1);
@@ -270,6 +250,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | Ce
 
   const type = block.type.name;
   if (type === "table") return cellCommentTargetOf(editor, ydoc);
+  if (type === "card") return cardCommentTargetOf(editor, ydoc);
   if (!(BLOCK_TYPES as readonly string[]).includes(type)) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
@@ -278,10 +259,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | Ce
   const contentStart = blockPos + 1;
   const contentEnd = blockPos + block.nodeSize - 1;
 
-  // The one Y-side read in this function, and last for that reason: an offset
-  // is only meaningful if both sides count the same characters, and a second
-  // Y.XmlText child — or an embed the editor cannot render — means they do not.
-  // Every offset below would then name the wrong text.
+  // Read Yjs last; mismatched text/embeds would make these offsets mark wrong characters.
   if (anchorTextLength(ydoc, blockId) !== block.content.size) return null;
 
   const start = $from.parentOffset;

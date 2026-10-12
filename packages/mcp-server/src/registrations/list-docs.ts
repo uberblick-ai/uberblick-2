@@ -9,15 +9,23 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
   server.registerTool("list_docs", {
     title: "List documents",
     description:
-      "List workspace documents from directory stubs without opening document rooms. The unfiltered listing " +
-      "omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one " +
+      "List directory stubs without opening rooms. Decision answers use one to three short blocks with a " +
+      "brief reason; guidance is on the related page, discussion in an RFC. get_doc on regular pages marks " +
+      "related or linked topics. " +
+      "The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. " +
+      "kind: decision returns one " +
       "row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status " +
       "and tag may match different live records of a topic; resolution still uses its whole graph. " +
       "include_superseded returns records with per-record predicates. include_deleted admits archived topics " +
       "but is not a predicate, so archived decisions also require a matching predicate. Filters combine; " +
       "unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and " +
-      "authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. A fresh replica " +
-      "can discover the corpus once its directory room has synced." +
+      "authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. " +
+      "Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph or list, null " +
+      "when neither exists and absent when unknown. Every decision entry, including inForce, pending and " +
+      "conflicts, also caches discussion as its RFC UUID, null for none and absent when unknown. Each " +
+      "pending proposal names its own explicitly connected discussion, separately from curated links and " +
+      "recorded answer. " +
+      "A fresh replica can discover the corpus once its directory room has synced." +
       helpPointer("list_docs"),
     outputSchema: outputSchemas.list_docs,
     inputSchema,

@@ -1,46 +1,17 @@
-/**
- * @uberblick/schema — the keystone package.
- *
- * Owns the Y.Doc layout for an uberblick document:
- *   - `meta`        Y.Map: uuid, title, description, TL;DR,
- *                        `tag-assigned:<identity>` presence entries,
- *                        links-by-UUID, kind, status and decision metadata
- *   - `blocks`      Y.XmlFragment: one Y.XmlElement per block, each holding a
- *                   single Y.XmlText, except tables containing TableKit rows,
- *                   cells and one paragraph per cell
- *                   (types: paragraph, heading, code, mermaid, list-item,
- *                   quote, table, terminal, chart), formatted by the closed inline-mark set
- *                   (bold, italic, strike, inlineCode, link, docLink) on
- *                   prose blocks and table cells
- *   - `annotations` Y.Map of one Y.Map per thread — anchor, resolved flag and
- *                   the conversation as a nested Y.Array — anchored by
- *                   `comment` formatting marks on the block's text
- *   - `data`        optional flat Y.Map: versioned collection schemas and
- *                   id-keyed whole JSON records, independently replaceable
- *
- * …plus workspace ids (a uuid, optionally slug-decorated for display), room
- * names (`<workspaceId>/<uuid>`), the directory doc that makes discovery a
- * synced doc, the sidebar doc that makes curation one, the settings doc that
- * owns the workspace tag catalog, and one-way markdown export.
- *
- * Runtime dependencies are limited to `yjs` and `fast-diff`.
- *
- * Three rules hold everywhere: identity is UUIDs (titles and paths are display
- * data); writes are block-scoped, so there is no whole-document replace, by
- * construction; and a block's type changes only through `setBlockType`, which
- * keeps the id and preserves representable marks, refusing lossy conversions.
- */
+/** Schema runtime primitives remain limited to Yjs and fast-diff. */
 
 export {
   ANNOTATIONS_KEY,
   BLOCKS_KEY,
   META_KEY,
+  decisionContentLocked,
   getAnnotationsMap,
   getBlocksFragment,
   getMeta,
   getMetaMap,
   initDoc,
   setDescription,
+  setDiscussion,
   setTldr,
   setKind,
   setLinks,
@@ -56,7 +27,12 @@ export type { DataCollection, DataIssue, DataOperation, DataRecord, DocData } fr
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
 export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
+export {
+  decisionAnswerFailure, decisionAnswerShapeFailure, decisionDocAnswerFailure,
+} from "./decision-answer.js";
+export type { DecisionAnswerFailure, DecisionAnswerShapeFailure } from "./decision-answer.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
+export { archiveDocument } from "./lifecycle.js";
 
 export {
   appendBlock,
@@ -113,7 +89,14 @@ export {
 } from "./table.js";
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
-export { exportMarkdown, importMarkdown } from "./markdown.js";
+export {
+  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardInline, cardPartElement,
+  cardPartTexts, cardText, cardTextParts, isSupportedCard, parseCardInput,
+  seedNewCardParts, writeCardText,
+} from "./card.js";
+export type { CardInline, CardPart, CardText } from "./card.js";
+
+export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {
   ExportMarkdownOptions,
   ImportedBlock,
@@ -210,6 +193,8 @@ export {
   AnnotationCellError,
   AnnotationRangeError,
   BlockNotFoundError,
+  CardAnnotationError,
+  CardConversionError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -225,6 +210,7 @@ export {
   OldTextMismatchError,
   StaleBlockError,
   InvalidTableError,
+  InvalidCardError,
   InvalidTableMappingError,
   TableMappingRequiredError,
   TableAnnotationError,

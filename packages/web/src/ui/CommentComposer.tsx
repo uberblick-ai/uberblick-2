@@ -1,12 +1,8 @@
 /**
- * Selection chrome for prose and single-cell text: inline formatting, external links and the
- * existing comment composer.
- *
- * A selection wholly inside one prose block or cell gets the compact toolbar. Source
- * blocks and cross-block ranges keep the older Comment-only affordance because
- * the annotation API can clamp them honestly while inline marks cannot.
- * Decided records keep Comment, without formatting or link controls. Archived
- * and foreign-content panes never mount this component.
+ * Inline formatting and external links require one prose block or single
+ * cell or card part. Source and cross-block selections offer Comment alone because
+ * annotations can clamp honestly. Decided content offers only Comment;
+ * archived or foreign-content panes never mount this surface.
  */
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -24,7 +20,7 @@ import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture } from "../editor/block-menu.js";
 import { cellTextTargetOf, commentTargetOf } from "../editor/selection.js";
-import type { CellTextTarget, CommentTarget } from "../editor/selection.js";
+import type { CardTextTarget, CellTextTarget, CommentTarget } from "../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
 import { Button } from "./shadcn/button.js";
@@ -41,17 +37,17 @@ interface MarkReading {
 }
 
 interface Draft {
-  target: CommentTarget | CellTextTarget;
+  target: CommentTarget | CellTextTarget | CardTextTarget;
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
 }
 
 /** The range a target names, as a value two reads can be compared by. */
-function rangeOf(target: CommentTarget | CellTextTarget): string {
-  return `${target.blockId}:${"cellPos" in target ? target.cellPos : "prose"}:${target.start}:${target.end}`;
+function rangeOf(target: CommentTarget | CellTextTarget | CardTextTarget): string {
+  return `${target.blockId}:${"cellPos" in target ? target.cellPos : "part" in target ? target.part : "prose"}:${target.start}:${target.end}`;
 }
 
 /** Read the editor's stored range even while a link or comment field has focus. */
-function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | null): Range | null {
+function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | CardTextTarget | null): Range | null {
   const { from, to } = target === null ? editor.state.selection : {
     from: target.contentStart + target.start, to: target.contentStart + target.end,
   };
@@ -111,11 +107,11 @@ function boundedWrite(editor: Editor, write: () => void): void {
   endUndoCapture(editor.state);
 }
 
-function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | null {
+function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | null {
   const cell = cellTextTargetOf(editor);
   if (cell !== null) return cell;
   const target = commentTargetOf(editor, ydoc);
-  return target !== null && !target.clamped && isProseBlockType(target.blockType)
+  return target !== null && !target.clamped && (isProseBlockType(target.blockType) || "part" in target)
     ? target
     : null;
 }
@@ -203,6 +199,7 @@ function FormatButton({
   );
 }
 
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function CommentComposer({
   editor,
   contentReadOnly = false,
@@ -284,7 +281,7 @@ export function CommentComposer({
       }
       if (
         readMode() === "link" &&
-        (target.clamped || (!isProseBlockType(target.blockType) && !("cellPos" in target)))
+        (target.clamped || (!isProseBlockType(target.blockType) && !("cellPos" in target) && !("part" in target)))
       ) {
         setMode("toolbar");
         setHref("");
@@ -443,8 +440,9 @@ export function CommentComposer({
   if (draft === null) return null;
   const { target } = draft;
   const cell = "cellPos" in target;
+  const card = "part" in target;
   const prose = !target.clamped && isProseBlockType(target.blockType);
-  const formatting = (prose || (cell && !target.clamped)) && !contentReadOnly && editor.isEditable;
+  const formatting = (prose || ((cell || card) && !target.clamped)) && !contentReadOnly && editor.isEditable;
   const blockRef = blockRefLabel(target.blockType, target.blockIndex,
     editor.state.doc.nodeAt(target.contentStart - 1)?.textContent);
 
@@ -463,7 +461,7 @@ export function CommentComposer({
         target.end,
         author,
         text,
-        cell ? { row: target.row, column: target.column } : undefined,
+        cell ? { row: target.row, column: target.column } : card ? { part: target.part } : undefined,
       );
       close();
       onCreated(thread.id);
@@ -492,7 +490,7 @@ export function CommentComposer({
           <p className="m-0 flex items-center gap-[0.35rem]">
             <span className="mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{blockRef}</span>
             {target.clamped && (
-              <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">{cell ? "first cell only" : "first block only"}</span>
+              <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">{cell ? "first cell only" : card ? "first part only" : "first block only"}</span>
             )}
           </p>
           <p data-slot="selection-excerpt" className="border-l-2 border-(--border) pl-[0.4rem] text-[0.8rem] text-foreground italic before:content-['“'] after:content-['”']">{target.text}</p>
@@ -628,7 +626,7 @@ export function CommentComposer({
           onMouseDown={(event) => event.preventDefault()}
           onClick={openComment}
         >
-          {prose || cell ? "Comment" : `Comment on ${blockRef}`}
+          {prose || cell || card ? "Comment" : `Comment on ${blockRef}`}
         </Button>
       )}
     </div>,

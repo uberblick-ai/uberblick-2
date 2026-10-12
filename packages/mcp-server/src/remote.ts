@@ -1,59 +1,4 @@
-/**
- * The two halves of a one-time bridge between a workspace and a hub.
- *
- * `ub workspace use <link>` is the one command that composes both: it reads the remote
- * as a fresh client, refuses what it cannot verify, and only then attaches this
- * machine's replica to it. Each half is also used alone — `ub doctor`'s hub
- * probe inspects, `ub workspace create`'s starter seed syncs. They live here because they
- * are about Y.Docs and hub connections rather than about a command line:
- *
- * - {@link syncWorkspace} boots a real replica set over the mirror, hydrates it
- *   from a hub, and reports the corpus that ended up in the update log. It is
- *   the *acting* half: what it pulls down is logged, and what the log already
- *   holds is pushed up, because that is what attaching a replica to a hub does.
- * - {@link inspectRemote} opens throwaway Y.Docs against a hub and reports what
- *   a **fresh client would see there**. It is the *observing* half: no mirror,
- *   no update log, no awareness state, and nothing written to the hub — which
- *   is what lets a refusal ("that hub already holds documents") be reached
- *   without having touched anything.
- *
- * **Why an observer at all, when the replica set already reports `synced`.**
- * `HubSync.waitForQuiet` is a bounded best-effort wait: it returns when every
- * attached room is quiet *or* when the clock runs out, and the caller cannot
- * tell those apart from the outside. A bridge that persisted a new endpoint on
- * the strength of a timer would, on a slow link, tell somebody their documents
- * are on a machine that has never seen them. So completion is established by
- * asking the far side, and by three separate facts, all of which must hold:
- *
- * 1. Every room opened for this reading is *quiet* — {@link Corpus.unsettled}
- *    is empty. A bounded wait that expired is a failure, not a result.
- * 2. The full directory and every room selected for content verification
- *    arrived — {@link Corpus.missing} is empty.
- * 3. The directories agree in **both directions**, tombstones included, and
- *    content agrees for every archived document plus one live document. Not
- *    "the far side has everything we have": also "the far side has nothing we
- *    do not", because a document that appeared over there mid-bridge means the
- *    snapshot this was verified against is already stale.
- *
- * **What counts as agreement.** {@link docFingerprint} covers the whole
- * schema-owned surface — meta, blocks, their inline marks, annotations and
- * structured data — because `Block.rev` alone covers
- * type, text and attributes and would let a remote missing every bold run and
- * every comment thread pass.
- * Alongside it, state vectors are compared directly, which catches any struct
- * one side holds and the other does not, whatever it belongs to.
- *
- * A hash of `encodeStateAsUpdate` is deliberately *not* what is compared: those
- * bytes depend on how items happened to be split and merged during
- * integration, so two replicas that have genuinely converged can encode
- * differently and a byte comparison would fail a promotion that worked. State
- * vectors and schema-level content are both representation-independent.
- *
- * Tombstoned documents travel too. The directory doc carries the tombstone and
- * the document room carries the content it hides, so a later restore on a fresh
- * replica can recover the same blocks and annotations rather than an empty
- * room.
- */
+/** Keep throwaway inspection separate from reconciliation through the durable replica. */
 
 import { createHash } from "node:crypto";
 import {
@@ -77,26 +22,20 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { McpConfig } from "./config.js";
 import { usesDeviceLogin } from "./config.js";
-import { Replicas } from "./replica.js";
-import { MirrorStore } from "./store.js";
+import type { Replicas } from "./replica.js";
+import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import type { HubState } from "./sync.js";
 import { HubSync } from "./sync.js";
 
 /**
- * How long a bridge waits for a hub to answer, and for its rooms to go quiet.
- *
- * Deliberately far more generous than a tool call's budget. A tool call must
- * never block on the network, so `resolveMcpConfig` keeps those waits down in
- * the seconds; a bridge is a one-time operation a human is watching, moving a
- * whole corpus over a link that may be a laptop's tether.
+ * Bridges move a whole corpus over potentially slow links, so their finite
+ * connect budget is more generous than an ordinary tool call's.
  */
 export const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 
 /**
- * Generous, but finite and short enough to be *reached* rather than endured. A
- * hub that connects and then never finishes syncing is a real failure mode —
- * the far side is up but not serving this room — and it is only distinguishable
- * from success because this budget runs out and says so.
+ * A connected hub can still fail to serve a room. Expiry must leave that room
+ * unsettled rather than count as successful verification.
  */
 export const BRIDGE_SYNC_TIMEOUT_MS = 15_000;
 
@@ -129,21 +68,14 @@ export function bridgeConfig(
 export interface CorpusDoc {
   uuid: string;
   /**
-   * The directory stub's title and tags — not the document's own meta.
-   *
-   * The stub remains the discovery authority for an archived document. Its
-   * room is opened when a bridge moves or verifies it, but its document meta
-   * may have changed on a replica that had not seen the tombstone, so the stub
-   * is still compared independently.
+   * Compare the discovery stub separately: archived room meta may have changed
+   * on a replica that had not yet seen its tombstone.
    */
   title: string;
   tags: string[];
   /** Tombstoned in the directory. The room and its content remain intact. */
   deleted: boolean;
-  /**
-   * Content hash of the whole document, or null when this reading did not open
-   * the room.
-   */
+  /** Whole-document content hash, or null when this reading did not open the room. */
   fingerprint: string | null;
   /** The document's Yjs state vector, or null as above. */
   stateVector: Uint8Array | null;
@@ -157,29 +89,17 @@ export interface Corpus {
   /** Every directory entry, live and tombstoned alike. */
   entries: CorpusDoc[];
   /**
-   * Inspected directory entries whose document did not arrive. Never
-   * empty-and-fine: a directory naming a document nothing can produce is an
-   * incomplete sync, and every caller here treats it as a failure.
+   * A named document that did not arrive is a verification failure, not an empty room.
    */
   missing: { uuid: string; title: string }[];
   /**
-   * Rooms the hub has not acknowledged. A bounded wait that ran out leaves
-   * entries here, which is exactly the case a quiet timer cannot distinguish
-   * from success.
+   * Unacknowledged rooms after the bounded wait; any entry fails verification.
    */
   unsettled: string[];
   /**
-   * Whether this reading finished. **A corpus that is not complete says nothing
-   * about what the hub holds**, and in particular an empty `entries` on an
-   * incomplete reading is not an empty hub.
-   *
-   * This is the third answer, and it exists because the other two are not
-   * enough. `waitForQuiet` returns identically when the directory went quiet
-   * and when the clock ran out, and in the second case the connection is still
-   * up — so `hub.status` says `connected` and `entries` is empty, which reads
-   * exactly like a blank hub ready to be attached to. Deciding a refusal from
-   * that would attach a populated mirror to a hub whose contents were never
-   * read, and attaching is a merge.
+   * Whether the directory read finished; inspectRemote also waits for quiet.
+   * Check unsettled separately. An incomplete empty listing proves nothing
+   * about hub contents and must not permit attachment.
    */
   complete: boolean;
 }
@@ -190,15 +110,8 @@ export function liveDocs(corpus: Corpus): CorpusDoc[] {
 }
 
 /**
- * A value with every object key sorted, recursively.
- *
- * The document fingerprint passes each thread's plain JSON `toJSON()` value
- * here, alongside its metadata and each inline run's marks. One thread's
- * updates can reach two replicas in different orders; nothing guarantees the
- * two decodings enumerate their keys identically. A fingerprint that depends
- * on key order would report
- * divergence between documents that are in fact the same, and this bridge fails
- * closed — so a false difference is a promotion that refuses to finish.
+ * Sort object keys recursively: replicas can decode identical metadata, marks
+ * and threads in different key order, which must not fail closed verification.
  */
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -214,66 +127,34 @@ function canonical(value: unknown): unknown {
   return out;
 }
 
-/** The table subtree, including cell marks and anchors, without Yjs item ids. */
-function tableContent(element: Y.XmlElement | null): unknown {
+/** A structured prose subtree, including marks and anchors, without Yjs item ids. */
+function structuredContent(element: Y.XmlElement | null): unknown {
   if (element === null) return null;
   return {
     name: element.nodeName,
     attributes: canonical(element.getAttributes()),
     children: element.toArray().map((child) => {
-      if (child instanceof Y.XmlElement) return tableContent(child);
+      if (child instanceof Y.XmlElement) return structuredContent(child);
       return canonical(child instanceof Y.XmlText ? child.toDelta() : child.toJSON());
     }),
   };
 }
 
 /**
- * A content hash of one document, over everything the schema puts in it.
- *
- * Meta, the ordered blocks, the inline marks on those blocks,
- * and the annotations map — which is the whole documented
- * layout (`meta`, `blocks`, `annotations`), so nothing a document
- * can carry is outside this.
- *
- * **Meta is hashed as `getMeta` returns it, not as a list of fields named
- * here.** The list this used to carry went stale three times without anyone
- * noticing: `description`, `kind` and `status` each landed in `DocMeta` after
- * this function was written and none of them reached it (#526). Deriving the
- * coverage is what makes the claim above true rather than aspirational — a
- * field added to `getMeta` is inside the hash the moment it exists, and there
- * is no second place to remember. `getMeta` is also the normalising read, so
- * two documents it reports identically hash identically: a cleared `kind` and
- * one never set are both simply absent. Only `tags` and `links` are reshaped,
- * by sorting, because their order is not content.
- *
- * The annotations map is read through `toJSON()` because a thread's value is a
- * Y.Map with its conversation nested inside it, not plain JSON. That is what
- * brings the comments into the hash, in their stored order: the order is the
- * converged Yjs array order, identical on every replica, and it is content —
- * two replicas holding the same replies in different sequence are not the same
- * document.
- *
- * `Block.rev` supplies the per-block part because it is already the schema's
- * answer to "has this block's content changed" — type, text and attributes. It
- * does not cover prose inline marks, so the marks are hashed here
- * beside it rather than assumed; a remote that received the text of every block
- * and none of its formatting, or none of its comment threads, must not be able
- * to pass verification.
- *
- * **Anchors are content too, and nothing else here sees them.**
- * `getBlockInline` strips the `comment` mark, the annotations map holds no
- * positions, and a state vector says nothing about a delete set — so an undo
- * that removes an anchor leaves the text, the state vector and the thread record
- * all identical while the range a reader sees has moved or vanished. The
- * anchored runs are therefore hashed per block, which is where they live.
+ * Hash the schema-owned surface, including marks, threads, anchors and data.
+ * Block.rev omits prose marks; state vectors omit delete-set-only changes, so
+ * neither alone can prove that all reader-visible content reached the replica.
  */
 export function docFingerprint(doc: Y.Doc): string {
+  // Derive metadata coverage from the normalising reader, including future fields.
   const meta = getMeta(doc);
+  // Decode nested Y.Maps; reply array order is content and must remain intact.
   const annotations = getAnnotationsMap(doc).toJSON();
   const data = getDocDataEntries(doc);
   const state = {
     meta: canonical({
       ...meta,
+      // Tags and links are sets; their enumeration order is not content.
       tags: [...meta.tags].sort(),
       links: [...meta.links].sort(),
     }),
@@ -284,23 +165,23 @@ export function docFingerprint(doc: Y.Doc): string {
         text: run.text,
         marks: canonical(run.marks),
       })),
+      // getBlockInline strips comment marks and thread records hold no positions.
       anchors: listAnnotationRanges(doc, block.id).map((run) => ({
         threadId: run.threadId,
         start: run.start,
         end: run.end,
       })),
-      ...(block.type === "table" ? {
-        // GFM/rev can lose edge whitespace and unrepresentable marks. Include every cell's stored
-        // characters and delta, including comment anchors, so verification
-        // cannot accept a replica missing cell formatting or anchor deletions.
-        cells: tableContent(findBlockElement(doc, block.id)),
+      ...(block.type === "table" || block.type === "card" ? {
+        // GFM/rev can lose edge whitespace and marks. Stored cell deltas retain
+        // those characters, formatting and comment-anchor deletions for verification.
+        cells: structuredContent(findBlockElement(doc, block.id)),
       } : {}),
     })),
     annotations: Object.keys(annotations)
       .sort()
       .map((key) => [key, canonical(annotations[key])]),
-    // Data is content even when a merged schema is unsupported or records are
-    // invalid. Empty/absent data preserves historical promotion fingerprints.
+    // Include data even with unsupported schemas or invalid records. Omitting
+    // empty data keeps fingerprints stable for documents without collections.
     ...(data.length === 0 ? {} : { data: canonical(data) }),
   };
   return createHash("sha256")
@@ -322,21 +203,15 @@ function coversClocks(source: Uint8Array, target: Uint8Array): boolean {
 }
 
 /**
- * Whether two readings of the same document agree.
- *
- * Both tests, not either: the fingerprint is schema-level and would miss a
- * struct belonging to nothing the schema reads, and the state vectors are
- * structural and would miss a difference that is only in the delete set. A
- * side that was not opened contributes nothing to its half of the comparison —
- * a directory-only reading is not evidence of agreement, and callers that need
- * evidence open the documents.
+ * Check both schema content and struct clocks: neither covers the other's gaps.
+ * Encoded-update bytes depend on integration splitting/merging and cannot prove
+ * divergence. A directory-only side supplies no content-verification evidence.
  */
 function sameDoc(a: CorpusDoc, b: CorpusDoc): boolean {
   if (a.deleted !== b.deleted) {
     return false;
   }
-  // The directory stub, compared semantically: it remains discovery truth for
-  // a tombstone, and tag order is not meaningful.
+  // Tombstoned stubs remain discovery truth; tag order is not meaningful.
   if (a.title !== b.title || !sameTags(a.tags, b.tags)) {
     return false;
   }
@@ -381,24 +256,11 @@ function directoryOnly(entry: {
 }
 
 /**
- * What a fresh client would find on a hub. Reads; never writes.
- *
- * The documents it opens are empty Y.Docs with no mirror behind them, so
- * nothing observed here is logged and nothing held here is uploaded. Its
- * awareness state is left unset as well — a probe must not appear in the web
- * UI as a ghost collaborator.
- *
- * @param options.documents `true` opens every document the directory names and
- * fingerprints it. `"sample"` opens every archived document plus one live
- * document, which keeps large-corpus join verification bounded without ever
- * claiming an archived room moved from its tombstone alone. Off where the
- * caller needs only the directory entries.
- *
- * @param options.silent Keep this probe's hub reading off stderr, for a caller
- * that renders `hub` itself. Off by default, because most callers here are the
- * only place a refusal is ever named: `ub open` reduces its probe to a boolean,
- * so silencing every probe would trade one stray line for a lost diagnostic
- * (#447). {@link HubSync}'s `silent` option names the three lines it covers.
+ * Inspect with empty, unlogged Y.Docs; no existing content or presence is uploaded.
+ * documents: true verifies all rooms; sample verifies every archived room plus
+ * one live room, bounding live-content work without trusting tombstones alone.
+ * Silent is opt-in for callers rendering hub themselves; boolean-only callers
+ * otherwise need this probe's diagnostic.
  */
 export async function inspectRemote(
   config: McpConfig,
@@ -428,11 +290,7 @@ export async function inspectRemote(
     if (sync.state().status !== "connected") {
       return emptyCorpus(sync.state());
     }
-    // "Read it and it holds nothing" and "could not finish reading it" are
-    // different answers, and only one of them means the hub is empty. A
-    // directory room that connected but never went quiet inside the sync budget
-    // is the second, and reporting it as a corpus of zero documents is how a
-    // bridge would decide a populated hub was safe to attach a mirror to.
+    // A connected but unsettled directory cannot prove an empty hub safe to attach to.
     if (!sync.isRoomQuiet(dirRoom)) {
       return {
         hub: sync.state(),
@@ -487,8 +345,7 @@ export async function inspectRemote(
       if (!sync.isRoomQuiet(room)) {
         unsettled.push(room);
       }
-      // An empty `meta.uuid` is the one reliable "this document has not
-      // arrived": the room is named after the uuid, so its name proves nothing.
+      // The room name does not prove hydration; only a nonempty meta.uuid does.
       if (held === undefined || getMeta(held.doc).uuid === "") {
         missing.push({ uuid: entry.uuid, title: entry.title });
         continue;
@@ -507,9 +364,7 @@ export async function inspectRemote(
         if (!sync.isRoomQuiet(room)) unsettled.push(room);
       }
     }
-    // Complete: the directory was read in full. An inspected document that did
-    // not arrive lands in `missing`, which every caller already refuses on —
-    // only the directory read can fail in a way that looks like emptiness.
+    // Complete describes the directory read; missing and unsettled still fail verification.
     return {
       hub: sync.state(),
       entries,
@@ -557,9 +412,8 @@ function readCorpus(replicas: Replicas): Corpus {
   for (const entry of all) {
     const replica = attached.get(entry.uuid);
     if (replica === undefined || getMeta(replica.doc).uuid === "") {
-      // The stub is still evidence that this workspace has been used, even
-      // when nobody can produce its archived room. Callers such as the starter
-      // guard need that evidence; `missing` still makes a bridge fail closed.
+      // Retain tombstone evidence for starter guards even without its room;
+      // missing still makes bridge verification fail closed.
       if (entry.deleted === true) {
         entries.push(directoryOnly(entry));
       }
@@ -580,50 +434,29 @@ function readCorpus(replicas: Replicas): Corpus {
 }
 
 /**
- * Attach the mirror at `config.databasePath` to the hub at `config.hubUrl`,
- * hydrate everything, and report what the update log ends up holding.
- *
- * This has no direction of its own, because attaching a replica to a hub
- * reconciles the two: a populated mirror against an empty hub uploads, an empty
- * mirror against a populated hub downloads, and two populated sides merge as
- * CRDTs with neither discarded. `ub workspace use <link>` can attach an existing
- * replica; `ub workspace promote` first reserves an empty destination. What is
- * being reconciled is established by the caller, before this is called,
- * rather than inferred here from which side happens to be empty.
- *
- * Hydration is the two-pass shape the seed import relies on and for the same
- * reason: the directory has to arrive before the documents it names can be
- * attached. `Replicas.settle` does both passes; the extra wait after it is what
- * gives the last round of attachments a chance to finish.
- *
- * The store is opened and closed around one call, so consecutive phases share
- * the mirror through the file rather than through a handle. That is what "the
- * same MCP mirror" means here, and it keeps a phase from leaving a database
- * open across a network wait.
+ * Reconcile both ways through the local log; populated sides merge without
+ * discarding either. The caller must verify the destination before attachment.
+ * Settle hydrates directory then documents; the extra wait covers final attaches.
+ * Close the store and connection after this phase; later phases reopen the same file.
  */
 export async function syncWorkspace(config: McpConfig): Promise<Corpus> {
-  const store = new MirrorStore(config.databasePath, config.workspaceId);
-  const replicas = new Replicas(config, store);
+  const workspace = openWorkspaceReplicas(config);
+  const { replicas } = workspace;
   try {
     await replicas.settle();
-    // Ordinary MCP sessions leave tombstoned rooms detached: discovery and
-    // search need only the directory stub. A bridge is different — the hidden
-    // room is what makes restore meaningful on another machine, so attach every
-    // directory entry before waiting for the corpus to arrive.
+    // Carry archived content too: a tombstone alone cannot restore blocks and
+    // annotations on a fresh machine, though ordinary discovery needs only its stub.
     for (const entry of listDirectory(replicas.directory().doc, {
       includeDeleted: true,
     })) {
       replicas.replica(entry.uuid);
     }
     await replicas.sync.waitForQuiet();
-    // The log is the replica: a failed append means what follows would be read
-    // out of a document the log does not back.
+    // Refuse a snapshot that the authoritative log does not back.
     replicas.assertHealthy();
     return readCorpus(replicas);
   } finally {
-    replicas.destroy();
-    await replicas.sync.waitForDeviceWork();
-    store.close();
+    await workspace.close();
   }
 }
 
@@ -645,26 +478,10 @@ export function isIdentical(difference: CorpusDifference): boolean {
 }
 
 /**
- * Compare two corpora by uuid, and by content wherever both sides opened the
- * document.
- *
- * `extra` is what makes the refusals precise: a hub holding documents this
- * workspace has never heard of is a *second populated workspace*, and merging
- * those is out of scope. Reading it as a set difference rather than as "is the
- * other side empty" is also what lets a rerun finish — a promotion interrupted
- * halfway leaves a remote that holds a subset.
- *
- * **A refusal is decided on uuids alone; `differing` is for verification.** An
- * overlapping uuid is the same document, and the same document on two hubs is
- * one lineage that Yjs merges — re-promoting it converges its own history,
- * which is exactly the rerun the two verbs are meant to support. Content only
- * decides anything at read-back time, where the question is not "may this
- * proceed" but "did what just happened actually land".
- *
- * Tombstoned entries take part in the set difference. They carry no content to
- * compare, but their presence is content: a hub whose directory names documents
- * this workspace has never heard of has been used by somebody else, whether or
- * not those documents are still live.
+ * Compare UUID sets both ways, tombstones included, so a newly appeared remote
+ * document cannot pass read-back against a stale snapshot. Extra UUIDs mean a
+ * second workspace; overlapping UUIDs share Yjs lineage and permit interrupted
+ * reruns. Content differences verify read-back, not permission to attach.
  */
 export function compareCorpus(
   expected: readonly CorpusDoc[],

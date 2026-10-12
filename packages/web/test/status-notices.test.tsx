@@ -5,7 +5,7 @@ import { StatusLine } from "../src/ui/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
 import type { Notice } from "../src/notifications.js";
-import { AUTH_REJECTED } from "@uberblick/hub/protocol";
+import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status-reading.js";
 
 const notices = vi.hoisted(() => {

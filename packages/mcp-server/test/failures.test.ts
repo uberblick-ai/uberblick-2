@@ -108,6 +108,8 @@ const EXPECTED: Record<
     detail: ["collection", "recordId", "limit", "value", "attempted"],
   },
   invalid_table: { recoveryClass: "manual", detail: [] },
+  invalid_card: { recoveryClass: "manual", detail: [] },
+  annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
@@ -168,10 +170,23 @@ const EXPECTED: Record<
     recoveryClass: "manual",
     detail: ["uuid", "kind", "status"],
   },
-  governs_not_requirement: {
+  related_not_regular_document: {
     recoveryClass: "reread",
-    detail: ["governs", "kind"],
+    detail: ["related", "kind"],
   },
+  discussion_not_regular_document: {
+    recoveryClass: "reread",
+    detail: ["discussion", "kind"],
+  },
+  discussion_not_writable: {
+    recoveryClass: "manual",
+    detail: ["uuid", "kind", "status", "field"],
+  },
+  decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
+  decision_block_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
   invalid_tag_assignment: {
     recoveryClass: "manual",
     detail: ["unknown", "retired"],
@@ -262,6 +277,15 @@ describe("the failure contract", () => {
     record((await rig.call("get_help", { topic: "no-such-help-topic" })).payload);
     record((await rig.call("insert_block", {
       uuid: doc.uuid, type: "table", text: "not a GFM table",
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, type: "card", text: "label: Missing title",
+    })).payload);
+    const card = await rig.ok("insert_block", {
+      uuid: doc.uuid, after_block_id: doc.blockId, type: "card", text: "title: Card\n\nBody",
+    });
+    record((await rig.call("annotate", {
+      uuid: doc.uuid, block_id: card.block.id, start: 0, end: 3, text: "Open this in the web editor",
     })).payload);
     const table = await rig.ok("insert_block", {
       uuid: doc.uuid, after_block_id: doc.blockId, type: "table", text: "| Header |\n| --- |\n| Cell |",
@@ -392,6 +416,7 @@ describe("the failure contract", () => {
       description: "The topic's first stance.",
       kind: "decision",
       status: "decided",
+      blocks: [{ type: "paragraph", text: "Use the existing log." }],
     });
     const successorDecision = await rig.ok("create_doc", {
       title: "Successor proposal",
@@ -414,16 +439,30 @@ describe("the failure contract", () => {
     })).payload);
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
     record((await rig.call("set_metadata", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
+    record((await rig.call("set_metadata", { uuid: requirement.uuid, discussion: null })).payload);
+    record((await rig.call("create_doc", {
+      title: "Wrong discussion kind",
+      description: "Discussion belongs on a regular document.",
+      kind: "decision",
+      discussion: firstDecision.uuid,
+    })).payload);
     record(
       (
         await rig.call("create_doc", {
-          title: "Wrong governing kind",
-          description: "A decision cannot govern an ordinary document.",
+          title: "Wrong related kind",
+          description: "A decision cannot own another decision record.",
           kind: "decision",
-          governs: doc.uuid,
+          related: firstDecision.uuid,
         })
       ).payload,
     );
+    for (const fields of [
+      { status: "decided" },
+      { tldr: "No decision TL;DR." },
+      { blocks: [{ type: "heading", text: "No heading" }] },
+      { blocks: Array.from({ length: 4 }, () => ({ type: "paragraph", text: "An answer." })) },
+    ]) record((await rig.call("create_doc", { title: "Invalid answer", description: "Answer validation refuses before writing.", kind: "decision", ...fields })).payload);
+    record((await rig.call("update_data", { uuid: successorDecision.uuid, operations: [] })).payload);
     record(
       (
         await rig.call("create_doc", {
@@ -449,8 +488,7 @@ describe("the failure contract", () => {
       ).payload,
     );
 
-    // No data tool is introduced in this slice. Exercise the shared operation
-    // errors through the same adapter a later dedicated tool will use.
+    // Exercise shared data-operation errors through the tool failure adapter.
     const dataDoc = rig.instance.replicas.replica(doc.uuid).doc;
     const directory = rig.instance.replicas.directory().doc;
     const dataSchema = {
@@ -714,7 +752,7 @@ describe("the failure contract", () => {
     const malformed = [
       // A field whose value is the wrong shape.
       { uuid: "not-a-uuid", block_id: "b", old_text: "", new_text: "" },
-      // And a field nobody declared, which used to be dropped in silence.
+      // An undeclared field must be refused rather than silently dropped.
       {
         uuid: doc.uuid,
         block_id: doc.blockId,

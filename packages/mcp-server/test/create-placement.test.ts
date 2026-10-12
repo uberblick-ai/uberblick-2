@@ -2,8 +2,7 @@
  * `create_doc`'s optional sidebar placement: one call, up to three rooms, and
  * no claim the rooms cannot back.
  *
- * The contract this suite defends is the honest one the issue chose over
- * transactional machinery that does not exist: placement is expressed once, in
+ * The rooms persist independently: placement is expressed once, in
  * an input that cannot say two contradictory things; an unknown group fails
  * having created nothing; and a create that gets part-way says which rooms are
  * durable, which one refused, that nothing was rolled back, and what to do
@@ -535,7 +534,7 @@ describe("a create that gets part-way", () => {
     ]);
   });
 
-  it("never writes the governed requirement room", async () => {
+  it("never writes the related page room", async () => {
     const databasePath = tempDatabasePath();
     const store = failingStore(databasePath);
     const rig = await server(databasePath, store);
@@ -547,8 +546,8 @@ describe("a create that gets part-way", () => {
     store.failRoom = room => room === requirementRoom;
     store.failing = true;
     const decision = await rig.ok("create_doc", {
-      title: "Own metadata", description: "Stores its governing link itself.",
-      kind: "decision", governs: requirement.uuid,
+      title: "Own metadata", description: "Stores its related page itself.",
+      kind: "decision", related: requirement.uuid,
     });
     expect(store.appends.get(requirementRoom)).toBe(before);
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual(["document", "directory"]);

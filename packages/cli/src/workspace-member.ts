@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
-import { isGithubAccountId, isGithubUsername } from "@uberblick/hub";
-import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "./access-management.js";
 import type { ManagementAction } from "./access-management.js";
@@ -102,6 +102,7 @@ function already(value: Member, io: Io): void {
   io.out(`already a member: ${describe(value)} as ${value.role}; use \`ub workspace member role ${value.githubAccountId} <admin|member>\` to change the role\n`);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function workspaceMemberCommand(argv: string[], io: Io): Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || ["help", "--help", "-h"].includes(command)) {

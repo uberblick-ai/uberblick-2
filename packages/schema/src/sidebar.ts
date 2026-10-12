@@ -1,188 +1,23 @@
-/**
- * The sidebar document.
- *
- * The sidebar is explicit curation, not a view of the directory: one Y.Doc per
- * workspace, in the well-known room `<workspaceId>/_sidebar` (see `rooms.ts`),
- * holding an ordered list of named groups, each holding an ordered list of
- * pinned document UUIDs. It is an ordinary synced document — logged, hydrated
- * offline and merged like every other room.
- *
- * It stores UUIDs and nothing else. No title, no path, no content: a group is a
- * list of references, so nothing here can change, hide or delete a document.
- * Unpinning and deleting a group are sidebar-only acts.
- *
- * Layout — four fixed top-level keys, plus one array per group:
- *   - `groups`    Y.Map: groupId → name, the group's only field
- *   - `order`     Y.Array<groupId>: the group order
- *   - `unpinned`  Y.Map: `<uuid>#<clientID>` → number, unpin counters (below)
- *   - `flags`     Y.Map: set-once booleans about the sidebar itself (below)
- *   - `pins:<id>` Y.Array<Pin>: one group's pins, a top-level type of its own
- *
- * A `Pin` is a plain `{ uuid, since }` object, never a nested Y type.
- *
- * A group's pins live in a *top-level* array named after the group rather than
- * in a nested one stored under its id, and that is what makes creating a group
- * convergent. A nested type has to be created by somebody: `groups.set(id, new
- * Y.Map())` on two replicas is two writes of one key, so one map wins whole and
- * every pin the loser held goes with it, silently. A top-level type is created
- * by *name* — Yjs hands the same array to whoever asks for `pins:<groupId>`, on
- * every replica, whether or not anyone has written to it — so two offline
- * replicas can each create one group and pin into it, and the merge keeps both
- * pins. A group is then a name in `groups`, an id in `order` and an array
- * reached by name: three writes that merge, none that replaces.
- *
- * Two replicas creating one group under *different* names still resolve that
- * one key by clientID, and deliberately so: a name is a string both sides can
- * see and correct, not a container holding somebody's pins.
- *
- * The cost is that a top-level type cannot be removed. {@link deleteGroup}
- * empties the array instead, so a long-lived sidebar carries one spent array
- * per group ever deleted — a handful of empty arrays, in exchange for never
- * losing a pin. Emptying is not removal in the concurrent case, either: a pin
- * another replica made into the group while it was being deleted integrates
- * after the delete and stays in the array, invisible while no group carries
- * the id, and back in the sidebar if that exact id is created again — routine
- * once ids are derived from names ({@link getOrCreateGroup}). A pin
- * *resurfaces*; none is lost. Whether that wants a generation stamp on pins or
- * a record of spent ids is decided with the wiring, in
- * {@link https://github.com/uberblick-ai/uberblick-2/issues/306}.
- *
- * The order is an array of *ids*, not of the groups themselves, because Yjs has
- * no move: reordering is delete-then-insert. Moving a plain value rewrites
- * nothing, whereas moving a group whose array element held its own pins would
- * mean cloning that element — and a pin another replica made into it
- * concurrently would be dropped along with the original. Pins are plain objects
- * for the same reason.
- *
- * ## Convergence
- *
- * Two rules are enforced on read, which is what lets replicas agree without
- * agreeing on anything first — each computes the same answer from the same
- * state.
- *
- *   - **One pin per document.** Two replicas pinning the same uuid into two
- *     groups both integrate, so storage holds two pins. `readSidebar` keeps the
- *     first occurrence in stored traversal order — groups in sidebar order,
- *     pins in group order, the block-id dedupe of `blocks.ts` — and that is the
- *     same occurrence on every replica. Every write removes *all* occurrences
- *     of a uuid before inserting, so the shadowed copy clears on the next move
- *     or unpin; there is nothing to repair in the meantime.
- *
- *   - **A document moved by two replicas lands in one place: the first
- *     occurrence in stored traversal order wins, never both.** A move is a
- *     delete plus an insert; the deletes commute and both inserts survive, so
- *     storage does hold the uuid twice, and the same dedupe picks one. Nothing
- *     here is a recency rule: the winner is a position, not a timestamp, so the
- *     destination does not depend on which move was made or integrated last.
- *
- * ## Unpinning: counters, never a tombstone that gets deleted
- *
- * An unpin has to beat a move that raced it (owner decision), and removing the
- * pins cannot do that on its own: the unpin deletes the pin its own replica
- * could see, the move inserts one the unpin never saw, and a delete does not
- * reach forward, so the move's insert would survive as a live pin.
- *
- * So every pin records the unpin level it was made under, and `unpinned` counts
- * unpins:
- *
- *   - `unpinLevel(uuid)` is the **maximum** over every `<uuid>#<clientID>`
- *     entry, 0 when there are none.
- *   - A pin is visible iff `pin.since >= unpinLevel(pin.uuid)`.
- *   - `unpinDoc` writes **to its own client's key** one more than the highest
- *     stamp it can actually see — the unpin level, or a visible pin's `since`
- *     if that is higher — so every pin this replica can see is hidden. Counting
- *     from the level alone is not enough: updates from different clients arrive
- *     in no guaranteed order, so a replica can hold a pin stamped above its own
- *     level and would otherwise write a number that pin already clears.
- *   - `pinDoc` stamps the new pin with the level it can see, so the pin is
- *     visible again — a deliberate re-pin beats the unpins it has seen.
- *   - `moveDoc` carries the existing pin's `since` across unchanged. Moving is
- *     not re-pinning, and must not silently clear an unpin.
- *   - `unpinDocIncludingUnseen` is that same write without the visible-pin
- *     check, for the one caller that must also hide a pin it has not received
- *     yet: archiving (#957), whose claim is about the document rather than
- *     about a pin somebody is looking at.
- *
- * Two properties make this sound, and both are deliberate:
- *
- *   - **Nothing is ever deleted from `unpinned`, and no key is ever written by
- *     more than one replica.** A concurrent set and delete of one Y.Map key
- *     resolves by clientID order — a coin flip, not a rule — so a design that
- *     needed one to win would converge to different answers on different
- *     machines. Keying by client removes the race instead of betting on it: the
- *     only writer of `<uuid>#<clientID>` is that client, and it only ever
- *     raises its own number. Taking the max on read is what merges them.
- *
- *   - **Equal counters mean pinned.** When an unpin and a re-pin are made
- *     concurrently from the same level, both produce the same number, the pin's
- *     `since` equals the level, and the document reads as pinned. That is a
- *     genuine tie between two deliberate acts that never saw each other, and it
- *     is resolved by a rule rather than by whoever's clientID sorts lower. The
- *     decided case — an unpin racing a *move*, which carries an older `since` —
- *     is not a tie, and the unpin wins it.
- *
- * The counters only grow, one entry per (document, client that unpinned it).
- * Compacting them would mean deleting keys their owners may concurrently write,
- * which is the race this design exists to avoid, so they are left alone.
- *
- * Ordering is stored, never computed: `readSidebar` returns groups and pins in
- * exactly the order the arrays hold. Nothing in this module sorts by title.
- *
- * Every operation naming a group id the sidebar does not hold does nothing. A
- * group can always be deleted concurrently, so a throw here would fire on
- * ordinary merges rather than on caller mistakes.
- *
- * ## Flags: set once, never cleared
- *
- * `flags` answers questions about the sidebar that its contents cannot — the
- * one there is being {@link isSidebarSeeded}, whether the one-time migration
- * that built a sidebar out of the old tag grouping has already run. Emptiness
- * cannot answer it: a sidebar deliberately emptied would be migrated again, and
- * the delete would not stick.
- *
- * A flag is only ever set, and only ever to `true`. That is what makes it
- * convergent without a rule: two replicas setting one key to the same value
- * agree however Yjs orders them, whereas a flag that could be cleared would be
- * the concurrent set-and-delete this module refuses everywhere else.
- *
- * A migration guarded by a flag still has to survive being run twice — two
- * offline replicas can each seed before either sees the other's flag — so it
- * writes with ids of its own choosing rather than generated ones (see
- * {@link createGroup}), and the two runs merge into one sidebar instead of two.
- *
- * Sharing an id is enough because a group's fields merge rather than replace
- * each other — the name is a string, the pins are an array Yjs hands out by
- * name — so two runs built from *different* state converge on one group holding
- * both sides' pins. A caller that addresses groups by name rather than by id
- * gets the same guarantee from {@link getOrCreateGroup}, which derives the id
- * from the name so that two replicas naming one group write one group.
- */
+/** UUID-only curation in a synced room; sidebar writes never alter documents. */
 
 import type * as Y from "yjs";
 import type { SidebarGroup } from "./types.js";
 
-/** The key of the sidebar's groupId → name Y.Map. */
 export const SIDEBAR_GROUPS_KEY = "groups";
 
-/** The key of the sidebar's group-order Y.Array. */
 export const SIDEBAR_ORDER_KEY = "order";
 
-/** The key of the sidebar's unpin-counter Y.Map. */
 export const SIDEBAR_UNPINNED_KEY = "unpinned";
 
-/** The key of the sidebar's set-once flag Y.Map. */
 export const SIDEBAR_FLAGS_KEY = "flags";
 
-/** The flag recording that the one-time tag-group migration has run. */
+/** A persistent seed guard independent of whether the sidebar is empty. */
 const SEEDED_FLAG = "seeded";
 
-/** Prefixes the top-level array holding one group's pins. */
 const PINS_PREFIX = "pins:";
 
-/** Prefixes the id {@link getOrCreateGroup} derives from a group's name. */
 const NAME_ID_PREFIX = "name:";
 
-/** Separates the uuid from the client id in an `unpinned` key. */
 const CLIENT_SEPARATOR = "#";
 
 /** One stored pin: a document uuid, and the unpin level it was pinned under. */
@@ -191,64 +26,58 @@ interface Pin {
   since: number;
 }
 
-/** The groupId → name map inside a sidebar doc. A group's only field. */
+/** Concurrent names resolve by Yjs key order without replacing any pins. */
 export function getSidebarGroups(sidebarDoc: Y.Doc): Y.Map<string> {
   return sidebarDoc.getMap<string>(SIDEBAR_GROUPS_KEY);
 }
 
-/** The group-order array inside a sidebar doc. */
+/** Order stores plain ids so delete/insert moves never clone pin containers. */
 export function getSidebarOrder(sidebarDoc: Y.Doc): Y.Array<string> {
   return sidebarDoc.getArray<string>(SIDEBAR_ORDER_KEY);
 }
 
 /**
- * The unpin counters inside a sidebar doc: `<uuid>#<clientID>` → count.
- *
- * A document's unpin level is the maximum over its entries. Only
- * {@link unpinDoc} writes here, only ever to its own client's key, and nothing
- * ever deletes one — see the module header for why that matters.
+ * `<uuid>#<clientID>` counters have one writer each and only increase; reads
+ * take their maximum. Never delete or compact keys that their owners may write.
+ * Storage grows by one entry per document/client that unpins it.
  */
 export function getSidebarUnpinned(sidebarDoc: Y.Doc): Y.Map<number> {
   return sidebarDoc.getMap<number>(SIDEBAR_UNPINNED_KEY);
 }
 
-/** The set-once flags inside a sidebar doc. See the header. */
+/** Flags only become true; clearing one would race concurrent seeding. */
 export function getSidebarFlags(sidebarDoc: Y.Doc): Y.Map<boolean> {
   return sidebarDoc.getMap<boolean>(SIDEBAR_FLAGS_KEY);
 }
 
-/** Whether the one-time migration out of tag grouping has already run. */
 export function isSidebarSeeded(sidebarDoc: Y.Doc): boolean {
   return getSidebarFlags(sidebarDoc).get(SEEDED_FLAG) === true;
 }
 
 /**
- * Record that the one-time migration has run. Set once, never cleared: a
- * sidebar emptied down to nothing stays migrated, which is the whole point.
+ * Set once so deliberately emptying the sidebar cannot trigger another seed.
+ * Offline seeders must still use shared ids: neither may see the other's flag.
  */
 export function markSidebarSeeded(sidebarDoc: Y.Doc): void {
   getSidebarFlags(sidebarDoc).set(SEEDED_FLAG, true);
 }
 
-/** A group's name, or null when the sidebar holds no such group. */
+/** Missing groups make writes no-ops: concurrent group deletion is ordinary. */
 function groupName(sidebarDoc: Y.Doc, groupId: string): string | null {
   const name = getSidebarGroups(sidebarDoc).get(groupId);
   return typeof name === "string" ? name : null;
 }
 
 /**
- * One group's pins, as a top-level array named after the group.
- *
- * Reached by name and never stored under a key, which is what lets two replicas
- * create one group without either side's pins being replaced — see the header.
- * The array exists as soon as it is asked for, on every replica, so this needs
- * no create step and cannot return null.
+ * Named top-level arrays merge independent group creates; competing nested
+ * maps would replace a whole pin container. Yjs creates this array on access.
+ * Top-level arrays cannot be removed, even after their group is deleted.
  */
 function pinsOfGroup(sidebarDoc: Y.Doc, groupId: string): Y.Array<Pin> {
   return sidebarDoc.getArray<Pin>(`${PINS_PREFIX}${groupId}`);
 }
 
-/** A stored pin, or null when the value is not one. */
+/** Pins are plain values so moves can reinsert them without cloning Y types. */
 function readPin(value: unknown): Pin | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Partial<Pin>;
@@ -257,7 +86,6 @@ function readPin(value: unknown): Pin | null {
   return { uuid: candidate.uuid, since };
 }
 
-/** Every document's unpin level, in one pass over the counters. */
 function unpinLevels(sidebarDoc: Y.Doc): Map<string, number> {
   const levels = new Map<string, number>();
   for (const [key, value] of getSidebarUnpinned(sidebarDoc).entries()) {
@@ -269,7 +97,7 @@ function unpinLevels(sidebarDoc: Y.Doc): Map<string, number> {
   return levels;
 }
 
-/** How often `uuid` has been unpinned, as the highest replica's count. */
+/** An unseen counter contributes zero; a deliberate pin may equal the level. */
 function unpinLevel(sidebarDoc: Y.Doc, uuid: string): number {
   return unpinLevels(sidebarDoc).get(uuid) ?? 0;
 }
@@ -287,7 +115,6 @@ function orderedGroupIds(sidebarDoc: Y.Doc): string[] {
   return out;
 }
 
-/** `index` clamped into an array of `length`; undefined means append. */
 function clampIndex(index: number | undefined, length: number): number {
   if (index === undefined || !Number.isFinite(index)) return length;
   return Math.min(Math.max(Math.trunc(index), 0), length);
@@ -301,7 +128,6 @@ function removeAll(array: Y.Array<string>, value: string): void {
   }
 }
 
-/** Every group's pin array, in stored order. */
 function allPinLists(sidebarDoc: Y.Doc): Y.Array<Pin>[] {
   return orderedGroupIds(sidebarDoc).map((id) => pinsOfGroup(sidebarDoc, id));
 }
@@ -332,16 +158,8 @@ function visiblePin(sidebarDoc: Y.Doc, uuid: string): Pin | null {
 }
 
 /**
- * The level an unpin of `uuid` has to clear: the document's unpin level, and
- * the stamp of every pin that currently reads as visible.
- *
- * The two can disagree. Updates from different clients arrive in no guaranteed
- * order, so a replica can hold a pin stamped `since: 2` while the counter that
- * justified it — written by some third client — has not arrived, leaving the
- * level at 0. Counting from the level alone would write 1, which that pin
- * already clears, and the unpin would be silently lost the moment the pin was
- * moved or the missing counter turned up. Counting from what is actually
- * visible cannot be fooled that way: whatever a replica can see, it can hide.
+ * A pin can arrive before the counter that justified its stamp. Clear both
+ * the visible stamps and the observed level so every visible pin is hidden.
  */
 function unpinCeiling(sidebarDoc: Y.Doc, uuid: string): number {
   const level = unpinLevel(sidebarDoc, uuid);
@@ -357,18 +175,8 @@ function unpinCeiling(sidebarDoc: Y.Doc, uuid: string): number {
 }
 
 /**
- * Add an empty group at `index` (default: last) and return its id.
- *
- * `id` defaults to a generated one, which is what an ordinary create wants. A
- * caller passes one when two replicas may make the *same* group independently —
- * the one-time migration does, because a generated id would give each replica
- * its own copy of every group, and a merge would show both. With one id they
- * write the same group, and the two creates merge into one holding both sides'
- * pins: the name is a plain string and the pins are a top-level array reached
- * by name, so nothing here replaces anything (see the header).
- *
- * Creating a group that is already there is therefore not an error and not a
- * duplicate: it asserts the name and leaves the position and the pins alone.
+ * Shared caller-supplied ids merge offline creates into one group with both
+ * sets of pins. Repeating an id asserts its name without moving or clearing it.
  */
 export function createGroup(
   sidebarDoc: Y.Doc,
@@ -379,9 +187,7 @@ export function createGroup(
   sidebarDoc.transact(() => {
     getSidebarGroups(sidebarDoc).set(id, name);
     const order = getSidebarOrder(sidebarDoc);
-    // The local repeat only: a replica creating this group concurrently cannot
-    // see this entry and inserts its own, which `orderedGroupIds` dedupes on
-    // read and the next `moveGroup` clears out of storage.
+    // Concurrent creates can insert duplicate ids; reads dedupe and moves clear them.
     if (!order.toArray().includes(id)) {
       order.insert(clampIndex(index, order.length), [id]);
     }
@@ -390,15 +196,8 @@ export function createGroup(
 }
 
 /**
- * The id of the group called `name`, creating it at `index` (default: last) if
- * no group carries that name — for callers that address groups by name.
- *
- * The created id is derived from the name, so two replicas that each create
- * "Reading" while out of contact write one group rather than two, and the merge
- * holds both sides' pins. Where the derived id is already taken by a group that
- * has since been renamed, this falls back to a generated id: two replicas can
- * then still end up with two same-named groups, which is visible and repairable
- * — the loss this trades away was neither.
+ * Name-derived ids merge offline creates. If a renamed group occupies the id,
+ * generated fallback ids can leave duplicate names, while retaining both pins.
  */
 export function getOrCreateGroup(
   sidebarDoc: Y.Doc,
@@ -418,7 +217,6 @@ export function getOrCreateGroup(
   );
 }
 
-/** Rename a group, keeping its id and its pins. */
 export function renameGroup(
   sidebarDoc: Y.Doc,
   groupId: string,
@@ -429,15 +227,8 @@ export function renameGroup(
 }
 
 /**
- * Delete a group. Its pins go with it — the documents themselves are untouched,
- * because the sidebar only ever held their uuids.
- *
- * The group's array is emptied rather than removed, because a top-level type
- * cannot be removed — and emptying reaches only the pins this replica can see.
- * A pin another replica made into the group concurrently integrates after the
- * delete, survives in the array, and is back in the sidebar if that id is
- * created again. See the header and
- * {@link https://github.com/uberblick-ai/uberblick-2/issues/306}.
+ * Empty the permanent array without touching documents. Unseen concurrent
+ * pins survive invisibly and resurface if the exact group id is created again.
  */
 export function deleteGroup(sidebarDoc: Y.Doc, groupId: string): void {
   if (groupName(sidebarDoc, groupId) === null) return;
@@ -450,16 +241,8 @@ export function deleteGroup(sidebarDoc: Y.Doc, groupId: string): void {
 }
 
 /**
- * Pin a document into a group at `index` (default: last).
- *
- * One pin per document across the whole sidebar: pinning a uuid that is already
- * pinned anywhere does nothing, even into another group. Moving it is
- * {@link moveDoc}.
- *
- * This is also the way back from an unpin, and it is deliberate about it: the
- * new pin is stamped with the unpin level this replica can see, so it clears
- * every unpin it knows about, and any older pins are swept away first — the
- * document lands where this call puts it rather than wherever a race left it.
+ * An already visible pin makes this a no-op. A deliberate re-pin removes stale
+ * copies and stamps the observed level; equality wins over observed unpins.
  */
 export function pinDoc(
   sidebarDoc: Y.Doc,
@@ -478,12 +261,8 @@ export function pinDoc(
 }
 
 /**
- * Unpin a document, wherever it sits. The document itself is untouched.
- *
- * Removing the pins is not enough on its own — a move made concurrently on
- * another replica would reinstate one — so this also raises this client's unpin
- * counter past every pin this replica can currently see, which is a stronger
- * bar than the unpin level alone. See {@link unpinCeiling} and the header.
+ * An unpin beats a concurrent move: raise the counter beyond visible stamps,
+ * since deleting visible pins alone cannot suppress the move's unseen insert.
  */
 export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
   if (visiblePin(sidebarDoc, uuid) === null) return;
@@ -491,30 +270,15 @@ export function unpinDoc(sidebarDoc: Y.Doc, uuid: string): void {
 }
 
 /**
- * Unpin a document whether or not this replica can see a pin — what archiving
- * needs (#957).
- *
- * {@link unpinDoc} asks for a visible pin first, so a pin this replica has not
- * received yet is neither removed nor counted: it merges in afterwards and the
- * document reads as pinned again. That is right for an unpin, which is a
- * request about the pin somebody is looking at. It is wrong for an archive,
- * which claims the document is no longer an entry point at all, so it raises the
- * counter whether or not a pin is visible. What that achieves is bounded: it
- * hides every pin stamped at or below the level this replica can see, including
- * one that has not arrived here yet. A pin stamped above that level — made
- * under an unpin this replica has not received either — still surfaces
- * afterwards (#969).
- *
- * Raising the counter with nothing visible is safe for the same reason the
- * ordinary unpin is: it only ever raises *this* client's own key, one past
- * everything this replica can see, and a deliberate {@link pinDoc} afterwards
- * still wins, because it stamps the level it can then see.
+ * Archiving asserts an unpin even with no visible pin, hiding unseen pins at
+ * or below the observed level. A pin stamped at or above the raised counter can
+ * still surface; a deliberate re-pin after observing the unpin also wins.
  */
 export function unpinDocIncludingUnseen(sidebarDoc: Y.Doc, uuid: string): void {
   raiseUnpin(sidebarDoc, uuid);
 }
 
-/** Hide every pin of `uuid` this replica can see, and count the unpin. */
+/** Only this client writes its counter; it is never cleared on re-pin. */
 function raiseUnpin(sidebarDoc: Y.Doc, uuid: string): void {
   const next = unpinCeiling(sidebarDoc, uuid) + 1;
   const key = `${uuid}${CLIENT_SEPARATOR}${sidebarDoc.clientID}`;
@@ -525,15 +289,8 @@ function raiseUnpin(sidebarDoc: Y.Doc, uuid: string): void {
 }
 
 /**
- * Move a document to `index` in `toGroupId` — within its group or across
- * groups. `index` counts positions in the target group *after* the document has
- * been taken out of it.
- *
- * Moving only ever moves a pin that is there: a uuid that does not read as
- * pinned is left alone rather than pinned, and the pin keeps the unpin level it
- * was made under. Pinning is {@link pinDoc}, which is where the deliberate
- * re-pin of an unpinned document belongs — keeping the two apart is what stops
- * a move from quietly overriding an unpin.
+ * Only move visible pins, carrying their stamp so a move cannot undo an unpin.
+ * The target index is measured after removing the pin, including hidden copies.
  */
 export function moveDoc(
   sidebarDoc: Y.Doc,
@@ -551,7 +308,6 @@ export function moveDoc(
   });
 }
 
-/** Move a group to `index` in the sidebar, keeping its id, name and pins. */
 export function moveGroup(
   sidebarDoc: Y.Doc,
   groupId: string,
@@ -566,10 +322,9 @@ export function moveGroup(
 }
 
 /**
- * The sidebar in stored order, with both read-side rules applied: a pin whose
- * `since` no longer clears its document's unpin level is hidden, and a uuid
- * appearing more than once keeps its first visible occurrence — the same
- * occurrence on every replica. Nothing is sorted.
+ * Stored traversal order determines the first visible pin per uuid, including
+ * concurrent moves. This is a positional winner, never recency or title order.
+ * Successful pin/move/unpin writes clear shadowed copies in current groups.
  */
 export function readSidebar(sidebarDoc: Y.Doc): SidebarGroup[] {
   const levels = unpinLevels(sidebarDoc);

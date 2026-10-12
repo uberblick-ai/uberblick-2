@@ -1,11 +1,8 @@
-/* Product tokens, fonts, editor content and remaining UI rules are unlayered,
- * so they outrank the layered utilities in `ui/tailwind.css`. Theme colors
- * pair both appearances in `light-dark()`; the terminal's fixed palette stays
- * local to its surface.
- *
- * Default text and emphasis use weights 400 and 500. Avatar initials,
- * collaborator overflow counts and the TL;DR label use 600; prose <strong>
- * keeps the browser's bold weight.
+/*
+ * Unlayered product rules outrank Tailwind utilities. light-dark() pairs
+ * appearances; the terminal palette stays local. Keep normal/emphasis at
+ * 400/500, avatar initials, overflow counts and TL;DR label at 600, and prose
+ * strong at browser bold.
  */
 
 :root {
@@ -54,31 +51,38 @@
   --sidebar-border: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 12%));
   --sidebar-accent: light-dark(oklch(0.89 0.015 65), oklch(0.28 0.015 65));
 
-  /* Sidebar tints apply alpha to the ink so they work on the column and its
-     accent. Label and small-text ink have separate roles but share the 60%
-     AA floor: 4.96:1 on the light column and 4.70:1 on its highlight (#515). */
+  /*
+   * Sidebar ink alpha works on column and accent grounds. Label and small-
+   * text roles share a 60% AA floor: 4.96:1 on light column and 4.70:1 on its
+   * highlight.
+   */
   --sidebar-row-foreground: light-dark(oklch(0.145 0 0 / 82%), oklch(0.985 0 0 / 82%));
   --sidebar-row-icon: light-dark(oklch(0.145 0 0 / 68%), oklch(0.985 0 0 / 68%));
   --sidebar-group-label: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-muted-foreground: light-dark(oklch(0.145 0 0 / 60%), oklch(0.985 0 0 / 60%));
   --sidebar-selected-border: light-dark(oklch(0.75 0.15 65 / 28%), oklch(0.8 0.18 65 / 28%));
 
-  /* The rename-field edge matches the sidebar border in light and keeps
-     the stronger 15% input stroke in dark (#515). */
+  /*
+   * Match sidebar border in light and preserve the stronger 15% input stroke
+   * in dark.
+   */
   --sidebar-input: light-dark(oklch(0.9 0.006 65), oklch(1 0 0 / 15%));
 
-  /* Card highlights step off their own ground and hue: OKLab ΔE is 0.0510
-     in light and 0.0716 in dark, clearing the dark 0.064 floor (#516).
-     The global accent and secondary fills retain their warm values. */
+  /*
+   * Card highlight OKLab ΔE is 0.0510 in light and 0.0716 in dark, above the
+   * dark 0.064 floor. Preserve warm global accent and secondary fills.
+   */
   --card-accent: light-dark(oklch(0.92 0.015 75), oklch(0.275 0.015 75));
 
+  /* Decision: 3b99506a-1ccd-453b-b01d-0eadef56f12f. */
   --brand: light-dark(oklch(0.75 0.15 65), oklch(0.8 0.18 65));
   --brand-subtle: light-dark(oklch(0.95 0.03 65), oklch(0.25 0.04 65));
 
-  /* Functional brand text uses `--brand-ink`; strokes, fills and other
-     non-text accents use `--brand` (#569). The light ink clears AA at 4.82:1
-     on sidebar-accent, its tightest ground. Dark ink can use the accent itself;
-     darkening the accent to serve light text would also repaint every stroke. */
+  /*
+   * Use brand-ink for text and brand for non-text accents. Light ink clears
+   * AA at 4.82:1 on sidebar-accent; dark uses the accent itself. Darkening
+   * the shared accent for light text would repaint strokes.
+   */
   --brand-ink: light-dark(oklch(0.48 0.1 65), var(--brand));
 
   /* Brand fills are light amber in both appearances, so their ink stays
@@ -123,6 +127,7 @@
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
 
+  /* Decision: 7fde74ef-5f4e-45bf-83ce-73354e2f38f1. */
   /* UI and prose use Geist; machine text uses Geist Mono. The document title
      and TL;DR heading share the Fraunces display stack. System fallbacks cover
      the font-swap period. */
@@ -136,13 +141,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Bundle variable WOFF2 faces for offline rendering; relative asset URLs
- * survive the build's base path. `swap` keeps first paint on system fallbacks,
- * and normal faces leave italics to synthetic oblique.
- *
- * Geist 1.7.2 and Fraunces v38 use SIL Open Font License 1.1. Distributions
- * must retain public/LICENSE-Geist.txt and public/LICENSE-Fraunces.txt for
- * these vendored fonts.
+/*
+ * Bundle relative WOFF2 assets for offline use and build base paths. swap
+ * keeps system first paint; normal faces use synthetic oblique. SIL Open Font
+ * License 1.1 requires public/LICENSE-Geist.txt and public/LICENSE-Fraunces.txt
+ * for bundled Geist 1.7.2 and Fraunces v38.
  */
 @font-face {
   font-family: "Geist";
@@ -341,8 +344,10 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* Sidebar small text uses its AA floor (#515). Keep this before the
-   equal-specificity header rule, which has its own label tint. */
+/*
+ * Keep sidebar small text at its AA floor before the equal-specificity header
+ * rule, which owns its label tint.
+ */
 .ub-list .ub-muted {
   color: var(--sidebar-muted-foreground);
 }
@@ -880,6 +885,47 @@ h3.ub-heading {
   color: var(--prose-text);
 }
 
+.ub-card {
+  margin: 12px 0;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--card);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.ub-card + .ub-card { margin-top: 12px; }
+.ub-card .ub-paragraph { margin: 0; color: inherit; white-space: pre-wrap; }
+.ub-card-label, .ub-card-footer {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.ub-card-label { letter-spacing: 0.08em; }
+.ub-card-title { margin-top: 6px; color: var(--foreground); font-size: 18px; font-weight: 600; }
+.ub-card-body { margin-top: 12px; color: var(--prose-text); }
+.ub-card-footer { margin-top: 12px; letter-spacing: 0.06em; }
+.ub-card-footer a { text-transform: none; }
+.ub-card [data-empty="true"] { position: relative; }
+.ub-card [data-empty="true"]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  pointer-events: none;
+  color: var(--muted-foreground);
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+.ub-card [data-empty="true"]:not(.ub-card-title) { display: none; }
+.ub-card:has(> .ub-card-label[data-empty="true"]) > .ub-card-title { margin-top: 0; }
+.ProseMirror-focused .ub-card[data-card-focused="true"] {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+.ProseMirror-focused .ub-card[data-card-focused="true"] [data-empty="true"] { display: block; }
+.ProseMirror-focused .ub-card[data-card-focused="true"] > .ub-card-title { margin-top: 6px; }
+
 /* Lists are flat sibling blocks: suppress native markers and draw each
    item's ::before from data-list and data-indent. Ordered markers read
    data-number, supplied by editor/list-keys.ts from the schema's export
@@ -973,6 +1019,25 @@ h3.ub-heading {
 
 .ub-chart-title { margin: 0 0 0.5rem; padding-right: 7rem; font-weight: 500; }
 .ub-chart-screen { position: relative; width: 100%; aspect-ratio: 2 / 1; min-height: 200px; max-height: 300px; }
+.ub-chart-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 1rem 0.75rem;
+  aspect-ratio: auto;
+  min-height: 0;
+  max-height: none;
+}
+.ub-chart-series-panel { min-width: 0; }
+.ub-chart-series-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0 0 0.4rem;
+  font: 0.8rem var(--font-sans);
+  line-height: 1.3;
+}
+.ub-chart-series-header strong { font-size: 1.05rem; font-weight: 600; }
+.ub-chart-series-plot { position: relative; height: 150px; }
 .ub-chart-open {
   position: absolute;
   top: 0.75rem;
@@ -1045,6 +1110,7 @@ h3.ub-heading {
 }
 .ub-chart-editing > .ub-chart-footer > :not(.ub-copy),
 .ub-chart[data-annotated="true"] > .ub-chart-footer > :not(.ub-copy) { display: none; }
+.ub-chart-limit-notice,
 .ub-chart[data-view="table"] .ub-chart-notice,
 .ub-chart[data-view="table"] .ub-chart-diagnostics { color: var(--muted-foreground); }
 @media (hover: hover) {

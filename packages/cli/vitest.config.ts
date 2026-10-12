@@ -24,14 +24,12 @@ export default defineConfig({
     // `ub open`'s port-release test (two starts and two interrupts, each
     // bounded by WAIT_TIMEOUT_MS in test/helpers.ts). Whichever timeout fires
     // first is the one that gets to explain the failure, and a bare "test timed
-    // out in 30000ms" names nothing — which is what a loaded machine used to
-    // produce here. The named wait says which condition never arrived, and that
-    // is the difference between a diagnosis and a re-run.
+    // out in 30000ms" names nothing. The named wait says which condition never
+    // arrived so the failure can be diagnosed.
     testTimeout: 150_000,
     hookTimeout: 150_000,
     // Most of a test here is spent waiting on sockets, child processes and
-    // timers, not computing: at the default of one fewer worker than cores the
-    // suite left over half the machine idle. Oversubscribe instead.
+    // timers, not computing, so oversubscribe to use the cores during waits.
     maxWorkers: "150%",
   },
 });

@@ -5,9 +5,14 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-    "Optional `tldr` supplies the decision line before a decided record freezes it, under set_metadata rules and " +
-    "limit. When the call seeds at least one block and stays editable, its answer carries the non-blocking " +
-    "TL;DR review reminder; a metadata-only create carries no such reminder.\n\n" +
+    "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
+    "Decision records instead hold one to three short answer blocks with a brief reason: paragraph, code, " +
+    "table or a maximal run of adjacent list-item blocks. Other types refuse with decision_block_unsupported; " +
+    "more than three answer blocks refuse with decision_answer_too_long, and either writes nothing. Guidance " +
+    "belongs on the related regular page and discussion in an RFC. A decision refuses non-null tldr with " +
+    "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
+    "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
+    "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
     "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
@@ -16,18 +21,35 @@ export const toolHelpDetails = {
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
     "without `kind`, or a status owned by the other kind, is refused before a document is created. A decision " +
-    "may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision stores " +
-    "`governs` in its own metadata; the requirement's decision log is derived from directory stubs. Any other " +
-    "use of `governs` is refused before a UUID is allocated or a room is written. A decision may also pass " +
+    "may pass `related`, the UUID of one live, locally readable regular page, including a requirement. " +
+    "A decision target refuses with related_not_regular_document. The page is fixed at creation, stored as " +
+    "`governs` for compatibility; existing governs values stay related pages without migration. Any other " +
+    "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
-    "and its predecessor's topic is copied forward; a first record uses its own UUID as topic. `topic` is " +
+    "and its predecessor's topic is copied forward; a successor without related also inherits its page. " +
+    "An explicit related selects the page given. A first record uses its own UUID as topic. `topic` is " +
     "never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
     "decision exposes every successor without editing that earlier document. A non-decision target or a " +
     "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
     "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering " +
     "it. Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as " +
     "proposals. A decided successor without an answer is refused before allocating a UUID or writing any " +
-    "room.\n\n" +
+    "room. Optional `discussion` names a live, locally readable non-decision document, including a " +
+    "requirement, for this record's RFC. Create or reuse it first as an ordinary regular document. New " +
+    "workspaces include an ordinary `rfc` tag to apply deliberately; connecting never requires or applies " +
+    "that tag, creates an RFC or edits the RFC or related page. A decision target refuses with " +
+    "`discussion_not_regular_document`; archived, unknown or unhydrated targets refuse with `doc_archived`, " +
+    "`doc_not_found` or `doc_not_hydrated`, before a UUID is allocated or a room is written. `discussion` " +
+    "without `kind: \"decision\"` is an argument error. For a new topic, create an open first record with " +
+    "related and discussion; it has no answer until one is recorded. For reconsideration, create an open " +
+    "successor with supersedes and discussion; the current answer stays in force. A record created decided " +
+    "can also name its discussion. Successors never inherit discussion, even when they inherit the related " +
+    "page. set_metadata can correct or clear it only while open; set_status settles, rejects or withdraws " +
+    "under the existing recorded-answer contract. The reference is fixed once the record leaves open. " +
+    "It is returned separately from curated links and recorded answer attribution. Directory decision " +
+    "entries cache discussion, null for none and absent when unknown, and derive answerPreview from the " +
+    "legacy TL;DR or first paragraph/list; " +
+    "get_doc on the related page returns its topic marked related, and other linking topics marked linked.\n\n" +
     "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is " +
     "created unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group " +
     "that ALREADY exists — the id comes from get_sidebar, `position` is clamped into range and omitted means " +
@@ -37,7 +59,7 @@ export const toolHelpDetails = {
     "brings a group into being. The answer echoes the placement it made as `sidebar: {group: {id, name}, " +
     "position}`.\n\n" +
     "This call writes up to three independently persisted rooms — the document, the directory, and the " +
-    "sidebar when you place it — so it reports them one by one. The governing requirement is never written. " +
+    "sidebar when you place it — so it reports them one by one. The related page and RFC are never written. " +
     "If the local update log refuses a write part-way, the call fails with `persistence_failed` carrying the " +
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
@@ -47,9 +69,27 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
+    "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
+    "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
+    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
+    "Decision-record metadata returns `discussion` as the connected RFC UUID or null. Every decision " +
+    "directory entry, including page decisions, predecessors, successors, inForce, pending and conflicts, " +
+    "caches it: null means no reference, absent means unknown until stub repair. The discussion is a " +
+    "derived outbound edge in effective links, separately from curated links and recorded answer " +
+    "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
+    "linked unless it is also the topic's related page. Renaming or archiving the RFC preserves each " +
+    "reference, and an archived RFC remains readable. Decision entries include a cached answerPreview: " +
+    "legacy TL;DR or the first paragraph/list as plain " +
+    "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
+    "It is null without a paragraph or list, or absent when the cache is unknown. Decision answers use " +
+    "one to three short answer blocks with a brief reason; guidance belongs on the related page and " +
+    "discussion in an RFC. Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
-    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. For other blocks " +
+    "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
+    "canonical container content with inline Markdown parts; its rev also includes formatting. Card thread " +
+    "ranges name their anchored part. For other blocks " +
     "`text` is plain text and `rev` ignores marks. A prose block that carries inline references to other " +
     "documents also carries `doc_links`: `[{start, end, docId}]` in characters, the same offsets annotate and " +
     "link_range speak in, and absent where there are none. Table cell links count toward backlinks but do not " +
@@ -85,7 +125,16 @@ export const toolHelpDetails = {
     "true` returns every record with predicates applied per record. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced.\n\n" +
+    "synced. Decision answers use one to three short blocks with a brief reason, with guidance on their " +
+    "related regular page and discussion in an explicitly connected RFC. Every decision directory entry, " +
+    "including inForce, pending and conflicts, caches `discussion` as the RFC UUID, null when none or " +
+    "absent when unknown until a newer client repairs the stub. Each pending proposal therefore names " +
+    "its own discussion without opening its room. The reference is distinct from curated links and " +
+    "recorded answer attribution. Every decision directory entry also carries a derived " +
+    "answerPreview when known: legacy TL;DR, else plain text of the first paragraph or list, list items " +
+    "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
+    "neither exists, and absent when unknown. Page get_doc reads mark related and linked topics separately; " +
+    "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
     "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
@@ -175,7 +224,11 @@ export const toolHelpDetails = {
     "recovery and `applied: false`, `partial: false`, `synced: false`. Stale assertions retain precedence and " +
     "invalid GFM remains `invalid_table`. Malformed input shapes are refused by the MCP input schema before " +
     "the handler. Previously accepted structural and multi-cell table calls must now supply mappings as part " +
-    "of the coordinated table cutover. Other blocks use plain text with no markdown and reject " +
+    "of the coordinated table cutover. Cards take the canonical content between :::card and :::, with " +
+    "inline Markdown in each part. Invalid input refuses with invalid_card before writing. An edit splices " +
+    "only changed parts, characters and mark keys; unchanged parts and comment anchors on unchanged " +
+    "characters survive. Newly added document targets must be known locally; existing targets in a part " +
+    "remain editable. A card's rev includes formatting. Cards reject table_mapping. Other blocks use plain text with no markdown and reject " +
     "`table_mapping`. In other blocks, spliced-in text inherits the formatting of the character to its left, " +
     "and `rev` ignores marks. A table's `rev` includes its projected formatting. Inserting a read table's GFM " +
     "preserves representable cells and marks, subject to trimmed cell-edge whitespace and renderInline's " +
@@ -194,27 +247,48 @@ export const toolHelpDetails = {
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
-    "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A terminal's text is a " +
+    "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
+    "content between lines exactly :::card and :::. Header keys are lowercase label, title and footer, " +
+    "each at most once, in any order. A nonempty title is required. Values are one-line inline Markdown " +
+    "after the colon and one optional space, not YAML; quotes stay literal. The first blank line ends the " +
+    "header, and the remainder is one optional prose body. Parts keep table-cell inline marks. Missing " +
+    "title, unknown or duplicate keys and non-key header lines refuse with invalid_card and write nothing. " +
+    "get_doc orders present keys label, title, footer, then a blank line and body. Export wraps that content " +
+    "in :::card and :::, folds header newlines to spaces, omits empty keys and escapes prose/body lines " +
+    "beginning :::. Invalid imports become plain paragraphs preserving all container text. A terminal's text is a " +
     "transcript in which a line beginning `$ ` is a command typed out and every other line is output shown " +
     "whole — the format has no escape, so an output line that itself begins `$ ` cannot be written. A chart's " +
     "text is a JSON mapping, for example " +
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
     "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
-    "missing (gap or connect, default gap) control presentation. A data table also uses a chart block, " +
+    "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
+    "panels draws one compact line chart per y series in mapping order, in a responsive grid; each panel shows its label " +
+    "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
+    "layout is invalid for table mappings. Optional limit is an integer of 1 or more " +
+    "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
+    "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
     "{\"field\":\"count\",\"label\":\"Count\",\"format\":\"number\"}],\"sort\":{\"field\":\"day\",\"direction\":\"desc\"}}`. " +
     "Its one to thirty ordered columns name fields, optional labels and formats text (default), number, date or link. " +
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten). Optional title " +
     "supplies only the table's accessible name, and sort (one column field, direction asc or desc) orders rows. " +
-    "Every valid record appears in one continuous native table, with Generated from document data · read-only below it. " +
+    "Optional limit is an integer of 1 or more and shows only the first N valid rows in sort order " +
+    "(record-id order without sort). Without limit, every valid record appears in one continuous native table, " +
+    "with Generated from document data · read-only below it. Limited rows remain one continuous table, " +
+    "with no pager or page state; when limit hides rows, the footnote includes shown and total valid-record counts. " +
     "Open table source appears on hover or keyboard focus and stays reachable without hover. " +
     "Existing pageSize values remain accepted as integers from one to one hundred for compatibility and never affect display; " +
-    "omit pageSize from new mappings. Unknown mapping keys and options are invalid. Both views only " +
+    "omit pageSize from new mappings. For both views, limit has no upper bound of its own. Records hidden by " +
+    "the author limit are not omissions. When it hides chart records, a muted note shows the latest shown and " +
+    "total valid-x counts; when it hides nothing, no count appears. The chart's 5,000 cap retains its existing " +
+    "notice and diagnostics when N exceeds 5,000. update_data recomputes a limited window without changing its source. " +
+    "Unknown mapping keys and options are invalid. Both views only " +
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:
-    "Update one or more of `title`, `description`, `tldr`, `tags` and curated `links` together. At least one " +
+    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links` and decision `discussion` " +
+    "together. At least one " +
     "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
     "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
     "refusals keep their usual shape.\n\n" +
@@ -223,8 +297,12 @@ export const toolHelpDetails = {
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
     "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
     "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +
-    "overlong TL;DR values are refused; use null to clear it. Decision stubs cache it as the decision line, " +
-    "while ordinary document stubs, search and Markdown do not carry it.\n\n" +
+    "overlong TL;DR values are refused; use null to clear it. On an open decision, non-null tldr refuses with " +
+    "decision_tldr_unsupported; null clears a legacy value. Decisions hold one to three short answer blocks " +
+    "with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Their " +
+    "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
+    "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
+    "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
     "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
     "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
     "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
@@ -232,11 +310,21 @@ export const toolHelpDetails = {
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
-    "effective links back stores derived governs and supersedes UUIDs in the curated array too; get_doc " +
+    "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
+    "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
-    "A decided record refuses title or tldr with `decision_read_only` and the refused field, but accepts " +
-    "description, tags and links. An archived document refuses all five. A success returns uuid and all " +
-    "five fields as get_doc would read them, including unchanged values, plus shared write durability and " +
+    "An open decision accepts `discussion` as a live, locally readable non-decision document UUID, including " +
+    "a requirement, or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
+    "A decision target refuses with `discussion_not_regular_document`; archived, unknown and unhydrated " +
+    "targets refuse with `doc_archived`, `doc_not_found` and `doc_not_hydrated`, each naming field discussion. " +
+    "Rejected or withdrawn records and non-decision documents refuse with `discussion_not_writable` and " +
+    "`field: \"discussion\"`. The reference is fixed once the record leaves open. Changing or clearing " +
+    "it never creates a document, tags or edits the RFC or related page, or changes approvalFingerprint " +
+    "or approvalChanged. It is distinct from curated links and recorded answer attribution.\n\n" +
+    "A decided record refuses title, tldr or discussion with `decision_read_only` and the refused field, " +
+    "but accepts description, tags and links. An archived document refuses every metadata field. A success " +
+    "returns uuid and the metadata fields as get_doc would read them, including unchanged values and " +
+    "discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +
@@ -286,7 +374,10 @@ export const toolHelpDetails = {
     "range adds `row` and `column`, recomputed as cells move; it is null when orphaned. Coordinates on a " +
     "non-table block, missing coordinates or a cell outside the projection refuse with `annotation_cell` " +
     "before anything is written. Empty and overlapping ranges refuse with `annotation_range`. Orphaned legacy " +
-    "table threads stay orphaned and accept replies, resolution and reopening.\n\n" +
+    "table threads stay orphaned and accept replies, resolution and reopening. Card comments are opened in " +
+    "the web editor; MCP opening a new card thread refuses with annotation_card before writing. Existing " +
+    "card threads accept replies, resolution and reopening. Their returned ranges name label, title, body " +
+    "or footer in part.\n\n" +
     "Two shapes, and a call is exactly one of them: open a thread with `block_id`, `start` and `end` — all " +
     "three, none of them optional — plus `row` and `column` for a table cell, or reply to one with " +
     "`thread_id` and no range fields at all. Mixing them, or leaving a range half-stated, is refused at the " +
@@ -305,8 +396,8 @@ export const toolHelpDetails = {
     "`currentText` and `currentRev` to re-measure against. Indices are clamped to the text and swapped if " +
     "reversed; a range that clamps to nothing is refused.\n\n" +
     "A range that is already a reference is RETARGETED. A range that is already an external link is refused — " +
-    "one range cannot be both — and so is a code, mermaid, table, terminal or chart block, which holds source " +
-    "text. The answer carries the target's current `title` for information; the label in the document is the " +
+    "one range cannot be both — and so are source blocks, tables and cards. Write card links as inline " +
+    "Markdown through insert_block or edit_block. The answer carries the target's current `title` for information; the label in the document is the " +
     "text you linked, and it does not follow a later rename.\n\n" +
     "The target must be a document this replica's directory knows, or the call refuses with " +
     "`doclink_target_not_known_locally` and writes nothing. An archived target is accepted.\n\n" +

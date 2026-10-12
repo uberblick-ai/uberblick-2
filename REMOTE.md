@@ -2,9 +2,9 @@
 
 Run a published hub release with Docker on Linux x86_64 or Docker Desktop on
 macOS. Apple Silicon Macs run the published `linux/amd64` images under emulation.
-The host needs no repository checkout, build tools, `ub`, GitHub account or
-registry login. One version supplies the hub image, the prebuilt web image and
-all host files. By default Caddy serves plain HTTP only on the host's loopback
+The Docker-only route needs no repository checkout, build tools, `ub`, GitHub
+account or registry login on the host. One version supplies the hub image, the
+prebuilt web image and all host files. By default Caddy serves plain HTTP only on the host's loopback
 interface at `http://localhost:8080`, answering only `localhost` and `127.0.0.1`
 Host names to prevent DNS rebinding. Other computers use HTTPS for a configured
 host name. Tailscale is the recommended optional network layer; public DNS is
@@ -14,7 +14,7 @@ also supported. Caddy serves the app and `/uberblick-config.json` and proxies
 > Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The host's web page receives no credential and shows no documents: direct browser sign-in is not available yet. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
 
 The access-control boundary and broader-access requirements are described in
-the corpus Configuration and auth (62c70b7c-6e4c-40a4-a6bb-a7edbee08360).
+the corpus Permissions (eb9a7801-05f3-417a-81d5-07c18795ac81).
 
 ## Host prerequisites
 
@@ -46,6 +46,65 @@ Caddy as root to reach it. See [the route settings below](#choose-how-clients-re
 The macOS routes are loopback and public DNS HTTPS; the host-socket Tailscale
 recipe is Linux-only. Every other process runs in the published containers, including backup,
 restore and first-admin setup. The host needs no Node, pnpm or `sqlite3`.
+
+## Quickstart with an installed client
+
+Install the `ub` client on the hub host and meet [the host prerequisites](#host-prerequisites):
+Linux x86_64 with Docker Engine 28.0.0 or newer, or Docker Desktop on macOS
+with that Engine floor, and Docker Compose 2.24.4 or newer. Run these commands
+on that host from any directory; they need no project binding or login:
+
+```sh
+ub hub setup
+# Edit ~/uberblick-remote/.env if you need a route other than localhost.
+ub hub up
+ub hub status
+ub hub status --json
+```
+
+`setup` extracts the published release matching this client's version into
+`~/uberblick-remote`, creates a mode-0600 `.env` from its template, and starts
+nothing. It refuses a non-empty directory. Use `--release X.Y.Z` on setup or
+upgrade to choose another published release; a source-checkout client reporting
+`0.0.0` requires this flag. Every subcommand accepts `--dir <path>` for an
+existing Docker-only deployment or another deployment directory.
+
+`up` checks the configuration, pulls the release's images and starts the stack
+through that deployment's `bin/remote-compose.sh`. `status` reports the release,
+sync protocol, hub and Caddy states, and configured site origin. It checks the
+site and `/ws` from the host itself and exits 0 only when healthy; an HTTPS
+name the host cannot reach shows as not answering. `--json` prints one JSON
+object. Allow certificate acquisition to finish, then check status again.
+After starting a fresh hub, [claim it](#claim-a-fresh-hub) with `ub auth login`
+before wider exposure; see the corpus's CLI: ub auth intents and examples
+(0ad5f7da-edb2-4e53-a6eb-9d95922a3e95), “Claim a fresh hub”.
+
+```sh
+ub hub down
+ub hub up
+ub hub upgrade --release X.Y.Z
+```
+
+`down` removes containers and keeps the `hub-data`, `caddy-data` and
+`caddy-config` volumes. The next `up` reuses documents, claim state and
+certificates. `upgrade` requires a running hub; choosing the current release
+changes nothing, and an older target is refused. For a newer published release,
+it stages and checks the target and pulls its images, then runs the live
+deployment's backup script before replacing release files and recreating
+containers. It keeps `.env` and earlier backups, and checks health for up to
+90 seconds while the recreated services start and certificates are acquired.
+It reports the new backup's path and resulting health. Retain backups according to
+[the backup procedure](#backing-the-hub-up).
+If the sync protocol changes, update every client in the same sitting;
+upgrade asks for confirmation at a terminal, or accepts `--yes`.
+
+Run one operator session at a time. The release uses the single Compose project
+`uberblick-remote`; ambient `COMPOSE_PROJECT_NAME` and `COMPOSE_FILE` do not
+redirect these commands. Hosts without Docker, remote or SSH orchestration,
+service integration, and more than one deployment per Docker host are
+unsupported. To operate an SSH host, sign in there and run `ub hub` locally.
+Use [the manual switch procedure](#switch-an-existing-checkout-host-to-a-release)
+for a source-checkout deployment. `ub hub` grants no hub or workspace role.
 
 ## Stand it up from a release
 
@@ -158,9 +217,15 @@ this version first opens it gets no default workspace and is never claimable.
 **The wire-semantics rule.** A change to what travels over the socket — the auth
 token's shape or claims, the sync protocol, the room key, the served
 `/uberblick-config.json` contract — requires a matching client release. Such a
-hub release is published together with that client release. Move the host to
-the new hub release and update all clients in the **same sitting**, and reload
-every open browser tab so it takes its bundle and configuration from the host.
+hub release is published together with that client release. An incompatible
+change to `/auth/github/start`, `/auth/github/collect`, `/auth/github/cancel`
+or `/auth/claim-state` also requires a matching client release and increments
+the same `SYNC_PROTOCOL_VERSION`; there is no separate HTTP version. The
+credential-free version probe's envelope and replies described under
+[device renewal](#claim-a-fresh-hub) stay stable across protocol versions.
+Move the host to the new hub release and update all clients in the **same
+sitting**, and reload every open browser tab so it takes its bundle and
+configuration from the host.
 If you cannot finish both halves now, do neither now. Check the protocol
 version recorded by the hub release before choosing it.
 
@@ -259,7 +324,7 @@ trap 'exit 143' HUP TERM
 mkdir "$candidate_root/source"
 git archive "$candidate_sha" | tar -x -C "$candidate_root/source"
 candidate_protocol=$(sed -n 's/^export const SYNC_PROTOCOL_VERSION = \([1-9][0-9]*\);$/\1/p' \
-  "$candidate_root/source/packages/hub/src/protocol.ts")
+  "$candidate_root/source/packages/schema/src/protocol.ts")
 test -n "$candidate_protocol"
 candidate_build_args=(
   --platform linux/amd64 --file "$candidate_root/source/Dockerfile.hub-release"
@@ -470,8 +535,8 @@ administrator, because the account approving it receives the grant.
 A malformed `HUB_GITHUB_CLIENT_ID` prevents hub startup and names that setting;
 it never falls back to the shared app. GitHub refusing or being unreachable
 fails only the attempt in progress. Local-only work never contacts GitHub. The
-hub started by `ub open` retains explicit-only sign-in: it offers it only when
-`HUB_GITHUB_CLIENT_ID` is set to a valid app client ID.
+hub started by `ub open` uses the machine's local signing secret and offers no
+GitHub sign-in, including when `HUB_GITHUB_CLIENT_ID` is set.
 
 ### Use an operator-owned app
 
@@ -574,6 +639,10 @@ with the failing step, a fixed code and the upstream HTTP status when available.
 No GitHub token, response body or upstream exception is logged. Check the app's
 Device Flow setting and client ID when the code reports `device_flow_disabled`
 or `incorrect_client_credentials`.
+
+Before starting an attempt or displaying a GitHub code, `ub auth login` checks
+protocol compatibility without a credential. A differing version stops login
+and says whether to update this client or the hub; no login is stored.
 
 The sign-in interface is `POST /auth/github/start`, `POST /auth/github/collect`
 and `POST /auth/github/cancel`. Starting returns a GitHub approval URL, short
@@ -691,6 +760,16 @@ room, and a room token authorizes no renewal. Send secrets only in JSON bodies,
 never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
 all answers are `no-store`.
 
+Login uses this route as a credential-free version probe before sign-in,
+posting `{protocolVersion, token: ""}`. A configured hub checks the version
+before the token: skew returns HTTP 409 with
+`{status: "protocol-mismatch", reason: "protocol-mismatch:<hubVersion>"}`;
+an equal version returns HTTP 401 with `{status: "sign-in-required"}`. The
+probe creates no sign-in attempt, changes no hub state and needs no GitHub
+connection. This envelope and these replies remain stable across protocol
+versions. Login believes only a validated mismatch reply; other replies or
+probe failures leave sign-in's existing diagnostics in charge.
+
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the
 same principal and device and exactly its current memberships, including none.
@@ -746,7 +825,7 @@ The shared HTTP interface is `POST /auth/manage` with a JSON body
 `{protocolVersion, token, operation, ...targets}`. It requires configured
 GitHub sign-in. Only `resolve-account` and `grant-member` contact GitHub;
 the other management operations make no GitHub call. Use
-`mintRequestProof` from `@uberblick/hub/token` with the current device key,
+`mintRequestProof` from `@uberblick/schema/token` with the current device key,
 its credential UUID as `kid`, the operation and all targets below, and
 `lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
 `typ: "request"`, those exact fields, and `iat` and `exp` in epoch seconds.
@@ -1188,8 +1267,10 @@ sh bin/remote-compose.sh up --detach
 
 Deploying a newer release is [its own runbook](#updating-the-host--deliberately).
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
-it exits. SQLite is `/data/hub.sqlite` in the `hub-data` named volume, so normal
-container replacement and `sh bin/remote-compose.sh down` preserve it.
+it exits. The image sets `HUB_DB_PATH=/data/hub.sqlite` in the `hub-data` named
+volume, so normal container replacement and `sh bin/remote-compose.sh down`
+preserve it. Both the hub and `hub-admin-setup` require a non-empty `HUB_DB_PATH`;
+an unset or empty value refuses startup and names the setting.
 
 ### Backing the hub up
 

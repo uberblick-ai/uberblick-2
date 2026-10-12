@@ -8,9 +8,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
 
 - Resolve and record the PR's immutable `headRefOid`.
 - **CI, every tier.** The PR's `CI` workflow runs on every push. Its required
-  checks, `lint, typecheck and tests` and `macOS tests`, must have concluded
-  `success` at `headRefOid` (`gh pr checks <n>`). The ruleset accepts them
-  only from GitHub Actions. Wait for a pending check; for a failure, read
+  checks, `lint, typecheck and tests`, `macOS tests` and `browser e2e`, must
+  have concluded `success` at `headRefOid` (`gh pr checks <n>`). Read main's
+  active `signoff` ruleset (`gh api repos/uberblick-ai/uberblick-2/rulesets`,
+  then `gh api repos/uberblick-ai/uberblick-2/rulesets/<id>`) and verify it
+  requires all three contexts from GitHub Actions (`integration_id: 15368`).
+  A missing context blocks agent merge: escalate to a maintainer; no run
+  changes repository settings. Wait for a pending check; for a failure, read
   `gh run view <id> --log-failed`. A lint, typecheck, test or spec failure
   that main's `CI` run does not show the same way (the base comparison below)
   is a branch failure: finish `changes` naming it. When it does show the same
@@ -32,8 +36,8 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   section states the full boundary. Use the head's SHA-tagged image for the
   failure-path probes the policy requires at stateful boundaries, then remove
   it when the PR is settled; the merged-tree gate below uses the same task.
-- CI also runs browser e2e at the head as the advisory `browser e2e` (Linux)
-  and `macOS browser e2e` checks. Both use the candidate's own e2e recipe, so
+- The required `browser e2e` (Linux) and advisory `macOS browser e2e` checks
+  run at the head. Both use the candidate's own e2e recipe, so
   for a browser-observable outcome read their output rather than trusting
   the conclusions. Classify a failure of either check the same way. A
   failure may be called environmental only after the same failing spec is run
@@ -42,7 +46,9 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   (`gh run list --workflow ci.yml --branch main --status completed`, then
   `gh run view <id> --log-failed`): green at the base and red at the head is a
   branch regression to fix, even when the stale code is a test fixture rather
-  than production.
+  than production. A branch regression in either check returns as `changes`;
+  an established environmental failure of the advisory macOS check does not
+  block the merge. Required-check failures still follow the CI gate above.
 - Record every gate outcome against the commit SHA it ran at, and the exact
   base-ref SHA the exact-head gate set began from as its base-freshness point.
   Link the check or failure evidence; do not paste full logs, test counts or
@@ -140,8 +146,13 @@ move or a head mismatch returns to the applicable gates.
 
 Confirm every issue the PR closes auto-closed, and close a parent whose last
 open sub-issue it closed. Then apply the pull request's `Corpus update` through
-MCP, checked against the merged code. If MCP fails, record the concrete failure
-and outstanding update on the PR for recovery. A fresh integrator does not own
+MCP, checked against the merged code. A block that describes intended behavior
+the merged code does not deliver yet stays as it is, tracked by an issue under
+[AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action); when you cannot tell
+whether a block is intent or a wrong claim, leave it and ask the maintainers on
+the PR. If MCP fails, open an issue titled `Corpus update outstanding for #<PR>`
+that quotes the concrete failure and the update still to apply, link it on the
+PR, and still finish `merged`. A fresh integrator does not own
 or restart another session's development processes.
 
 **Housekeeping, last** (owner direction, 2026-09-01). On every durable outcome —

@@ -45,6 +45,7 @@ import {
 import { WORKSPACE_PROMOTE_HELP } from "../src/workspace-promote.js";
 import { STATUS_HELP, STATUS_OPTIONS } from "../src/status.js";
 import { UPDATE_HELP } from "../src/update.js";
+import { HUB_HELP, HUB_OPTIONS } from "../src/hub.js";
 import {
   WORKSPACE_HELP,
   WORKSPACE_LIST_HELP,
@@ -184,6 +185,8 @@ const PATHS: Path[] = [
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
   { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
   { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
+  { argv: ["hub"], help: HUB_HELP, options: {}, children: ["setup", "up", "down", "status", "upgrade"] },
+  ...Object.entries(HUB_OPTIONS).map(([sub, options]) => ({ argv: ["hub", sub], help: HUB_HELP, options })),
   { argv: ["mcp"], help: MCP_HELP, options: {}, children: ["install"] },
   { argv: ["mcp", "install"], help: INSTALL_HELP, options: INSTALL_OPTIONS },
 ];
@@ -200,6 +203,7 @@ const DISPATCHERS = [
   { file: "workspace.ts", group: ["workspace"], variable: "sub" },
   { file: "workspace-member.ts", group: ["workspace", "member"], variable: "command" },
   { file: "auth.ts", group: ["auth"], variable: "sub" },
+  { file: "hub.ts", group: ["hub"], variable: "sub" },
 ];
 
 /** Not commands: the hidden machine entry, the help words, the version flags. */
@@ -605,7 +609,7 @@ describe("what is not a request for help", () => {
   it("still refuses an unknown subcommand, `--help` after it or not", async () => {
     // A group answers for itself only when its own one argument is the
     // question. `ub workspace bogus --help` is a typo, not a request, and every
-    // level says so the same way — the top level always has.
+    // level says so the same way.
     for (const group of [[], ["workspace"], ["mcp"]]) {
       const argv = [...group, "bogus", "--help"];
       const run = await dispatch(argv);

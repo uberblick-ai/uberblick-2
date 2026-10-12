@@ -1,4 +1,4 @@
-import { getMeta, listAnnotations, readDecisions, summarizeDocData } from "@uberblick/schema";
+import { getMeta, listAnnotations, readDecisions, resolveDecisionTopics, summarizeDocData } from "@uberblick/schema";
 import { strictInput } from "../inputs.js";
 import { uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
@@ -11,12 +11,22 @@ export const getDocOperation = operation("get_doc", inputSchema, (context, { uui
   const replica = requireDoc(uuid);
   const meta = getMeta(replica.doc);
   const collections = summarizeDocData(replica.doc);
+  const directory = replicas.directory().doc;
+  const related = readDecisions(replica.doc, directory);
+  const relatedTopics = new Set(related.map(topic => topic.topic));
+  const backlinks = meta.kind === "decision" ? new Set<string>() :
+    new Set(replicas.store.backlinks(uuid).map(entry => entry.uuid));
+  const linked = meta.kind === "decision" ? [] : resolveDecisionTopics(directory).filter(topic =>
+    !topic.archived && !relatedTopics.has(topic.topic) && topic.records.some(record => backlinks.has(record.uuid)));
   const result = {
     ...meta,
     ...decisionAuthorityJson(replica),
     tags: documentTags(replica),
     room: replica.room,
-    decisions: readDecisions(replica.doc, replicas.directory().doc).map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic) })),
+    decisions: [
+      ...related.map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic), relation: "related" })),
+      ...linked.map(topic => ({ ...decisionEntryJson(topic.representative), ...topicJson(topic), relation: "linked" })),
+    ],
     ...(meta.kind === "decision" ? decisionReadJson(uuid) : {}),
     blocks: blocksJson(replica),
     annotations: listAnnotations(replica.doc).map((annotation) =>

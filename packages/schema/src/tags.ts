@@ -1,20 +1,3 @@
-/**
- * The workspace tag catalog.
- *
- * One settings Y.Doc owns one flat, synced vocabulary. `identities` maps each
- * UUID ever minted for a valid name to that immutable name. Concurrent offline
- * creates can therefore leave two UUIDs for one name without leaving two tags:
- * readers group by name, choose the lexicographically first UUID as the
- * canonical identity, and keep every other UUID as a resolvable alias. A
- * document assigned through either replica before the merge is still readable;
- * its next assignment write stores the canonical identity.
- *
- * Retirement and restoration are monotone per-client levels keyed by the
- * immutable name. Creation and seeding never write those levels, so a stale
- * replica materialising an example cannot reactivate a retirement it has not
- * seen. A deliberate restore advances the level instead.
- */
-
 import type * as Y from "yjs";
 import { getMeta, setTags } from "./doc.js";
 import {
@@ -29,7 +12,7 @@ import type {
   TagCatalogEntry,
 } from "./types.js";
 
-/** UUID -> immutable display name. */
+/** One settings Y.Doc holds a flat vocabulary of UUIDs mapped to immutable names. */
 export const TAG_CATALOG_IDENTITIES_KEY = "tag-identities";
 
 /** `<name>#<clientID>` -> retirement level. */
@@ -53,6 +36,7 @@ export const EXAMPLE_TAGS = [
   { id: "00000000-0000-4000-8000-000000000002", name: "billing" },
   { id: "00000000-0000-4000-8000-000000000003", name: "mcp" },
   { id: "00000000-0000-4000-8000-000000000004", name: "permissions" },
+  { id: "00000000-0000-4000-8000-000000000006", name: "rfc" },
   { id: "00000000-0000-4000-8000-000000000005", name: "sync" },
 ] as const;
 
@@ -97,6 +81,7 @@ function levelFor(map: Y.Map<number>, name: string): number {
   return level;
 }
 
+// Per-client levels are monotone; restoration wins a tie with retirement.
 function stateFor(catalogDoc: Y.Doc, name: string): "active" | "retired" {
   return levelFor(getRestoredLevels(catalogDoc), name) >=
     levelFor(getRetiredLevels(catalogDoc), name)
@@ -109,7 +94,7 @@ interface CatalogIndex {
   byIdentity: Map<string, TagCatalogEntry>;
 }
 
-/** Materialise the deterministic view over possibly duplicated identities. */
+/** Group by name: the least UUID is canonical and every other UUID remains an alias. */
 function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
   const identitiesByName = new Map<string, string[]>();
   for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
@@ -154,13 +139,7 @@ export function getTagCatalogEntry(
   return catalogIndex(catalogDoc).byIdentity.get(canonical) ?? null;
 }
 
-/**
- * Create one active entry, or return the existing entry with this name.
- *
- * `identity` is injectable for a seed and deterministic tests. Ordinary callers
- * omit it and get a random UUID. Names never change; rename is deliberately not
- * part of the first catalog.
- */
+/** Existing names keep their entry; new creates never write lifecycle levels or undo retirement. */
 export function createTagCatalogEntry(
   catalogDoc: Y.Doc,
   name: string,
@@ -186,6 +165,7 @@ function requireEntry(catalogDoc: Y.Doc, identity: string): TagCatalogEntry {
   return entry;
 }
 
+// Explicit lifecycle changes advance beyond every visible retire/restore level.
 function nextLifecycleLevel(catalogDoc: Y.Doc, name: string): number {
   return (
     Math.max(
@@ -234,11 +214,7 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
   });
 }
 
-/**
- * Resolve identities in the supplied order. A UUID absent from this replica's
- * catalog remains visible as unresolved, while provisional name strings are
- * omitted; aliases converge on one canonical ID.
- */
+/** Keep unresolved UUIDs in supplied order; omit provisional names and canonicalize aliases. */
 export function resolveTagAssignments(
   catalogDoc: Y.Doc,
   identities: readonly unknown[],
@@ -273,10 +249,9 @@ export function readDirectoryTags(
 }
 
 /**
- * Atomically replace a document's tag identities after validating the complete
- * request. An already-assigned retired tag or unresolved UUID may remain;
- * neither may be newly added. The first successful call naturally leaves
- * every provisional value unassigned.
+ * Validate the whole request before replacing assignments with canonical UUIDs.
+ * Assigned retired/unresolved tags may remain but cannot be newly added;
+ * successful writes remove provisional names.
  */
 export function assignDocumentTags(
   document: Y.Doc,

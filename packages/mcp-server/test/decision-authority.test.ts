@@ -3,6 +3,7 @@ import * as Y from "yjs";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   MAX_TLDR_LENGTH,
+  decisionApprovalFingerprint,
   editBlock,
   getBlocks,
   getDirectoryEntry,
@@ -25,6 +26,16 @@ async function localRig(): Promise<Rig> {
 
 async function decision(rig: Rig, fields: Record<string, unknown> = {}) {
   return rig.ok("create_doc", { title: "Persistence", description: "The durable choice of storage.", kind: "decision", blocks: body, ...fields });
+}
+
+async function legacyDecision(rig: Rig, fields: Record<string, unknown>) {
+  const { tldr, ...current } = fields;
+  const record = await decision(rig, current);
+  const doc = rig.instance.replicas.replica(record.uuid).doc;
+  setTldr(doc, tldr as string);
+  if (fields.answer !== undefined) getMetaMap(doc).set("approvalFingerprint", decisionApprovalFingerprint(doc));
+  await rig.ok("get_doc", { uuid: record.uuid });
+  return record;
 }
 
 function state(rig: Rig, uuid?: string) {
@@ -150,7 +161,7 @@ describe("decision authority through MCP", () => {
   it("protects all decided content doors while comments and unapproved metadata remain writable", async () => {
     const rig = await localRig();
     const target = await rig.ok("create_doc", { title: "Reference", description: "A curated reference." });
-    const record = await decision(rig, { status: "decided", answer, tldr: "Use the update log." });
+    const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const block = record.blocks[0];
     const mutations: [string, Record<string, unknown>][] = [
       ["set_metadata", { title: "Reworded topic" }],
@@ -160,7 +171,15 @@ describe("decision authority through MCP", () => {
       ["delete_block", { block_id: block.id }],
       ["link_range", { block_id: block.id, start: 0, end: 3, doc_id: target.uuid, rev: block.rev }],
     ];
-    for (const [name, args] of mutations) await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
+    for (const [name, args] of mutations) {
+      const refused = await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
+      expect(refused).toMatchObject({
+        message: "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only; create a superseding record.",
+        recoveryClass: "manual",
+        recovery: "A decided record's title, answer blocks, legacy TL;DR, structured data and discussion reference are read-only. Create an open superseding record " +
+          "for any content change, then record a person's answer to decide it. Comments stay open.",
+      });
+    }
     const thread = await rig.ok("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 3, text: "Discuss the rationale." });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: thread.annotation.id, text: "Resolved in discussion.", resolved: true });
     await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." });
@@ -172,11 +191,11 @@ describe("decision authority through MCP", () => {
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });
 
-  it("seeds and validates the decision line before direct decided creation freezes it", async () => {
+  it("keeps legacy TL;DR readable but refuses new decision TL;DR before creation", async () => {
     const rig = await localRig();
-    const first = await decision(rig, { status: "decided", tldr: "  Use the update log.  " });
-    const next = await decision(rig, { status: "decided", supersedes: first.uuid, answer, tldr: "Use a database-backed update log." });
-    for (const [record, tldr] of [[first, "Use the update log."], [next, "Use a database-backed update log."]] as const) {
+    const first = await legacyDecision(rig, { status: "decided", tldr: "  Use the update log.  " });
+    const next = await legacyDecision(rig, { status: "decided", supersedes: first.uuid, answer, tldr: "Use a database-backed update log." });
+    for (const [record, tldr] of [[first, "  Use the update log.  "], [next, "Use a database-backed update log."]] as const) {
       expect((await rig.ok("get_doc", { uuid: record.uuid })).tldr).toBe(tldr);
       expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.tldr).toBe(tldr);
       expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.find((row: any) => row.uuid === record.uuid)?.tldr).toBe(tldr);
@@ -185,8 +204,11 @@ describe("decision authority through MCP", () => {
     expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("approvalFingerprint")).toEqual(expect.any(String));
     expect((await rig.ok("get_doc", { uuid: (await decision(rig)).uuid })).tldr).toBeNull();
     expect((await rig.ok("get_doc", { uuid: (await decision(rig, { tldr: null })).uuid })).tldr).toBeNull();
-    const exact = await decision(rig, { tldr: "x".repeat(MAX_TLDR_LENGTH) });
+    const exact = await legacyDecision(rig, { tldr: "x".repeat(MAX_TLDR_LENGTH) });
     expect((await rig.ok("get_doc", { uuid: exact.uuid })).tldr).toHaveLength(MAX_TLDR_LENGTH);
+    for (const status of ["open", "decided"]) {
+      await refuse(rig, "create_doc", { title: "New TL;DR", description: "Answer blocks hold the answer.", kind: "decision", status, tldr: "Use the log.", blocks: body }, "decision_tldr_unsupported");
+    }
     for (const tldr of ["", "  ", "x".repeat(MAX_TLDR_LENGTH + 1)]) {
       const before = state(rig);
       expect((await rig.call("create_doc", { title: "Invalid line", description: "The same TL;DR limits as set_metadata.", kind: "decision", status: "decided", tldr })).payload.error).toBe("schema_validation");
@@ -196,7 +218,7 @@ describe("decision authority through MCP", () => {
 
   it("detects merged changes to every approved content field and reapproves the current content", async () => {
     const rig = await localRig();
-    const record = await decision(rig, { status: "decided", answer, tldr: "Use the update log." });
+    const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const doc = rig.instance.replicas.replica(record.uuid).doc;
     const changedAgain = { who: "Another workspace member", when: "2026-10-05T08:00:00Z", where: "An in-person review." };
     const edits: ((offline: Y.Doc) => void)[] = [

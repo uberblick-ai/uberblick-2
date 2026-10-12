@@ -23,6 +23,7 @@ import {
   restoreDirectoryEntry,
   setAnnotationResolved,
   setDescription,
+  setDiscussion,
   setInlineLink,
   setBlockType,
   setKind,
@@ -107,6 +108,18 @@ describe("decision approval content", () => {
     doc.destroy();
   });
 
+  it("keeps untouched legacy TL;DR and data approvals valid when the answer preview is repaired", () => {
+    const doc = decision();
+    doc.getMap("data").set(JSON.stringify(["record", "legacy", "kept"]), { old: true });
+    approve(doc);
+    const fingerprint = decisionApprovalFingerprint(doc);
+    const directory = new Y.Doc();
+    repair(directory, doc);
+    expect(getDirectoryEntry(directory, UUID)).toMatchObject({ answerPreview: "The decision.", approvalChanged: false });
+    expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+    expect(decisionApprovalChanged(doc)).toBe(false);
+  });
+
   it("fingerprints equivalent structured JSON independently of property insertion order", () => {
     const first = decision();
     const second = decision();
@@ -149,6 +162,11 @@ describe("decision approval content", () => {
     setDescription(doc, "Changed description");
     setTags(doc, ["another-tag"]);
     setLinks(doc, [TARGET]);
+    for (const discussion of [TARGET, UUID, null]) {
+      setDiscussion(doc, discussion);
+      expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+      expect(decisionApprovalChanged(doc)).toBe(false);
+    }
     const meta = getMetaMap(doc);
     meta.set("changelogSuggestion", "A legacy release note");
     meta.set("agentStance", false);

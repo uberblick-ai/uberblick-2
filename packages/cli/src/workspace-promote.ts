@@ -2,11 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/hub/device-login";
-import type { StoredHubLogin } from "@uberblick/hub/auth-store";
-import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
-import { resolveStorage } from "@uberblick/hub/storage";
-import { defaultDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
+import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { defaultWorkspaceDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { ManagementResponseError, manageRequest } from "./access-management.js";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
@@ -91,6 +91,7 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
   throw new PromotionRefusal(reasons[String(result.status)] ?? "the hub refused promotion; update the hub and retry");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<number> {
   if (takeHelp(argv, io, WORKSPACE_PROMOTE_HELP)) return 0;
   let endpoint: string;
@@ -127,7 +128,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     const before = bindingBytes(path);
     const origin = authenticationOrigin(endpoint);
     const refuseSignIn = (): number => {
-      const name = readWorkspaceName(defaultDatabasePath(workspaceId), workspaceId) ?? workspaceId;
+      const name = readWorkspaceName(defaultWorkspaceDatabasePath(workspaceId), workspaceId) ?? workspaceId;
       io.err(
         `error: you are not signed in to ${origin}\n` +
         `nothing was uploaded; ${name} is still local\n` +

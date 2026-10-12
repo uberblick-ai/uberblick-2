@@ -1,20 +1,3 @@
-/**
- * `ub update` — update the Homebrew copy this `ub` runs from.
- *
- * **Which copy is decided by where `ub`'s own files live, never by the working
- * directory.** A Homebrew `ub` typed inside a checkout updates Homebrew's copy,
- * because that is the copy the person just ran; the alternative — updating
- * whatever tree they happen to be standing in — is the surprise this command
- * exists to avoid.
- *
- * Homebrew runs the two update commands USER_GUIDE.md documents; its prefix and
- * linked installed version identify the result. This command does not re-prove
- * that Homebrew replaces the installed version;
- * `.github/workflows/homebrew-formula.yml` owns that. A source checkout is
- * refused without running any commands or changing any files: contributors
- * update it with `git pull`, then `mise run setup`.
- */
-
 import { spawn, spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, sep } from "node:path";
@@ -24,10 +7,8 @@ import { takeHelp } from "./help.js";
 import { isInstallPayload } from "./installation.js";
 import type { Io } from "./io.js";
 
-/** The tap USER_GUIDE.md documents, and the only one this command upgrades from. */
 const FORMULA = "uberblick-ai/tap/uberblick";
 
-/** The two a terminal or a supervisor sends; see {@link processHost}'s `run`. */
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 
 export const UPDATE_HELP = `usage: ub update
@@ -43,18 +24,14 @@ options:
   -h, --help        show this help
 `;
 
-/** What the running CLI is installed as. */
 export type Installation =
   | { kind: "homebrew"; prefix: string }
   | { kind: "checkout"; root: string }
   | { kind: "unknown" };
 
 /**
- * Everything this command does outside its own process.
- *
- * Injected because the one thing that cannot be faked is `import.meta.url`: the
- * suite spawns the real `ub`, whose own files are in this checkout, so a test
- * that pointed a fixture at it would be testing the repository it runs in.
+ * Inject the CLI location: a spawned checkout process cannot fake import.meta.url
+ * to exercise another installation without accidentally classifying itself.
  */
 export interface UpdateHost {
   /** Where the running CLI's own files live. */
@@ -82,7 +59,6 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The real world, used by everything except the tests. */
 export function processHost(): UpdateHost {
   return {
     cliDir: dirname(fileURLToPath(import.meta.url)),
@@ -98,13 +74,9 @@ export function processHost(): UpdateHost {
     run(command, args, cwd) {
       const label = named(command, args);
       return new Promise((done) => {
-        // Both streams to stderr: stdout carries this command's own result, and
-        // a reader of it must not have to sift Homebrew's log out first.
         const child = spawn(command, args, { cwd, stdio: ["ignore", 2, 2] });
 
-        // Pass terminal and supervisor signals to Homebrew, then wait for it
-        // to exit. The listener suppresses Node's immediate default exit so
-        // the command does not leave its child running behind it.
+        // Forward signals and await Homebrew exit; Node's default would orphan it.
         const forward = SIGNALS.map((signal) => {
           const stop = (): void => {
             child.kill(signal);
@@ -147,18 +119,11 @@ function within(parent: string, child: string): boolean {
 }
 
 /**
- * Whether this copy is Homebrew-owned, a source checkout, or neither.
- *
- * A payload is Homebrew's only when it lies under the prefix Homebrew itself
- * reports — asked, rather than assumed from `/opt/homebrew`, because the prefix
- * is the installer's choice. That is what separates the tree the formula
- * installed from the same archive unpacked somewhere by hand, which
- * `brew upgrade` would not replace.
+ * Require the payload to lie under Homebrew's reported prefix. An archive
+ * unpacked elsewhere is not owned by Homebrew and brew upgrade cannot replace it.
  */
-export function classify(host: UpdateHost): Installation {
-  // A versioned payload stays a payload wherever somebody unpacked it: only a
-  // Homebrew-owned one can be updated, and an ancestor checkout is not the copy
-  // this process is running from.
+function classify(host: UpdateHost): Installation {
+  // A payload inside a checkout still belongs to the payload, not its ancestor.
   if (host.installPayload) {
     const prefix = homebrewPrefix(host);
     return prefix === null ? { kind: "unknown" } : { kind: "homebrew", prefix };
@@ -180,7 +145,7 @@ const UNSUPPORTED =
   "the uberblick repository. `ub update` only updates Homebrew installations, " +
   `installed with \`brew install ${FORMULA}\`. Nothing has changed.\n`;
 
-/** Run one `ub update`. Never throws for a failure a person can act on. */
+/** Report expected installation and Homebrew failures without throwing. */
 export async function updateCommand(
   argv: string[],
   io: Io,

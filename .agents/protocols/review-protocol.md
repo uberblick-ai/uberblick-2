@@ -33,11 +33,18 @@ Check the PR's mechanism and evidence under
 [library and custom-mechanism choices](delivery-policy.md#library-and-custom-mechanism-choices),
 including live web UI criteria and owner-confirmed exceptions where required.
 
+Check every new or changed code comment against
+[AGENTS.md's comment rule](../../AGENTS.md#find-the-right-authority), including
+decision citations and the allowance for comments that tools read. A violation
+is a finding under the existing P1/P2/P3 scale, grounded in its consequence.
+
 Product intent is read, not inferred from the issue text: read the corpus the
 issue's Pointers cite wherever the change touches its product meaning, under
-[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: a missing
-rewrite for a claim the change makes wrong, or one that misstates the change,
-is a finding.
+[AGENTS.md's read rules](../../AGENTS.md#read-for-the-action). The pull request's `Corpus update` is part of the change: search the corpus
+for each changed command, tool or screen by name; a missing rewrite for a claim
+the change makes wrong or for behavior no page describes, one that misstates
+the change, or one that removes intent the code does not yet deliver, is a
+finding.
 
 A corrections review asks a narrower question: for each finding id the
 revision lists, does the corrected head resolve it, or is the implementer's
@@ -107,9 +114,11 @@ When a PR settles a choice that passes
 but has no record, raise a finding; the reviewer does not draft it. The
 implementer supplies the complete record in the same PR under
 [`implementer.md`'s Decision records](../roles/implementer.md#decision-records),
-as a drafted initial stance or a linked boundary `open` recommendation. Verify
-the draft or open record like any other correction, while it is still editable;
-do not hold the PR for a person's confirmation of that record. Review and merge gates
+as a drafted initial stance or a linked `open` recommendation for a code-cited
+initial stance or boundary topic. Verify the draft or open record like any
+other correction, while it is still editable; check that a new code citation
+uses its topic UUID and that the PR records its post-merge disposition.
+Do not hold the PR for a person's confirmation of that record. Review and merge gates
 remain owed.
 
 ## Handing findings over

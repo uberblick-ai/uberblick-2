@@ -206,8 +206,14 @@
           ],
           "description": "The recorded lifecycle state. Its kind owns the legal values."
         },
-        "governs": {
-          "description": "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
+        "related": {
+          "description": "Live, locally readable regular document UUID this decision relates to. Fixed at creation; omitted successors inherit their predecessor's page. Accepted only with `kind: decision`.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "discussion": {
+          "description": "Live, locally readable regular document UUID holding this record's RFC discussion. Accepted only with `kind: decision`; never inherited. Correct or clear with set_metadata only while open; fixed after leaving open. Does not create or tag a document.",
           "type": "string",
           "format": "uuid",
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
@@ -235,11 +241,12 @@
                   "quote",
                   "table",
                   "terminal",
-                  "chart"
+                  "chart",
+                  "card"
                 ]
               },
               "text": {
-                "description": "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
                 "type": "string"
               },
               "level": {
@@ -253,7 +260,7 @@
                 "type": "string"
               },
               "inline": {
-                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+                "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -361,9 +368,10 @@
             "kind": {
               "const": "requirement"
             },
-            "governs": false,
+            "related": false,
             "supersedes": false,
-            "answer": false
+            "answer": false,
+            "discussion": false
           }
         },
         {
@@ -371,9 +379,10 @@
           "properties": {
             "kind": false,
             "status": false,
-            "governs": false,
+            "related": false,
             "supersedes": false,
-            "answer": false
+            "answer": false,
+            "discussion": false
           }
         }
       ]
@@ -591,6 +600,17 @@
         "supersedes": {
           "type": "string"
         },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
+        },
         "tldr": {
           "anyOf": [
             {
@@ -600,11 +620,11 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary or decision line; null when unwritten."
+          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
         },
         "tldrHint": {
-          "type": "string",
-          "description": "Non-blocking request to review the TL;DR after changing document content."
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "type": "string"
         },
         "agentStance": {
           "type": "boolean"
@@ -636,7 +656,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -694,7 +714,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -755,7 +775,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -824,7 +844,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -855,7 +875,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -867,7 +887,8 @@
                       "mermaid",
                       "table",
                       "terminal",
-                      "chart"
+                      "chart",
+                      "card"
                     ]
                   }
                 },
@@ -930,7 +951,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create a document and its directory stub, with optional seed blocks and TL;DR. Requires nonblank title and description. Tags select active catalog ids or exact names; unknown or retired selections refuse before creation. A kind defaults to its first status; incompatible kind/status combinations refuse. Decisions start open or decided; governs requires a live, hydrated requirement, and supersedes a hydrated decision in a live topic. Invalid targets and a decided successor without a person's answer refuse before any room is written. Optional sidebar placement pins into an existing group id from get_sidebar; an unknown or empty id returns group_not_found and creates nothing. Omit placement to create unpinned. The answer reports each independently persisted room; writes are not transactional. A partial persistence_failed carries uuid, completed and failed rooms, rolledBack: false and stage-aware recovery: follow it to finish without creating a duplicate.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated decision in a live topic. Invalid targets refuse before writes. discussion connects a live, readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. Discussion never inherits; set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, absent if unknown. Page get_doc marks topics related or linked.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -987,7 +1008,7 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary or decision line; null when unwritten."
+          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
         },
         "tags": {
           "type": "array",
@@ -1076,6 +1097,17 @@
         },
         "supersedes": {
           "type": "string"
+        },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
         },
         "agentStance": {
           "type": "boolean"
@@ -1221,6 +1253,28 @@
               "tldr": {
                 "type": "string"
               },
+              "answerPreview": {
+                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "agentStance": {
                 "type": "boolean"
               },
@@ -1356,6 +1410,28 @@
                       },
                       "tldr": {
                         "type": "string"
+                      },
+                      "answerPreview": {
+                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "agentStance": {
                         "type": "boolean"
@@ -1508,6 +1584,28 @@
                     "tldr": {
                       "type": "string"
                     },
+                    "answerPreview": {
+                      "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "discussion": {
+                      "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentStance": {
                       "type": "boolean"
                     },
@@ -1654,6 +1752,28 @@
                     "tldr": {
                       "type": "string"
                     },
+                    "answerPreview": {
+                      "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "discussion": {
+                      "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentStance": {
                       "type": "boolean"
                     },
@@ -1683,6 +1803,14 @@
               },
               "archived": {
                 "type": "boolean"
+              },
+              "relation": {
+                "type": "string",
+                "enum": [
+                  "related",
+                  "linked"
+                ],
+                "description": "Related page membership takes precedence over an indexed link from any record in the topic."
               }
             },
             "required": [
@@ -1694,7 +1822,8 @@
               "inForce",
               "pending",
               "conflicts",
-              "archived"
+              "archived",
+              "relation"
             ],
             "additionalProperties": false
           }
@@ -1817,6 +1946,28 @@
               },
               "tldr": {
                 "type": "string"
+              },
+              "answerPreview": {
+                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "agentStance": {
                 "type": "boolean"
@@ -1963,6 +2114,28 @@
               },
               "tldr": {
                 "type": "string"
+              },
+              "answerPreview": {
+                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discussion": {
+                "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "agentStance": {
                 "type": "boolean"
@@ -2111,6 +2284,28 @@
                 "tldr": {
                   "type": "string"
                 },
+                "answerPreview": {
+                  "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "discussion": {
+                  "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "agentStance": {
                   "type": "boolean"
                 },
@@ -2246,6 +2441,28 @@
                         },
                         "tldr": {
                           "type": "string"
+                        },
+                        "answerPreview": {
+                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "agentStance": {
                           "type": "boolean"
@@ -2398,6 +2615,28 @@
                       "tldr": {
                         "type": "string"
                       },
+                      "answerPreview": {
+                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "agentStance": {
                         "type": "boolean"
                       },
@@ -2544,6 +2783,28 @@
                       "tldr": {
                         "type": "string"
                       },
+                      "answerPreview": {
+                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "discussion": {
+                        "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "agentStance": {
                         "type": "boolean"
                       },
@@ -2605,7 +2866,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2663,7 +2924,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2724,7 +2985,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2793,7 +3054,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2824,7 +3085,7 @@
                   },
                   "text": {
                     "type": "string",
-                    "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                    "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                   },
                   "rev": {
                     "type": "string",
@@ -2836,7 +3097,8 @@
                       "mermaid",
                       "table",
                       "terminal",
-                      "chart"
+                      "chart",
+                      "card"
                     ]
                   }
                 },
@@ -2903,6 +3165,15 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "part": {
+                        "type": "string",
+                        "enum": [
+                          "label",
+                          "title",
+                          "body",
+                          "footer"
+                        ]
                       },
                       "start": {
                         "type": "integer",
@@ -2992,7 +3263,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM with formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table cell links have no block-level ranges. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks and annotation threads with lifecycle and decision context. Decisions hold one to three short answer blocks with a brief reason; related pages hold guidance, RFCs discussion. Regular pages return live related topics first, then topics linked by any record, with relations marked. Decision metadata returns discussion: connected RFC UUID or null; every decision entry caches it, null for none and absent if unknown. Discussion is a derived effective link, separate from curated links and recorded answer. The RFC returns its topic marked linked unless it is also the related page; rename or archive preserves the reference. Cached answerPreview when known: legacy TL;DR, else the first paragraph or list shortened to 300 characters. Missing description and TL;DR return null. Structured data is summarized by collection names and record counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other text is plain and rev ignores marks. Prose doc_links expose character ranges; table and card links have no block-level ranges. Card annotation ranges name their part. Reading eligible guidance counts toward this process's briefing, with best-effort bookkeeping that never fails the read. Read before editing and use the returned text and rev.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -3527,7 +3798,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Apply one validated batch through the shared applyDocData operation. Name each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` is exclusive of other changes. Schema and value JSON reach the shared validator unaltered; unsupported schema versions/rules and invalid retained records are refused before mutation. The whole batch commits as one local transaction. An identical refresh reports `changed: false` and emits no update. The answer summarizes touched collection names, counts and deletion without schemas or record values, plus the normal durability fields.\n\nA producer owns its collections and refreshes them by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by the producer's record ids; refreshing producer records leaves that collection unchanged. Split changes exceeding the 1 MiB operation budget (schemas plus changed record values) across calls; those calls are not atomic together. No CAS, distributed lock or new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data.",
+    "description": "Apply one validated batch through applyDocData, naming each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. The batch is one local transaction; identical refreshes return `changed: false` without an update. The result summarizes touched collection names, counts and deletion with durability, without values.\n\nRefresh producer-owned collections by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. Read with get_data; get_doc summarizes collections. Decisions refuse data with decision_data_unsupported; decided records keep decision_read_only, and legacy data stays readable. Decisions use one to three short answer blocks with a brief reason, guidance on the related regular page and discussion in an RFC. Their directory answerPreview uses legacy TL;DR or the first paragraph/list; get_doc page decisions are marked related or linked. Recorded attribution {who, when, where} is separate from the answer's content blocks.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -3706,6 +3977,28 @@
                   "tldr": {
                     "type": "string"
                   },
+                  "answerPreview": {
+                    "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "discussion": {
+                    "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "agentStance": {
                     "type": "boolean"
                   },
@@ -3854,6 +4147,28 @@
                   "tldr": {
                     "type": "string"
                   },
+                  "answerPreview": {
+                    "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "discussion": {
+                    "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "agentStance": {
                     "type": "boolean"
                   },
@@ -3989,6 +4304,28 @@
                           },
                           "tldr": {
                             "type": "string"
+                          },
+                          "answerPreview": {
+                            "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "discussion": {
+                            "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
                           },
                           "agentStance": {
                             "type": "boolean"
@@ -4141,6 +4478,28 @@
                         "tldr": {
                           "type": "string"
                         },
+                        "answerPreview": {
+                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "agentStance": {
                           "type": "boolean"
                         },
@@ -4287,6 +4646,28 @@
                         "tldr": {
                           "type": "string"
                         },
+                        "answerPreview": {
+                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "discussion": {
+                          "description": "Cached RFC discussion document UUID; null when none, absent when the cache is unknown.",
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "agentStance": {
                           "type": "boolean"
                         },
@@ -4413,7 +4794,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List workspace documents from directory stubs without opening document rooms. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "description": "List directory stubs without opening rooms. Decision answers use one to three short blocks with a brief reason; guidance is on the related page, discussion in an RFC. get_doc on regular pages marks related or linked topics. The unfiltered listing omits decisions; a kind, status or tag predicate includes its exact matches. kind: decision returns one row per topic: the record in force, else pending, else first, plus pending/conflicting records. Status and tag may match different live records of a topic; resolution still uses its whole graph. include_superseded returns records with per-record predicates. include_deleted admits archived topics but is not a predicate, so archived decisions also require a matching predicate. Filters combine; unknown catalog tags refuse. Rows carry cached description, canonical tag identities, lifecycle and authority metadata, sidebar-derived pinned and approximate optional epoch timestamps. Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph or list, null when neither exists and absent when unknown. Every decision entry, including inForce, pending and conflicts, also caches discussion as its RFC UUID, null for none and absent when unknown. Each pending proposal names its own explicitly connected discussion, separately from curated links and recorded answer. A fresh replica can discover the corpus once its directory room has synced.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4818,7 +5199,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4848,7 +5229,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4881,7 +5262,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4922,7 +5303,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4953,7 +5334,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -4965,7 +5346,8 @@
                         "mermaid",
                         "table",
                         "terminal",
-                        "chart"
+                        "chart",
+                        "card"
                       ]
                     }
                   },
@@ -5076,8 +5458,8 @@
           "type": "null"
         },
         "tldrHint": {
-          "type": "string",
-          "description": "Non-blocking request to review the TL;DR after changing document content."
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "type": "string"
         }
       },
       "required": [
@@ -5085,13 +5467,12 @@
         "block",
         "applied",
         "synced",
-        "hub",
-        "tldrHint"
+        "hub"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to re-diff. Assertions check this replica at call time, without distributed compare-and-swap. For prose, use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added document targets must be known locally. Read edit_block help for mapping invariants and formatting limits before editing tables. Cards take canonical container content with inline Markdown, refuse invalid input with invalid_card, and splice only changed parts, characters and formatting while preserving unchanged comment anchors. Their rev includes formatting.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -5134,11 +5515,12 @@
             "quote",
             "table",
             "terminal",
-            "chart"
+            "chart",
+            "card"
           ]
         },
         "text": {
-          "description": "Block text. For a table, exactly one GFM table with inline markdown cell formatting (code, bold, italic, strike, external and document links). Alignment markers are accepted but not stored; escaped punctuation stays literal.",
+          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
           "type": "string"
         },
         "level": {
@@ -5152,7 +5534,7 @@
           "type": "string"
         },
         "inline": {
-          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables also ignore it and take exactly one GFM table through `text`.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
+          "description": "Formatted content for a PROSE block (paragraph, heading, list-item, quote), as runs of equally-marked text: `[{text, marks}]`, where marks are `bold`, `italic`, `strike`, `inlineCode`, `link` (an external http(s) URL) and `docLink` (another document's UUID — the inline way to cite one). When present it REPLACES `text`, so the run texts joined together are the block's text. Code, mermaid, terminal and chart hold source text and ignore it; tables and cards also ignore it and read inline Markdown through `text`: exactly one GFM table or the content between :::card and :::.\n\nA `docLink` run with an EMPTY `text` is filled in for you with the target's current title, so `{text: \"\", marks: {docLink: \"<uuid>\"}}` is how you cite a document without looking its title up first. A target this replica's directory has never heard of fails the call with `doclink_target_not_known_locally` and writes nothing; an archived target is fine.",
           "type": "array",
           "items": {
             "type": "object",
@@ -5222,7 +5604,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5252,7 +5634,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5285,7 +5667,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5326,7 +5708,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5357,7 +5739,7 @@
                     },
                     "text": {
                       "type": "string",
-                      "description": "Plain prose or source text; tables carry canonical GFM with cell formatting."
+                      "description": "Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."
                     },
                     "rev": {
                       "type": "string",
@@ -5369,7 +5751,8 @@
                         "mermaid",
                         "table",
                         "terminal",
-                        "chart"
+                        "chart",
+                        "card"
                       ]
                     }
                   },
@@ -5480,8 +5863,8 @@
           "type": "null"
         },
         "tldrHint": {
-          "type": "string",
-          "description": "Non-blocking request to review the TL;DR after changing document content."
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "type": "string"
         }
       },
       "required": [
@@ -5489,13 +5872,12 @@
         "block",
         "applied",
         "synced",
-        "hub",
-        "tldrHint"
+        "hub"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert one block after after_block_id, or at the top when omitted. Types cover the editor's closed block palette; lists use adjacent list-item blocks. Table text must be exactly one GFM table or invalid_table refuses; it stores parsed cells and inline formatting. Card text omits its :::card and ::: delimiter lines: label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Parts hold inline Markdown; unknown, duplicate or non-key header lines refuse with invalid_card. Document-link targets must be known in this replica's directory or doclink_target_not_known_locally refuses before writing. Other block text is plain or literal source. Terminal lines starting with a dollar sign and space are demonstrated commands; other lines are output, with no escape for output beginning that way. Chart text is a JSON mapping for a line chart or data table reading this document's collection; invalid mappings remain editable source with a problem message. Use update_data to change view records.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -5629,8 +6011,8 @@
           "type": "null"
         },
         "tldrHint": {
-          "type": "string",
-          "description": "Non-blocking request to review the TL;DR after changing document content."
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "type": "string"
         }
       },
       "required": [
@@ -5638,8 +6020,7 @@
         "blockId",
         "applied",
         "synced",
-        "hub",
-        "tldrHint"
+        "hub"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
@@ -5703,6 +6084,20 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
             "description": "Target document UUID."
           }
+        },
+        "discussion": {
+          "description": "RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged.",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "Document UUID."
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5734,6 +6129,11 @@
         {
           "required": [
             "links"
+          ]
+        },
+        {
+          "required": [
+            "discussion"
           ]
         }
       ]
@@ -5851,7 +6251,7 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary or decision line; null when unwritten."
+          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
         },
         "tags": {
           "type": "array",
@@ -5911,6 +6311,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "discussion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer."
         }
       },
       "required": [
@@ -5927,7 +6338,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set any non-empty subset of `title`, `description`, `tldr`, `tags` and curated `links` in one call; omitted fields keep their values. All named fields are validated before any write, so a refusal changes nothing and a field-specific failure names `field`. The answer returns all five fields as get_doc would read them, with write durability and no TL;DR review reminder.\n\nTitle and description must be nonempty and cannot be cleared; `tldr: null` clears the person-facing summary. Tags and links each replace their complete curated set, and `[]` clears one. Tag selectors are active catalog ids or exact names from list_tags; already assigned retired or unresolved ids can be preserved. Newly added link UUIDs must be known to this replica's directory; archived targets are accepted, and existing curated targets may be passed back unchanged.\n\nA decided record refuses any call naming title or tldr, while description, tags and links remain writable. Archived documents refuse every metadata field; status changes use set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer {who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6652,6 +7063,15 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
+                    "part": {
+                      "type": "string",
+                      "enum": [
+                        "label",
+                        "title",
+                        "body",
+                        "footer"
+                      ]
+                    },
                     "start": {
                       "type": "integer",
                       "minimum": 0,
@@ -6786,7 +7206,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Open an anchored comment thread on block_id/start/end, or reply with thread_id and no range fields. text and author belong to both modes; only replies accept resolved to resolve or reopen in the same update. Mixing modes or incomplete ranges refuses at the input boundary. For tables, row/column are zero-based GFM projection indices including header row 0. Offsets count displayed cell characters, including stored edge whitespace: remove exactly the GFM padding before decoding inline syntax. Returned coordinates follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; open it in the web editor. Existing card threads accept replies, resolution and reopening.\n\nHelp: annotate, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6965,7 +7385,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links and code, mermaid, table, terminal or chart source blocks refuse. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Mark selected prose text as a document reference without changing its characters or rev. start/end are character offsets measured against the required rev; stale_block returns currentText/currentRev for remeasurement. Indices clamp to text and swap if reversed; empty ranges refuse. Existing document references are retargeted; external links, source blocks, tables and cards refuse. Write card links as inline Markdown in the card text. doc_id must be known to this replica's directory or doclink_target_not_known_locally refuses before writing; archived targets are accepted. The answer includes the target title, but the label stays the selected text and does not follow renames. Backlinks update without changing curated meta.links.\n\nHelp: link_range, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7022,7 +7442,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Cards export as separate :::card containers with inline Markdown parts and escaped ::: prose lines. Structured document data is omitted; documents holding data include an omission notice. Export only: markdown is never the storage format, and there is no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

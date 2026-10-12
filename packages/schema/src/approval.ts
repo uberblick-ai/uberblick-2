@@ -1,33 +1,33 @@
-/** Approval content is narrower than replica agreement: discussion stays open. */
+// Decision approval model: b4e616bb-10f6-460d-a13b-9c21354ca80b
 
 import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
 import { inlinePlainText } from "./marks.js";
 import { writeGfmTable } from "./table.js";
+import { CARD_PARTS, writeCardText } from "./card.js";
+import type { CardText } from "./card.js";
 import { getMeta } from "./doc.js";
 import { getDocDataEntries } from "./data.js";
 import { blockRev } from "./rev.js";
 
 /**
- * Browser-safe change detector for the approved title, decision line, block
- * text in document order and structured data. JSON preserves field and block
- * boundaries. Block identities, attributes, marks, comments and approval bookkeeping are outside
- * this content; the shared non-cryptographic revision hash detects changes,
- * rather than proving who approved them.
+ * Hash title, decision line, ordered block text and raw data with JSON boundaries.
+ * Identities, attributes, marks, comments and approval bookkeeping are excluded.
+ * The browser-safe revision hash detects changes; it does not prove attribution.
  */
 export function decisionApprovalFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
-  // Keep the historical input for documents without data. Raw entries include
-  // invalid merged records and unsupported schemas: approval covers content,
-  // not only content this client's validator understands.
+  // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
-  // Approval excludes formatting and retains the historical plain table
-  // projection, even though the agent-facing text now includes inline marks.
-  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table }) =>
-    table !== undefined && table.length > 0
+  // Use plain table text so formatting alone cannot invalidate approval.
+  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card }) =>
+    card !== undefined
+      ? writeCardText(Object.fromEntries(CARD_PARTS.map((part) => [part, inlinePlainText(card[part])])) as CardText)
+      : table !== undefined && table.length > 0
       ? writeGfmTable(table.map((row) => row.map(inlinePlainText)))
       : block.text,
   )];
+  // Omit empty data to preserve fingerprints for documents without a data area.
   if (data.length > 0) content.push(data);
   return blockRev({
     type: "paragraph",

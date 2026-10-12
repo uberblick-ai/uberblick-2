@@ -2,13 +2,14 @@
 import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manageRequest } from "../src/access-management.js";
 import {
   cleanUp, credentialPath, fixture, rig, savedLogin, serve,
 } from "./auth-fixtures.js";
 import {
-  removeTempDirs, sandbox, sleep, UB_BIN, waitUntil, type Run, type Sandbox,
+  removeTempDirs, sandbox, UB_BIN, waitUntil, type Run, type Sandbox,
 } from "./helpers.js";
 
 afterEach(cleanUp);
@@ -21,25 +22,26 @@ const started = {
   verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH", expiresIn: 30, interval: 1,
 };
 
-function loginWithHostname(box: Sandbox, origin: string, value: string | undefined, throws = false) {
+function loginWithHostname(box: Sandbox, origin: string, value: string | undefined, throws = false, acknowledgeInterrupt = false) {
   const shim = join(box.cwd, "hostname.mjs");
   // The built-in is replaced only inside this test process, with no shipped seam.
   writeFileSync(shim, `import os from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
 os.hostname = () => { ${throws ? "throw new Error('hostname unavailable');" : `return ${JSON.stringify(value)};`} };
 syncBuiltinESMExports();
+${acknowledgeInterrupt ? 'process.on("SIGINT", () => process.stderr.write("test: SIGINT received\\n"));' : ''}
 `);
   const child = spawn(process.execPath, ["--import", shim, UB_BIN, "auth", "login", origin], {
     cwd: box.cwd, env: { ...box.env, SSH_CONNECTION: "test remote session" }, timeout: 15_000,
   });
+  let stdout = ""; let stderr = "";
   const result = new Promise<Run>((resolve, reject) => {
-    let stdout = ""; let stderr = "";
     child.stdout.on("data", chunk => { stdout += String(chunk); });
     child.stderr.on("data", chunk => { stderr += String(chunk); });
     child.on("error", reject);
     child.on("close", status => resolve({ status, stdout, stderr, output: stdout + stderr }));
   });
-  return { child, result };
+  return { child, result, get stderr() { return stderr; } };
 }
 
 async function olderHub(refusal = { status: 400, result: { status: "invalid-request" } as Record<string, unknown> },
@@ -47,13 +49,18 @@ async function olderHub(refusal = { status: 400, result: { status: "invalid-requ
   const login = fixture([]);
   const starts: Record<string, unknown>[] = [];
   const cancellations: Record<string, unknown>[] = [];
+  const probes: { body: Record<string, unknown>; authorization: string | undefined }[] = [];
   const remote = await serve((request, response) => {
     void (async () => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString("utf8"));
       response.setHeader("Content-Type", "application/json");
-      if (request.url === "/auth/claim-state") {
+      if (request.url === "/auth/credential/renew") {
+        probes.push({ body, authorization: request.headers.authorization });
+        response.statusCode = 401;
+        response.end(JSON.stringify({ status: "sign-in-required" }));
+      } else if (request.url === "/auth/claim-state") {
         response.end(JSON.stringify({ unclaimed: false, canClaim: false }));
       } else if (request.url === "/auth/github/start") {
         starts.push(body);
@@ -72,7 +79,7 @@ async function olderHub(refusal = { status: 400, result: { status: "invalid-requ
       }
     })().catch(() => { response.statusCode = 500; response.end(); });
   });
-  return { ...remote, login, starts, cancellations };
+  return { ...remote, login, starts, cancellations, probes };
 }
 
 describe("CLI device hostname metadata", () => {
@@ -107,6 +114,7 @@ describe("CLI device hostname metadata", () => {
     const remote = await olderHub(); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
     expect(run.status, run.stderr).toBe(0);
+    expect(remote.probes).toEqual([{ body: { protocolVersion: SYNC_PROTOCOL_VERSION, token: "" }, authorization: undefined }]);
     expect(remote.starts).toEqual([{ deviceName: "agent-server" }, {}]);
     expect(savedLogin(box, remote.origin)).toEqual(remote.login);
     expect(remote.cancellations).toEqual([]);
@@ -138,11 +146,11 @@ describe("CLI device hostname metadata", () => {
     let entered = false; let release: () => void = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
     const remote = await olderHub(undefined, false, async () => { entered = true; await held; });
-    const box = sandbox(); const run = loginWithHostname(box, remote.origin, "agent-server");
+    const box = sandbox(); const run = loginWithHostname(box, remote.origin, "agent-server", false, true);
     try {
       await waitUntil("named sign-in request reached the hub", () => entered, 5_000);
       run.child.kill("SIGINT");
-      await sleep(50);
+      await waitUntil("SIGINT reached the login process", () => run.stderr.includes("test: SIGINT received"));
       release();
       const result = await run.result;
       expect(result.status).toBe(1);

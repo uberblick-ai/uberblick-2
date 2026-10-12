@@ -1,14 +1,13 @@
 /**
  * `ub auth login` against an unavailable or misbehaving hub, and the finite
- * lifetime of an attempt. Split from `auth.test.ts`; the fixtures are in
- * `auth-fixtures.ts`.
+ * lifetime of an attempt. The fixtures are in `auth-fixtures.ts`.
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import {
-  DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil,
-} from "./helpers.js";
+import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 import {
   GITHUB_TOKEN, SIGNING_SECRET, type Login,
   assertPublicOnly, cleanUp, credentialPath, fixture, privateDeviceRows, rig, serve,
@@ -19,15 +18,17 @@ afterAll(removeTempDirs);
 
 describe("CLI sign-in validates availability and has a finite lifetime", () => {
   it("reports unreachable and unconfigured hubs without changing the store", async () => {
-    const remote = await rig([], false);
+    const remote = await rig([], false, false, false, SYNC_PROTOCOL_VERSION + 1);
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET } });
     const before = readFileSync(credentialPath(box));
-    const unconfigured = await runUbAsync(["auth", "login", remote.origin], box);
+    const unconfigured = await runInProcess(["auth", "login", remote.origin], box);
     expect(unconfigured.status).toBe(1);
     expect(unconfigured.stderr).toMatch(/not configured|not.configured/i);
-    const unreachable = await runUbAsync(["auth", "login", DEAD_HUB_URL], box);
+    expect(unconfigured.stderr).not.toMatch(/sync protocol|update/i);
+    const unreachable = await runInProcess(["auth", "login", DEAD_HUB_URL], box);
     expect(unreachable.status).toBe(1);
     expect(unreachable.stderr).toMatch(/unreachable|cannot reach/i);
+    expect(unreachable.stderr).not.toMatch(/sync protocol|update/i);
     expect(readFileSync(credentialPath(box))).toEqual(before);
   });
 
@@ -35,7 +36,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     const proxy = await serve((_request, response) => { response.writeHead(502); response.end(); });
     const box = sandbox({ credentials: { hubLogins: { [proxy.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "login", proxy.origin], box);
+    const run = await runInProcess(["auth", "login", proxy.origin], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/unreachable|cannot reach/i);
     expect(run.stderr).not.toMatch(/update.*hub/i);
@@ -47,7 +48,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     remote.controls.unavailableCollection = true;
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/unreachable|cannot reach/i);
     expect(run.stderr).not.toMatch(/update.*hub/i);
@@ -71,7 +72,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
     try {
-      const run = await runUbAsync(["auth", "login", remote.origin], box);
+      const run = await runInProcess(["auth", "login", remote.origin], box);
       expect(run.status).toBe(1);
       expect(run.stderr).toMatch(/unreachable|timed out/i);
       const cancellation = remote.requests.find((request) => request.path === "/auth/github/cancel");
@@ -99,7 +100,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     };
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/failed/i);
     expect(run.stderr).toMatch(/issued.*device.*remain.*hub/i);
@@ -114,7 +115,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     const remote = await rig();
     remote.github.failAt = "https://github.com/login/device/code";
     const box = sandbox();
-    const failure = await runUbAsync(["auth", "login", remote.origin], box);
+    const failure = await runInProcess(["auth", "login", remote.origin], box);
     expect(failure.status).toBe(1);
     expect(failure.stderr).toMatch(/failed/i);
     assertPublicOnly(failure, remote);
@@ -123,7 +124,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     await Promise.all(Array.from({ length: 100 }, () => fetch(`http://127.0.0.1:${remote.hub.port}/auth/github/start`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
     }).then((response) => response.arrayBuffer())));
-    const busy = await runUbAsync(["auth", "login", remote.origin], box);
+    const busy = await runInProcess(["auth", "login", remote.origin], box);
     expect(busy.status).toBe(1);
     expect(busy.stderr).toMatch(/busy/i);
     expect(existsSync(credentialPath(box))).toBe(false);
@@ -143,7 +144,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     }) : undefined;
     const box = sandbox({ credentials: { signingSecret: SIGNING_SECRET } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "login", old?.origin ?? remote.origin], box);
+    const run = await runInProcess(["auth", "login", old?.origin ?? remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/offer|invalid|malformed|unsupported|response/i);
     expect(run.output).not.toContain(GITHUB_TOKEN);
@@ -176,7 +177,7 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     };
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });
     const before = readFileSync(credentialPath(box));
-    const run = await runUbAsync(["auth", "login", remote.origin], box);
+    const run = await runInProcess(["auth", "login", remote.origin], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/invalid.*credential|invalid.*sign.in|invalid.*response/i);
     expect(run.stderr).toMatch(/issued.*device.*remain.*hub/i);

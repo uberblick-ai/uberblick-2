@@ -1,17 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { publishOwnerOnly } from "@uberblick/hub/safe-write";
+import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { acquireInitLock } from "../src/init-lock.js";
 import { writeProjectBinding } from "../src/project-binding.js";
 import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { removeTempDirs, runUb, sandbox } from "./helpers.js";
+import { removeTempDirs, sandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
-vi.mock("@uberblick/hub/safe-write", async (original) => {
-  const actual = await original<typeof import("@uberblick/hub/safe-write")>();
+vi.mock("@uberblick/mcp-server/safe-write", async (original) => {
+  const actual = await original<typeof import("@uberblick/mcp-server/safe-write")>();
   return { ...actual, publishOwnerOnly: vi.fn(actual.publishOwnerOnly) };
 });
-const { publishOwnerOnly: realPublish } = await vi.importActual<typeof import("@uberblick/hub/safe-write")>("@uberblick/hub/safe-write");
+const { publishOwnerOnly: realPublish } = await vi.importActual<typeof import("@uberblick/mcp-server/safe-write")>("@uberblick/mcp-server/safe-write");
 afterAll(removeTempDirs);
 afterEach(() => vi.mocked(publishOwnerOnly).mockImplementation(realPublish));
 const previous = "11111111-1111-4111-8111-111111111111";
@@ -82,7 +83,7 @@ describe("workspace record failure boundaries", () => {
     const config = join(box.configHome, "uberblick", "config.json");
     const bindingBefore = readFileSync(path);
     const settingsBefore = readFileSync(config);
-    const run = runUb(["workspace", "use", selected], box);
+    const run = await runInProcess(["workspace", "use", selected], box);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("Invalid workspace records");
     expect(run.stderr).not.toContain("misplaced-sensitive-value");

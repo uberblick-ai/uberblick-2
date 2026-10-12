@@ -1,8 +1,7 @@
 /**
  * The document identity line: tags, uuid/revision, copy and document actions.
  *
- * The removed global header deliberately has no test double here. These tests
- * pin only the document-local controls that survive #611.
+ * These tests pin the document-local controls without a global-header double.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";

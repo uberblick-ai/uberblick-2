@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * The executable link between a repository scenario and the Playwright test
- * that defends it (#668).
+ * that defends it.
  *
  * A scenario in `e2e/scenarios/` names a registered test as
  * `e2e/<spec> › <test's own title>`. The test names the scenario with a

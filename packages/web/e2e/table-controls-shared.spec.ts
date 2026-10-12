@@ -1,9 +1,9 @@
-/** A row menu names its shared row while real collaborator changes arrive. */
+/** Table menus keep their shared targets while real collaborator changes arrive. */
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock, decisionDirectoryFields, deleteBlock, directoryRoom, editBlock,
   getBlocks, getBlocksFragment, initDoc, roomForDoc, setKind, setStatus,
@@ -14,6 +14,20 @@ import { setupHarness } from "./app-helpers.js";
 
 const { harness, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |";
+
+function makeRagged(doc: Y.Doc, id: string, source: string): void {
+  const other = new Y.Doc();
+  try {
+    Y.applyUpdate(other, Y.encodeStateAsUpdate(doc));
+    editBlock(doc, id, source, `${source}\n|  |  |`, {
+      tableMapping: { rows: [0, 1, null], columns: [0, 1] },
+    });
+    editBlock(other, id, source, "| A | B | extra |\n| --- | --- | --- |\n| alpha | one | new |", {
+      tableMapping: { rows: [0, 1], columns: [0, 1, null] },
+    });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
+  } finally { other.destroy(); }
+}
 
 async function publishTable(options: { source?: string; ragged?: boolean; decision?: boolean } = {}): Promise<{
   uuid: string;
@@ -32,19 +46,7 @@ async function publishTable(options: { source?: string; ragged?: boolean; decisi
     setKind(doc, "decision");
     setStatus(doc, "open");
   }
-  if (options.ragged) {
-    const other = new Y.Doc();
-    try {
-      Y.applyUpdate(other, Y.encodeStateAsUpdate(doc));
-      editBlock(doc, id, source, `${source}\n|  |  |`, {
-        tableMapping: { rows: [0, 1, null], columns: [0, 1] },
-      });
-      editBlock(other, id, source, "| A | B | extra |\n| --- | --- | --- |\n| alpha | one | new |", {
-        tableMapping: { rows: [0, 1], columns: [0, 1, null] },
-      });
-      Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
-    } finally { other.destroy(); }
-  }
+  if (options.ragged) makeRagged(doc, id, source);
   const peers: Array<{ provider: HocuspocusProvider; ydoc: Y.Doc }> = [];
   const close = (): void => {
     for (const { provider, ydoc } of peers) { provider.destroy(); ydoc.destroy(); }
@@ -76,6 +78,118 @@ async function publishTable(options: { source?: string; ragged?: boolean; decisi
     throw error;
   }
 }
+
+for (const deleted of ["column", "table"] as const) {
+  test(`an open column menu closes when a collaborator deletes its ${deleted}`, async ({ page }) => {
+    const fixture = await publishTable();
+    try {
+      await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+      const table = page.locator(".ub-table");
+      await expect(table.locator("tr")).toHaveCount(3);
+      await table.locator("td").first().click();
+      await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeVisible();
+      const remaining = "| B |\n| --- |\n| one |\n| two |";
+      if (deleted === "column") {
+        editBlock(fixture.doc, fixture.id, SOURCE, remaining, {
+          tableMapping: { rows: [0, 1, 2], columns: [1] },
+        });
+        await expect(table.locator("th")).toHaveText(["B"]);
+        await expect(table.locator("td")).toHaveText(["one", "two"]);
+      } else {
+        deleteBlock(fixture.doc, fixture.id);
+        await expect(table).toHaveCount(0);
+      }
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toHaveCount(0);
+      if (deleted === "column") {
+        await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(remaining);
+      } else {
+        await expect.poll(() => getBlocks(fixture.doc).some((block) => block.id === fixture.id)).toBe(false);
+      }
+    } finally { fixture.close(); }
+  });
+}
+
+test("an open column menu keeps its target through collaborator edits, insertion and deletion to its left", async ({ page }) => {
+  const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | one | last |\n| beta | two | tail |";
+  const fixture = await publishTable({ source });
+  try {
+    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+    const table = page.locator(".ub-table");
+    await expect(table.locator("th")).toHaveCount(3);
+    await table.locator("td").nth(1).click();
+    await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
+    const remove = page.getByRole("menuitem", { name: "Delete column", exact: true });
+    await expect(remove).toBeVisible();
+    const edited = source.replace("one", "edited one").replace("last", "edited last");
+    editBlock(fixture.doc, fixture.id, source, edited, {
+      tableMapping: { rows: [0, 1, 2], columns: [0, 1, 2] },
+    });
+    await expect(table.locator("td").nth(1)).toHaveText("edited one");
+    const expanded = "| A | New | B | C |\n| --- | --- | --- | --- |\n| alpha | new one | edited one | edited last |\n| beta | new two | two | tail |";
+    editBlock(fixture.doc, fixture.id, edited, expanded, {
+      tableMapping: { rows: [0, 1, 2], columns: [0, null, 1, 2] },
+    });
+    await expect(table.locator("th")).toHaveText(["A", "New", "B", "C"]);
+    await expect(remove).toBeVisible();
+    const reduced = "| New | B | C |\n| --- | --- | --- |\n| new one | edited one | edited last |\n| new two | two | tail |";
+    editBlock(fixture.doc, fixture.id, expanded, reduced, {
+      tableMapping: { rows: [0, 1, 2], columns: [1, 2, 3] },
+    });
+    await expect(table.locator("th")).toHaveText(["New", "B", "C"]);
+    await expect(remove).toBeVisible();
+    await remove.click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(table.locator("th")).toHaveText(["New", "C"]);
+    await expect(table.locator("td")).toHaveText(["new one", "edited last", "new two", "tail"]);
+    await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text)
+      .toBe("| New | C |\n| --- | --- |\n| new one | edited last |\n| new two | tail |");
+  } finally { fixture.close(); }
+});
+
+test("a single-column menu cannot delete its last column", async ({ page }) => {
+  const source = "| A |\n| --- |\n| alpha |";
+  const fixture = await publishTable({ source });
+  try {
+    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+    const table = page.locator(".ub-table");
+    await expect(table.locator("th")).toHaveCount(1);
+    await table.locator("td").first().click();
+    await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeDisabled();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(table.locator("th")).toHaveText(["A"]);
+    await expect(table.locator("td")).toHaveText(["alpha"]);
+    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Column 1 actions", exact: true })).toBeFocused();
+  } finally { fixture.close(); }
+});
+
+test("a column menu closes when concurrent structural edits make its table ragged", async ({ page }) => {
+  const source = "| A | B |\n| --- | --- |\n| alpha | one |";
+  const fixture = await publishTable({ source });
+  try {
+    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+    const table = page.locator(".ub-table");
+    await expect(table.locator("th")).toHaveCount(2);
+    await table.locator("td").first().click();
+    await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeVisible();
+    makeRagged(fixture.doc, fixture.id, source);
+    await expect(table.locator("tr")).toHaveCount(3);
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.locator(".ub-table-controls")).toHaveCount(0);
+    expect(await table.locator("tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("th, td").length)))
+      .toEqual([3, 3, 2]);
+    await table.locator("td").first().click();
+    await page.keyboard.press("Control+Alt+t");
+    await expect(page.getByRole("button", { name: /^Column \d+ actions$/ })).toHaveCount(0);
+    await expect(table.locator("td").first()).toHaveText("alpha");
+  } finally { fixture.close(); }
+});
 
 for (const deleted of ["row", "table"] as const) {
   test(`an open row menu closes when a collaborator deletes its ${deleted}`, async ({ page }) => {
@@ -167,16 +281,17 @@ test("a ragged shared table offers no structural controls and retains editable c
   } finally { fixture.close(); }
 });
 
-test("deciding a record closes its table menu and removes structural controls", async ({ page }) => {
+for (const kind of ["row", "column"] as const) {
+test(`deciding a record closes its ${kind} menu and removes structural controls`, async ({ page }) => {
   const fixture = await publishTable({ decision: true });
   try {
     await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
     const table = page.locator(".ub-table");
     await expect(table.locator("tr")).toHaveCount(3);
     await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "true");
-    await table.locator("tr").nth(1).hover();
-    await page.getByRole("button", { name: "Row 2 actions", exact: true }).click();
-    await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeVisible();
+    await table.locator("td").first().click();
+    await page.getByRole("button", { name: kind === "row" ? "Row 2 actions" : "Column 1 actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: `Delete ${kind}`, exact: true })).toBeVisible();
     setStatus(fixture.doc, "decided");
     upsertDirectoryEntry(fixture.directory, {
       uuid: fixture.uuid, title: "Shared table controls", kind: "decision", status: "decided",
@@ -191,3 +306,4 @@ test("deciding a record closes its table menu and removes structural controls", 
     expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(SOURCE);
   } finally { fixture.close(); }
 });
+}

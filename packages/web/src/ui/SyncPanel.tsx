@@ -1,16 +1,8 @@
 /**
- * The sync and presence detail panel (#72, design surface 1e's right column):
- * what this client knows about its connection, and who else is in the room.
- *
- * Every line is a *reading* of state the client already holds — the resolved
- * hub endpoint, the room key, the provider's status, the awareness map. When
- * `ub open` serves the page, the shell also supplies its latest local
- * `/api/status` answer. The panel never asks the remote hub directly and the
- * local durability reading never waits on that HTTP fact.
- *
- * That rule is also why the mockup's local-update count is missing rather than
- * filled in: the web client keeps no local update log, so the number has no
- * source here. An omitted row says less than an invented one.
+ * Display client-held endpoint, room, provider and awareness facts plus the
+ * shell's local /api/status answer. Never query the remote hub or wait on
+ * HTTP for local durability. Omit local-update count because this client has
+ * no update log.
  */
 
 import type { ReactElement } from "react";
@@ -50,21 +42,10 @@ function Fact({
 }
 
 /**
- * The panel. Rendered only while open — an overlay nobody asked for should not
- * be in the tree keeping observers on the document.
- *
- * `connection` is the room the open document's status line reports on. Routes
- * without an open document have no sync-details surface.
- *
- * `endpoint` is passed rather than read here, because the address is resolved
- * once per session by an async read the shell already waits on (`hubUrl` throws
- * before it settles). Null is that in-between moment, and it says so.
- *
- * The hub rows answer which hub an upstream fact is about (#362). One machine
- * legitimately runs several — the local serving process and the promoted
- * remote — so a panel that named the state without naming the remote would
- * overclaim during an outage. The address is `config.ts`'s stripped label: an
- * endpoint, never a credential.
+ * Mount only while open and only for the document status room. The shell
+ * supplies its resolved endpoint; null stays unknown. Name the remote hub
+ * beside upstream facts using the credential-free config label so local and
+ * promoted hubs cannot be confused.
  */
 export function SyncPanel({
   connection,
@@ -88,9 +69,8 @@ export function SyncPanel({
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
-  // The same settled word the pill this panel opens from shows. Calm is a
-  // cadence, never a quieter version of the truth (see calm.ts) — and two
-  // different words in one corner of the screen would be worse than either.
+  // Show the same calm word as the opening status control; only redraw
+  // cadence changes, never truth.
   const reading = statusReading(status, state ?? raw);
   const localWorkspace = endpoint?.url === "local";
   const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
@@ -105,8 +85,7 @@ export function SyncPanel({
       <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
       <dl className="ub-sync-facts m-0 mb-5">
         <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} />
-        {/* Always drawn, "served config" included: a reader checking which hub
-            they are on is asking in the same breath who decided it. */}
+        {/* Always name the configuration source beside its hub endpoint. */}
         <Fact
           label="Source"
           value={
@@ -128,9 +107,10 @@ export function SyncPanel({
         {connection !== null && reason !== null && (
           <Fact label="Reason" value={reason} />
         )}
-        {/* Always drawn, zero included: this is the panel someone opens to ask
-            what the backlog is, and a row that vanished at zero would leave
-            them unable to tell "nothing waiting" from "not reported". */}
+        {/*
+            * Keep the backlog row at zero so nothing waiting stays distinct from
+            * unreported.
+         */}
         <Fact
           label="Backlog"
           value={
@@ -154,10 +134,10 @@ export function SyncPanel({
               key={session.clientId}
               className="ub-presence-row flex min-w-0 items-baseline gap-[0.4rem]"
             >
-              {/* The same avatar the peer strip draws, decorative here: this
-                  is a list, so the name stays in words and is the row's
-                  accessible name. A labelled avatar would announce every
-                  session twice. */}
+              {/*
+                  * The row name is accessible text; keep its shared avatar decorative to avoid
+                  * naming the session twice.
+               */}
               <PeerAvatar session={session} />
               <span className="ub-presence-name min-w-0 [overflow-wrap:anywhere]">
                 {session.name}

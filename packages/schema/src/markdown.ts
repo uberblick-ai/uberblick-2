@@ -1,44 +1,6 @@
 /**
- * Markdown is an export format, never the storage format.
- *
- * `exportMarkdown` is the one-way road out of the document model.
- * `importMarkdown` is the opposite direction and deliberately weaker: it is a
- * dependency-free, line-based reader used to bring seed documents in once.
- *
- * Both directions carry the closed inline-mark set — `**bold**`, `*italic*`,
- * `~~strike~~`, `` `code` ``, `[text](https://…)` and `[text](<uuid>)` — because
- * a block's text
- * does store inline formatting (as Yjs formatting attributes; see `marks.ts`).
- * Block structure stays line-based, which is exactly what the flat block model
- * needs: a list is a run of `list-item` blocks and a quote is a `quote` block,
- * so a line maps to a block and back with nothing to nest.
- *
- * Reader and writer are one unit: every legal combination of marks has to
- * survive the trip out and back, so the reader implements CommonMark's delimiter
- * matching rather than a looser approximation, and the writer escapes exactly
- * what that reader would take as syntax. The vocabulary is narrower than
- * CommonMark's, deliberately:
- *
- *   - Both emphasis characters are read, `*` and `_`, because both are standard
- *     GFM and an agent writing markdown by hand will use either. Flanking decides
- *     what can open and close, so `_` between two word characters is not a
- *     delimiter at all and `snake_case` survives untouched.
- *   - The writer only ever *writes* `*` and `~~`, so its output is boring and
- *     its diffs are stable — see {@link DELIMITER}.
- *   - Delimiter *runs* are matched the CommonMark way: flanking decides what can
- *     open and close (`** x **` is literal), a closer takes the nearest opener,
- *     and a long run splits between matches — which is what makes `***both***`,
- *     `**a***b*` and `*a **b** c*` each mean what they should.
- *   - `[label](target)` is a link only when the target is one of the two things
- *     a link mark can hold: an external `http(s)` URL (`link`) or a document
- *     uuid (`docLink`). The target's own shape decides which, in both
- *     directions; anything else stays literal text, and so does an empty label,
- *     so the shorthand spellings (`[](uuid)`, `[uuid]`) are neither read nor
- *     written here — resolving a title needs the directory, which is the
- *     caller's. Balanced parentheses inside a target
- *     belong to it, again per CommonMark.
- *   - `\` escapes `` \ ` * [ ``, `~` and `_` where they could delimit, and `]`
- *     inside a link label. Nothing else, in both directions.
+ * Markdown is an interchange projection, never the document's storage format.
+ * Reader and writer share delimiter and escape rules to preserve inline runs.
  */
 
 import type * as Y from "yjs";
@@ -58,6 +20,7 @@ import {
 import { canonicalDocumentUuid } from "./rooms.js";
 import { listNumbers } from "./lists.js";
 import { parseGfmTable, writeGfmTable } from "./table.js";
+import { escapeContainerLines, parseCardInput, writeCardText } from "./card.js";
 import { resolveTagAssignments } from "./tags.js";
 import { MAX_LIST_INDENT } from "./types.js";
 import type {
@@ -73,26 +36,21 @@ import type {
 
 export interface ExportMarkdownOptions {
   /**
-   * Emit a `---` YAML frontmatter block with uuid, title, tags and — when the
-   * document has them — description, kind and status. Default true.
+   * Default true: emit uuid, title and tags, plus description/kind/status only
+   * when present, within a --- frontmatter block.
    */
   frontmatter?: boolean;
   /**
-   * How to render annotation threads. `"html-comments"` emits one HTML comment
-   * per thread directly after its block; `"drop"` (default) omits them.
+   * Default drop; html-comments places each thread immediately after its block.
    */
   annotations?: "html-comments" | "drop";
   /**
-   * The workspace settings doc. When present, frontmatter renders current tag
-   * names (including retired assignments) rather than stored UUIDs. Unknown
-   * identities and provisional pre-catalog strings are omitted.
+   * Project current names, including retired assignments; omit unknown IDs and
+   * provisional strings. Without a catalog, export stored assignments.
    */
   tagCatalog?: Y.Doc;
   /**
-   * The workspace's directory doc, used to name and state the documents the
-   * decision log references. Without it the log still exports — the references
-   * are the record — but as bare uuids, because only the directory knows what
-   * they are called and what state they are in.
+   * Resolve decision titles and state; absent directory data leaves bare UUIDs.
    */
   directory?: Y.Doc;
 }
@@ -144,25 +102,16 @@ function fenceFor(text: string): string {
 /* --------------------------------------------------------------- inline: out */
 
 /**
- * The marks that nest. `inlineCode` is not one: it is always innermost.
- *
- * `"link"` here means *either* link mark: both are spelled `[label](target)`,
- * so they nest identically and the emitter keeps one stack entry for both. What
- * distinguishes them is the target string alone — see {@link inlineLinkTarget}.
+ * Code is always innermost. Both link marks share one stack entry because their
+ * target shape distinguishes them within the same [label](target) syntax.
  */
 const NESTING = ["link", "bold", "italic", "strike"] as const;
 
 type NestedMark = (typeof NESTING)[number];
 
 /**
- * The delimiter each mark is written with.
- *
- * One spelling each, always. The `_` forms are deliberately *not* used: the
- * writer would have to predict, at the moment it opens a mark, whether `_` can
- * still close it at the other end of the span — and that prediction depends on
- * run structure that the first export can normalise, which makes the *output*
- * unstable. Measured, it made both mark preservation and byte stability worse
- * than leaving it alone. See the note on `renderInline`.
+ * Fixed spellings keep export stable: whether an underscore can close depends
+ * on distant run structure that the first export may normalize.
  */
 const DELIMITER: Record<Exclude<NestedMark, "link">, string> = {
   bold: "**",
@@ -183,34 +132,19 @@ interface EscapeContext {
   /** Tables also escape pipes, HTML/autolink openers and entity ampersands. */
   table?: boolean;
   /**
-   * Within a link label the first unescaped `]` ends the label, so a label
-   * holding one must escape it or the link does not survive the round trip.
+   * The first unescaped ] ends a link label and must be escaped inside it.
    */
   insideLabel: boolean;
   /**
-   * Whether a delimiter the writer emits can sit against this text. A lone `~` is
-   * not a delimiter, so ordinary prose keeps its home directories unescaped — but
-   * `~` next to an emitted `~~` merges into one run and changes meaning, and the
-   * merge happens across the boundary where this text cannot see it.
+   * A neighboring emitted ~~ can absorb a lone ~ across a run boundary.
    */
   hugged: boolean;
 }
 
 /**
- * Escape the characters the reader would take as syntax.
- *
- * `[` is escaped unconditionally, even though most brackets are harmless. What
- * makes one dangerous is a `](…)` *somewhere later in the line*, and that can be
- * emitted by a different run entirely — a link mark two runs along, or another
- * run's literal text. No run-local test can see it, and a global one would have
- * to render first and then decide, so the bracket always gets its backslash.
- *
- * `~` and `_` are escaped only where they could actually delimit something, which
- * is what keeps ordinary prose readable: a lone `~` is not a delimiter, so home
- * directories survive, and a `_` between two word characters can neither open nor
- * close, so `snake_case` does too. Both rules are the reader's, read backwards —
- * and both err towards escaping, since a delimiter from a neighbouring run can
- * change what this text sits against.
+ * Escape backslash, backtick, * and [; plus ] in labels, delimiting ~/_ and table
+ * punctuation. Always escape [: a later run can supply its ](target). Missing
+ * neighbors may delimit, and the tokenizer must undo this same vocabulary.
  */
 function escapeInline(text: string, context: EscapeContext): string {
   let out = "";
@@ -235,10 +169,8 @@ function escapeInline(text: string, context: EscapeContext): string {
 }
 
 /**
- * Whether the character at `index` sits between two word characters, where a `_`
- * can neither open nor close emphasis. Only what is inside this run counts: a
- * neighbour that is a word character stays one wherever the run lands, while a
- * missing neighbour could turn out to be anything, so it errs towards escaping.
+ * Intraword _ cannot delimit emphasis. Missing run-local neighbors could be
+ * anything after joining runs, so they do not qualify for this exemption.
  */
 function intraword(text: string, index: number): boolean {
   const word = /[\p{L}\p{N}]/u;
@@ -264,13 +196,8 @@ function parensBalanced(href: string): boolean {
 }
 
 /**
- * A link target, written so the reader gets it back *unchanged* — a target is
- * data, so escaping it is fine but rewriting it is not.
- *
- * Balanced parentheses belong to a bare target (the rule the reader implements),
- * so `https://example.com/a_(b)` goes out as it is. Anything a bare target cannot
- * hold — an unbalanced paren, an angle bracket — goes in CommonMark's `<…>` form,
- * where a backslash covers the rest. A document uuid is bare by construction.
+ * Preserve target bytes: balanced parentheses may stay bare; unbalanced ones
+ * and angle brackets require <…> with escapes that matchAngleTarget undoes.
  */
 function renderTarget(target: string): string {
   if (parensBalanced(target) && !/[<>]/.test(target)) return target;
@@ -278,9 +205,8 @@ function renderTarget(target: string): string {
 }
 
 /**
- * A code span. Its content is literal — backslash escapes do not exist inside
- * one — so the fence is lengthened past any backticks in the text, and edges the
- * reader's unpadding rule would eat are padded out.
+ * Code content is literal. Use a longer backtick fence and pad edges that the
+ * reader would otherwise unpad.
  */
 function renderCodeSpan(text: string): string {
   const fence = "`".repeat(longestBacktickRun(text) + 1);
@@ -307,13 +233,8 @@ function without(marks: InlineMarkSet, drop: readonly EmphasisMark[]): InlineMar
 }
 
 /**
- * Merge neighbouring runs that carry the same marks.
- *
- * A caller can hand over two runs that say the same thing — `appendBlock` writes
- * whatever delta it is given — and how the text happens to be divided must not
- * change what comes out, or an export and the export of its own re-import would
- * disagree over nothing. Every read of a document already merges them, so this is
- * the writer catching up.
+ * Coalesce equal-mark runs before export, matching document reads so arbitrary
+ * delta splits cannot change the bytes on re-import and re-export.
  */
 function merged(runs: readonly InlineRun[]): InlineRun[] {
   const out: InlineRun[] = [];
@@ -322,17 +243,9 @@ function merged(runs: readonly InlineRun[]): InlineRun[] {
 }
 
 /**
- * Drop the emphasis a run of nothing but whitespace cannot carry.
- *
- * A delimiter needs something other than whitespace to hug, so a mark that has to
- * *open or close* at a whitespace-only run cannot be written at all. A mark that
- * merely passes through — carried by the runs on both sides — is fine: it opened
- * somewhere real and will close somewhere real, and the whitespace is interior to
- * it. Stripping those too is what made a mark survive one round trip and vanish on
- * the next, because the second export was normalising what the first had kept.
- *
- * A code span is exempt entirely: its emphasis hugs the backtick fence, not the
- * whitespace inside it.
+ * Whitespace-only runs cannot open or close emphasis. Keep marks present on
+ * both neighbors, or a later export would strip valid interior whitespace marks.
+ * Code spans are exempt because emphasis hugs their fence.
  */
 function whitespaceSafe(runs: readonly InlineRun[]): InlineRun[] {
   return runs.map((run, index) => {
@@ -370,19 +283,9 @@ function sharedMarks(a: InlineMarkSet, b: InlineMarkSet): InlineMarkSet {
 }
 
 /**
- * Merge neighbouring code runs, which is almost always lossless and never
- * optional.
- *
- * Two code spans cannot sit side by side: their fences would meet as one run of
- * backticks that no reader can split. Usually there is nothing to do about it —
- * runs carrying *identical* marks are indistinguishable anyway, so joining them
- * changes nothing; and runs that differ are kept apart for free by the delimiters
- * of the mark they disagree about, ``**`a`**`b` `` having the `**` in the way.
- *
- * The exception is a code run of nothing but whitespace. The mark that would have
- * separated it cannot be written there — an emphasis delimiter has no non-space to
- * hug — so the fences really would meet, and the only choice left is which to
- * give up: the marks the two runs disagree about, or the text. It keeps the text.
+ * Touching code fences merge into one unreadable delimiter run. Equal marks
+ * coalesce losslessly; differing marks normally separate fences. Whitespace-only
+ * code cannot carry that separator, so preserve text and keep only shared marks.
  */
 function coalesceCodeRuns(runs: readonly InlineRun[]): InlineRun[] {
   /** The two runs joined, or null when they may stay apart. */
@@ -400,9 +303,7 @@ function coalesceCodeRuns(runs: readonly InlineRun[]): InlineRun[] {
   const out: InlineRun[] = [];
   for (const run of runs) {
     out.push(run);
-    // Collapse backwards, not just once: a forced merge drops the marks that were
-    // keeping this span apart from the one before it, which can leave *those* two
-    // needing to join as well.
+    // Dropping separator marks can force a further merge with the preceding run.
     while (out.length >= 2) {
       const a = out[out.length - 2] as InlineRun;
       const b = out[out.length - 1] as InlineRun;
@@ -426,19 +327,8 @@ interface OpenMark {
 }
 
 /**
- * For each run, its marks ordered outermost-first, by the extent of the span the
- * run belongs to: earliest start outermost, and among equal starts the latest
- * end.
- *
- * This is a quality choice, not a correctness one — the emitter below is
- * well-nested whatever order it is given — but it is what stops a mark that
- * spans a whole phrase from closing and reopening around every word inside it.
- * A mark shared with a neighbour lands at the same depth in both runs, so it
- * stays open across the boundary, and a mark about to end sits inside the ones
- * that continue, so it closes first.
- *
- * Computed for every run in two linear passes per mark rather than by walking
- * outwards from each run, so the whole thing is O(runs).
+ * Earliest-start/latest-end marks go outside shorter spans, avoiding needless
+ * close/reopen pairs across words. Two passes per mark keep the work O(runs).
  */
 function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
   const starts = new Map<NestedMark, number[]>();
@@ -487,42 +377,12 @@ function markOrders(runs: readonly InlineRun[]): NestedMark[][] {
 }
 
 /**
- * Render runs as GFM. Table mode escapes literal HTML punctuation; the outer
- * `writeGfmTable` layer escapes pipes, including pipes in code and link targets.
- *
- * The emitter is a stack, and everything else follows from that. For each run it
- * closes marks from the top until every mark still open is one this run wants,
- * then opens the rest — so the output is a properly nested tree of delimiters *by
- * construction*, whatever the runs do. Markdown cannot represent crossing spans
- * (strike over runs 1–2, bold over 2–3), and it does not have to: the emitter
- * splits the crossing into nested pieces, and a span written as two adjacent
- * pieces carries the same per-character marks as one — which is the contract that
- * matters, since the reader and Yjs both coalesce runs that agree.
- *
- * Two things a stack cannot settle on its own:
- *
- *   - **Emphasis touching whitespace,** which GFM cannot spell at all: `**word **`
- *     is not bold in any reader including this one. Leading whitespace is written
- *     before the delimiters that open, trailing whitespace is taken back off the
- *     output and re-appended after the delimiters that close, and a mark that
- *     would have to *open or close* on a whitespace-only run is dropped from it.
- *     Only that mark, and only there: one that merely passes through, carried by
- *     the runs on both sides, is interior to its span and survives.
- *   - **Delimiter runs of the same character that meet.** Splitting a crossing
- *     means an inner mark's reopener lands against the closer of the mark that
- *     died, and `*` after `**` is one run of three. The reader takes those apart
- *     the CommonMark way — nearest opener, runs split a piece at a time, and the
- *     rule of three judging only the *first* match between two runs, since a pair
- *     already mid-construct must not be vetoed halfway.
- *
- * What the pair therefore guarantees, and what the property test at the bottom of
- * `test/marks.test.ts` asserts: the text never changes; the per-character mark
- * sets never change from the first export's own re-read onward; and the bytes
- * settle immediately, an export of a re-import being identical to its source. For
- * a document GFM can express at all, the first export is already exact — the two
- * exceptions being the marked whitespace above and two code spans that would meet
- * with nothing writable between them. Both are the format's limits rather than this
- * code's, and `expressibleInGfm` in the test names them structurally.
+ * Close/open a stack so crossing marks become nested pieces with identical
+ * per-character marks. Table mode escapes HTML punctuation; writeGfmTable owns
+ * all pipe escaping, including inside code and targets.
+ * Text is preserved; marks and bytes stabilize after the first re-read. The
+ * first export preserves marks except unwritable edge whitespace and touching
+ * code spans without a writable separator.
  */
 export function renderInline(source: readonly InlineRun[], table = false): string {
   let out = "";
@@ -534,17 +394,9 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
   const orders = markOrders(runs);
 
   /**
-   * Close every mark above `depth`, top down, putting `held` back after the last
-   * emphasis closer — outside the emphasis, still inside the marks that enclose
-   * it, whose closers have not been written yet.
-   *
-   * Only emphasis cannot sit against whitespace; a link is perfectly happy to, so
-   * `[word ](url)` keeps its space when the link is the deeper of the two. When
-   * the link is the *inner* one, though, the space cannot stay in it: the bold
-   * closing after it would then cover a trailing space, which the next read strips
-   * — the export would keep a mark that its own re-export drops. One mark has to
-   * go, and it is the one whose span ends here. `expressibleInGfm` in the test
-   * names that case, and the honest cost is recorded there.
+   * Put held whitespace outside the last closing emphasis but inside continuing
+   * marks. An inner link ending with that emphasis loses the whitespace mark;
+   * retaining it would make the next export differ.
    */
   const closeDownTo = (depth: number, held = ""): void => {
     const lastEmphasis = open.findIndex(
@@ -554,9 +406,8 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
       const entry = open[i];
       if (entry === undefined) continue;
       if (entry.name === "link" && out.length === entry.start + 1) {
-        // Hugging an outer emphasis can take the link's entire whitespace label
-        // out of it. An empty label is literal syntax to the reader, so drop only
-        // the link's opener and keep the held characters after the emphasis.
+        // Whitespace hugging can empty a link label. Drop its opener so the
+        // reader sees no literal empty-link syntax; held text remains outside.
         out = out.slice(0, entry.start);
       } else {
         out +=
@@ -582,8 +433,7 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
       common += 1;
     }
 
-    // Closing: hold back the whitespace already written, so no emphasis closer
-    // sits on it. `closeDownTo` puts it back inside whatever may keep it.
+    // Emphasis cannot close against whitespace; restore it after the closer.
     let held = "";
     if (open.slice(common).some((entry) => entry.name !== "link")) {
       held = trailingWhitespace(out);
@@ -591,19 +441,11 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
     }
     closeDownTo(common, held);
 
-    // Opening: the mirror image. Leading whitespace goes before the first
-    // *emphasis* delimiter — so a link opened outside it still covers the space —
-    // and never comes out of a code span at all, whose delimiters hug its backtick
-    // fence rather than its content.
-    //
-    // A run of nothing but whitespace opens no emphasis at all. `whitespaceSafe`
-    // has already dropped the marks that begin or end there, but a crossing can
-    // still force one that merely passes through to close and *reopen* right here,
-    // and an opener needs something other than a space to hug. Hoisting instead
-    // would empty the run — and an empty link label is not a link.
+    // Hoist leading whitespace before emphasis but inside an outer link.
+    // Crossings can reopen a continuing mark on blank text; omit that opener
+    // rather than emptying the run or emitting unwritable emphasis.
     let text = run.text;
-    // A code run is not "blank" for this purpose however empty it looks: its
-    // emphasis hugs the backtick fence, which is not whitespace.
+    // Code emphasis hugs its fence, so whitespace code is not blank here.
     const blank = text.trim() === "" && marks.inlineCode !== true;
     const opening = blank
       ? desired.slice(common).filter((name) => name === "link")
@@ -646,20 +488,13 @@ export function renderInline(source: readonly InlineRun[], table = false): strin
 }
 
 /**
- * One indent level, as written.
- *
- * Four spaces rather than two, because both markers have to nest under it: a
- * child of `1. ` has to start at or past the parent's content column, which is
- * three, and two spaces would close the list instead of nesting into it. Four
- * clears every marker this writer emits and still stays under the parent's
- * content column plus four, where an indented code block would begin.
+ * Four spaces clear bullet/ordered content columns while staying below the
+ * parent's content column plus four, where indented code would begin.
  */
 const LIST_INDENT_UNIT = "    ";
 
 /**
- * The marker one list item is written with: its indentation, then `- ` or the
- * number {@link listNumbers} gave it. The numbering rule itself is shared with
- * the editor and lives in `lists.ts`.
+ * Use listNumbers so export and editor display agree on ordered markers.
  */
 function listMarker(block: Block, number: number | null): string {
   const indent = Math.min(block.indent ?? 0, MAX_LIST_INDENT);
@@ -689,9 +524,7 @@ function renderBlock(
       return `${fence}mermaid\n${block.text}\n${fence}`;
     }
     case "terminal": {
-      // Same shape as `mermaid`: the fence's info string *is* the block type,
-      // so the transcript comes back as a terminal demonstration rather than a
-      // code block that happens to say `terminal`.
+      // The info string preserves terminal type instead of importing as code.
       const fence = fenceFor(block.text);
       return `${fence}terminal\n${block.text}\n${fence}`;
     }
@@ -700,8 +533,7 @@ function renderBlock(
       return `${fence}chart\n${block.text}\n${fence}`;
     }
     case "list-item": {
-      // One item, one line — a second line would be a continuation the reader
-      // resolves against the marker's column, which no flat block can promise.
+      // Flat items cannot represent continuation blocks; fold to one line.
       const text = renderInline(inline).replace(/\s*\n\s*/g, " ").trim();
       return `${marker}${text}`.trimEnd();
     }
@@ -712,11 +544,12 @@ function renderBlock(
         .map((line) => `> ${line}`.trimEnd())
         .join("\n");
     case "table":
-      // Fallback for an unnormalized legacy table. Structured cells are
-      // rendered with their marks in the document traversal below.
+      // Unnormalized tables have no structured marked cells to render.
       return block.text;
+    case "card":
+      return `:::card\n${block.text}\n:::`;
     case "paragraph":
-      return renderInline(inline);
+      return escapeContainerLines(renderInline(inline));
   }
 }
 
@@ -731,7 +564,6 @@ function renderAnnotationComment(
   return `<!-- annotation ${id} ${range}${resolved ? " resolved" : ""} ${safeBody} -->`;
 }
 
-/** The fixed heading the decision log exports under. */
 const DECISIONS_HEADING = "## Decisions";
 
 /** The log is derived; Markdown never restores directory relationships. */
@@ -750,22 +582,10 @@ function renderDecision(reference: DecisionReference): string {
 }
 
 /**
- * Render the document as markdown.
- *
- * headings → `#`×level, paragraphs → their text, code → a fenced block tagged
- * with its language, mermaid → a ```mermaid fence, terminal → a ```terminal
- * fence, chart → a ```chart fence, list items → a `- `/`1. ` line indented by
- * their level, quotes → `> `
- * on every line, tables → padded GFM rows with cell marks as inline markdown.
- *
- * Blocks are separated by a blank line, except two adjacent list items: a blank
- * line between them is what makes a reader render the list *loose*, so a run of
- * items is written as the tight list it is.
- *
- * A non-empty decision log follows the blocks as a fixed `## Decisions`
- * section, oldest topic first. An empty one emits nothing, so a document without
- * decisions exports exactly as it did before the slot existed.
+ * Keep adjacent items tight with single newlines; other sections need blank
+ * lines. Emit the derived decision log oldest-topic-first only when nonempty.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function exportMarkdown(
   ydoc: Y.Doc,
   options: ExportMarkdownOptions = {},
@@ -773,7 +593,7 @@ export function exportMarkdown(
   const withFrontmatter = options.frontmatter ?? true;
   const annotationMode = options.annotations ?? "drop";
 
-  /** Rendered blocks, each knowing whether it is a list item — see the join. */
+  // Annotation sections inside items must also keep the list's tight spacing.
   const sections: Array<{ text: string; listItem: boolean }> = [];
   const push = (text: string, listItem = false): void => {
     sections.push({ text, listItem });
@@ -791,8 +611,7 @@ export function exportMarkdown(
       "---",
       `uuid: ${emitScalar(meta.uuid)}`,
       `title: ${emitScalar(meta.title)}`,
-      // No description means no line, not an empty one: absent is how `getMeta`,
-      // the reader below and the directory stub all spell "none".
+      // Absence must remain distinct from an empty metadata value.
       ...(meta.description === null
         ? []
         : [`description: ${emitScalar(meta.description)}`]),
@@ -810,15 +629,14 @@ export function exportMarkdown(
   if (annotationMode === "html-comments") {
     for (const annotation of listAnnotations(ydoc)) {
       const range = resolveAnnotationRange(ydoc, annotation.id);
-      // Threads whose anchor no longer resolves are omitted: there is nothing
-      // in the exported text left to point at.
+      // An unresolved anchor has no exported text to point at.
       if (range === null) continue;
       const body = annotation.comments
         .map((comment) => `${comment.author}: ${JSON.stringify(comment.text)}`)
         .join(" | ");
       const line = renderAnnotationComment(
         annotation.id,
-        `${range.row === undefined ? "" : `row=${range.row} column=${range.column} `}range=${range.start}-${range.end}`,
+        `${range.part === undefined ? "" : `part=${range.part} `}${range.row === undefined ? "" : `row=${range.row} column=${range.column} `}range=${range.start}-${range.end}`,
         annotation.resolved === true,
         body,
       );
@@ -831,19 +649,12 @@ export function exportMarkdown(
     }
   }
 
-  // Blocks and their marks come from one traversal. Looking each block's marks
-  // up by id would rescan the whole fragment per block.
+  // Read blocks and marks together to avoid rescanning the fragment per block.
   const entries = getBlocksWithInline(ydoc);
   const numbers = listNumbers(entries.map((entry) => entry.block));
 
-  // An annotated *list item* takes its comments indented underneath it, where
-  // they are the item's own content. Two things have to hold at once, and only
-  // that shape holds both: a comment is attributed by the block it follows —
-  // it carries a thread id, not a block id — so it must stay with its item;
-  // and a comment written *between* two items at column zero is a block between
-  // them, blank lines and all, which ends the list for any reader, so the next
-  // item would come back at depth zero. Indented, it is inside the item and the
-  // run carries on.
+  // Annotation comments carry thread IDs, not block IDs: place them after their
+  // own item and indent within it so another reader does not end the list.
   for (const [index, { block, inline, table }] of entries.entries()) {
     const listItem = block.type === "list-item";
     const marker = listItem ? listMarker(block, numbers[index] ?? null) : "";
@@ -863,10 +674,7 @@ export function exportMarkdown(
       push(comments.join("\n"));
       continue;
     }
-    // Indented to the item's own content column, which is the width of its
-    // marker — indentation, marker and the space after it. A fixed unit cannot
-    // do this: `100. ` is five columns wide, and four spaces would put the
-    // comment *outside* the item for any reader that counts columns.
+    // Match the full content column: even 100. needs five spaces after indent.
     const inside = " ".repeat(marker.length);
     push(comments.map((line) => `${inside}${line}`).join("\n"), true);
   }
@@ -910,9 +718,7 @@ export interface ImportedBlock {
   /** List items only: nesting depth, 0–3, read from the source's indentation. */
   indent?: number;
   /**
-   * The formatted content, present only when the source carried inline syntax.
-   * Feeding it to `appendBlock`/`insertBlock` is what preserves the formatting;
-   * a caller that reads only `text` gets the same prose without marks.
+   * Present only for formatted source; pass to block writers to retain marks.
    */
   inline?: InlineRun[];
 }
@@ -923,15 +729,11 @@ export interface ImportedDoc {
   /** Present only when the source carried a uuid in its frontmatter. */
   uuid?: string;
   /**
-   * What the document is for, present only when the source carried a non-blank
-   * `description` in its frontmatter. A blank one is no description, the same
-   * reading `getMeta` and the directory stub give it.
+   * Blank frontmatter descriptions read as absent, matching document metadata.
    */
   description?: string;
   /**
-   * Outbound links, present only when the source carried a `links` key. Values
-   * are target document UUIDs — a link is never a path or a title, so nothing
-   * here is resolved against titles or filenames.
+   * Present only for a links key; targets are UUIDs, never title/path resolution.
    */
   links?: string[];
   blocks: ImportedBlock[];
@@ -976,9 +778,8 @@ interface Frontmatter {
 }
 
 /**
- * A frontmatter list value in any of the three shapes the seed files use:
- * inline (`[a, b]`), a `- ` block on the following lines, or a bare scalar.
- * Returns the list and the index of the last line it consumed.
+ * Accept inline lists, following - lines or a bare scalar; report the last
+ * consumed line so frontmatter parsing does not revisit list entries.
  */
 function parseListValue(
   lines: string[],
@@ -1044,29 +845,6 @@ function parseFrontmatter(lines: string[]): Frontmatter {
 
 /* ---------------------------------------------------------------- inline: in */
 
-/**
- * The reader is two passes, not one, and that is the whole design.
- *
- * A single left-to-right scan that looks for "the closing delimiter" cannot get
- * nesting right: in `*italic **bold** italic*` the first `*`-run it meets is the
- * inner bold's *opener*, and in ``**bold `a**b`**`` the `**` it meets is inside a
- * code span. So:
- *
- *  1. **Tokenize.** Escapes, code spans and links are resolved first — code spans
- *     bind tighter than everything (their content is literal) and a link's label
- *     is tokenized recursively. What is left of `*` and `~` becomes *delimiter
- *     runs*, each tagged with whether it can open and whether it can close,
- *     from the flanking rule: a run can open when the character after it is not
- *     whitespace, and can close when the character before it is not.
- *  2. **Match delimiters,** CommonMark-style: every closer takes the nearest
- *     compatible opener, and a run of three or more is *split* — two characters
- *     for strong, one for emphasis — which is what makes both `***both***` and
- *     `**a***b*` come out right. Delimiter characters nobody claimed are text.
- *
- * The result is a set of properly nested spans over the token list, so a token's
- * marks are simply the union of the spans containing it.
- */
-
 /** How many characters a mark's delimiter takes from a run. */
 const STRONG = 2;
 const EMPHASIS = 1;
@@ -1098,19 +876,9 @@ function runLength(source: string, from: number, char: string): number {
 }
 
 /**
- * The link opening at `start`, or null — including for a target that is neither
- * an external URL nor a document uuid, which stays literal text rather than
- * becoming a mark.
- *
- * The target's shape picks the mark: `http(s)` is a `link`, a uuid is a
- * `docLink`, and `marks` is the one to add. An *empty* label is neither, in
- * both directions: a mark needs text to cover, and filling one in from a
- * document's title needs the directory, which this package does not have.
- *
- * The label ends at the first unescaped `]`. The target is either bare — running
- * to the `)` that matches, counting nested pairs, so `https://example.com/a_(b)`
- * survives — or CommonMark's `<…>` form, which holds the targets a bare one
- * cannot. Both are the writer's two forms, read back.
+ * Only nonempty labels with http(s) or UUID targets become marks; unsupported
+ * targets and shorthand remain literal. Directory-dependent titles belong to
+ * callers. Accept balanced bare parentheses and the writer's <…> target form.
  */
 function matchLink(
   source: string,
@@ -1124,9 +892,7 @@ function matchLink(
       i += 1;
       continue;
     }
-    // Code spans are resolved before brackets, so a `]` inside one belongs to the
-    // code and not to the label — the same order CommonMark parses in, and what
-    // lets a label hold `` `]` `` at all.
+    // A ] inside code is literal and cannot close the surrounding link label.
     if (char === "`") {
       const span = matchCodeSpan(source, i);
       if (span !== null) {
@@ -1169,11 +935,8 @@ function matchBareTarget(
 }
 
 /**
- * A `(<target>)`, ending at the first unescaped `>`.
- *
- * Only the three characters the writer escapes there come off their backslash. A
- * backslash before anything else is part of the target — an href goes out
- * unchanged, so it has to come back unchanged.
+ * End at the first unescaped >; undo only the writer's backslash/angle escapes
+ * so literal backslashes in targets survive unchanged.
  */
 function matchAngleTarget(
   source: string,
@@ -1241,18 +1004,8 @@ function isPunctuation(char: string | undefined): boolean {
 }
 
 /**
- * Whether a delimiter run can open, can close, or both.
- *
- * `*` and `~` use the rule this reader has always used: a run may open when a
- * non-space follows it and close when a non-space precedes it. That is the part
- * of CommonMark's flanking rule that matters for them, and the strict form —
- * which also asks about punctuation on either side — would refuse perfectly good
- * closers like the `~~` after an escaped tilde.
- *
- * `_` gets the strict form, because its whole reason for existing here is the
- * *intraword* restriction: a run that could go either way may only open when
- * punctuation precedes it and only close when punctuation follows, so a `_`
- * between two word characters can do neither and `snake_case` is just a word.
+ * * and ~ flank by whitespace alone so escaped punctuation can precede closers.
+ * Underscores need strict punctuation flanking to leave intraword _ literal.
  */
 function flanking(
   char: string,
@@ -1274,7 +1027,7 @@ function flanking(
   };
 }
 
-/** Pass 1: `source` as text, code and delimiter tokens, with `marks` in scope. */
+/** Resolve escapes, literal code and recursive link labels before emphasis. */
 function tokenizeInline(source: string, marks: InlineMarkSet, table = false): Token[] {
   const tokens: Token[] = [];
   let plain = "";
@@ -1289,7 +1042,7 @@ function tokenizeInline(source: string, marks: InlineMarkSet, table = false): To
 
     if (char === "\\") {
       const next = source[i + 1];
-      if (next !== undefined && ("\\`*_~[]".includes(next) || (table && "<>&!".includes(next)))) {
+      if (next !== undefined && ("\\`*_~[]:".includes(next) || (table && "<>&!".includes(next)))) {
         plain += next;
         i += 2;
         continue;
@@ -1362,26 +1115,9 @@ function delimiterTake(char: string, opener: number, closer: number): number {
 }
 
 /**
- * CommonMark's "rule of three", which is what keeps a `*` that could go either
- * way from closing the wrong thing: when either delimiter can both open and
- * close, the two runs' lengths may not sum to a multiple of three unless both are
- * multiples of three.
- *
- * Without it, `**~~a*x*~~**` reads the italic's *opener* as the bold's closer —
- * the bold `**` can close (a non-space precedes it) and one asterisk is enough —
- * and the whole span unravels. Strikethrough is a GFM extension with no such
- * rule, so this applies to the emphasis characters only.
- *
- * The lengths are what is *left* of each run, not what it started as. A run gets
- * spent a piece at a time, and the rule is about the match being made now:
- * `**a***b**` spends two of the middle three closing the bold, and the remaining
- * one against the final two is the 1+2 the rule exists to reject.
- *
- * It only judges the *first* match between two runs — a pair that has already
- * exchanged characters is one nested construct being taken apart, and vetoing the
- * rest of it would strand delimiters as text. That waiver is conditional, though,
- * and {@link matchNesting} is what makes it conditional: it only stands if the
- * construct actually finishes.
+ * Apply the rule of three to remaining emphasis lengths, never strike. It stops
+ * a dual-purpose opener from closing the wrong span. Repeat matches of one pair
+ * may waive it only when matchNesting confirms the construct finished.
  */
 function ruleOfThreeAllows(
   char: string,
@@ -1404,12 +1140,8 @@ function markFor(char: string, take: number): Span["mark"] {
 }
 
 /**
- * Pass 2: match delimiter runs — every closer takes the nearest compatible
- * opener, and a long run is split between several matches.
- *
- * Returns the spans plus, per token, how much of its run nobody claimed. That
- * leftover is literal text: `**a*` is not emphasis, it is two asterisks and an
- * asterisk.
+ * Match nearest compatible openers, splitting long runs across matches.
+ * Unclaimed delimiter characters stay literal text.
  */
 function matchDelimiters(
   tokens: readonly Token[],
@@ -1428,8 +1160,7 @@ function matchDelimiters(
     take: number;
   }> = [];
   const spans: Span[] = [];
-  // Frozen characters are text before matching begins: nothing may claim them,
-  // and they are added back to the leftovers at the end so they still get written.
+  // Frozen characters cannot match and must return as literal leftovers.
   const unclaimed = tokens.map((token, index) =>
     token.kind === "delim" ? token.length - (frozen[index] ?? 0) : 0,
   );
@@ -1445,9 +1176,7 @@ function matchDelimiters(
     if (token === undefined || token.kind !== "delim") continue;
 
     while (token.canClose && lengthAt(i) > 0) {
-      // The nearest opener this closer can actually use. An opener it cannot —
-      // too short for the mark, or refused by the rule of three — is skipped, not
-      // a dead end: `~~a~b~~` matches the outer pair *past* the lone `~`.
+      // Skip unusable openers: ~~a~b~~ must match past the lone ~.
       let at = -1;
       let take = 0;
       let exercisedWaiver = false;
@@ -1462,11 +1191,8 @@ function matchDelimiters(
         ) {
           continue;
         }
-        // Two separate questions: would the rule of three allow this match on its
-        // own, and if not, is the waiver available? Most repeat matches between one
-        // pair need no waiver at all — `****a*****` matches strong twice because
-        // neither run can go both ways — and recording those as waived would
-        // quarantine delimiters that nothing was ever wrong with.
+        // Record only exercised waivers; tagging strict matches would quarantine
+        // valid delimiters if a later match leaves this pair unfinished.
         const strict = ruleOfThreeAllows(
           token.char,
           candidate,
@@ -1493,8 +1219,7 @@ function matchDelimiters(
       unclaimed[j] = lengthAt(j) - take;
       unclaimed[i] = lengthAt(i) - take;
       spans.push({ from: j + 1, to: i - 1, mark: markFor(token.char, take) });
-      // Openers inside the pair just closed are unreachable now: any closer they
-      // could still meet lies outside the span they would have to cover.
+      // Inner unmatched openers cannot pair outside the span just closed.
       openers.length = lengthAt(j) === 0 ? at : at + 1;
     }
 
@@ -1508,44 +1233,10 @@ function matchDelimiters(
 }
 
 /**
- * Match the delimiters, and check that the licence taken to do it was earned.
- *
- * The rule of three is waived for a second match between the same two runs, so
- * that one nested construct can be taken apart — the four asterisks that close an
- * italic inside a bold and reopen the italic need it. But `a***b****c` has the
- * same shape and no later closer to finish the job, and CommonMark reads it as a
- * single strong span with three asterisks left over as text. The two are
- * indistinguishable at the moment of the match; what tells them apart is whether
- * the construct is *finished*.
- *
- * So: match with the waiver, and if either run it was granted for ends up with
- * characters nobody claimed, withdraw it — and *quarantine* what the waived match
- * had taken. Those characters become literal text for the re-match rather than
- * going back on the market.
- *
- * The quarantine is what keeps a withdrawal local. Handing the freed characters
- * back would let some *other* pair consume them, so denying one waiver could
- * silently change the marks on a construct that was perfectly well formed.
- * Freezing them leaves every other pair looking at the same characters it saw
- * before.
- *
- * Not at the same *time*, though, and that is worth being exact about: a denied
- * pair stops matching altogether, which changes how the opener stack unwinds after
- * it, so a later pair can pair up differently and need a withdrawal of its own.
- * Settling is therefore monotone rather than immediate — every round denies at
- * least one pair and no round ever grants one back, so the number of rounds is at
- * most the number of distinct pairs that exercise the waiver, *plus one* for the
- * clean round that returns. In practice that is one round whenever nothing has to
- * be withdrawn — including input whose waiver is exercised and stands, like
- * `***c****d*` — and two when one is: `****a******a*******` and `a***b****c` each
- * withdraw a single pair and return on the second round.
- *
- * A note on fidelity, since this is a reader of other people's markdown: the
- * quarantine is a rule of this implementation, chosen because it is provable, not
- * one lifted from a reference implementation. cmark could not be run in the
- * environment this was written in, so its output for these shapes is *unverified*
- * here; what the tests pin is that every character of the input survives, which is
- * the contract this reader owes its callers either way.
+ * Withdraw waivers whose runs remain unfinished and freeze their characters as
+ * literal text; reusing them could change unrelated spans. Denials only grow,
+ * but changed stack unwinding can require further passes. This local quarantine
+ * preserves input characters; it is not a claim of reference-parser equivalence.
  */
 function matchNesting(tokens: readonly Token[]): {
   spans: Span[];
@@ -1553,9 +1244,7 @@ function matchNesting(tokens: readonly Token[]): {
 } {
   const denied = new Set<string>();
   const frozen = tokens.map(() => 0);
-  // One round per withdrawal plus a clean one to finish; the cap is here so a
-  // mistake in the reasoning above cannot become an infinite loop, not because the
-  // count is expected to come near it.
+  // Bound retries defensively; each settling pass must add a denial.
   for (let pass = 0; pass < tokens.length + 2; pass += 1) {
     const attempt = matchDelimiters(tokens, denied, frozen);
     const stranded = attempt.waived.filter(
@@ -1588,9 +1277,7 @@ function marksFor(
 }
 
 /**
- * Read `source` into runs: tokenize, match delimiters, then hand every token the
- * union of the marks covering it. Unclaimed delimiter characters come through as
- * the text they are.
+ * Union tokenizer scope with covering spans; unclaimed delimiters remain text.
  */
 function scanInline(source: string, out: InlineRun[], table = false): void {
   const tokens = tokenizeInline(source, {}, table);
@@ -1614,9 +1301,7 @@ export function parseInline(source: string, table = false): InlineRun[] {
 }
 
 /**
- * A prose block from its markdown source. `inline` is present only when the
- * source actually carried formatting, so an unformatted document imports to
- * exactly what it did before inline marks existed.
+ * Omit inline for unformatted source so callers receive plain blocks.
  */
 function proseBlock(
   type: ProseBlockType,
@@ -1631,11 +1316,8 @@ function proseBlock(
 }
 
 /**
- * `- `, `* `, `+ `, `1. ` or `1) `, with whatever indentation precedes it.
- *
- * Four captures: the indentation, the marker, the run of spaces after it, and
- * the content. The gap is captured because it is part of the arithmetic — see
- * `contentColumn` in {@link importMarkdown}.
+ * Capture indentation, marker, following gap and content separately: depth uses
+ * the content column, not a fixed indentation unit.
  */
 const LIST_LINE = /^([ \t]*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?[ \t]*$/;
 
@@ -1648,16 +1330,8 @@ const FENCE_LINE = /^(?:`{3,}|~{3,})/;
 const COMMENT_LINE = /^<!--/;
 
 /**
- * Whether `line` starts a block, in the sense that matters to a table: a table
- * ends where another block begins, and every one of these begins one.
- *
- * This is the reader's knowledge, not the table parser's. `parseGfmTable` knows
- * tables — to it a heading or a quote is a perfectly good one-column row — so
- * the question of what else a line could be has to be asked out here, where the
- * rest of the document's vocabulary lives. The list is exactly what the loop
- * below recognises, HTML comments included: anything this reader would take as
- * its own block after the table has to end the table, or the two disagree and
- * the comment — an exported annotation, say — is stored as a row.
+ * Keep this vocabulary aligned with the import loop. The table parser accepts
+ * headings, lists and annotation comments as one-column rows unless stopped here.
  */
 function startsBlock(line: string): boolean {
   const trimmed = line.trim();
@@ -1667,19 +1341,24 @@ function startsBlock(line: string): boolean {
     HEADING_LINE.test(trimmed) ||
     FENCE_LINE.test(trimmed) ||
     COMMENT_LINE.test(trimmed)
+    || line === ":::card"
   );
 }
 
 /** How wide a tab is, counted to the next stop rather than as four columns. */
 const TAB_WIDTH = 4;
 
+/** A line-exact container reader; headers and body are interpreted by its owner. */
+function readContainer(lines: readonly string[], start: number): { source: string; last: number; closed: boolean } {
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index] === ":::") return { source: lines.slice(start + 1, index).join("\n"), last: index, closed: true };
+  }
+  return { source: lines.slice(start + 1).join("\n"), last: lines.length - 1, closed: false };
+}
+
 /**
- * The column `text` ends at, starting from `column`.
- *
- * A tab advances to the next tab stop, which is what makes it worth a function:
- * a tab in column two is worth two columns, not four, and a list whose depth was
- * measured by expanding every tab to four spaces nests items their author wrote
- * as siblings. CommonMark counts columns, so this counts columns.
+ * Advance tabs to the next stop, not by four columns: fixed expansion would
+ * turn some list siblings into children.
  */
 function advanceColumn(text: string, column: number): number {
   let at = column;
@@ -1690,23 +1369,12 @@ function advanceColumn(text: string, column: number): number {
 }
 
 /**
- * Parse markdown into the pieces needed to build a document: title,
- * description, tags, links and a flat block list. Handles frontmatter, ATX
- * headings, fenced code (with language), mermaid, terminal and chart fences, list
- * items, block quotes and GFM tables; everything else becomes a paragraph, with
- * its inline formatting read into `inline`.
- *
- * Title precedence: frontmatter `title`, else a leading level-1 heading — which
- * is then *consumed*, so the title is not duplicated as a block. Any other
- * heading stays a block.
- *
- * A list item is one line and one block: continuation lines and nested block
- * content inside an item are not read, because no flat block can hold them.
- * Consecutive `>` lines are one quote block, which is what makes a multi-line
- * quote survive the trip out and back.
- *
- * HTML comments (including exported annotation comments) are skipped.
+ * Frontmatter title wins; otherwise consume a leading H1 as title. Other
+ * headings stay blocks. Flat list items cannot contain continuation/nested blocks;
+ * consecutive quote lines share one block. Unknown block syntax becomes prose,
+ * and HTML comments are skipped rather than restoring annotations.
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function importMarkdown(markdown: string): ImportedDoc {
   const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
   const front = parseFrontmatter(lines);
@@ -1726,23 +1394,12 @@ export function importMarkdown(markdown: string): ImportedDoc {
   };
 
   /**
-   * The **content column** of every list item still open, innermost last.
-   *
-   * Depth is never a division of the indentation: a source nesting by two
-   * spaces and one nesting by four both mean "one level in". It is not the
-   * relative column either, which is the trap — an item is nested only when it
-   * reaches the column where the item above it *starts its content*, which is
-   * that item's marker column plus its marker plus the spaces after it. So
-   * `- a` followed by ` - b` is two siblings (one space does not reach column
-   * two), while `1. a` followed by `   1. b` is a child (three does reach
-   * three). CommonMark's rule, and the reason each open item remembers a column
-   * rather than the level remembering one.
+   * Open content columns, innermost last. Children must reach the parent's
+   * marker-plus-gap column; depth is neither indent/unit nor relative indent.
    */
   let openItems: number[] = [];
   const listLevel = (column: number, contentColumn: number): number => {
-    // An item closes every open item whose content column it does not reach:
-    // indented less than that, it is a sibling of one of their lists, never a
-    // child of the item above it.
+    // Below a parent's content column this item is a sibling, not its child.
     while (openItems.length > 0 && column < (openItems.at(-1) ?? 0)) {
       openItems.pop();
     }
@@ -1756,22 +1413,31 @@ export function importMarkdown(markdown: string): ImportedDoc {
     const trimmed = line.trim();
 
     if (trimmed === "") {
-      // A blank line ends a paragraph but not a list: a blank line between
-      // items is a loose list, still one list.
+      // Blank lines end paragraphs, but a loose list remains the same list.
       flush();
       continue;
     }
 
-    // A table is two lines before it is anything — a header row and a delimiter
-    // row — so it is recognised with a lookahead, and by the same parser that
-    // draws one: it is the parser that knows which pipes are structure and which
-    // are somebody's `\|`. Its lines are then taken verbatim, because the block
-    // stores GFM source.
-    //
-    // A delimiter row that is also a list line loses to the list. `- | -` is
-    // both — a one-hyphen delimiter row is legal GFM — and reading it as a
-    // delimiter would swallow the paragraph above it into a table nobody wrote,
-    // while reading it as the list item it looks like costs the reader nothing.
+    if (line === ":::card") {
+      flush();
+      openItems = [];
+      const container = readContainer(lines, i);
+      try {
+        if (!container.closed) throw new Error("Unclosed card");
+        blocks.push({ type: "card", text: writeCardText(parseCardInput(container.source)) });
+      } catch {
+        // Invalid containers are literal prose, including syntax that would
+        // otherwise start headings, code blocks or comments and lose source.
+        const text = lines.slice(i, container.last + 1).join("\n");
+        blocks.push({ type: "paragraph", text, inline: [{ text, marks: {} }] });
+      }
+      i = container.last;
+      continue;
+    }
+
+    // The shared table parser distinguishes structural from escaped pipes.
+    // Prefer lists for ambiguous delimiter lines such as - | -, or the preceding
+    // paragraph would be swallowed into an unintended table.
     const delimiterLine = lines[i + 1] ?? "";
     if (
       parseGfmTable(`${line}\n${delimiterLine}`) !== null &&
@@ -1781,19 +1447,9 @@ export function importMarkdown(markdown: string): ImportedDoc {
       openItems = [];
       const table = [line, delimiterLine];
       let j = i + 2;
-      // Where the table ends is two questions, and they are asked in this
-      // order. First: does this line *start another block*? The parser cannot
-      // answer that — it knows tables, and a heading, a quote, a fence or a
-      // list item is a fact about the document around one; to `parseGfmTable`
-      // every one of them is a perfectly good one-column row, so asking it
-      // first swallows the rest of the document up to the next blank line.
-      // Then, and only then: does the block still parse as one table? That is
-      // the parser's own boundary, and asking it keeps the imported GFM cells
-      // consistent with the table write boundary.
-      //
-      // The blank line is tested here rather than left to the parser because a
-      // *trailing* one is trimmed off any source before it is parsed; inside the
-      // block, the parser rejects it as the table-ender it is.
+      // Stop at blanks/new blocks before asking the table parser, which accepts
+      // one-column block syntax and trims trailing blanks. Revalidate each row
+      // with the write-boundary parser to keep imported cells consistent.
       while (
         j < lines.length &&
         (lines[j] ?? "").trim() !== "" &&
@@ -1815,10 +1471,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
       const column = advanceColumn(listLine[1] ?? "", 0);
       const afterMarker = column + marker.length;
       const gap = advanceColumn(listLine[3] ?? " ", afterMarker) - afterMarker;
-      // Where this item's own content starts, which is what decides whether the
-      // next line is inside it. Five columns or more after the marker begin an
-      // indented code block instead, and the content column is then the marker
-      // plus one — CommonMark again, and the one place the gap is not itself.
+      // Gaps above four columns imply indented code; nesting then uses a one-space
+      // gap rather than the full gap, matching CommonMark content columns.
       const contentColumn = afterMarker + (gap > 4 ? 1 : gap);
       blocks.push({
         ...proseBlock("list-item", (listLine[4] ?? "").trim()),
@@ -1827,10 +1481,8 @@ export function importMarkdown(markdown: string): ImportedDoc {
       });
       continue;
     }
-    // An HTML comment is not content, so it is not a block between two items
-    // either: the run survives it, and an annotated list item exported with
-    // `annotations: "html-comments"` comes back at the depth it went out at.
-    // Checked before the reset below for exactly that reason.
+    // Skip comments before resetting list depth, or exported annotated items
+    // would return at depth zero.
     if (trimmed.startsWith("<!--")) {
       flush();
       if (!trimmed.includes("-->")) {
@@ -1844,19 +1496,14 @@ export function importMarkdown(markdown: string): ImportedDoc {
 
     const quoteLine = QUOTE_LINE.exec(line);
     if (quoteLine !== null) {
-      // Prose ahead of it is its own block; the quote lines that follow join
-      // this one.
+      // Preceding prose is separate; consecutive quote lines join.
       if (paragraph.length > 0) flush();
       quote.push(quoteLine[1] ?? "");
       continue;
     }
 
-    // A *backtick* fence's info string may hold no backticks — CommonMark's rule,
-    // and the one that keeps a paragraph apart from a fence here: a code span whose
-    // content has two adjacent backticks needs a three-backtick fence of its own,
-    // so an exported paragraph can legitimately start with ```, and what tells the
-    // two apart is that the rest of the line is then full of backticks. A tilde
-    // fence has no such restriction, so `~~~ ` + anything is still a fence.
+    // Backtick info strings forbid backticks so an exported paragraph beginning
+    // with a long code-span fence stays prose. Tilde info strings allow them.
     const fence =
       /^(`{3,})\s*([^`\s]*)\s*$/.exec(trimmed) ??
       /^(~{3,})\s*(\S*)\s*$/.exec(trimmed);
@@ -1878,8 +1525,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
       }
       if (!closed) {
         i = lines.length;
-        // An unterminated fence swallowed the rest of the file, including the
-        // empty string after its trailing newline.
+        // An unclosed fence consumes EOF; remove only trailing empty lines.
         while (body.length > 0 && body[body.length - 1] === "") body.pop();
       }
       const text = body.join("\n");
@@ -1916,9 +1562,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
     }
   }
 
-  // uuid and links are set only when the source carried them: absent is not the
-  // same as empty, and a caller distinguishes "no identity in this file" from
-  // "this file declares no links".
+  // Preserve absent versus explicit empty identity/link fields for callers.
   const result: ImportedDoc = { title, tags: front.tags ?? [], blocks };
   if (front.uuid !== undefined) result.uuid = front.uuid;
   if (front.description !== undefined) result.description = front.description;

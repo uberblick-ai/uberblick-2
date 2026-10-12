@@ -1,10 +1,6 @@
 /**
- * The sidebar's two anchored menus, in a real browser (#74) — and with them the
- * claim the vendored chrome rests on (#27).
- *
- * These assertions used to run against a demo page, because when the chrome was
- * adopted there was nowhere in the product that opened a Radix surface. There
- * is now, so they point at it and the demo is gone.
+ * The sidebar's two anchored menus, in a real browser — and with them the
+ * claim the vendored chrome rests on.
  *
  * What earns a browser here, and nothing else does:
  *
@@ -24,19 +20,19 @@
  *   hub, and the session it counts is a client that is not a browser at all.
  * - **The cascade wires the highlight.** The token table holds palette floors;
  *   rendered consumers must still share one card accent, including the focused
- *   orphan chip whose actual ground changes with state (#516).
+ *   orphan chip whose actual ground changes with state.
  * - **A bundled face is really there.** A `font-family` in a stylesheet is a
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
- *   behind it (#536).
+ *   behind it.
  * - **The brand's ink is one value, and readable.** Four rules across three
  *   surfaces are meant to resolve to the same colour and clear AA on every
  *   ground they land on; only an engine that ran the cascade can say whether
- *   they did (#569).
+ *   they did.
  * - **A surface is measured, not a selector list.** The sidebar's interior is
  *   held to its own strokes and to WCAG AA by walking what the column and its
  *   two menus actually paint — which needs a cascade, a `light-dark()` and a
- *   layout, and is what a list of rules checked one at a time missed (#515).
+ *   layout; checking rules separately would miss mismatched consumers.
  * - **The document and rail are one composition.** Their fixed insets and
  *   overlay breakpoint are geometry, so only a laid-out browser can prove that
  *   viewport surplus follows them without shifting the prose.
@@ -50,13 +46,10 @@ import { expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
+import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { wrapToken } from "@uberblick/schema/protocol";
 import {
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintToken,
-} from "@uberblick/hub";
-import { wrapToken } from "@uberblick/hub/protocol";
-import {
+  EXAMPLE_TAGS,
   appendBlock,
   assignDocumentTags,
   createAnnotation,
@@ -112,7 +105,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
-  ).toHaveCount(5);
+  ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
     new URL(`/${harness().workspace}`, harness().appUrl).href,
@@ -167,7 +160,7 @@ async function expectNoSidebarMotion(page: Page): Promise<void> {
 }
 
 /**
- * What the identity row's tag strip does with the width it was given (#958).
+ * What the identity row's tag strip does with the width it was given.
  *
  * The strip's own box says nothing about this: a pill wider than its strip
  * escapes it without moving it, so the hit test is the *painted* rectangle of
@@ -227,7 +220,7 @@ async function width(page: Page, selector: string): Promise<number> {
  * A surface reads as the product's if it is painted on the sidebar's own ground
  * and set in the product's face — the two things `@theme` bridges. Both of
  * these menus belong to that column, which is why it is the sidebar they have
- * to equal and not the card (#480).
+ * to equal and not the card.
  */
 async function matchesTheSidebar(page: Page, selector: string): Promise<void> {
   expect(await painted(page, selector, "background-color")).toBe(
@@ -258,10 +251,10 @@ for (const scheme of ["dark"] as const) {
     await expect(configured).toBeVisible();
 
     // And an item on that surface stays visible when it is the one being
-    // chosen. Matching the container is not enough to prove that: the menu now
+    // chosen. Matching the container is not enough to prove that: the menu
     // floats the sidebar's ground, and in dark `--accent` *is* that ground, so
     // an item highlighted out of the global palette would paint itself
-    // invisible (#480). Radix carries one `data-highlighted` state for the
+    // invisible. Radix carries one `data-highlighted` state for the
     // keyboard and the pointer, so this is asserted through each of them.
     const ground = await painted(page, "[data-slot=dropdown-menu-content]", "background-color");
     await page.keyboard.press("ArrowDown");
@@ -517,15 +510,15 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
 });
 
 /**
- * A hover ground is an offer, and a disabled control has nothing to offer
- * (#529). Beside the loop above, because it asks the same kind of question of
+ * A hover ground is an offer, and a disabled control has nothing to offer.
+ * Beside the loop above, because it asks the same kind of question of
  * the same column in the same two appearances.
  *
  * The sidebar's row controls share one hover rule, and two of them can be
  * unavailable: `+ new doc`, which creates into the directory room and has none
  * at an address naming no workspace this client can use, and Navigation's
  * placeholder destinations, which are `aria-disabled` rather than `disabled`
- * because they stay in the tab order (#483). Only a browser can be asked —
+ * because they stay in the tab order. Only a browser can be asked —
  * `:hover` is a state nothing but a pointer sets, and the ground it would paint
  * is a `light-dark()` token — so the enabled control beside them takes the same
  * gesture, which is what makes "unchanged" mean the rule missed it rather than
@@ -1028,7 +1021,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     "contenteditable",
     "false",
   );
-  // The archive took the pin with it (#957), so the sidebar stops listing the
+  // Archiving removes the pin, so the sidebar stops listing the
   // document altogether rather than carrying it with an archived marker.
   await page.getByRole("button", { name: "Show document list" }).click();
   await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
@@ -1090,11 +1083,10 @@ test("MCP connections counts a connected agent session, and stops when it goes",
   await expect(connections).toContainText("0");
 
   // An agent, as far as the hub and the awareness map are concerned: a client
-  // that publishes a user and says positively that it is an agent (#494). That
+  // that publishes a user and says positively that it is an agent. That
   // pair is exactly what the MCP server's replicas publish, in one write
   // (`mcp-server/src/replica.ts`), and the marker is what the count reads —
-  // omitting it makes this session a person, which is the whole point of the
-  // positive test replacing the old "not this app, therefore an agent" one.
+  // omitting it makes this session a person: the count requires a positive marker.
   const doc = new Y.Doc();
   const agent = new HocuspocusProvider({
     url: harness().hubUrl,
@@ -1177,7 +1169,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     await new Promise<void>((resolve) => provider.on("synced", resolve));
     provider.setAwarenessField("user", { name, color });
     provider.setAwarenessField("client", kind === "agent" ? "agent" : "web");
-    if (kind === "agent") provider.setAwarenessField("session", `agent-${uuid}`);
+    if (kind === "agent") provider.setAwarenessField("session", `agent-${randomUUID()}`);
     return { provider, doc };
   };
 
@@ -1247,7 +1239,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
     expect(editorAfter?.x).toBe(editorBefore?.x);
     expect(editorAfter?.width).toBe(editorBefore?.width);
     // The row reserves its circle's height while it is empty, so the cap and
-    // the overflow control beside it leave it exactly as tall (#832). The
+    // the overflow control beside it leave it exactly as tall. The
     // prose position that follows from it is proven at the transition that
     // would move it, in `collab.spec.ts`.
     expect((await status.boundingBox())?.height).toBe(rowBefore);
@@ -1458,9 +1450,8 @@ type Reading = {
 /**
  * Everything one rendered surface paints, walked rather than listed.
  *
- * A list of selectors is exactly what went stale between #480 and #515: the
- * column took its own surface tokens and its interior kept reading the page's,
- * and no rule was wrong on its own. So this reads the surface the reader sees —
+ * Correct individual rules can still leave an interior painted for the wrong
+ * surface. So this reads the surface the reader sees —
  * every stroke and every text under a root, against the ground each actually
  * sits on — and a rule added later is measured without anybody remembering to
  * add it.
@@ -1539,42 +1530,35 @@ async function surface(page: Page, root: string): Promise<Reading[]> {
 }
 
 /**
- * The sidebar's interior is the sidebar's own surface (#515).
+ * The sidebar's interior is the sidebar's own surface.
  *
- * #480 gave the column four surface tokens and applied one of them to its outer
- * edge; everything inside kept reading the page's `--border` and
- * `--muted-foreground`, which are tuned for the `--card` ground the column no
- * longer has. Two floors follow, and each is read off the column itself rather
- * than written down here, so neither can drift from what the surface is:
+ * Its interior must use the sidebar's ground rather than the page card's.
+ * Each floor is read off the column itself so it cannot drift from the surface:
  *
  * - **Light — the strokes.** Every separator or outline reaches at least the
  *   OKLab separation the column's own outer edge has (`--sidebar-border` on
- *   `--sidebar`, ΔE 0.040). `--border` gives half of that, 0.021.
+ *   `--sidebar`, ΔE 0.040).
  * - **Dark — the strokes.** They are white at a low alpha there, where a
  *   separation between two opaque colours is not the measurement; the composite
  *   is. No interior stroke is weaker against its ground than that same outer
  *   edge.
- * - **Both — the ink.** Every text reaches WCAG AA's 4.5:1. In light
- *   `--muted-foreground` reached 3.96:1 on `--sidebar` and 3.40:1 on
- *   `--sidebar-accent`, and the group label 4.20:1. `--sidebar-accent` is the
- *   tighter of those two grounds and the resting column paints no text on it —
+ * - **Both — the ink.** Every text reaches WCAG AA's 4.5:1. `--sidebar-accent`
+ *   is tighter than `--sidebar`, and the resting column paints no text on it —
  *   every row that takes it does so hovered or highlighted — so the walk reaches
  *   it deliberately and then asserts it got there, rather than leaving the
- *   closest call in the change unmeasured while everything else passes.
+ *   tighter ground unmeasured while everything else passes.
  *
  * Chroma is what separates an accent from the surface: every neutral this column
  * paints sits at or under 0.015, and the 28% brand edge at 0.15. The two
  * populations are a tenfold apart, and the threshold below sits about three
  * times clear of each of them, so it is a gap rather than a number picked to
- * make something pass. It buys a stroke exactly what #515's criterion says —
- * "a stroke carrying its own meaning (`--brand`, a focus ring)" is excluded.
+ * make something pass. A stroke carrying its own meaning (`--brand`, a focus
+ * ring) is excluded.
  * Meaning, not a named token: a list of accent rules would be the selector list
  * this test exists not to be.
  *
- * Ink has no such exclusion, and since #569 no text has one either. The one text
- * that used to be let through — `.ub-menu-current`, the current workspace's row,
- * at 1.93:1 in light — now reads `--brand-ink`, so it is measured like every
- * other text on the surface and the carve-out is gone rather than inherited.
+ * Text has no such exclusion: `.ub-menu-current`, the current workspace's row,
+ * reads `--brand-ink` and is measured like every other text on the surface.
  */
 const accentChroma = 0.05;
 
@@ -1710,7 +1694,7 @@ async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
 }
 
 /**
- * One brand ink, wherever the brand is text (#569).
+ * One brand ink, wherever the brand is text.
  *
  * The walk above measures `.ub-menu-current` on `--sidebar` and on
  * `--sidebar-accent`. It cannot see the other three functional consumers: they
@@ -1857,8 +1841,8 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
   // The title remains as wide as the editor, regardless of its type size.
   expect(await width(page, ".ub-title")).toBe(await width(page, ".ub-editor"));
 
-  // No font file comes from outside the app, and the Google Fonts stylesheet
-  // endpoint the feature replaced is absent too. Fraunces itself was fetched.
+  // No font file or Google Fonts stylesheet comes from outside the app.
+  // Fraunces itself must be fetched.
   const fetched = await page.evaluate(() => {
     const resources = performance
       .getEntriesByType("resource")
@@ -1878,18 +1862,12 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
 });
 
 /**
- * The copy-link control's touch target (#535).
+ * The copy-link control's touch target.
  *
- * A browser, because the claim is layout and nothing else. The target used to
- * be a pseudo-element overhanging a 25px row, and both directions it could
- * overhang were already spoken for: `.ub-title` is full-bleed a few pixels
- * below and lost the taps a target reaching down took from it (Codex round 1),
- * and above is `.ub-pane`'s top padding, which scrolls away — the same target
- * measured 44px at rest and 25px once the pane had scrolled 20px, with the
- * button itself still fully visible and unchanged (Opus round 1). The target is
- * the control's own box now, and this asks the only question that settles it:
- * at both offsets where a reader can see the whole control, does the whole
- * 44x44 take a click?
+ * The control's own 44x44 box must take clicks at rest and after scrolling.
+ * An overhanging target could steal taps from `.ub-title` below or borrow
+ * `.ub-pane` padding above that scrolls away while the control stays visible.
+ * Only browser layout can prove the full target at both offsets.
  */
 test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
   browser,
@@ -1899,15 +1877,14 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
   await page.getByRole("button", { name: "+ new doc" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
-  // Prose enough that the pane really scrolls: the defect this replaced was
-  // invisible in a document short enough to sit still.
+  // Enough prose to scroll: a clipped target cannot be exposed in a short page.
   await placeCaret(page);
   await page.keyboard.type("a line of prose\n".repeat(24));
 
   // A long tag selection, because that is what pushes this row around.
   const editTags = page.getByRole("button", { name: "Edit tags" });
   await editTags.click();
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await editTags.click();
@@ -2128,8 +2105,8 @@ for (const scheme of ["light", "dark"] as const) {
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
 
-      // These desktop and iPad sizes exposed header obstruction in the former
-      // top-right region. One source consumer also proves it uses the same region;
+      // Desktop and iPad layouts must leave the notification region unobstructed
+      // by the header. One source consumer proves it uses the same region;
       // the full source and clipboard contracts are checked separately below.
       const codeCopy = page.locator(".ub-code .ub-copy");
       const actions = page.getByRole("button", { name: "Document actions" });
@@ -2215,15 +2192,15 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 /**
- * The document's tags read as tags rather than as a form field (#958).
+ * The document's tags read as tags rather than as a form field.
  *
  * The token table cannot see the tag field's cascade or focus state, and axe
  * cannot measure their separation. The browser also observes what
  * the trigger paints, whether pills wrap or scroll out of sight, where the
  * keyboard lands when the panel has no field to enter it through, and whether
  * the field — once ten entries earn one — steps down from the panel it sits on
- * or washes over it. Dark, because the wash this replaces was `--input` as a
- * ground, which is 15% white and only visible where `light-dark()` resolved.
+ * or washes over it. Dark catches a field painted with `--input` as its
+ * ground: its 15% white is only visible where `light-dark()` resolves.
  */
 test("the document's tags are wrapping pills, and the panel earns its search field — dark", async ({
   browser,
@@ -2282,16 +2259,16 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   });
   for (const viewport of [375, 1280]) {
     await page.setViewportSize({ width: viewport, height: 620 });
-    await expect.poll(comfortableList).toEqual({ inside: true, names: [true, true, true, true, true] });
+    await expect.poll(comfortableList).toEqual({ inside: true, names: EXAMPLE_TAGS.map(() => true) });
   }
 
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await page.keyboard.press("Escape");
   await expect(trigger).toBeFocused();
 
-  // Narrow enough that five pills cannot sit on one line. They take a second
+  // Narrow enough that the seeded pills cannot sit on one line. They take a second
   // line inside the row and the row grows to hold them; the scroller that used
   // to hide the overflow is gone, so nothing is out of sight.
   await page.getByRole("button", { name: "Hide document list" }).click();
@@ -2355,13 +2332,13 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByLabel("Create a tag").fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("button", { name: `Retire ${longest}` })).toBeVisible();
-  // On its own, because one name is the case: with the five short ones beside
+  // On its own, because one name is the case: with the seeded short ones beside
   // it the oversized pill is carried onto a line of its own below the machine
   // facts, and misses them without being any better contained.
   await page.goto(documentUrl);
   await trigger.click();
   await page.getByRole("option", { name: longest, exact: true }).click();
-  for (const tag of ["auth", "billing", "mcp", "permissions", "sync"]) {
+  for (const { name: tag } of EXAMPLE_TAGS) {
     await page.getByRole("option", { name: tag, exact: true }).click();
   }
   await page.keyboard.press("Escape");
@@ -2407,7 +2384,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   }
   await expect(
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
-  ).toHaveCount(5);
+  ).toHaveCount(EXAMPLE_TAGS.length);
 });
 
 test("Workspace Settings uses the shared touch floors in narrow and wide layouts", async ({ browser }) => {
@@ -2668,7 +2645,7 @@ for (const scheme of ["light"] as const) {
         for (const control of await page.locator(selector).all()) await check(control);
       }
       const row = page.locator(".ub-docs-row").first();
-      // The pin's hover/reveal treatment belongs to #1108 and is not sampled.
+      // The pin's hover/reveal treatment is outside this sample.
       await check(row.locator(".ub-docs-open"), row);
     }, true);
     const waiting = await openApp(browser, `/${harness().workspace}/${randomUUID()}`, {
@@ -2749,10 +2726,10 @@ for (const scheme of ["light"] as const) {
 /**
  * The table holds token floors. Only rendered state can show the one card fill
  * reaching every consumer, or a later rule changing a chip's focused ground.
- * Seed both thread states through schema operations; no reload or key deletion
- * is needed to make an orphan, the intermittent setup removed before v0.3.
+ * Seed both thread states through schema operations for deterministic orphaning
+ * without a reload or key deletion.
  */
-for (const scheme of ["light"] as const) {
+for (const scheme of ["light", "dark"] as const) {
   test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.setViewportSize({ width: 1000, height: 1000 });
@@ -3084,7 +3061,7 @@ test("terminal controls keep their dark-screen contrast in either appearance", a
   });
 });
 
-/** Touch paths for information formerly available only on hover (#1071). */
+/** Touch paths for information also available on hover. */
 const LONG_NAME = "Alexandria Montgomery · Engineering collaboration session on the production workspace";
 const UNBROKEN_NAME = "Collaborator".repeat(12);
 
@@ -3312,4 +3289,190 @@ test("decision archive and restore follow the whole topic and its first record",
       doc.destroy();
     }
   }
+});
+
+test("the document and comments rail stay left-anchored as the viewport changes", async ({
+  browser,
+}) => {
+  const page = await openAppearanceApp(browser, "light");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+
+  type Layout = {
+    body: { left: number; right: number };
+    sidebar: { right: number } | null;
+    pane: { left: number; right: number; width: number };
+    column: { left: number; right: number; width: number };
+    editor: { left: number };
+    rail: { left: number; right: number } | null;
+    paneClientWidth: number;
+    paneScrollWidth: number;
+    bodyClientWidth: number;
+    bodyScrollWidth: number;
+  };
+  const layout = (): Promise<Layout> =>
+    page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>(".ub-body");
+      const sidebar = document.querySelector<HTMLElement>(".ub-list:not([inert])");
+      const pane = document.querySelector<HTMLElement>(".ub-document-pane");
+      const rail = document.querySelector<HTMLElement>(".ub-rail");
+      if (body === null || pane === null) {
+        throw new Error("e2e: document composition is incomplete");
+      }
+      const column = pane.querySelector<HTMLElement>(":scope > .ub-column");
+      const editor = pane.querySelector<HTMLElement>(".ub-editor");
+      if (column === null || editor === null) {
+        throw new Error("e2e: document composition is incomplete");
+      }
+      const bodyBox = body.getBoundingClientRect();
+      const paneBox = pane.getBoundingClientRect();
+      const columnBox = column.getBoundingClientRect();
+      const editorBox = editor.getBoundingClientRect();
+      const sidebarBox = sidebar?.getBoundingClientRect() ?? null;
+      const railBox =
+        rail === null || getComputedStyle(rail).display === "none"
+          ? null
+          : rail.getBoundingClientRect();
+      return {
+        body: { left: bodyBox.left, right: bodyBox.right },
+        sidebar: sidebarBox === null ? null : { right: sidebarBox.right },
+        pane: { left: paneBox.left, right: paneBox.right, width: paneBox.width },
+        column: {
+          left: columnBox.left,
+          right: columnBox.right,
+          width: columnBox.width,
+        },
+        editor: { left: editorBox.left },
+        rail:
+          railBox === null ? null : { left: railBox.left, right: railBox.right },
+        paneClientWidth: pane.clientWidth,
+        paneScrollWidth: pane.scrollWidth,
+        bodyClientWidth: body.clientWidth,
+        bodyScrollWidth: body.scrollWidth,
+      };
+    });
+  const atWidths = async (widths: number[]): Promise<Layout[]> => {
+    const readings: Layout[] = [];
+    for (const width of widths) {
+      await page.setViewportSize({ width, height: 800 });
+      readings.push(await layout());
+    }
+    return readings;
+  };
+  const firstTwo = (readings: Layout[]): [Layout, Layout] => {
+    const [first, second] = readings;
+    if (first === undefined || second === undefined) {
+      throw new Error("e2e: two viewport readings required");
+    }
+    return [first, second];
+  };
+  const shownRail = (reading: Layout): { left: number; right: number } => {
+    if (reading.rail === null) throw new Error("e2e: comments rail is hidden");
+    return reading.rail;
+  };
+  const expectFixedOrigins = (
+    readings: Layout[],
+    edge: (reading: Layout) => number,
+  ): void => {
+    const [first, second] = firstTwo(readings);
+    expect(first.column.left - edge(first)).toBeCloseTo(
+      second.column.left - edge(second),
+      1,
+    );
+    expect(first.column.width).toBeCloseTo(second.column.width, 1);
+  };
+
+  // With no heading or thread the rail is genuinely absent, but the document
+  // origin is already fixed and does not spend a wider viewport on centring.
+  const expandedEmpty = await atWidths([1400, 1600]);
+  expect(expandedEmpty.every((reading) => reading.rail === null)).toBe(true);
+  expectFixedOrigins(expandedEmpty, (reading) => reading.sidebar?.right ?? 0);
+
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+  await expect(page.locator(".ub-list")).toHaveAttribute("aria-hidden", "true");
+  const collapsedEmpty = await atWidths([1400, 1600]);
+  expectFixedOrigins(collapsedEmpty, (reading) => reading.body.left);
+
+  await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
+  await expect(page.locator(".ub-list")).toBeVisible();
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await placeCaret(page);
+  await page.keyboard.type("annotate me", { delay: 15 });
+  await page.keyboard.press("Shift+Home");
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.keyboard.type("keep this beside the prose", { delay: 15 });
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ub-thread")).toBeVisible();
+
+  const expandedPopulated = await atWidths([1400, 1600]);
+  expectFixedOrigins(expandedPopulated, (reading) => reading.sidebar?.right ?? 0);
+  for (let index = 0; index < expandedPopulated.length; index += 1) {
+    const reading = expandedPopulated[index];
+    const empty = expandedEmpty[index];
+    if (reading === undefined || empty === undefined) {
+      throw new Error("e2e: viewport readings do not line up");
+    }
+    expect(reading.column.left).toBeCloseTo(empty.column.left, 1);
+    expect(reading.rail).not.toBeNull();
+  }
+  const [firstPopulated, secondPopulated] = firstTwo(expandedPopulated);
+  const firstGap = shownRail(firstPopulated).left - firstPopulated.column.right;
+  const secondGap = shownRail(secondPopulated).left - secondPopulated.column.right;
+  expect(firstGap).toBeGreaterThan(0);
+  expect(firstGap).toBeCloseTo(secondGap, 1);
+  const firstTail = firstPopulated.body.right - shownRail(firstPopulated).right;
+  const secondTail = secondPopulated.body.right - shownRail(secondPopulated).right;
+  expect(secondTail - firstTail).toBeCloseTo(200, 1);
+
+  const highlight = page.locator("[data-comment-thread]").first();
+  await highlight.click();
+  await expect(page.locator('.ub-thread[aria-current="true"]')).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Hide document list" }).click();
+  await expect(page.locator('[data-slot="sidebar-gap"]')).toHaveCSS("width", "0px");
+  const collapsedPopulated = await atWidths([1400, 1600]);
+  expectFixedOrigins(collapsedPopulated, (reading) => reading.body.left);
+  for (let index = 0; index < collapsedPopulated.length; index += 1) {
+    const reading = collapsedPopulated[index];
+    const empty = collapsedEmpty[index];
+    if (reading === undefined || empty === undefined) {
+      throw new Error("e2e: viewport readings do not line up");
+    }
+    expect(reading.column.left).toBeCloseTo(empty.column.left, 1);
+  }
+
+  // At the existing breakpoint the same pane shrinks without horizontal
+  // overflow. The drawer overlays it, and a keyboard activation still opens
+  // and targets the right card without changing document geometry.
+  await page.getByRole("button", { name: "Show document list" }).click();
+  await expect.poll(async () => (await page.locator(".ub-list").boundingBox())?.x).toBe(0);
+  await page.setViewportSize({ width: 768, height: 720 });
+  await page.getByRole("button", { name: "Close threads" }).click();
+  await expect(page.locator(".ub-rail")).not.toBeVisible();
+  await expect(page.locator(".ub-threads-toggle")).toBeFocused();
+  const narrow = await layout();
+  expect(narrow.column.width).toBeLessThan(firstPopulated.column.width);
+  expect(narrow.column.left).toBeGreaterThanOrEqual(narrow.pane.left);
+  expect(narrow.column.right).toBeLessThanOrEqual(narrow.pane.right);
+  expect(narrow.editor.left - narrow.column.left).toBeGreaterThan(20);
+  expect(narrow.paneScrollWidth).toBe(narrow.paneClientWidth);
+  expect(narrow.bodyScrollWidth).toBe(narrow.bodyClientWidth);
+
+  await highlight.focus();
+  await page.keyboard.press("Enter");
+  const selected = page.locator('.ub-thread[aria-current="true"]');
+  await expect(page.locator(".ub-rail")).toBeVisible();
+  await expect(selected).toBeFocused();
+  const withDrawer = await layout();
+  expect(withDrawer.column.left).toBeCloseTo(narrow.column.left, 1);
+  expect(withDrawer.column.right).toBeCloseTo(narrow.column.right, 1);
+  expect(shownRail(withDrawer).right).toBeCloseTo(withDrawer.body.right, 1);
+  await page.getByRole("button", { name: "Close threads" }).click();
+  await expect(highlight).toBeFocused();
 });

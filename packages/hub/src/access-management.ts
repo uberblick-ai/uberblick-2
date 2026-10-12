@@ -5,13 +5,14 @@ import type { GithubAccountLookup } from "./github-account-lookup.js";
 import type { HubLogger } from "./log.js";
 import { MembershipRefusal, type MembershipRegistry } from "./memberships.js";
 import type { PrincipalRegistry } from "./principals.js";
-import { protocolMismatchReason } from "./protocol.js";
-import { clampToken, readRequestAction, type RequestAction } from "./token.js";
+import { protocolMismatchReason } from "@uberblick/schema/protocol";
+import { clampToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
 
 import type { WorkspacePromotions } from "./workspace-promotion.js";
 
 type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export async function handleAccessManagement(
   credentials: CredentialRegistry | undefined,
   memberships: MembershipRegistry | undefined,

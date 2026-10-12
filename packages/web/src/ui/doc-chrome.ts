@@ -1,9 +1,6 @@
 /**
- * The document-local chrome's pure derivations.
- *
- * They live apart from the components that draw them because both are about
- * what is *true* — which session has a caret where, and whether the content has
- * changed — and neither needs React to say it.
+ * Pure derivations shared by document chrome; presence and content revision
+ * need no React state.
  */
 
 import * as Y from "yjs";
@@ -22,48 +19,33 @@ export interface RemotePresence {
   /** The session's own presence colour — its chip is drawn in it. */
   color: string;
   /**
-   * Agent only where the session says so (#494). Everything else is a person:
-   * a browser tab, including one running a bundle from before either marker
-   * existed. This is the positive test — the absence test it replaces called
-   * every silent session an agent.
+   * Count as an agent only with its explicit marker; all other sessions
+   * remain people.
    */
   kind: SessionKind;
   /**
-   * The agent session id (`agent-<uuid>`, the one `sync_status` reports), or
-   * null for a session that publishes none. Null for every human, and for an
-   * agent whose bundle predates the field.
+   * Use a published agent-UUID session ID; humans and agents without the
+   * field return null.
    */
   session: string | null;
   /** A locally retained departure, never a claim published in awareness. */
   departed?: boolean;
   /**
-   * 1-based position of the block its caret is in, or null when there is no
-   * saying: no cursor published, or one anchored where no reader is looking.
-   * Null is "not known", never "block zero" — the sync panel omits the words
-   * rather than naming a block it cannot resolve.
+   * Use one-based visible block positions. An absent or unresolvable caret
+   * returns null and omits location text.
    */
   block: number | null;
   /**
-   * Stable id of that same visible block, or null when the caret has no
-   * resolvable target. The number is for reading; the id is for a one-shot
-   * jump that survives blocks being inserted above the caret.
+   * Stable visible block ID supports a one-shot jump when earlier blocks
+   * move; null means no resolvable target.
    */
   blockId: string | null;
 }
 
 /**
- * The block elements a reader can see, in document order.
- *
- * The first element to claim an id wins; every later element carrying that id
- * is *shadowed* — two replicas re-typing one block converge on two elements
- * sharing its id, and only the first is a block anyone resolves. An element
- * with no id has claimed no identity, so two of those are two blocks and both
- * are visible.
- *
- * This is schema's `partitionById` rule, re-derived because schema exports no
- * projection helper and adding one would be a schema change in service of
- * chrome. Both derivations below go through it, so the block a pill numbers and
- * the blocks a rev folds are the blocks `getBlocks` would have returned.
+ * Match schema partitionById visibility: the first claimed ID wins, later
+ * duplicates are shadowed, and separate ID-less elements remain visible.
+ * Presence numbering and revision folding must agree with getBlocks.
  */
 function visibleBlocks(fragment: Y.XmlFragment): Y.XmlElement[] {
   const seen = new Set<string>();
@@ -112,16 +94,9 @@ function blockOf(
 }
 
 /**
- * Every remote session in this room, by client id.
- *
- * Each session says what kind it is in its `client` field (#494) and, where it
- * is an agent, which session it is in `session`. Both ride beside `user` and
- * are withdrawn with it, so a peer that is here at all is a peer this can
- * classify and name.
- *
- * A state carrying neither a `user` nor a cursor is skipped: there is nobody to
- * name and nowhere to point, and a row for it would be a session invented out
- * of an empty map entry.
+ * Sort remote sessions by client ID. Read explicit client/session markers
+ * beside user; skip states carrying neither user nor cursor instead of
+ * inventing a person.
  */
 export function readPresence(
   ydoc: Y.Doc,
@@ -156,14 +131,36 @@ export function readPresence(
   return found;
 }
 
+/** Session identity belongs only to agents; other peers keep connection identity. */
+export function presenceKey(peer: RemotePresence): string {
+  return peer.kind === "agent" && peer.session !== null && peer.session !== ""
+    ? `session:${peer.session}`
+    : String(peer.clientId);
+}
+
+/** The title draws one agent session, live while any of its connections is live. */
+export function groupAgentPresence(
+  presence: readonly RemotePresence[],
+): RemotePresence[] {
+  const groups = new Map<string, RemotePresence>();
+  for (const peer of presence) {
+    const key = presenceKey(peer);
+    const previous = groups.get(key);
+    if (
+      previous === undefined ||
+      (previous.departed && !peer.departed) ||
+      ((previous.departed === true) === (peer.departed === true) &&
+        previous.blockId === null && peer.blockId !== null)
+    ) {
+      groups.set(key, peer);
+    }
+  }
+  return [...groups.values()];
+}
+
 /**
- * Whether two readings would draw the same chip.
- *
- * Every field the chip or its hover shows is compared, and that is a
- * correctness rule rather than thoroughness: this is what decides whether a
- * re-read is stored at all, so a projection that gains a field without gaining
- * a comparison here silently drops every update to it. A marker or a session id
- * that arrives after a session's first state is exactly that case.
+ * Compare every rendered and hover field before storing. Adding a projection
+ * field without its comparison would silently discard later updates.
  */
 function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolean {
   if (a === null || b === null) return a === b;
@@ -180,12 +177,9 @@ function sameSession(a: RemotePresence | null, b: RemotePresence | null): boolea
 }
 
 /**
- * What a peer's avatar says on hover, and to a screen reader.
- *
- * Every control names the complete session and whether it is a person or an
- * agent. An agent also names its published session id, and either kind names a
- * resolved caret location while live. A retained departure says it left
- * instead of claiming it is editing. Optional tail parts drop out cleanly.
+ * Name the complete session, person or agent, published agent ID and
+ * resolvable live caret. Retained departures say left rather than claiming
+ * ongoing edits.
  */
 export function presenceLabel(session: RemotePresence): string {
   const parts = [session.name, session.kind === "agent" ? "agent" : "person"];
@@ -227,41 +221,12 @@ function blockElementOf(
 }
 
 /**
- * The document's rev, live: the fold of its block revs through the same hash
- * the blocks use, so "changed" means one thing at both levels.
- *
- * A change detector, not a version counter — exactly what a block `rev` is.
- * Block ids go into the fold as well as block revs, so reordering two blocks or
- * splitting one changes the document rev even when no character did.
- *
- * `blockRev` is that hash's only exported entry point, and a document rev is
- * chrome rather than a schema concern, so it is folded here rather than added
- * to `@uberblick/schema`.
- *
- * **Why this is an observer and not a function of the document.** The obvious
- * shape — read `getBlocks(ydoc)` whenever anything changes — reads and rehashes
- * every character of every block on every keystroke, which is the whole
- * document's worth of work for eight characters of chrome. So the revs are
- * cached and only the block an event landed in is re-read: `getBlocks` runs
- * once, to seed, and each later edit costs one `getBlock` plus the fold. The
- * fold itself walks the fragment reading `id` attributes — no text — so the
- * recurring cost is in blocks, never in characters.
- *
- * **The cache is keyed by element identity, not by block id**, and that is a
- * correctness rule rather than a preference. A `setBlockType` keeps the block's
- * id and *replaces its element* (Yjs element names are immutable), so the only
- * event it produces is a structural one on the fragment: nothing names the
- * block, and an id-keyed cache would answer with the old type's rev for as long
- * as the document stayed open. A replaced element is a different object, so it
- * is a cache miss for free — no invalidation rule to get wrong.
- *
- * The cache is rebuilt by the fold rather than pruned, so a block that leaves
- * the document takes its entry with it.
- *
- * **Shadowed duplicates are skipped** — the fold walks `visibleBlocks`, not the
- * raw fragment. Folding a hidden element would count it as content, and the
- * repair that later deletes it would move the rev with nothing on screen having
- * changed.
+ * Fold visible block IDs and revisions as a change detector, so order and
+ * splits matter without text edits. Seed with one document read, then cache
+ * by element identity and reread only invalidated blocks: retyping preserves
+ * IDs but replaces elements. Rebuild the cache during folding to drop
+ * departed elements, and skip shadowed duplicates so hidden repairs cannot
+ * change the visible revision.
  */
 export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => void {
   const fragment = getBlocksFragment(ydoc);
@@ -272,9 +237,8 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
     const lines: string[] = [];
     for (const child of visibleBlocks(fragment)) {
       const id = child.getAttribute("id") ?? "";
-      // A miss is an element this fold has not seen: a new block, one an event
-      // invalidated, or the replacement a re-type left behind. `getBlock` is the
-      // schema's own read, so a shadowed duplicate never supplies the rev.
+      // A missing cache entry may be new, invalidated or retyped. getBlock
+      // supplies the schema read and excludes shadowed duplicates.
       const rev = revs.get(child) ?? seeded?.get(id) ?? getBlock(ydoc, id)?.rev ?? "";
       next.set(child, rev);
       lines.push(`${id} ${rev}`);

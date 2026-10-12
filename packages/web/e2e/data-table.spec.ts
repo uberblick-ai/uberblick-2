@@ -6,9 +6,11 @@ import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
+const peers: Array<{ close: () => void }> = [];
 test.beforeAll(() => {
   agent = new McpAgent({
     workspace: harness().workspace,
@@ -17,7 +19,10 @@ test.beforeAll(() => {
     statePrefix: `uberblick-e2e-data-table-${process.env.UB_AGENTS_RUN ?? "local"}-`,
   });
 });
-test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterEach(async () => {
+  for (const peer of peers.splice(0)) peer.close();
+  await agent?.closeSessions();
+});
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
 function writer(): McpSession {
@@ -49,10 +54,9 @@ const RECORDS = [
   { id: "f", value: { name: "Relative link", value: 0, day: "2026-01-03", url: "/relative" } },
 ];
 
-async function tableDoc(session: McpSession, title: string, mapping: unknown = MAPPING, decision = false): Promise<string> {
+async function tableDoc(session: McpSession, title: string, mapping: unknown = MAPPING): Promise<string> {
   const result = await session.call<{ uuid: string }>("create_doc", {
     title, description: "Read-only evidence projected from document-owned measurements.",
-    ...(decision ? { kind: "decision", status: "open", tldr: "Keep these observations visible." } : {}),
     blocks: [{ type: "paragraph", text: "Read the live evidence below." }, { type: "chart", text: JSON.stringify(mapping) }],
   });
   return result.uuid;
@@ -433,9 +437,60 @@ test("MCP data and mapping updates keep all rows and sort across reload and reop
   expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(updated));
 });
 
+test("a record limit keeps the first sorted rows in one live table with a neutral footnote", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...MAPPING, pageSize: 1, limit: 2, sort: { field: "day", direction: "desc" },
+    columns: [{ field: "name", label: "Name" }, { field: "day", label: "Day", format: "date" }] };
+  const uuid = await tableDoc(session, "Limited live data table", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
+    { id: "a", value: { name: "First", day: "2026-01-01" } },
+    { id: "b", value: { name: "Second", day: "2026-01-02" } },
+    { id: "c", value: { name: "Third", day: "2026-01-03" } },
+  ] }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  const notice = page.locator(".ub-chart-notice");
+  const diagnostics = page.locator(".ub-chart-diagnostics");
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Third", "Second"]);
+  await expect(page.locator(".ub-data-table")).toHaveCount(1);
+  await expect(page.locator(".ub-table-range, .ub-table-pager")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^(Previous|Next) page$|show more/i })).toHaveCount(0);
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 3 records");
+  await expect(notice).not.toHaveAttribute("aria-live", /.*/);
+  await expect(notice).not.toHaveAttribute("role", /alert|status/);
+  await expect(notice).toHaveCSS("color", await page.locator(".ub-chart-open").evaluate((element) => getComputedStyle(element).color));
+  await expect(diagnostics).toBeHidden();
+
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "d", value: { name: "Fourth", day: "2026-01-04" } },
+  ] }] });
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Fourth", "Third"]);
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 4 records");
+  await expect(diagnostics).toBeHidden();
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+
+  const ascending = { ...mapping, sort: { field: "day", direction: "asc" } };
+  await editMapping(session, uuid, JSON.stringify(ascending));
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["First", "Second"]);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "e", value: { name: "Fifth", day: "2026-01-05" } },
+  ] }] });
+  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 5 records");
+  await expect(table.locator("tbody tr td:first-child")).toHaveText(["First", "Second"]);
+  await expect(diagnostics).toBeHidden();
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(ascending));
+
+  await editMapping(session, uuid, JSON.stringify({ ...ascending, limit: 5 }));
+  await expect(table.locator("tbody tr")).toHaveCount(5);
+  await expect(notice).toHaveText("Generated from document data · read-only");
+  await editMapping(session, uuid, JSON.stringify({ ...ascending, limit: null }));
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
+  await expect(notice).toBeHidden();
+});
+
 test("problem states recover without editing stored values and decided or archived tables keep every row", async ({ browser }) => {
   const session = writer();
-  const uuid = await tableDoc(session, "Table states", MAPPING, true);
+  const uuid = await tableDoc(session, "Table states");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
   await editMapping(session, uuid, "{invalid JSON");
@@ -450,7 +505,9 @@ test("problem states recover without editing stored values and decided or archiv
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const stored = await session.call<DocPayload>("get_doc", { uuid });
   const data = await session.call("get_data", { uuid });
-  await session.call("set_status", { uuid, status: "decided" });
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  peer.decide("decided");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });

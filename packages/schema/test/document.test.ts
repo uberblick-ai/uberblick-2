@@ -9,6 +9,7 @@ import {
   InvalidDocumentLifecycleError,
   appendBlock,
   blockRev,
+  decisionContentLocked,
   deleteBlock,
   getBlock,
   getBlockText,
@@ -174,6 +175,7 @@ describe("document round-trip", () => {
           kind: "decision",
           status: "open",
           topic: UUID,
+          discussion: null,
           links: [target],
         });
         expect(getMetaMap(replica).get("changelogSuggestion")).toBe(legacy);
@@ -181,6 +183,25 @@ describe("document round-trip", () => {
       }
     },
   );
+
+  it("locks only decided-record content", () => {
+    for (const [meta, locked] of [
+      [{}, false],
+      [{ kind: "requirement" }, false],
+      [{ kind: "decision" }, false],
+      [{ kind: "requirement", status: "draft" }, false],
+      [{ kind: "requirement", status: "planned" }, false],
+      [{ kind: "requirement", status: "implementing" }, false],
+      [{ kind: "requirement", status: "done" }, false],
+      [{ kind: "decision", status: "open" }, false],
+      [{ kind: "decision", status: "decided" }, true],
+      [{ kind: "decision", status: "rejected" }, false],
+      [{ kind: "decision", status: "withdrawn" }, false],
+      [{ kind: "requirement", status: "decided" }, false],
+    ] as const) {
+      expect(decisionContentLocked(meta), JSON.stringify(meta)).toBe(locked);
+    }
+  });
 
   it("writes every legal kind/status pair and refuses every illegal one", () => {
     const legal = [

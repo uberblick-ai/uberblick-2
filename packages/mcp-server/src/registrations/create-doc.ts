@@ -9,16 +9,21 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
   server.registerTool("create_doc", {
     title: "Create a document",
     description:
-      "Create a document and its directory stub, with optional seed blocks and TL;DR. Requires nonblank title " +
-      "and description. Tags select active catalog ids or exact names; unknown or retired selections refuse " +
-      "before creation. A kind defaults to its first status; incompatible kind/status combinations refuse. " +
-      "Decisions start open or decided; governs requires a live, hydrated requirement, and supersedes a " +
-      "hydrated decision in a live topic. Invalid targets and a decided successor without a person's answer " +
-      "refuse before any room is written. Optional sidebar placement pins into an existing group id from " +
-      "get_sidebar; an unknown or empty id returns group_not_found and creates nothing. Omit placement to " +
-      "create unpinned. The answer reports each independently persisted room; writes are not transactional. A " +
-      "partial persistence_failed carries uuid, completed and failed rooms, rolledBack: false and stage-aware " +
-      "recovery: follow it to finish without creating a duplicate." +
+      "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. " +
+      "Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. " +
+      "Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, " +
+      "discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid " +
+      "nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a " +
+      "live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated " +
+      "decision in a live topic. Invalid targets refuse before writes. discussion connects a live, " +
+      "readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. " +
+      "Discussion never inherits; " +
+      "set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. " +
+      "Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing " +
+      "get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. " +
+      "Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery " +
+      "avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, " +
+      "absent if unknown. Page get_doc marks topics related or linked." +
       helpPointer("create_doc"),
     outputSchema: outputSchemas.create_doc,
     inputSchema,

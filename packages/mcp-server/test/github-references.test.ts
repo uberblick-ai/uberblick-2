@@ -110,7 +110,7 @@ describe("decision records linking GitHub work", () => {
     });
   });
 
-  it("uses only external href marks in decision prose, ignoring labels and foreign source-block marks", async () => {
+  it("reads legacy decision prose href marks, ignoring labels and foreign source-block marks", async () => {
     const rig = await server();
     const target = await rig.ok("create_doc", {
       title: "Document target",
@@ -119,7 +119,6 @@ describe("decision records linking GitHub work", () => {
     const record = await rig.ok("create_doc", {
       title: "Href owns identity",
       description: "Exercises links in prose and non-links in source.",
-      kind: "decision",
       blocks: [
         { type: "heading", level: 2, text: "", inline: [{ text: "owner/repo#90", marks: { link: HREF } }] },
         { type: "quote", text: "", inline: [{ text: "Issue", marks: { link: HREF } }] },
@@ -144,6 +143,8 @@ describe("decision records linking GitHub work", () => {
     });
     const replica = rig.instance.replicas.replica(record.uuid);
     replica.doc.transact(() => {
+      setKind(replica.doc, "decision");
+      setStatus(replica.doc, "open");
       const both = blockText(replica.doc, record.blocks[4].id)!;
       both.format(0, both.length, {
         link: { href: "https://github.com/owner/repo/issues/80" },

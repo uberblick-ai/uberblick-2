@@ -8,7 +8,7 @@ import {
   MAX_TOKEN_LIFETIME_SECONDS,
   importCredentialKey,
   mintToken,
-} from "../src/token.js";
+} from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const databases: HubDatabase[] = [];

@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -11,6 +11,8 @@ import { resolveTagSelectors } from "../tag-catalog.js";
 import { roomStages, stoppedPartWay } from "./helpers.js";
 import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
+import type { ToolContext } from "./context.js";
+import { discussionTarget } from "./discussion.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
@@ -20,12 +22,12 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "A requirement document (`kind: requirement`)",
     when: { field: "kind", is: "requirement" },
-    forbids: ["governs", "supersedes", "answer"],
+    forbids: ["related", "supersedes", "answer", "discussion"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status", "governs", "supersedes", "answer"],
+    forbids: ["status", "related", "supersedes", "answer", "discussion"],
   },
 ];
 
@@ -36,14 +38,8 @@ function firstStatus(kind: DocumentKind): DocumentStatus {
 }
 
 /**
- * Where a new document goes in the sidebar — optional, and the whole of it.
- *
- * Placement implies pinning, so there is no `pinned` boolean and no `state`
- * enum: a contradictory pair like `{pinned: false, group: …}` is not a state
- * this input can express. Both objects are `.strict()`, so a caller reaching
- * for either is told rather than having it silently dropped — and the group is
- * an object with an id rather than a bare name, because creating a group is
- * pin_doc's job and must not happen as a side effect of creating a document.
+ * Placement implies pinning and names an existing group ID. Document creation
+ * must not create groups or accept contradictory pin/state fields.
  */
 const sidebarPlacementArg = z
   .object({
@@ -89,9 +85,7 @@ const RECOVERY: Record<string, string> & { other: string } = {
     "predicate — and get_sidebar what the rooms in `completed` left behind.",
 };
 
-// `{sidebar: {...}, pinned: true}` must be refused wherever the redundant
-// key sits, so the nested placement object is strict too — see
-// {@link sidebarPlacementArg}. The top level is strict like every tool's.
+// Refuse unknown keys at the root and throughout nested placement objects.
 export const inputSchema = strictInput(
   {
     title: titleArg,
@@ -101,11 +95,14 @@ export const inputSchema = strictInput(
     tags: z.array(z.string().min(1)).optional(),
     kind: documentKindArg.optional(),
     status: documentStatusArg.optional(),
-    governs: uuidArg
+    related: uuidArg
       .optional()
       .describe(
-        "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
+        "Live, locally readable regular document UUID this decision relates to. Fixed at creation; omitted successors inherit their predecessor's page. Accepted only with `kind: decision`.",
       ),
+    discussion: uuidArg
+      .optional()
+      .describe("Live, locally readable regular document UUID holding this record's RFC discussion. Accepted only with `kind: decision`; never inherited. Correct or clear with set_metadata only while open; fixed after leaving open. Does not create or tag a document."),
     supersedes: uuidArg
       .optional()
       .describe(
@@ -120,6 +117,37 @@ export const inputSchema = strictInput(
   CREATE_DOC_LIFECYCLE_MODES,
 );
 
+function initialBlocks(
+  context: ToolContext,
+  { blocks, tldr, answer }: Pick<z.infer<typeof inputSchema>, "blocks" | "tldr" | "answer">,
+  lifecycle: { kind: DocumentKind; status: DocumentStatus } | null,
+  hasPredecessor: boolean,
+) {
+  if (lifecycle?.kind === "decision") {
+    if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
+    }
+    if (answer !== undefined && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
+    }
+    if (lifecycle.status === "decided" && hasPredecessor && answer === undefined) {
+      throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
+    }
+    if (tldr !== undefined && tldr !== null) {
+      throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", lifecycle);
+    }
+    const failure = decisionAnswerShapeFailure(blocks ?? []);
+    if (failure !== null) throw new ToolError(failure, "Decision answers use at most three paragraphs, code blocks, tables or lists.", lifecycle);
+  }
+  // Resolve all seed targets before creating a document.
+  const inputs = (blocks ?? []).map(context.blockInputFor);
+  if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
+    const failure = decisionAnswerFailure(inputs, tldr === undefined ? {} : { tldr });
+    if (failure !== null) throw new ToolError(failure, "A decided record needs a non-empty answer in one to three supported content blocks.", lifecycle);
+  }
+  return inputs;
+}
+
 export const createDocOperation = operation("create_doc", inputSchema, (context, {
       title,
       description,
@@ -128,12 +156,13 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       tags,
       kind,
       status,
-      governs,
+      related,
+      discussion,
       supersedes,
       blocks,
       sidebar,
     }, _request) => {
-  const { replicas, requireWritableDoc, blockInputFor, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
+  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
 
   const lifecycle =
     kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
@@ -155,17 +184,17 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     });
   }
 
-  const requirement =
-    governs === undefined ? null : requireWritableDoc(governs);
-  const requirementKind =
-    requirement === null ? null : (getMeta(requirement.doc).kind ?? null);
-  if (requirement !== null && requirementKind !== "requirement") {
+  const relatedPage =
+    related === undefined ? null : requireWritableDoc(related);
+  if (relatedPage !== null && getMeta(relatedPage.doc).kind === "decision") {
     throw new ToolError(
-      "governs_not_requirement",
-      `Document ${governs} is not a requirement, so this decision cannot govern it`,
-      { governs, kind: requirementKind },
+      "related_not_regular_document",
+      `Document ${related} is a decision record, so it cannot be the related page`,
+      { related, kind: "decision" },
     );
   }
+
+  const discussionUuid = discussion === undefined ? null : discussionTarget(context, discussion);
 
   const supersedesUuid =
     supersedes === undefined
@@ -183,44 +212,25 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     );
   }
 
-  // Before allocating a document uuid: an invalid tag selection is an
-  // all-or-nothing refusal, not the first stage of a partial create.
+  // Refuse invalid tags before allocating an identity or writing any room.
   const tagIds = resolveTagSelectors(replicas, tags ?? []);
 
-  // Resolved before a uuid exists, because this is the one part of the call
-  // that can still be all-or-nothing: an unknown group must fail having
-  // created nothing. Everything after it is three independently persisted
-  // rooms, reported one by one.
+  // Refuse unknown groups before independently persisted room stages begin.
   const group =
     sidebar === undefined
       ? null
       : requireGroup(replicas, sidebar.group.id);
 
-  // Same reason, same place: an inline reference to a target this replica
-  // does not know refuses the whole call before there is a document.
-  const inputs = (blocks ?? []).map(blockInputFor);
-
-  if (lifecycle?.kind === "decision") {
-    if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
-      throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
-    }
-    if (answer !== undefined && lifecycle.status !== "decided") {
-      throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
-    }
-    if (lifecycle.status === "decided" && superseded !== null && answer === undefined) {
-      throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
-    }
-  }
+  const inputs = initialBlocks(context, { blocks, tldr, answer }, lifecycle, superseded !== null);
+  const governs = relatedPage === null ? (superseded === null ? undefined : getMeta(superseded.doc).governs) : getMeta(relatedPage.doc).uuid;
 
   const uuid = randomUUID();
   const replica = replicas.replica(uuid);
-  // The one write that opens its room directly instead of through
-  // `requireWritableDoc`, and it is working in the document like any other.
+  // Creation bypasses requireWritableDoc, so announce document activity here.
   replicas.touch(replica);
   const directory = replicas.directory();
   const sidebarReplica = replicas.sidebar();
 
-  /** Which of this call's rooms a failed append names. */
   const purposeOf = (room: string): string => {
     if (room === replica.room) return "document";
     if (room === directory.room) return "directory";
@@ -237,12 +247,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   );
 
   stage("document", replica, () => {
-    // One transaction, so the document's room is ONE append: without it the
-    // metadata and each initial block are separate updates, and a refusal
-    // on the third block would leave the first two — and the directory stub
-    // the observer repaired from them — durable, under an error that says
-    // nothing survived. The stage boundary this call reports is only true
-    // if the write underneath it is atomic in the log.
+    // Keep metadata and seeds in one logged update; a later seed append must
+    // not fail after earlier blocks survived under a "nothing survived" refusal.
     replica.doc.transact(() => {
       initDoc(replica.doc, {
         uuid,
@@ -254,15 +260,14 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
           : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
       });
-      // The same schema-owned catalog boundary set_metadata uses. Validation
-      // already ran before identity allocation; this writes the canonical
-      // assignment representation inside the document's one update.
+      // Store validated canonical tags inside the document's single update.
       assignDocumentTags(replica.doc, tagCatalog(), tagIds);
       if (lifecycle !== null) {
         setKind(replica.doc, lifecycle.kind);
         setStatus(replica.doc, lifecycle.status);
       }
       if (tldr !== undefined) setTldr(replica.doc, tldr);
+      if (discussionUuid !== null) setDiscussion(replica.doc, discussionUuid);
       for (const input of inputs) {
         appendBlock(replica.doc, input);
       }
@@ -273,9 +278,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     });
   });
 
-  // Observing the document's own update repairs the stub, but a brand-new
-  // document must be discoverable because create_doc said so, not because
-  // a side effect happened to fire.
+  // Guarantee discoverability even if the document observer did not publish a stub.
   stage("directory", directory, () => {
     if (getDirectoryEntry(directory.doc, uuid) !== null) return;
     const now = Date.now();
@@ -294,8 +297,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   let placement: SidebarPlacement | null = null;
   if (group !== null && sidebar !== undefined) {
     stage("sidebar", sidebarReplica, () => {
-      // The same pin operation pin_doc runs — see placeInGroup. A brand-new
-      // uuid is pinned rather than moved, so it can only appear once.
+      // Share pin_doc's placement primitive so the new UUID appears only once.
       try {
         const { position } = placeInGroup(
           replicas,
@@ -305,11 +307,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
         );
         placement = { group: { id: group.id, name: group.name }, position };
       } catch (error) {
-        // A concurrent sidebar_group delete, landing between the lookup at
-        // the top of this call and this write. pin_doc answers that with
-        // its own `group_not_found` and nothing else to say; here the
-        // document and its stub are already durable, so the caller has to
-        // hear that before it retries a create it does not need.
+        // A concurrent group deletion leaves the document and stub durable;
+        // report partial success so the caller does not create a duplicate.
         if (
           !(error instanceof ToolError) ||
           error.code !== "group_not_found"
@@ -342,7 +341,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
     ...(governs === undefined ? {} : { governs }),
-    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
+    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic, discussion: getMeta(replica.doc).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
     ...decisionAuthorityJson(replica),

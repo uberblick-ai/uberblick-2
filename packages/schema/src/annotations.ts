@@ -1,70 +1,16 @@
 /**
- * Annotation threads, anchored by formatting marks.
- *
- * A thread is one Y.Map in the `annotations` Y.Map, keyed by thread id, and it
- * carries no positions at all. The range lives in the text itself: the block's
- * or table cell's Y.XmlText carries a `comment` formatting mark whose value is
- * `{ threadId }` over exactly the annotated characters.
- *
- * Marks beat relative positions here because they are part of the text's own
- * CRDT state. They ride along through concurrent edits, through a block
- * re-type (the delta carries them — see `setBlockType`), and through a block
- * split, none of which a pair of stored positions survives. The mark value is
- * ProseMirror-shaped on purpose: y-prosemirror turns a text attribute into a
- * mark named for its key with the value as that mark's attrs, so `comment`
- * arrives in Tiptap as a `comment` mark with a `threadId` attribute, no
- * translation layer.
- *
- * Overlapping threads are rejected, not nested. A Yjs formatting key holds one
- * value per character: marking a range that already carries another thread's
- * mark does not nest, it *steals* those characters from the first thread. A
- * ProseMirror mark type has the same one-per-position rule, so there is no
- * shape that could round-trip an overlap to the editor either. Callers that
- * need overlapping discussion attach both threads to adjacent ranges, or to
- * the block.
- *
- * Consequences worth knowing, all pinned by tests:
- *   - Text typed strictly inside an annotated span joins the span; text typed
- *     at its *end* boundary also joins it (Yjs inserts inherit the formatting
- *     to their left), while text typed at its *start* boundary stays outside.
- *   - Deleting part of a span shrinks it. Deleting all of it removes the mark,
- *     and the thread then resolves to `null` — it is never cascade-deleted, so
- *     the conversation survives even when its anchor does not.
- *
- * ## Why a thread is a Y.Map and its conversation a nested Y.Array
- *
- * A thread's anchor block and its resolved flag are genuinely last-write-wins
- * data — whichever replica wrote last is the answer — so they are ordinary keys
- * on the thread's map. Its comments are not: while the conversation was an
- * array *inside* one replaced JSON value, two replicas each appending to one
- * thread converged to whichever write landed last and the other reply vanished
- * with no conflict and no error (#461).
- *
- * So the comments are a Y.Array nested under the thread's own `comments` key. A
- * Y.Map value may itself be a Y type, and content inside a nested type is not
- * last-write-wins — only a second `set` of the same key is. Two replies are
- * then two inserts, which Yjs merges, and a reply and a `resolved` write touch
- * different keys, so resolving cannot drop a reply either.
- *
- * Nesting rather than a second document root is also what makes deletion safe:
- * `deleteAnnotation` removes the thread's key, and its conversation goes with
- * it as one subtree. A conversation kept beside the thread instead — in a root
- * of its own — can be emptied by a delete while a concurrent resolve
- * resurrects the thread it belonged to, which loses the conversation exactly
- * the way #461 did.
- *
- * Comment order is the converged Yjs array order, and that IS the deterministic
- * order — every replica reads the same sequence without agreeing on anything
- * first. Nothing sorts by `createdAt`: clock skew can float a reply above the
- * comment it answers. `sidebar.ts` states the same rule for the same reason —
- * the winner is a position, not a timestamp.
+ * Each thread is a Y.Map under its id in `annotations`, with no stored offsets.
+ * Its `comment: { threadId }` text mark survives edits, splits and flat re-types;
+ * the attribute shape is also the editor mark's attrs.
  */
 
 import * as Y from "yjs";
 import { getAnnotationsMap } from "./doc.js";
-import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, InvalidTableError } from "./errors.js";
+import { AnnotationCellError, AnnotationRangeError, BlockNotFoundError, CardAnnotationError, InvalidCardError, InvalidTableError } from "./errors.js";
 import { findBlockElement, requireBlockText } from "./blocks.js";
 import { tableCellTexts, tableRows } from "./table.js";
+import { CARD_PARTS, cardPartTexts } from "./card.js";
+import type { CardPart } from "./card.js";
 import { COMMENT_MARK, isCommentMark } from "./types.js";
 import type {
   Annotation,
@@ -81,6 +27,7 @@ export interface CommentRun {
   /** Table projection coordinates; absent for a block-level text range. */
   row?: number;
   column?: number;
+  part?: CardPart;
   start: number;
   end: number;
 }
@@ -118,7 +65,11 @@ function commentRuns(texts: readonly Y.XmlText[]): CommentRun[] {
   return runs;
 }
 
-/** The editor and GFM projection concatenate adjacent shared texts in a cell. */
+/**
+ * Cell offsets concatenate adjacent texts, matching the editor and GFM.
+ * Insertions inside or at a marked span's end inherit its mark; insertions at
+ * its start stay outside. Deletions shrink the span without deleting its thread.
+ */
 function formatRange(
   texts: readonly Y.XmlText[],
   start: number,
@@ -139,7 +90,11 @@ function annotationTexts(element: Y.XmlElement): Array<{
   texts: Y.XmlText[];
   row?: number;
   column?: number;
+  part?: CardPart;
 }> {
+  if (element.nodeName === "card") {
+    return CARD_PARTS.map((part) => ({ texts: cardPartTexts(element, part), part }));
+  }
   if (element.nodeName !== "table") {
     return element.firstChild instanceof Y.XmlText ? [{ texts: [element.firstChild] }] : [];
   }
@@ -148,15 +103,17 @@ function annotationTexts(element: Y.XmlElement): Array<{
   );
 }
 
-/** The `comments` key on a thread's map: its conversation, in stored order. */
+/**
+ * Nested Y.Array replies merge independently of last-write-wins thread fields.
+ * Keep converged array order: createdAt sorting can invert replies under skew.
+ */
 const COMMENTS_FIELD = "comments";
 
 /** One thread as stored: its own Y.Map under its id in the annotations map. */
 type ThreadMap = Y.Map<unknown>;
 
 /**
- * A usable thread value. Any client can write into the annotations map, so a
- * value that is not this shape is skipped on read rather than trusted.
+ * Skip malformed foreign values rather than trusting the annotations map.
  */
 function isThreadMap(value: unknown): value is ThreadMap {
   return (
@@ -205,14 +162,9 @@ function threadMap(ydoc: Y.Doc, threadId: string): ThreadMap | null {
 }
 
 /**
- * Create an annotation thread over `[startIndex, endIndex)` of a block's text,
- * or a table cell's displayed text when `cell` supplies projection coordinates.
- *
- * Indices are clamped to the block's text length and swapped if reversed.
- *
- * @throws BlockNotFoundError when the block does not exist.
- * @throws AnnotationRangeError when the clamped range is empty, or when it
- * already carries another thread's mark.
+ * Clamp and order a half-open range in block text or one projected table cell.
+ * Empty ranges and overlaps are refused: Yjs and editor marks allow one thread
+ * per character, so another thread's anchor would be overwritten.
  */
 export function createAnnotation(
   ydoc: Y.Doc,
@@ -221,28 +173,35 @@ export function createAnnotation(
   endIndex: number,
   author: string,
   text: string,
-  cell?: { row: number; column: number },
+  target?: { row: number; column: number } | { part: CardPart },
 ): Annotation {
   const element = findBlockElement(ydoc, blockId);
   if (element === null) throw new BlockNotFoundError(blockId);
   let texts: Y.XmlText[];
   if (element.nodeName === "table") {
-    if (cell === undefined) throw new AnnotationCellError("missing", blockId);
+    if (target === undefined || !("row" in target)) throw new AnnotationCellError("missing", blockId);
+    const cell = target;
     const rows = tableRows(element);
     const width = Math.max(0, ...rows.map((row) => row.length));
     if (!Number.isSafeInteger(cell.row) || !Number.isSafeInteger(cell.column) ||
       cell.row < 0 || cell.row >= rows.length || cell.column < 0 || cell.column >= width) {
       throw new AnnotationCellError("out-of-bounds", blockId);
     }
-    const target = rows[cell.row]?.[cell.column];
-    texts = target === undefined ? [] : tableCellTexts(target);
+    const targetCell = rows[cell.row]?.[cell.column];
+    texts = targetCell === undefined ? [] : tableCellTexts(targetCell);
     // Embeds consume Yjs indices but are absent from the cell's displayed text
     // projection. Refuse rather than mark a different character than requested.
     if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
       throw new InvalidTableError();
     }
+  } else if (element.nodeName === "card") {
+    if (target === undefined || !("part" in target) || !CARD_PARTS.includes(target.part)) throw new CardAnnotationError(blockId);
+    texts = cardPartTexts(element, target.part);
+    if (texts.some((value) => (value.toDelta() as Array<{ insert?: unknown }>).some((op) => typeof op.insert !== "string"))) {
+      throw new InvalidCardError("The card part contains unsupported embedded content");
+    }
   } else {
-    if (cell !== undefined) throw new AnnotationCellError("not-table", blockId);
+    if (target !== undefined) throw new AnnotationCellError("not-table", blockId);
     texts = [requireBlockText(ydoc, element, blockId)];
   }
   const length = texts.reduce((total, value) => total + value.length, 0);
@@ -302,12 +261,8 @@ export function listAnnotationsForBlock(
 }
 
 /**
- * Every anchored range in one block, in document order, from a single delta
- * scan. This is what an editor wants: resolving threads one at a time rescans
- * the text for each.
- *
- * Returns marks as they exist in the text — including any whose thread is
- * gone, which is how an orphaned mark becomes visible.
+ * One scan returns document-order marks, including marks whose thread is gone.
+ * Resolve all ranges together to avoid rescanning once per thread.
  */
 export function listAnnotationRanges(
   ydoc: Y.Doc,
@@ -321,19 +276,14 @@ export function listAnnotationRanges(
 }
 
 /**
- * Resolve a thread's anchored range to indices in its block's current text,
- * or table-cell text with the cell's current projection coordinates.
- *
- * Returns null when the thread is unknown, when its block has been deleted, or
- * when its mark is no longer in the text because every annotated character was
- * deleted. The thread itself is never removed by any of those cases.
+ * Resolve current block or cell offsets. Unknown threads, deleted blocks and
+ * fully deleted spans return null; losing an anchor never deletes the thread.
  */
 export function resolveAnnotationRange(
   ydoc: Y.Doc,
   threadId: string,
 ): AnnotationRange | null {
-  // The stored map, not `getAnnotation`: a range needs the anchor block and
-  // nothing else, and this runs once per thread on every rail recompute.
+  // Range resolution needs no conversation materialization on each rail update.
   const thread = threadMap(ydoc, threadId);
   if (thread === null) return null;
 
@@ -344,12 +294,13 @@ export function resolveAnnotationRange(
   if (first === undefined) return null;
   // Foreign writers can copy marks into other cells. A cell thread still has
   // one cell's offset space, so resolve the first marked cell in reading order.
-  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column);
+  const sameCell = runs.filter((run) => run.row === first.row && run.column === first.column && run.part === first.part);
   const last = sameCell[sameCell.length - 1];
   if (last === undefined) return null;
 
   return {
     ...(first.row === undefined || first.column === undefined ? {} : { row: first.row, column: first.column }),
+    ...(first.part === undefined ? {} : { part: first.part }),
     start: first.start,
     end: last.end,
     collapsed: first.start === last.end,
@@ -357,12 +308,8 @@ export function resolveAnnotationRange(
 }
 
 /**
- * Append a comment to an existing thread. Returns the updated thread.
- *
- * One insert into the thread's own comments array and nothing else. Its
- * metadata key is not rewritten, so a reply cannot clobber a concurrent
- * `setAnnotationResolved` — and, the way round this exists to fix, two
- * concurrent replies are two inserts that both survive the merge.
+ * Insert only into the nested array: concurrent replies survive, and a reply
+ * cannot overwrite a concurrent resolved flag. Returns the updated thread.
  */
 export function addComment(
   ydoc: Y.Doc,
@@ -384,11 +331,8 @@ export function addComment(
 }
 
 /**
- * Mark a thread resolved or unresolved. The `comment` mark stays in the text —
- * a resolved thread is still anchored, so the editor can show it in place.
- *
- * Writes the one `resolved` key, not the whole thread, so resolving drops no
- * reply a concurrent replica was writing.
+ * Write only the resolved flag so concurrent replies survive. Keep the text
+ * mark so resolved threads remain anchored in the editor.
  */
 export function setAnnotationResolved(
   ydoc: Y.Doc,
@@ -404,15 +348,9 @@ export function setAnnotationResolved(
 }
 
 /**
- * Remove a thread: clear its `comment` mark from the text and drop the thread.
- * Returns true when something was removed.
- *
- * Dropping the key takes the conversation with it, as one subtree — which is
- * why a delete racing a concurrent reply or resolve cannot leave a thread
- * standing with its comments destroyed.
- *
- * Marks are cleared run by run, never as one span, so a foreign writer's
- * interleaved mark inside the range is left untouched.
+ * Delete the thread and nested conversation together, so a concurrent reply or
+ * resolve cannot retain a thread with a destroyed conversation. Clear only its
+ * mark runs, preserving foreign interleaved anchors. Returns whether it existed.
  */
 export function deleteAnnotation(ydoc: Y.Doc, threadId: string): boolean {
   const annotations = getAnnotationsMap(ydoc);

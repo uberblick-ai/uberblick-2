@@ -24,13 +24,13 @@ and delivery transitions.
 
 ## Packages
 
-| Package | What it is |
-| --- | --- |
-| `packages/schema` | The keystone: Yjs block model, Markdown import/export and block edits. |
-| `packages/hub` | Hocuspocus sync hub with SQLite persistence; binds `HUB_HOST`:`PORT`, default `127.0.0.1:1234`. |
-| `packages/mcp-server` | MCP stdio server, local SQLite mirror with FTS5, tags and backlinks, and block-scoped tools. |
-| `packages/web` | Vite, React and Tiptap/ProseMirror viewer/editor. |
-| `packages/cli` | The `ub` command line: configuration resolution, `ub status` and `ub mcp serve`. |
+| Package | Job | Ships in |
+| --- | --- | --- |
+| `packages/schema` | Yjs block model, Markdown import/export, block edits and the client-hub protocol and token contract. | Homebrew and the hub image. |
+| `packages/hub` | Hocuspocus rooms and SQLite persistence, with local shared-secret admission in the core and GitHub sign-in, device credentials, memberships and operator setup wired by the release entry points. | The core in Homebrew; the core and team features in the hub image. |
+| `packages/mcp-server` | MCP stdio server, local SQLite mirror with FTS5, tags, backlinks and block tools; shared clients for login, renewal and management, desktop storage and project configuration. | Homebrew. Its hub development preload runs only in a checkout. |
+| `packages/web` | Vite, React and Tiptap/ProseMirror viewer/editor. | Homebrew's local web app and the hub web image. |
+| `packages/cli` | The `ub` commands and local browser server. | Homebrew. |
 
 All five are private workspace packages and resolve to their TypeScript sources
 (`exports` → `./src/index.ts`). Nothing imports build output: `tsx`, `vite` and
@@ -241,12 +241,12 @@ existing state cannot stand in for what initialization should create.
 
 Every push to `main` and every pull request runs `.github/workflows/ci.yml`
 on GitHub: lint, typecheck, tests and browser e2e on Linux, and tests and browser
-e2e again on macOS. The checks `lint, typecheck and tests` and `macOS tests` are
-required to merge; the main ruleset accepts them only from GitHub Actions.
-`browser e2e` and `macOS browser e2e` are advisory. On `main` the same run
-records whether `main` itself is clean. A pull request's run uses that pull
-request's own recipe, so a change to what CI runs
-is reviewed as a change to the merge rules.
+e2e again on macOS. The checks `lint, typecheck and tests`, `macOS tests` and
+`browser e2e` are required to merge; the main ruleset accepts them only from
+GitHub Actions.
+`macOS browser e2e` is advisory. On `main` the same run records whether `main`
+itself is clean. A pull request's run uses that pull request's own recipe, so
+a change to what CI runs is reviewed as a change to the merge rules.
 
 GitHub Actions also retains release publishing and the Linux Homebrew upgrade
 proof after packaging changes. The latter runs after merges changing the formula

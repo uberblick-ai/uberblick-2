@@ -1,24 +1,22 @@
 /**
  * Startup contracts.
  *
- * A hub either comes up completely or not at all. Both ways of failing to come
- * up used to escape the promise `createHub` returns — the database is opened
- * from a Hocuspocus hook nobody awaits, and `Server.listen()` never watches the
- * HTTP server's `error` event — so a broken hub logged that it was listening and
- * then died, or took the process down with an uncaught `EADDRINUSE`.
+ * A hub either comes up completely or not at all. Database-open and bind
+ * failures must reject createHub without logging hub.listen or leaving resources.
  *
  * The bind address is here too: loopback by default is the hub's security model
  * while its only credential is one shared dev secret.
  *
  * And the handle itself: one `DatabaseSync` per hub, owned by `packages/hub`.
  * A second connection to the same file would be a second writer meeting the
- * first one's locks, so the workspace registry (#216) extends this one rather
+ * first one's locks, so the workspace registry extends this one rather
  * than opening its own — which only holds if startup opens exactly one.
  */
 
 import { dirname } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_HOST, resolveHubConfig } from "../src/config.js";
+import { DEFAULT_HOST, resolveCoreHubConfig } from "../src/config.js";
+import { createHub } from "../src/server.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
 import { removeTempDatabases, startHub, tempDatabasePath } from "./helpers.js";
@@ -52,21 +50,24 @@ describe("bind address", () => {
   it("is loopback unless HUB_HOST says otherwise", () => {
     const env = { HUB_AUTH_TOKEN: "secret" };
 
-    expect(resolveHubConfig(env).address).toBe(DEFAULT_HOST);
-    expect(resolveHubConfig({ ...env, HUB_HOST: "  " }).address).toBe(
+    expect(resolveCoreHubConfig(env, ":memory:").address).toBe(DEFAULT_HOST);
+    expect(resolveCoreHubConfig({ ...env, HUB_HOST: "  " }, ":memory:").address).toBe(
       DEFAULT_HOST,
     );
     // Exposing the hub to the network is a deliberate act, never a default.
-    expect(resolveHubConfig({ ...env, HUB_HOST: "0.0.0.0" }).address).toBe(
+    expect(resolveCoreHubConfig({ ...env, HUB_HOST: "0.0.0.0" }, ":memory:").address).toBe(
       "0.0.0.0",
     );
   });
 });
 
 describe("createHub", () => {
+  it("requires its embedding client to supply the database path", async () => {
+    await expect(createHub({ authSecret: "secret", port: 0 })).rejects.toThrow(/databasePath/);
+    await expect(createHub({ authSecret: "secret", port: 0, databasePath: "  " })).rejects.toThrow(/databasePath/);
+  });
   it("rejects without listening when the database cannot be opened", async () => {
-    // A directory is not a database — the shape of the mistake that used to
-    // produce a listening hub and then an unhandled SQLITE_CANTOPEN.
+    // A directory cannot be opened as SQLite; reject before binding the socket.
     const directory = dirname(tempDatabasePath());
     const records: HubLogRecord[] = [];
 
@@ -126,7 +127,7 @@ describe("createHub", () => {
     expect(Object.keys(entry)).not.toContain("HubDatabase");
 
     // The seam is a live handle or nothing: after the close it must fail
-    // loudly, never hand #216's registry a database that is already shut.
+    // loudly, never hand a registry a database that is already shut.
     const { HubDatabase } = await import("../src/persistence.js");
     const owned = new HubDatabase(tempDatabasePath(), () => {});
     owned.open();

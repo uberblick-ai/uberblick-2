@@ -1,5 +1,5 @@
 /**
- * The terminal block: a transcript that plays itself (#843).
+ * The terminal block: a transcript that plays itself.
  *
  * Four families of contract, and the first one is the reason the other three
  * are allowed to exist at all.

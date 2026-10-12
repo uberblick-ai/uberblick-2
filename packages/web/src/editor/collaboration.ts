@@ -1,14 +1,7 @@
 /**
- * The collaboration binding: y-prosemirror plugins over a schema-owned fragment.
- *
- * The fragment is passed in, and it is always `getBlocksFragment(ydoc)` — the
- * `blocks` Y.XmlFragment, **not** the Y.Doc's default fragment. y-prosemirror's
- * examples bind `ydoc.getXmlFragment('prosemirror')`; binding that here would
- * create a fifth root type the schema package knows nothing about, and the
- * document would look empty to every other client.
- *
- * Plugin order matters and is not arbitrary: `yCursorPlugin` and `yUndoPlugin`
- * both read `ySyncPluginKey`'s state, so the sync plugin must come first.
+ * Bind only the schema-owned blocks fragment; a default prosemirror fragment
+ * would create an unread root. Put ySync before cursor and undo plugins because
+ * both read its state.
  */
 
 import { Extension } from "@tiptap/core";
@@ -25,22 +18,10 @@ import type * as Y from "yjs";
 import { AGENT_CLIENT } from "../collab/identity.js";
 
 /**
- * How long a departed agent's caret and title avatar stay after its session
- * left the room (ms).
- *
- * An MCP client that writes one block and exits is gone from awareness within
- * milliseconds of the tool response, so the caret that says *who* wrote is on
- * screen for less time than it takes to look at it (#304). The five seconds
- * that first bought was still gone before the owner had looked at it, so this
- * is the thirty the MCP server already gives a *connected* agent's cursor
- * (`cursorTtlMs`, #407): one lifetime to learn, whichever way the session ends.
- *
- * The two clocks compose rather than coincide — the server's runs from the last
- * write while a session is connected, this one from the moment it leaves — so
- * an agent that writes, lingers and then exits is drawn for up to the sum.
- * Mistaking it for presence is ruled out elsewhere, not by the number: the
- * title avatar is muted and labelled as left. Connection counts and the sync
- * panel's Present now list still read the real awareness states.
+ * Retain a departed agent cursor and title avatar for 30 seconds from departure.
+ * The connected cursor TTL starts at its last write, so these clocks can add.
+ * Retained avatars are muted and marked left; live connection/presence counts
+ * continue to use real awareness.
  */
 export const AGENT_CURSOR_GRACE_MS = 30_000;
 
@@ -69,20 +50,20 @@ type AwarenessState = Record<string, unknown> & {
   user?: { name?: unknown };
   cursor?: unknown;
   client?: unknown;
+  session?: unknown;
 };
 
+function agentSession(state: AwarenessState): string | undefined {
+  return state.client === AGENT_CLIENT &&
+    typeof state.session === "string" &&
+    state.session !== ""
+    ? state.session
+    : undefined;
+}
+
 /**
- * Whether this state is an agent caret worth holding onto: the agent marker, a
- * cursor, and a name to write beside it.
- *
- * The name is part of the test, not an afterthought: a caret retained without
- * one would draw a bare line over the prose saying nothing about who left it,
- * which is the opposite of what the grace period exists for. The marker is
- * required *positively* (#564): the grace exists for agents, and a session that
- * merely omits `client` — a browser tab on a bundle from before #267, or any
- * future non-agent client — is not one. Held on omission, a person who closed
- * their tab kept a caret over the prose under their own name for the full
- * grace, which is the opposite of the rule that a reader who leaves is *gone*.
+ * Retain only positively marked agent sessions with a cursor and nonempty name.
+ * An omitted client marker must not retain a departing person's cursor.
  */
 function isAttributedAgentCursor(
   state: AwarenessState | undefined,
@@ -94,22 +75,11 @@ function isAttributedAgentCursor(
 }
 
 /**
- * A read-only view of `awareness` that keeps a departed agent's last cursor for
- * {@link AGENT_CURSOR_GRACE_MS}, so the caret and its label survive the session
- * that drew them.
- *
- * A *view*, deliberately: the retained state is never written back into the
- * awareness instance the rest of the app reads. The title cluster shares this
- * view and labels retained sessions as left; connection counts and Present now
- * read real states. Nothing is republished, no transport is held open,
- * and nothing reaches the Y.Doc; a reload starts with an empty map.
- *
- * Only the members the cursor plugin and title presence reader use are
- * implemented, hence the cast at the end. Expiry reaches their `change`
- * listeners; every other event is passed straight through.
- *
- * Exported so the grace can be driven on fake timers without an editor and a
- * hub in the way; production readers share {@link agentCursorAwareness}.
+ * Retain departed agent cursors locally; never publish retained state, hold a
+ * transport open or write it to the document. Reload starts empty. The title
+ * cluster shares this view; connection counts and Present now use real states.
+ * Expiry emits change; other events pass through. Implement only the members
+ * used by the cursor plugin and title presence reader.
  */
 export function withDepartedAgentCursors(
   awareness: Awareness,
@@ -123,8 +93,12 @@ export function withDepartedAgentCursors(
   }
 
   const listeners = new Set<Listener>();
-  /** The last attributed cursor seen from each live agent session. */
-  const lastSeen = new Map<number, AwarenessState>();
+  /** Last live agent states also identify cursorless reconnect departures. */
+  const lastSeen = new Map<
+    number,
+    { state: AwarenessState; cursor: string | undefined; cursorOrder: number }
+  >();
+  let nextCursorOrder = 0;
   /** Departed sessions still being drawn, and the timer that ends each. */
   const retained = new Map<
     number,
@@ -135,45 +109,98 @@ export function withDepartedAgentCursors(
     for (const listener of [...listeners]) listener(change);
   };
 
-  const forget = (clientId: number): void => {
+  const forget = (clientId: number): boolean => {
     const held = retained.get(clientId);
-    if (held === undefined) return;
+    if (held === undefined) return false;
     clearTimeout(held.timer);
     retained.delete(clientId);
+    return true;
   };
 
   /**
-   * Re-read every live state, so a departure has something to hold onto.
-   *
-   * Every state, not only the ones a change names: an agent already in the room
-   * when this editor opened is in no `added` list, and that is the ordinary
-   * case — a reader opening a document an agent is writing.
+   * Read all live states, including agents present before subscription, so their
+   * departure has an attributed cursor to retain.
    */
-  const remember = (): void => {
+  const remember = (removed: Set<number>): void => {
     const states = awareness.getStates() as Map<number, AwarenessState>;
     for (const [clientId, state] of states) {
-      // A live state always wins: this peer is here, and whatever it is
-      // pointing at now is the truth — a retained caret must never overwrite
-      // it, nor come back once the peer has spoken again.
-      forget(clientId);
-      if (isAttributedAgentCursor(state)) lastSeen.set(clientId, state);
-      else lastSeen.delete(clientId);
+      const previous = lastSeen.get(clientId);
+      const session = agentSession(state);
+      const cursor = JSON.stringify(state.cursor);
+      const newCaret =
+        isAttributedAgentCursor(state) &&
+        (previous === undefined ||
+          !isAttributedAgentCursor(previous.state) ||
+          previous.cursor !== cursor ||
+          agentSession(previous.state) !== session);
+      if (forget(clientId)) removed.add(clientId);
+      // Re-reading an unchanged concurrent caret must not erase a later
+      // departure; only a newly observed live caret supersedes it.
+      if (session !== undefined && newCaret) {
+        for (const [heldId, held] of retained) {
+          if (agentSession(held.state) === session && forget(heldId)) {
+            removed.add(heldId);
+          }
+        }
+      }
+      if (state.client === AGENT_CLIENT) {
+        lastSeen.set(clientId, {
+          state,
+          cursor,
+          cursorOrder: newCaret ? ++nextCursorOrder : previous?.cursorOrder ?? 0,
+        });
+      } else lastSeen.delete(clientId);
     }
   };
 
   const onChange = (change: Change): void => {
-    remember();
+    const removed = new Set(change.removed);
+    remember(removed);
     for (const clientId of change.removed) {
-      const departed = lastSeen.get(clientId);
+      const seen = lastSeen.get(clientId);
       lastSeen.delete(clientId);
-      if (departed === undefined) continue;
+      if (seen === undefined) continue;
+      const departed = seen.state;
+      const session = agentSession(departed);
+      if (
+        session !== undefined &&
+        isAttributedAgentCursor(departed) &&
+        [...lastSeen].some(
+          ([liveId, live]) =>
+            awareness.getStates().has(liveId) &&
+            agentSession(live.state) === session &&
+            isAttributedAgentCursor(live.state) &&
+            live.cursorOrder > seen.cursorOrder,
+        )
+      ) {
+        continue;
+      }
+      const previous =
+        session === undefined
+          ? undefined
+          : [...retained].find(([, held]) => agentSession(held.state) === session);
+      let retainedId = clientId;
+      let state = departed;
+      if (!isAttributedAgentCursor(departed)) {
+        if (previous === undefined) continue;
+        // A reconnect may leave without writing. Its last departure still
+        // starts the grace for the session's earlier named caret.
+        [retainedId] = previous;
+        state = previous[1].state;
+      }
+      if (previous !== undefined) {
+        const [previousId] = previous;
+        forget(previousId);
+        if (previousId !== retainedId) removed.add(previousId);
+      }
+      forget(retainedId);
       const timer = setTimeout(() => {
-        retained.delete(clientId);
-        announce({ added: [], updated: [], removed: [clientId] });
+        retained.delete(retainedId);
+        announce({ added: [], updated: [], removed: [retainedId] });
       }, graceMs);
-      retained.set(clientId, { state: departed, timer });
+      retained.set(retainedId, { state, timer });
     }
-    announce(change);
+    announce({ ...change, removed: [...removed] });
   };
 
   return {
@@ -197,11 +224,9 @@ export function withDepartedAgentCursors(
         awareness.on(event, listener);
         return;
       }
-      // Subscribed for exactly as long as somebody is watching. An editor
-      // rebind cannot reset the title's lifetime; leaving the document takes
-      // both readers away and clears every retained state and timer.
+      // Editor rebinds share the title's lifetime; the last reader clears timers.
       if (listeners.size === 0) {
-        remember();
+        remember(new Set());
         awareness.on("change", onChange);
       }
       listeners.add(listener);
@@ -216,6 +241,7 @@ export function withDepartedAgentCursors(
       awareness.off("change", onChange);
       for (const clientId of [...retained.keys()]) forget(clientId);
       lastSeen.clear();
+      nextCursorOrder = 0;
     },
   } as unknown as AgentCursorAwareness;
 }

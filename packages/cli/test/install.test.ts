@@ -30,15 +30,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { afterAll, describe, expect, it } from "vitest";
 import { INSTALL_HELP } from "../src/install.js";
 import { doctorEntry } from "../src/mcp-config.js";
-import {
-  type Sandbox,
-  type SandboxFiles,
-  UB_BIN,
-  removeTempDirs,
-  runUb,
-  sandbox as boundSandbox,
-  unboundSandbox,
-} from "./helpers.js";
+import { type Sandbox, type SandboxFiles, UB_BIN, removeTempDirs, sandbox as boundSandbox, unboundSandbox } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterAll(removeTempDirs);
 
@@ -156,10 +149,10 @@ function entrySnippet(program: string): string {
 }
 
 describe("ub mcp install --print", () => {
-  it("prints a snippet for the named target and touches no file", () => {
+  it("prints a snippet for the named target and touches no file", async () => {
     const box = sandbox();
 
-    const claude = runUb(["mcp", "install", "claude", "--print"], box);
+    const claude = await runInProcess(["mcp", "install", "claude", "--print"], box);
     expect(claude.status).toBe(0);
     expect(claude.stdout).toBe(entrySnippet("claude"));
     expect(claude.stderr).toContain(join(box.cwd, ".mcp.json"));
@@ -167,7 +160,7 @@ describe("ub mcp install --print", () => {
 
     // Codex's file is TOML, so the snippet has to be TOML — a JSON snippet
     // would be a valid-looking answer that silently does not work.
-    const codex = runUb(["mcp", "install", "codex", "--user", "--print"], box, {
+    const codex = await runInProcess(["mcp", "install", "codex", "--user", "--print"], box, {
       CODEX_HOME: codexHome(box),
     });
     expect(codex.status).toBe(0);
@@ -176,19 +169,19 @@ describe("ub mcp install --print", () => {
     );
   });
 
-  it("answers for a client it does not know, and writes nothing", () => {
+  it("answers for a client it does not know, and writes nothing", async () => {
     // `--print` is the documented answer for any client not on the list, so it
     // has to work *without* a known target rather than rejecting the name.
     const box = sandbox();
-    const run = runUb(["mcp", "install", "zed", "--print"], box);
+    const run = await runInProcess(["mcp", "install", "zed", "--print"], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toBe(entrySnippet("zed"));
     expect(run.stderr).toMatch(/not a client/);
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
-  it("names the targets, and points an unlisted client at --print", () => {
-    const run = runUb(["mcp", "install", "emacs"], sandbox());
+  it("names the targets, and points an unlisted client at --print", async () => {
+    const run = await runInProcess(["mcp", "install", "emacs"], sandbox());
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
     expect(run.stderr).toMatch(/claude, codex\./);
@@ -259,11 +252,11 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     },
   ];
 
-  it.each(CELLS)("delegates $what", ({ program, argv, expected }) => {
+  it.each(CELLS)("delegates $what", async ({ program, argv, expected }) => {
     const box = sandbox();
     const nested = subfolder(box);
     const stub = stubVendor(box, program);
-    const run = runUb(argv, nested, {
+    const run = await runInProcess(argv, nested, {
       ...stub.env,
       CODEX_HOME: codexHome(box),
       UB_WORKSPACE_ID: "invalid-ambient-workspace",
@@ -281,13 +274,13 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(existsSync(join(box.cwd, ".mcp.json"))).toBe(false);
   });
 
-  it("points codex at the configuration directory the scope means", () => {
+  it("points codex at the configuration directory the scope means", async () => {
     // `codex mcp add` has no scope flag: which file it writes *is* CODEX_HOME,
     // so project scope has to hand it the checkout's own directory — the same
     // one this command then reports and probes.
     const box = sandbox();
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex"], box, {
+    const run = await runInProcess(["mcp", "install", "codex"], box, {
       ...stub.env,
       CODEX_HOME: codexHome(box),
     });
@@ -299,10 +292,10 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.stdout).toContain(join(".codex", "config.toml"));
   });
 
-  it("reports the command, target, project file and restart after registration", () => {
+  it("reports the command, target, project file and restart after registration", async () => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
-    const run = runUb(
+    const run = await runInProcess(
       ["mcp", "install", "claude"],
       box,
       stub.env,
@@ -317,7 +310,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(run.output).not.toMatch(/pin/i);
   });
 
-  it.each(CELLS)("prints the entry for a failed $what without repeating its output", ({ program, argv, file }) => {
+  it.each(CELLS)("prints the entry for a failed $what without repeating its output", async ({ program, argv, file }) => {
     // A client's own diagnostics quote the config it just read, so relaying
     // them would walk straight past everything this command refuses to print.
     const box = sandbox();
@@ -329,7 +322,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       `echo "conflict in config: API_TOKEN=${SECRET}" >&2\necho "${SECRET}"\nexit 1\n`,
     );
 
-    const run = runUb(argv, nested, { ...stub.env, CODEX_HOME: home });
+    const run = await runInProcess(argv, nested, { ...stub.env, CODEX_HOME: home });
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
     expect(run.output).not.toContain(SECRET);
@@ -343,14 +336,14 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(existsSync(join(nested.cwd, ".mcp.json"))).toBe(false);
   });
 
-  it.each(["claude", "codex"])("prints the entry when %s mcp add is killed by a signal", (program) => {
+  it.each(["claude", "codex"])("prints the entry when %s mcp add is killed by a signal", async (program) => {
     const box = sandbox();
     const stub = stubVendor(
       box,
       program,
       `echo "${SECRET}" >&2\necho "${SECRET}"\nkill -TERM $$\n`,
     );
-    const run = runUb(["mcp", "install", program], box, stub.env);
+    const run = await runInProcess(["mcp", "install", program], box, stub.env);
 
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
@@ -363,12 +356,12 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
-  it.each(["claude", "codex"])("prints the entry when %s mcp add cannot start", (program) => {
+  it.each(["claude", "codex"])("prints the entry when %s mcp add cannot start", async (program) => {
     const box = sandbox();
     const stub = stubVendor(box, program);
     // A non-executable file on PATH is distinct from a missing program.
     chmodSync(join(stub.env.PATH as string, program), 0o644);
-    const run = runUb(["mcp", "install", program], box, stub.env);
+    const run = await runInProcess(["mcp", "install", program], box, stub.env);
 
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
@@ -381,7 +374,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
-  it("hands the vendor no variable of uberblick's own", () => {
+  it("hands the vendor no variable of uberblick's own", async () => {
     // `ub` is habitually run with a signing secret and an endpoint exported —
     // that is exactly what `fnox exec` does — and a child inherits whatever it
     // is handed. A vendor CLI has no use for either, and a client that records
@@ -399,7 +392,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
       WORKSPACES: "one,two",
     };
 
-    const run = runUb(["mcp", "install", "claude"], box, {
+    const run = await runInProcess(["mcp", "install", "claude"], box, {
       ...stub.env,
       ...ours,
     });
@@ -417,11 +410,11 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(received).not.toContain(SECRET);
   });
 
-  it.each(CELLS)("prints the entry for missing $what and leaves nothing behind", ({ program, argv, file }) => {
+  it.each(CELLS)("prints the entry for missing $what and leaves nothing behind", async ({ program, argv, file }) => {
     const box = sandbox();
     const nested = subfolder(box);
     const home = codexHome(box);
-    const run = runUb(argv, nested, { ...NO_VENDOR, CODEX_HOME: home });
+    const run = await runInProcess(argv, nested, { ...NO_VENDOR, CODEX_HOME: home });
     expect(run.status).toBe(1);
     expect(run.stdout).toBe(entrySnippet(program));
     expect(run.stderr).toContain(`\`${program}\` is not installed`);
@@ -435,7 +428,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     expect(existsSync(join(nested.cwd, ".mcp.json"))).toBe(false);
   });
 
-  it.each(["missing", "failed"])("leaves a `.codex` it did not create when the vendor is %s", (ending) => {
+  it.each(["missing", "failed"])("leaves a `.codex` it did not create when the vendor is %s", async (ending) => {
     // "Writes nothing" has to include taking nothing away. An empty `.codex` a
     // checkout already had is still somebody's state — and whether this run is
     // the one that made the directory is the only thing that decides it.
@@ -445,7 +438,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
     mkdirSync(dir, { recursive: true });
 
     const env = ending === "missing" ? NO_VENDOR : stubVendor(box, "codex", "exit 1\n").env;
-    const run = runUb(["mcp", "install", "codex"], nested, env);
+    const run = await runInProcess(["mcp", "install", "codex"], nested, env);
     expect(run.status, run.output).toBe(1);
     expect(run.stdout).toBe(entrySnippet("codex"));
     expect(existsSync(dir)).toBe(true);
@@ -454,7 +447,7 @@ describe("ub mcp install, and the vendor's own CLI", () => {
 });
 
 describe("ub mcp install, and what is registered already", () => {
-  it.each([undefined, {}])("recognises a plain entry with env %j and runs nothing", (env) => {
+  it.each([undefined, {}])("recognises a plain entry with env %j and runs nothing", async (env) => {
     // Claude's vendor-generated plain entry can include an empty env object.
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
@@ -470,7 +463,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude"], box, {
+    const run = await runInProcess(["mcp", "install", "claude"], box, {
       ...stub.env,
       UB_WORKSPACE_ID: "invalid-ambient-workspace",
       UB_HUB_URL: "invalid-ambient-hub",
@@ -519,7 +512,7 @@ describe("ub mcp install, and what is registered already", () => {
       what: "an empty env subtable separated by another table",
       before: entrySnippet("codex") + '[other]\nenabled = true\n[mcp_servers.uberblick.env]\n',
     },
-  ])("recognises the plain Codex entry from $what and runs nothing", ({ before }) => {
+  ])("recognises the plain Codex entry from $what and runs nothing", async ({ before }) => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
@@ -527,7 +520,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "entry", env: {} });
     const stub = stubVendor(box, "codex");
 
-    const run = runUb(
+    const run = await runInProcess(
       ["mcp", "install", "codex", "--user"],
       box,
       { ...stub.env, CODEX_HOME: home },
@@ -541,7 +534,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("protects a differing Codex entry under a quoted and spaced header", () => {
+  it("protects a differing Codex entry under a quoted and spaced header", async () => {
     // Alternate TOML spelling must not hide somebody else's command or env
     // from the protection against a duplicate add replacing their entry.
     const box = sandbox();
@@ -553,7 +546,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "codex");
 
-    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, {
       ...stub.env,
       CODEX_HOME: home,
     });
@@ -590,14 +583,14 @@ describe("ub mcp install, and what is registered already", () => {
     },
   ];
 
-  it.each(UNHEADED)("refuses $what", ({ before }) => {
+  it.each(UNHEADED)("refuses $what", async ({ before }) => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "codex");
 
-    const run = runUb(["mcp", "install", "codex", "--user"], box, {
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, {
       ...stub.env,
       CODEX_HOME: home,
     });
@@ -622,14 +615,14 @@ describe("ub mcp install, and what is registered already", () => {
     ...[`"${SECRET}"`, "[]", "1979-05-27", "07:32:00"].map((value) => ({
       what: `non-table server ${value}`, text: `[mcp_servers]\nuberblick = ${value}\n`,
     })),
-  ])("protects Codex config with $what", ({ text }) => {
+  ])("protects Codex config with $what", async ({ text }) => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
     const before = `private_token = "${SECRET}"\n${text}`;
     writeFileSync(path, before);
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(run.stdout).toBe(entrySnippet("codex"));
@@ -647,7 +640,7 @@ describe("ub mcp install, and what is registered already", () => {
     ...[`"${SECRET}"`, "[]", "1979-05-27", "07:32:00"].map((value) => ({
       what: `non-table mcp_servers ${value}`, text: `mcp_servers = ${value}\n`,
     })),
-  ])("refuses unusable Codex config with $what without quoting it", ({ text }) => {
+  ])("refuses unusable Codex config with $what without quoting it", async ({ text }) => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
@@ -655,7 +648,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before);
     expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "unusable" });
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
     expect(run.status, run.output).toBe(1);
     expect(run.stderr).toContain(path);
     expect(run.stderr).toMatch(/could not be read/);
@@ -666,7 +659,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("adds Codex's absent entry despite an apparent header inside unrelated multiline settings", () => {
+  it("adds Codex's absent entry despite an apparent header inside unrelated multiline settings", async () => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
@@ -675,7 +668,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before);
     expect(doctorEntry({ path, format: "toml" })).toEqual({ status: "absent" });
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
     expect(run.status, run.output).toBe(0);
     expect(read(stub.record).trimEnd().split("\n")).toEqual([
       "mcp", "add", "uberblick", "--", "ub", "mcp", "serve",
@@ -684,7 +677,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(read(path)).toBe(before);
   });
 
-  it("refuses an entry it did not write, prints the snippet, and quotes nothing", () => {
+  it("refuses an entry it did not write, prints the snippet, and quotes nothing", async () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
     const before = `${JSON.stringify(
@@ -704,7 +697,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(path);
     expect(run.stderr).toMatch(
@@ -720,7 +713,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("refuses a target file it cannot read, rather than delegating over it", () => {
+  it("refuses a target file it cannot read, rather than delegating over it", async () => {
     // Reading this as "absent" would mean "go ahead" — and going ahead points
     // `claude mcp add` at a file this could not read, which it loads and
     // rewrites. Nothing of it comes back out, not even a parser's complaint.
@@ -730,7 +723,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain(path);
     expect(run.stderr).toMatch(/could not be read/);
@@ -741,7 +734,7 @@ describe("ub mcp install, and what is registered already", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("does not call an entry ours when its `env` is not an environment", () => {
+  it("does not call an entry ours when its `env` is not an environment", async () => {
     // `null`, `[]`, `""`, a number: all of them have no entries to compare, and
     // an entry whose environment this cannot read is not one it understands.
     const box = sandbox();
@@ -758,7 +751,7 @@ describe("ub mcp install, and what is registered already", () => {
     writeFileSync(path, before, "utf8");
     const stub = stubVendor(box, "claude");
 
-    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(read(path)).toBe(before);
@@ -770,7 +763,7 @@ describe("ub mcp install cursor", () => {
   it.each([
     { scope: "default", args: [] },
     { scope: "user", args: ["--user"] },
-  ])("rejects $scope scope before running a client or writing anything", ({ args }) => {
+  ])("rejects $scope scope before running a client or writing anything", async ({ args }) => {
     const box = sandbox();
     const claude = stubVendor(box, "claude");
     const codex = stubVendor(box, "codex");
@@ -780,7 +773,7 @@ describe("ub mcp install cursor", () => {
     const root = join(box.cwd, "..");
     const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    const run = runUb(["mcp", "install", "cursor", ...args], box, {
+    const run = await runInProcess(["mcp", "install", "cursor", ...args], box, {
       ...claude.env,
       PATH: [claude.env.PATH, codex.env.PATH, cursor.env.PATH].join(":"),
     });
@@ -797,7 +790,7 @@ describe("ub mcp install cursor", () => {
     expect(read(bindingPath)).toBe(bindingBefore);
   });
 
-  it("prints the same generic entry as zed without consulting any client config", () => {
+  it("prints the same generic entry as zed without consulting any client config", async () => {
     const box = sandbox();
     const home = box.env.HOME as string;
     const paths = [
@@ -814,8 +807,8 @@ describe("ub mcp install cursor", () => {
     const root = join(box.cwd, "..");
     const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    const cursor = runUb(["mcp", "install", "cursor", "--print"], box, stub.env);
-    const zed = runUb(["mcp", "install", "zed", "--print"], box, stub.env);
+    const cursor = await runInProcess(["mcp", "install", "cursor", "--print"], box, stub.env);
+    const zed = await runInProcess(["mcp", "install", "zed", "--print"], box, stub.env);
 
     expect(cursor.status, cursor.output).toBe(0);
     expect(zed.status, zed.output).toBe(0);
@@ -839,7 +832,7 @@ describe("ub mcp install requires a client", () => {
     { args: ["--print"] },
     { args: ["--user"] },
     { args: ["--user", "--print"] },
-  ])("refuses options without a client: $args", ({ args }) => {
+  ])("refuses options without a client: $args", async ({ args }) => {
     const box = sandbox();
     const stub = stubVendor(box, "claude");
     const bindingPath = join(box.cwd, ".uberblick.json");
@@ -847,7 +840,7 @@ describe("ub mcp install requires a client", () => {
     const root = join(box.cwd, "..");
     const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    const run = runUb(["mcp", "install", ...args], box, stub.env);
+    const run = await runInProcess(["mcp", "install", ...args], box, stub.env);
 
     expect(run.status, run.output).toBe(2);
     expect(run.stdout).toBe("");
@@ -877,7 +870,7 @@ describe("ub mcp install rejects removed arguments", () => {
     ["--print", "--", "foo"],
   ];
 
-  it.each(REMOVED)("refuses %j before running a client or writing anything", (...args) => {
+  it.each(REMOVED)("refuses %j before running a client or writing anything", async (...args) => {
     const box = sandbox();
     const stub = stubVendor(box, "codex");
     const bindingPath = join(box.cwd, ".uberblick.json");
@@ -885,7 +878,7 @@ describe("ub mcp install rejects removed arguments", () => {
     const root = join(box.cwd, "..");
     const filesBefore = readdirSync(root, { recursive: true }).sort();
 
-    const run = runUb(["mcp", "install", ...args], box, stub.env);
+    const run = await runInProcess(["mcp", "install", ...args], box, stub.env);
 
     expect(run.status, run.output).toBe(2);
     expect(run.stdout).toBe("");
@@ -908,13 +901,13 @@ describe("binding-independent MCP registration", () => {
     { WORKSPACE_ID: OTHER, HUB_URL: "https://legacy.example.test", WORKSPACES: "one,two" },
   ];
 
-  it.each(AMBIENT)("prints only the plain entry with shell selectors %j", (env) => {
+  it.each(AMBIENT)("prints only the plain entry with shell selectors %j", async (env) => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const nested = subfolder(box);
     const bindingPath = join(box.cwd, ".uberblick.json");
     const before = read(bindingPath);
     for (const target of ["claude", "codex"]) {
-      const run = runUb(["mcp", "install", target, "--print"], nested, env);
+      const run = await runInProcess(["mcp", "install", target, "--print"], nested, env);
       expect(run.status, run.output).toBe(0);
       if (target === "codex") {
         expect(run.stdout).toBe('[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n');
@@ -935,7 +928,7 @@ describe("binding-independent MCP registration", () => {
     expect(existsSync(join(box.cwd, ".codex"))).toBe(false);
   });
 
-  it.each(["project", "user"])("registers %s scope without creating a binding", (scope) => {
+  it.each(["project", "user"])("registers %s scope without creating a binding", async (scope) => {
     // A legacy machine default is neither needed nor adopted by installation.
     const box = unboundSandbox({ userConfig: {
       workspace: WORKSPACE, hubUrl: "wss://old-hub.example.test/ws",
@@ -943,7 +936,7 @@ describe("binding-independent MCP registration", () => {
     const configPath = join(box.configHome, "uberblick", "config.json");
     const before = read(configPath);
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude", ...(scope === "user" ? ["--user"] : [])], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude", ...(scope === "user" ? ["--user"] : [])], box, stub.env);
 
     expect(run.status, run.output).toBe(0);
     expect(read(stub.record).trimEnd().split("\n")).toEqual([
@@ -967,11 +960,11 @@ describe("binding-independent MCP registration", () => {
   });
 
   it.each(["{ not json", '{"workspaceId":"invalid","hubUrl":null}'])(
-    "registers project scope without changing an invalid binding %s", (raw) => {
+    "registers project scope without changing an invalid binding %s", async (raw) => {
       const box = unboundSandbox({ raw: { projectBinding: raw } });
       const stub = stubVendor(box, "claude");
       const path = join(box.cwd, ".uberblick.json");
-      const run = runUb(["mcp", "install", "claude"], box, stub.env);
+      const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
       expect(run.status, run.output).toBe(0);
       expect(existsSync(stub.record)).toBe(true);
       expect(run.stdout).toContain(join(box.cwd, ".mcp.json"));
@@ -982,7 +975,7 @@ describe("binding-independent MCP registration", () => {
     },
   );
 
-  it.each(["claude", "codex"])("registers %s beside the nearest valid ancestor binding", (program) => {
+  it.each(["claude", "codex"])("registers %s beside the nearest valid ancestor binding", async (program) => {
     const box = sandbox();
     const path = join(box.cwd, ".uberblick.json");
     const before = read(path);
@@ -992,7 +985,7 @@ describe("binding-independent MCP registration", () => {
     const destination = program === "codex" ? '"$CODEX_HOME/config.toml"' : ".mcp.json";
     const stub = stubVendor(box, program,
       `printf '%s\\n' '${entrySnippet(program).trimEnd()}' > ${destination}\n`);
-    const run = runUb(["mcp", "install", program], nested, {
+    const run = await runInProcess(["mcp", "install", program], nested, {
       ...stub.env, UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "invalid-ambient-hub",
     });
 
@@ -1011,7 +1004,7 @@ describe("binding-independent MCP registration", () => {
   });
 
   it.each(["plain", "foreign", "malformed", "unreadable"])(
-    "checks a %s config at the binding root before running any client", (held) => {
+    "checks a %s config at the binding root before running any client", async (held) => {
       for (const program of ["claude", "codex"]) {
         const box = sandbox();
         const nested = subfolder(box);
@@ -1024,7 +1017,7 @@ describe("binding-independent MCP registration", () => {
         if (held === "unreadable") mkdirSync(file);
         else writeFileSync(file, before);
         const stub = stubVendor(box, program);
-        const run = runUb(["mcp", "install", program], nested, stub.env);
+        const run = await runInProcess(["mcp", "install", program], nested, stub.env);
 
         expect(run.status, run.output).toBe(held === "plain" ? 0 : 1);
         expect(run.output).toContain(file);
@@ -1040,7 +1033,7 @@ describe("binding-independent MCP registration", () => {
   );
 
   it.each(["missing", "malformed", "invalid"])(
-    "registers in the current subfolder with a %s nearest binding", (binding) => {
+    "registers in the current subfolder with a %s nearest binding", async (binding) => {
       for (const program of ["claude", "codex"]) {
         const box = binding === "missing" ? unboundSandbox() : sandbox();
         const nested = subfolder(box);
@@ -1049,7 +1042,7 @@ describe("binding-independent MCP registration", () => {
           : '{"workspaceId":"invalid","hubUrl":null}';
         if (binding !== "missing") writeFileSync(path, raw);
         const stub = stubVendor(box, program);
-        const run = runUb(["mcp", "install", program], nested, {
+        const run = await runInProcess(["mcp", "install", program], nested, {
           ...stub.env, ...LOCAL_BINDING_ENV,
         });
         const file = program === "codex"
@@ -1076,7 +1069,7 @@ describe("binding-independent MCP registration", () => {
     { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "wss://manual.example.test/ws" },
     { WORKSPACE_ID: WORKSPACE },
     { API_TOKEN: SECRET },
-  ])("protects an existing entry with nonempty env %j", (env) => {
+  ])("protects an existing entry with nonempty env %j", async (env) => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
     const before = JSON.stringify({ mcpServers: {
@@ -1085,7 +1078,7 @@ describe("binding-independent MCP registration", () => {
     } });
     writeFileSync(path, before);
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(JSON.parse(run.stdout)).toEqual({ mcpServers: {
@@ -1096,7 +1089,7 @@ describe("binding-independent MCP registration", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("protects an older pinned Codex entry", () => {
+  it("protects an older pinned Codex entry", async () => {
     const box = sandbox();
     const home = codexHome(box);
     const path = join(home, "config.toml");
@@ -1104,7 +1097,7 @@ describe("binding-independent MCP registration", () => {
       `\n[mcp_servers.uberblick.env]\nUB_HUB_URL = "local"\nUB_WORKSPACE_ID = "${WORKSPACE}"\n`;
     writeFileSync(path, before);
     const stub = stubVendor(box, "codex");
-    const run = runUb(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
+    const run = await runInProcess(["mcp", "install", "codex", "--user"], box, { ...stub.env, CODEX_HOME: home });
     expect(run.status).toBe(1);
     expect(run.stderr).toMatch(/something other than this/);
     expect(run.stdout).toBe('[mcp_servers.uberblick]\ncommand = "ub"\nargs = ["mcp", "serve"]\n');
@@ -1112,7 +1105,7 @@ describe("binding-independent MCP registration", () => {
     expect(existsSync(stub.record)).toBe(false);
   });
 
-  it("leaves separately named older entries alone while registering uberblick", () => {
+  it("leaves separately named older entries alone while registering uberblick", async () => {
     const box = sandbox();
     const path = join(box.cwd, ".mcp.json");
     const before = JSON.stringify({ mcpServers: {
@@ -1120,7 +1113,7 @@ describe("binding-independent MCP registration", () => {
     } });
     writeFileSync(path, before);
     const stub = stubVendor(box, "claude");
-    const run = runUb(["mcp", "install", "claude"], box, stub.env);
+    const run = await runInProcess(["mcp", "install", "claude"], box, stub.env);
     expect(run.status, run.output).toBe(0);
     expect(read(stub.record).trimEnd().split("\n")).toEqual([
       "mcp", "add", "uberblick", "--scope", "project", "--", "ub", "mcp", "serve",

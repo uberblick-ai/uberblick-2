@@ -13,9 +13,9 @@ import { ySyncPluginKey } from "y-prosemirror";
 import { InvalidTableError, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
 import type { GfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
+import { singleLine } from "./table-text.js";
 
 const CELL_MARKS = new Set<string>(TABLE_CELL_MARKS);
-const singleLine = (text: string): string => text.replace(/[\r\n]+/g, " ");
 
 function inTable(state: EditorState): boolean {
   return state.selection.$from.depth > 1 && state.selection.$from.node(1).type.name === "table";
@@ -145,19 +145,9 @@ function opensTable(header: string, delimiter: string): boolean {
 }
 
 /**
- * Whether any of `node`'s text carries a mark.
- *
- * The typed conversion rewrites one paragraph's text and deletes another, and
- * neither operation can carry a mark across honestly: an annotation anchored in
- * the header would lose the characters it is anchored to, and one in the
- * delimiter row would go with the block. This GFM door treats inline markdown
- * literally and therefore does not guess how prose formatting maps to cells.
- *
- * So a marked paragraph is not converted at all. Refusing is the whole fix: the
- * reader keeps their text, their thread and their formatting, and the table is
- * still one block menu entry (or one paste) away. Remapping the anchors instead
- * would mean offset arithmetic across a merge of two blocks, which is a lot of
- * machinery to make a rare gesture slightly smoother.
+ * Refuse typed conversion when either paragraph carries a mark. Rewriting the
+ * header and deleting the delimiter cannot preserve their annotation offsets;
+ * literal GFM does not infer formatting across cells. Keep marked text intact.
  */
 function carriesMarks(node: ProseMirrorNode): boolean {
   let marked = false;
@@ -169,13 +159,8 @@ function carriesMarks(node: ProseMirrorNode): boolean {
 }
 
 /**
- * Turn the block at `blockId` into a table holding `source`, in one transaction
- * and one undo step. Returns false, having touched nothing, when the block is
- * gone.
- *
- * The *header's* block is the one that becomes the table, so the table inherits
- * an id that already exists rather than taking a new one — and the delimiter
- * row's block, which was only ever syntax, goes.
+ * Convert in one transaction/undo step, preserving the header block id and
+ * deleting the delimiter block. A missing target changes nothing.
  */
 function convertToTable(
   view: EditorView,
@@ -202,19 +187,10 @@ function convertToTable(
 }
 
 /**
- * The two ways a table arrives: typed, and pasted.
- *
- * **Typed** is a delimiter row completed directly under a header row — the only
- * moment two paragraphs become one table. The keystroke is taken as the typing
- * it is and the conversion follows as its own undo step, so one undo gives the
- * reader back what they wrote; the same two-dispatch shape, and the same reason,
- * as the markdown input rules. A paragraph carrying any mark is left alone —
- * see {@link carriesMarks}.
- *
- * **Pasted** is a clipboard that is *exactly* one GFM table. It is handled here
- * rather than left to ProseMirror's plain-text parser, which folds the newlines
- * out of it and hands back a single line of pipes — but a clipboard that merely
- * begins with a table is a document, and falls through to the ordinary paste.
+ * Dispatch typed delimiter completion before conversion so undo restores it;
+ * marked paragraphs refuse conversion. Plain-text paste must be exactly one GFM
+ * table: PM's default parser collapses its lines, while mixed documents must
+ * retain ordinary paste behavior.
  */
 export function tableFromTextPlugin(): Plugin {
   return new Plugin({
@@ -282,12 +258,8 @@ export function tableFromTextPlugin(): Plugin {
         // The typed character first, so undo has something to give back.
         view.dispatch(defaultTransaction());
 
-        // Marks are read from the state the reader has actually produced, and
-        // only from it: a stored mark — bold left switched on — lands *on the
-        // character just typed*, so it does not exist in any state older than
-        // this dispatch. Nothing anchored or formatted is rewritten away, so a
-        // marked paragraph keeps what it is; see {@link carriesMarks}. The
-        // keystroke stands either way, which is what the `true` is for.
+        // Inspect marks after typing: stored marks land on the new character.
+        // Refusal keeps that dispatched keystroke, so return true either way.
         const typed = findBlockById(view.state.doc, headerId);
         const typedDelimiter = findBlockById(view.state.doc, delimiterId);
         if (typed === null || typedDelimiter === null) return true;
@@ -318,12 +290,8 @@ export function tableFromTextPlugin(): Plugin {
         if (/<table[\s>]/i.test(html)) return false;
         const text = event.clipboardData?.getData("text/plain") ?? "";
         const source = text.replace(/\r\n?/g, "\n").replace(/\s+$/, "");
-        // The *whole* clipboard has to be one table, not merely start as one.
-        // A table with prose under it is a document, and swallowing that prose
-        // into the block would store it as rows of a table nobody wrote — so it
-        // falls through to the ordinary paste, which keeps it as the blocks it
-        // is. The schema's writer adds block-boundary validation to its shared
-        // GFM reader, so web and agent writes accept the same input.
+        // Require the schema's exact-one-table boundary; mixed prose falls through
+        // to ordinary paste instead of becoming unauthored table rows.
         if (tableInput(source) === null) return false;
 
         const $from = view.state.selection.$from;

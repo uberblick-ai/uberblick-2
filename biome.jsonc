@@ -16,6 +16,25 @@
 
   "overrides": [
     {
+      // To tighten a limit, lower it, then fix or suppress new failures in a
+      // change of its own.
+      "includes": ["packages/*/src/**"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveLinesPerFunction": {
+              "level": "error",
+              "options": { "maxLines": 150, "skipBlankLines": true }
+            },
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": { "maxAllowedComplexity": 40 }
+            }
+          }
+        }
+      }
+    },
+    {
       // Tailwind directives live in this stylesheet. Keep their parser scoped
       // here; UI components use the utilities it generates. Web UI system
       // keeps editor content in plain CSS and migrates other legacy surfaces

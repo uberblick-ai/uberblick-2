@@ -1,61 +1,13 @@
 /**
- * The document list: the first screen of a working session (#406).
- *
- * One journey — *find the document I want* — and one surface for it. It is the
- * corpus half of the shell (#405), mounted at both addresses that name the
- * workspace rather than a document (`/<workspace>` and `/<workspace>/all`), and
- * it replaces `AllDocsPane`. The sidebar beside it is curation — groups, pins,
- * the switcher, `+ new doc` — and stays exactly as it was.
- *
- * **Fed by the directory stubs and nothing else.** Discovery is a synced doc,
- * so the rows are an observer over the same `_directory` room `list_docs`
- * reads: a document created, renamed or described in another browser or by an
- * agent appears here without anything being told about it, and rendering the
- * whole corpus opens no document room. The one other room it reads is
- * `_sidebar`, for the group a row is pinned in — the shell already holds both.
- *
- * **Both filters are that same derivation, narrowed.** The mode reads the
- * lifecycle shape already cached on each stub: ordinary or unreadable kinds
- * are Working, requirements are Product and decisions are Decisions. It opens
- * on Working and classifies no row by opening its document room.
- *
- * The field above the table is the same derivation narrowed once more, and it
- * asks nobody anything: it keeps the rows of the selected mode whose *title*
- * contains what was typed, ignoring case and the diacritics the store's own
- * index ignores (`title-fold.ts`). The stub caches every title, so
- * it consults nothing else, fetches nothing, and behaves identically whether
- * the page is served by `ub open` or opened straight at a hub. Querying
- * descriptions and block text through `/api/search` is what this page used to
- * do; whole-corpus search from here is deferred to a later stage (owner
- * statement, #956), and the endpoint and its index are untouched and still
- * served.
- *
- * **An empty listing is never a claim this client cannot make.** Nothing heard
- * yet is not "no documents", and nothing matching among what has arrived is
- * not "nothing matches" — until the directory has synced, both say what they
- * actually know. The filter inherits that rule rather than restating it: it
- * narrows an arrived set, so it can only ever speak about the arrived set.
- *
- * **Two orders, and the reader picks.** Last changed first is what a working
- * session opens on; title order is the other scan a corpus is read with — *what
- * is in here*, which filtering by a name you already know cannot answer (owner
- * feedback, 2026-08-30). The choice is the mounted pane's own state, so
- * filtering and a directory update leave it alone and nothing is remembered
- * across a reload.
- *
- * The stamps are the stubs' own `updatedAt` — cache-quality freshness hints
- * resolved to the greatest candidate an author wrote, never history — and
- * optional by construction. A future-skewed writer can therefore pin one until
- * a later candidate exceeds it. {@link sortDirectory} sorts the unstamped last
- * in last-changed order rather than treating absence as epoch zero: a document
- * nobody has stamped is not the oldest document, it is the one with no answer.
- * In title order they sort by title like every other row — grouping them at the
- * bottom there would not be title order — and the row's own dash carries "no
- * answer" in both. A recent stamp is shown as an age ("3 days ago" is what a
- * scan of a listing is asking), while one at least 30 days old becomes an
- * absolute date. The pane keeps its own clock so a relative label goes stale by
- * at most a minute even when nothing else re-renders. Its exact date and time
- * stay one hover away, and the machine value in `dateTime`.
+ * Workspace and /all routes list directory stubs without opening document rooms;
+ * sidebar groups supply pin labels. Kind modes and title filtering use cached
+ * data only, equally for local and direct serving. Working includes unknown kinds.
+ * Before directory sync, empty/filter messages describe only what has arrived.
+ * Sort starts last-changed first; pane state preserves it through filtering and
+ * updates but not reload. Stamps are greatest-authored cache hints, not history;
+ * a future-skewed clock can pin one. Missing stamps sort last only by changed.
+ * Ages turn absolute at 30 days and refresh at most a minute late. dateTime
+ * stays exact; relative ages expose exact time on hover.
  */
 
 import { useId, useMemo, useState } from "react";
@@ -67,41 +19,17 @@ import { LifecycleBadge } from "../ui/LifecycleBadge.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { foldForTitleMatch } from "../title-fold.js";
 
-/**
- * What the field does, said twice on purpose.
- *
- * {@link FILTER_LABEL} is the accessible name a screen reader repeats every
- * time the field is reached and in every listing of the form's controls;
- * {@link FILTER_HINT} is the hint drawn inside the empty field, which is what
- * makes an otherwise blank box read as something to type in — and which
- * disappears the moment anyone does. Neither may promise more than the filter
- * delivers: this narrows the list already on screen, by title.
- */
+/** Accessible name and disappearing hint must both promise title-only filtering. */
 const FILTER_LABEL = "Filter this list by title";
 const FILTER_HINT = "Filter by title";
 
-/**
- * The stamp, if a `Date` can actually hold it.
- *
- * The stubs are cache-quality and written by whichever replica had the clock,
- * so a finite-but-absurd number is a state that can reach here — the schema
- * only checks `Number.isFinite`, and `new Date(1e308).toISOString()` throws.
- * An uncaught throw in a cell would blank the whole listing over one bad stub,
- * so an unusable stamp is treated exactly like a missing one: a dash in the
- * row, and last in *last-changed* order. Title order never asks — a row with no
- * answer about its age still has a title, and sorts by it.
- */
+/** Invalid Date ranges read as absent: a dash, last by changed, ordinary title order. */
 function usableStamp(at: number | undefined): number | undefined {
   if (at === undefined) return undefined;
   return Number.isFinite(new Date(at).getTime()) ? at : undefined;
 }
 
-/**
- * The replica-stable code-unit order of `listDirectory`: title, then uuid.
- *
- * Deliberately `<` / `>`, not locale collation: the web pane and `list_docs`
- * must produce the same sequence on every replica.
- */
+/** Use code-unit title/UUID order so the list and list_docs agree across replicas. */
 function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
   if (a.title !== b.title) return a.title < b.title ? -1 : 1;
   return a.uuid < b.uuid ? -1 : a.uuid > b.uuid ? 1 : 0;
@@ -143,47 +71,18 @@ function inMode(entry: DirectoryEntry, mode: Mode): boolean {
 }
 
 /**
- * Substring over the stub's own title, and nothing else, under
- * {@link foldForTitleMatch}.
- *
- * `needle` arrives already trimmed and folded, so the comparison is one
- * `includes` per row over data the list is already holding — no request, no
- * document room, no index.
- *
- * Deliberately not the *Untitled* the row draws for an empty title: that word
- * is this list's label for the absence of a title, not a title to match
- * against, so typing it finds documents actually called "Untitled" and not the
- * unnamed ones. An empty needle matches everything, which is what clearing the
- * field has to mean.
- *
- * The fold itself is the `@` picker's fold: `filterMentions` runs the same
- * function over these same titles, so a title one of them matches for a query
- * the other offers for it. What it does and why it stops where it does is
- * documented at its definition; here it is enough that the query and the title
- * go through it alike. It is not collation — the locale-sensitive machinery
- * `byTitle` above deliberately refuses so that every replica agrees on order —
- * and it is not the tag picker's plain lowercase, whose catalog names cannot
- * carry a diacritic.
+ * Match only cached titles, using the same fold as mentions on query and title.
+ * Never match the display fallback Untitled for an empty title. Empty query
+ * matches all. This fold is neither locale collation nor tag-name lowercase.
  */
 function titleMatches(entry: DirectoryEntry, needle: string): boolean {
   return foldForTitleMatch(entry.title).includes(needle);
 }
 
 /**
- * The entries as the list shows them, in the order the reader chose.
- *
- * Both orders are total, because neither may let two rows swap places between
- * renders — that is exactly the layout shift the calm-UI rules forbid. Title
- * order is {@link byTitle}, whose uuid tiebreak is unique by construction; last
- * changed breaks its ties the same way, since two documents can share a coarse
- * millisecond.
- *
- * In last-changed order, entries with no usable stamp go last, and that is a
- * decision rather than a fallback: the stamps are optional, so a listing that
- * read "absent" as "very old" would still be sorting them — into a wall at the
- * bottom that hides nothing, instead of pretending they are ancient. It is a
- * rule about *this* order only; in title order an unstamped document is sorted
- * by its title like every other row.
+ * Total orders avoid row shifts: title then UUID breaks equal stamps too.
+ * Missing/unusable stamps sort last only in changed order; title order still
+ * sorts them by title. Absence must not masquerade as an ancient timestamp.
  */
 export function sortDirectory(
   entries: readonly DirectoryEntry[],
@@ -207,24 +106,13 @@ export function sortDirectory(
   });
 }
 
-/**
- * What a row's pin does, named after the document it does it to.
- *
- * Every pin in the list looks alike, so "Pin to the sidebar" on all of them
- * leaves a reader hearing the buttons with no way to tell which row they are on.
- */
+/** Name each pin's document so identical row buttons remain distinguishable. */
 function pinLabel(entry: DirectoryEntry, pinned: boolean): string {
   const named = entry.title === "" ? "Untitled" : entry.title;
   return pinned ? `Unpin ${named} from the sidebar` : `Pin ${named} to the sidebar`;
 }
 
-/**
- * The changing stamp, under the web UI's shared timestamp rule.
- *
- * A relative label answers *is this fresh?* at a glance; once it no longer
- * does, an absolute date is easier to place. The exact recent date and time
- * stay one hover away, and the machine value in `dateTime`.
- */
+/** Keep exact dateTime; expose exact time on hover while the age label is relative. */
 function ChangedStamp({
   at,
   now,
@@ -267,11 +155,7 @@ export function DocumentList({
   onSelect,
   onTogglePin,
 }: {
-  /**
-   * The directory room, for its sync state alone — the same reading the
-   * sidebar's head prints. An empty listing means two different things
-   * depending on it, and only one of them is "there are no documents".
-   */
+  /** Directory sync distinguishes an empty corpus from a not-yet-arrived listing. */
   connection: RoomConnection | null;
   /** The directory's non-deleted stubs, live — `useDirectory` in the shell. */
   entries: readonly DirectoryEntry[];
@@ -285,21 +169,13 @@ export function DocumentList({
   const pinUnavailableId = useId();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<Mode>("working");
-  /**
-   * The chosen order, held beside the query rather than derived from it: the
-   * two are independent, so switching one leaves the other exactly as it was.
-   * Mounted-pane state and nothing more — no storage, no preference mechanism.
-   */
+  /** Keep query and sort independent in pane state; persist neither across reload. */
   const [sort, setSort] = useState<{ order: Order; direction: Direction }>({
     order: "changed",
     direction: INITIAL_DIRECTION.changed,
   });
   const now = useTimestampClock();
-  /**
-   * Which group each pinned document sits in — the `_sidebar` document as it
-   * stands, not a breadcrumb derived from tags. First group wins, so a uuid
-   * that somehow reached two of them still names one.
-   */
+  /** Read actual sidebar groups; first group wins if a UUID appears twice. */
   const groupOf = useMemo(() => {
     const named = new Map<string, string>();
     for (const group of groups) {

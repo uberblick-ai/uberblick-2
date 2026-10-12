@@ -2,9 +2,10 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { createHub, silentLogger } from "@uberblick/hub";
-import { writeHubLogin, type StoredHubLogin } from "@uberblick/hub/auth-store";
-import { createMcpEngine, defaultDatabasePath, resolveMcpConfig, type ServingSyncStatus } from "@uberblick/mcp-server";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { createMcpEngine, defaultWorkspaceDatabasePath, resolveMcpConfig, type ServingSyncStatus } from "@uberblick/mcp-server";
 import { appendBlock, directoryRoom, editBlock, getBlocks, getDirectoryEntry, initDoc,
   roomForDoc, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
@@ -311,7 +312,7 @@ describe("ub open: this machine's workspaces", () => {
       await waitUntil("both browser rooms before quarantine", () => tabs.every(tab => tab.provider.isSynced));
       await waitUntil("secondary hub acknowledgement before quarantine", async () =>
         (await (await readStatus()).json() as ServingSyncStatus).caughtUp);
-      database = openStore(defaultDatabasePath(SECOND, box.env));
+      database = openStore(defaultWorkspaceDatabasePath(SECOND, box.env));
       database.exec("CREATE TRIGGER refuse_replica_append BEFORE INSERT ON updates BEGIN SELECT RAISE(ABORT, 'simulated disk refusal'); END");
       const remote = secondary.hub.hocuspocus.documents.get(roomForDoc(SECOND, DOC))!;
       const remoteBlock = getBlocks(remote)[0]!;

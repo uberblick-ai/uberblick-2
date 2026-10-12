@@ -1,18 +1,19 @@
 name: CI
 
 # The merge gate (CONTRIBUTING.md, "CI"): the main ruleset requires the checks
-# `lint, typecheck and tests` and `macOS tests` from GitHub Actions; `browser e2e`
-# and `macOS browser e2e` are advisory. On main it records whether main itself
-# is clean, so a failure seen while validating a branch can be checked against
-# main's latest run instead of rerunning the base. A pull request's run uses its own recipe, so a
-# change here is a change to the merge rules. Standard runners cost no Actions
+# `lint, typecheck and tests`, `macOS tests` and `browser e2e` from GitHub
+# Actions; `macOS browser e2e` is advisory. On main it records whether main
+# itself is clean, so a failure seen while validating a branch can be checked
+# against main's latest run instead of rerunning the base. A pull request's
+# run uses its own recipe, so a change here is a change to the merge rules.
+# Standard runners cost no Actions
 # minutes in a public repository, macOS ones included.
 #
 # Linux runs everything. macOS runs the tests again, because contributors and
 # the loop work on Macs and some failures show up on only one of the two; lint
 # and typecheck do not depend on the platform. Both platforms run browser e2e.
 #
-# No secrets: `install`, `lint`, `typecheck`, `test` and `e2e` need none.
+# No secrets: `install`, `lint`, `typecheck`, `test`, `site` and `e2e` need none.
 
 on:
   push:
@@ -75,6 +76,10 @@ jobs:
         run: mise run typecheck
       - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run test
+      # The website is static HTML the build script assembles; a page that
+      # fails to build must not reach main, where Pages deploys it.
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
+        run: mise run site
 
   # Separate from `checks` so it runs in parallel and only it downloads browsers.
   e2e:

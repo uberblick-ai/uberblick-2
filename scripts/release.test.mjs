@@ -121,30 +121,41 @@ test("a checkout not at freshly fetched main refuses before the dry runs", async
   assertBeforeCandidate(fake);
 });
 
-test("a missing, failed or unfinished required check refuses and advisory e2e never substitutes", async () => {
-  const [tests, macos] = REQUIRED_CHECKS;
-  for (const runs of [[], [check(tests)], [check(tests), check(macos, "failure")],
-    [check(tests), check(macos, null, 2, { status: "in_progress" })],
-    [check(tests), check("browser e2e"), check("macOS browser e2e")],
-    [...green(), check(macos, "failure", 3)]]) {
-    const fake = services({ checkRuns: async () => runs });
-    await assert.rejects(release(TAG, fake), /CI at .* is not green/);
-    assertBeforeCandidate(fake);
+test("a missing, failed or unfinished required check refuses and advisory macOS e2e never substitutes", async () => {
+  for (const name of ["lint, typecheck and tests", "macOS tests", "browser e2e"]) {
+    const others = [...green().filter((run) => run.name !== name), check("macOS browser e2e")];
+    for (const attempts of [[], [check(name, "failure")],
+      [check(name, null, 2, { status: "queued" })],
+      [check(name, null, 2, { status: "in_progress" })],
+      [check(name), check(name, "failure", 3)],
+      [check(name), check(name, null, 3, { status: "in_progress" })]]) {
+      const fake = services({ checkRuns: async () => [...others, ...attempts] });
+      await assert.rejects(release(TAG, fake), (error) => error.message.includes(`${name}:`));
+      assertBeforeCandidate(fake);
+    }
   }
 });
 
 test("a check with a required name from another app never counts", async () => {
-  const fake = services({ checkRuns: async () => green().map((run) => ({ ...run, app: { slug: "someone-else" } })) });
-  await assert.rejects(release(TAG, fake), /missing/);
-  assertBeforeCandidate(fake);
+  for (const name of REQUIRED_CHECKS) {
+    const others = green().filter((run) => run.name !== name);
+    const impostor = check(name, "success", 3, { app: { slug: "someone-else" } });
+    for (const [attempts, state] of [[[impostor], "missing"], [[check(name, "failure"), impostor], "failure"]]) {
+      const fake = services({ checkRuns: async () => [...others, ...attempts] });
+      await assert.rejects(release(TAG, fake), (error) => error.message.includes(`${name}: ${state}`));
+      assertBeforeCandidate(fake);
+    }
+  }
 });
 
 test("a newest successful re-run wins over an earlier failure regardless of API order", async () => {
-  const runs = [check(REQUIRED_CHECKS[0], "failure", 1), ...green()];
-  for (const entries of [runs, [...runs].reverse()]) {
-    const fake = services({ checkRuns: async () => entries });
-    await release(TAG, fake);
-    assert.equal(pushed(fake).length, 1);
+  for (const name of REQUIRED_CHECKS) {
+    const runs = [check(name, "failure", 1), ...green(), check("macOS browser e2e", "failure")];
+    for (const entries of [runs, [...runs].reverse()]) {
+      const fake = services({ checkRuns: async () => entries });
+      await release(TAG, fake);
+      assert.equal(pushed(fake).length, 1);
+    }
   }
 });
 
@@ -191,7 +202,7 @@ test("main, tag or CI changes during the dry runs refuse before the atomic push"
       remoteTags: async () => ++tagReads === 2 && changed === "tags"
         ? [{ name: HUB_TAG, sha: OTHER_SHA }] : [],
       checkRuns: async () => ++checkReads === 2 && changed === "ci"
-        ? [...green(), check(REQUIRED_CHECKS[1], "failure", 3)] : green(),
+        ? [...green(), check("browser e2e", "failure", 3)] : green(),
     });
     await assert.rejects(release(TAG, fake), /origin\/main|hub-v0\.5\.0|CI at/);
     assert.ok(fake.calls.some(([name]) => name === "dryRun"));

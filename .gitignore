@@ -3,6 +3,7 @@ node_modules/
 
 # build output
 dist/
+site/out/
 *.tsbuildinfo
 # the `ub` bundle packages/cli's test globalSetup builds once per run, so the
 # spawning suites do not transpile three packages in every child

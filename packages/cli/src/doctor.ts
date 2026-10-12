@@ -1,22 +1,6 @@
-/**
- * `ub doctor` checks this project's Uberblick setup and names each fix.
- * Product wording follows CLI: ub doctor intents and examples.
- *
- * **It diagnoses; it never repairs.** The database check reads an existing
- * store without a replica, hub connection, migration or write. Nothing creates
- * an absent database, configuration file or directory. A failed check names
- * the recovery.
- *
- * `--json` prints exactly one object to stdout and nothing else; warnings and
- * the MCP server's own logging go to stderr. No check ever prints the signing
- * secret: that one is configured, and which layer it came from, is the whole of
- * what is said about it.
- */
-
-
-import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/hub/device-login";
-import { isGithubUsername } from "@uberblick/hub";
-import { authenticationOrigin } from "@uberblick/hub/remote-url";
+import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/mcp-server/device-login";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -25,8 +9,8 @@ import { parseArgs } from "node:util";
 import {
   CLOCK_SKEW_SECONDS,
   REQUEST_PROOF_LIFETIME_SECONDS,
-} from "@uberblick/hub/token";
-import { protocolSkew } from "@uberblick/hub/protocol";
+} from "@uberblick/schema/token";
+import { protocolSkew } from "@uberblick/schema/protocol";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { McpConfig } from "@uberblick/mcp-server";
 import { formatHubFailure, inspectExistingStore, readWorkspaceName } from "@uberblick/mcp-server";
@@ -62,8 +46,6 @@ export interface Check {
   reason: string;
   /** How to repair a warning or failure; null for a pass or skip. */
   fix: string | null;
-  /** Listener details when the two local listeners give different verdicts. */
-  listeners?: Check[];
 }
 
 export interface DoctorReport {
@@ -115,8 +97,6 @@ function bindingRefusal(error: unknown, env: NodeJS.ProcessEnv, cwd: string): st
   }
 }
 
-// --- workspace ---------------------------------------------------------------
-
 function workspaceCheck(
   resolved: ResolvedConfig | null,
   config: McpConfig | null,
@@ -126,9 +106,7 @@ function workspaceCheck(
   env: NodeJS.ProcessEnv,
 ): Check {
   if (config === null || resolved === null) {
-    // Nothing configured at all is the common case and gets a line of its own;
-    // a value that *is* configured and was refused keeps the refusal's own
-    // message, which names the layer the value came from.
+    // Keep a configured value's refusal and its source; absence gets its own message.
     const reason = error ?? "no .uberblick.json here or in any parent directory";
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
@@ -140,14 +118,11 @@ function workspaceCheck(
   return pass("workspace", `${name === undefined || name === null ? config.workspaceId : `${name} (${config.workspaceId})`}, from ${source}`);
 }
 
-// --- login -------------------------------------------------------------------
-
 /** Keep auth's quoting, escaping backticks so diagnostic lines have no markup. */
 function doctorUsername(username: string): string {
   return displayUsername(username).replaceAll("`", "\\u0060");
 }
 
-/** The permission bits, as install.md quotes them: `mode 0644`. */
 function modeOf(path: string): string {
   try {
     return (statSync(path).mode & 0o777).toString(8).padStart(4, "0");
@@ -171,8 +146,6 @@ function loginCheck(
     config === null ? "no workspace configured, so no login applies" : "local workspace, so no hub login applies",
   );
 }
-
-// --- database ----------------------------------------------------------------
 
 /** The nearest ancestor that exists: what a create would actually be refused by. */
 function nearestExisting(path: string): string {
@@ -205,6 +178,7 @@ interface DatabaseCheckResult {
   workspaceName: string | null;
 }
 
+/** Inspect an existing store without a replica, hub connection, migration or write. */
 function databaseCheck(config: McpConfig | null): DatabaseCheckResult {
   const unread = (check: Check): DatabaseCheckResult => ({ check, workspaceName: null });
   if (config === null) {
@@ -260,14 +234,11 @@ function databaseCheck(config: McpConfig | null): DatabaseCheckResult {
       "restore access to a valid database for this workspace",
     );
   }
-  // Read only after the same preconditions that permit the database inspection.
-  // Both readers may leave SQLite WAL sidecars, but neither constructs a store.
+  // Share inspection's preconditions; neither reader constructs or migrates a
+  // store, though SQLite may leave WAL sidecars.
   return { check, workspaceName: readWorkspaceName(path, config.workspaceId) };
 }
 
-// --- hub and local listeners -------------------------------------------------
-
-/** An endpoint in, what a client found out. */
 type Dial = (url: string) => Promise<HubProbe>;
 
 interface HubCheckResult {
@@ -296,6 +267,7 @@ async function hubCheck(
   return { check: hubVerdict(config, hub, "hub", deviceLogin), status: hub.status };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin: DeviceLoginResult | null = null): Check {
   const local = config.deviceLogin === undefined;
   const origin = local ? config.hubUrl : authenticationOrigin(config.hubUrl);
@@ -326,12 +298,8 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin:
           return fail(name, `${origin} refused ${user}'s login`, `ub auth login ${origin}`);
       }
     }
-    // Narrower here than for a long-running client: this probe minted its
-    // token seconds ago, in this process, in the current format, so the token's
-    // *shape* is not in question. Three causes survive that — a secret the hub
-    // does not share, a clock far enough out that the hub's clamp refuses an
-    // otherwise correct token, and a hub older than this client, which reads
-    // our envelope as unparseable and answers exactly as a wrong secret does.
+    // This fresh token has the current shape. Refusal can still mean a different
+    // secret, clock skew, or an older hub that cannot parse the envelope.
     return fail(
       name,
       `${config.hubUrl} refused the signing secret`,
@@ -356,9 +324,7 @@ function hubVerdict(config: McpConfig, hub: HubProbe, name = "hub", deviceLogin:
     );
   }
   if (status === "unsettled") {
-    // Up, and not serving: the socket opened and the directory room never
-    // arrived. Reporting this as reachable is how a client that will never sync
-    // gets called healthy.
+    // An open socket without the directory room does not establish working sync.
     return (local ? fail : warn)(
       name,
       `${origin} answered but the directory room did not finish syncing`,
@@ -433,13 +399,17 @@ async function webServerCheck(): Promise<Check> {
 }
 
 /** The local hub's configuration and holder are one listener verdict. */
-async function localHubListenerCheck(
-  config: McpConfig,
+async function localHubCheck(
+  config: McpConfig | null,
   endpoint: Endpoint | null,
   env: NodeJS.ProcessEnv,
   dial: Dial,
 ): Promise<Check> {
-  const name = "hub listener";
+  const name = "local hub";
+  if (config === null) return skipped(name, "no workspace is configured");
+  if (config.deviceLogin !== undefined) {
+    return skipped(name, `no local hub is used; this workspace syncs through ${authenticationOrigin(config.hubUrl)}`);
+  }
   const credentials = readCredentials(env);
   if (credentials.exposed) {
     return fail(
@@ -504,34 +474,6 @@ async function localHubListenerCheck(
   }
   return fail(name, `${address} is in use by a process that is not an uberblick hub`, "stop that process, then run ub open");
 }
-
-async function localHubCheck(
-  config: McpConfig | null,
-  endpoint: Endpoint | null,
-  env: NodeJS.ProcessEnv,
-  dial: Dial,
-): Promise<Check> {
-  const web = await webServerCheck();
-  if (config === null || config.deviceLogin !== undefined) {
-    return { ...web, name: "local hub" };
-  }
-  const hub = await localHubListenerCheck(config, endpoint, env, dial);
-  const listeners = [web, hub];
-  // A partly running stack passes unless either listener fails. Skips alone
-  // stay skipped, and the seven-check summary counts the combined verdict once.
-  const status = listeners.some(listener => listener.status === "fail") ? "fail"
-    : listeners.some(listener => listener.status === "pass") ? "pass" : "skipped";
-  const fixes = listeners.flatMap(listener => listener.fix === null ? [] : [listener.fix]);
-  return {
-    name: "local hub",
-    status,
-    reason: listeners.map(listener => `${listener.name}: ${listener.reason}`).join("; "),
-    fix: fixes.length === 0 ? null : fixes.join("; "),
-    ...(web.status === hub.status ? {} : { listeners }),
-  };
-}
-
-// --- MCP wiring --------------------------------------------------------------
 
 const CLIENT_NAMES: Record<TargetName, string> = {
   claude: "Claude Code",
@@ -636,14 +578,12 @@ function mcpCheck(env: NodeJS.ProcessEnv, cwd: string, resolved: ResolvedConfig 
   return warn("mcp", "MCP client is not set up for this project", install);
 }
 
-// --- the report --------------------------------------------------------------
-
 export interface DoctorOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
 }
 
-/** Run every check without printing anything. Exported for tests. */
+/** Run every check without printing or exposing signing-secret values. */
 export async function doctorReport(
   options: DoctorOptions = {},
 ): Promise<{ report: DoctorReport; warnings: string[] }> {
@@ -651,9 +591,7 @@ export async function doctorReport(
   const cwd = options.cwd ?? process.cwd();
   const warnings: string[] = [];
 
-  // Resolution itself can refuse — a workspace id that is not a uuid is a
-  // configuration error, and a command whose job is to report configuration
-  // errors must report it rather than exit on it.
+  // Report resolver refusals alongside other checks rather than aborting diagnosis.
   let resolved: ResolvedConfig | null = null;
   let error: string | null = null;
   try {
@@ -697,6 +635,7 @@ export async function doctorReport(
     hub.check,
     await clockCheck(config, hub),
     await localHubCheck(config, endpoint, resolvedEnv, dial),
+    await webServerCheck(),
     mcpCheck(resolvedEnv, cwd, config === null ? null : resolved),
   );
 
@@ -723,12 +662,9 @@ export function renderDoctor(report: DoctorReport, env: NodeJS.ProcessEnv = proc
     offset === 0 || /[\s("'=:]/.test(value[offset - 1] ?? "") ? `~${sep}` : prefix);
   let text = `uberblick ${report.version}\n\n`;
   for (const check of report.checks) {
-    for (const line of check.listeners ?? [check]) {
-      const reason = check.listeners === undefined ? line.reason : `${line.name}: ${line.reason}`;
-      text += `${MARKERS[line.status].padEnd(6)}${check.name.padEnd(12)}${humanPath(reason)}\n`;
-      if (line.status === "warn" || line.status === "fail") {
-        text += `${" ".repeat(6)}→ ${humanPath(line.fix ?? "")}\n`;
-      }
+    text += `${MARKERS[check.status].padEnd(6)}${check.name.padEnd(12)}${humanPath(check.reason)}\n`;
+    if (check.status === "warn" || check.status === "fail") {
+      text += `${" ".repeat(6)}→ ${humanPath(check.fix ?? "")}\n`;
     }
   }
   const counts = { pass: 0, warn: 0, fail: 0, skipped: 0 };
@@ -739,7 +675,6 @@ export function renderDoctor(report: DoctorReport, env: NodeJS.ProcessEnv = proc
   return text;
 }
 
-/** Exported so the help below can be checked against the parser it describes. */
 export const DOCTOR_OPTIONS = {
   json: { type: "boolean", default: false },
 } as const;
@@ -777,6 +712,5 @@ export async function doctorCommand(
     io.err(`ub: warning: ${warning}\n`);
   }
   io.out(json ? `${JSON.stringify(report, null, 2)}\n` : renderDoctor(report));
-  // Non-zero on any failure: `ub doctor` is meant to be usable as a gate.
   return report.ok ? 0 : 1;
 }

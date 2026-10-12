@@ -1,4 +1,4 @@
-/** Decision answers derive entirely from directory stubs, never record rooms. */
+// Decision topic model: b4e616bb-10f6-460d-a13b-9c21354ca80b
 import type * as Y from "yjs";
 import { getMeta } from "./doc.js";
 import { listDirectory } from "./directory.js";
@@ -34,7 +34,7 @@ function ancestors(record: DirectoryEntry, byId: Map<string, DirectoryEntry>): S
   return out;
 }
 
-/** One answer per topic, with all pending and conflict branches preserved. */
+/** Resolve from directory stubs alone, preserving pending and conflicting branches. */
 export function resolveDecisionTopics(
   source: Y.Doc | readonly DirectoryEntry[],
 ): DecisionTopicResolution[] {
@@ -84,11 +84,11 @@ export function resolveDecisionTopics(
   return out.sort((left, right) => compareAge(left.first ?? left.representative, right.first ?? right.representative));
 }
 
-/** Requirement log, oldest topic first. Membership may be on any history record. */
+/** Related-page membership may be on any record; topics stay oldest first. */
 export function readDecisions(doc: Y.Doc, directory?: Y.Doc): DecisionTopicResolution[] {
   if (directory === undefined) return [];
   const meta = getMeta(doc);
-  if (meta.kind !== "requirement") return [];
+  if (meta.kind === "decision") return [];
   return resolveDecisionTopics(directory).filter((topic) => !topic.archived && topic.records.some((record) => record.governs === meta.uuid));
 }
 

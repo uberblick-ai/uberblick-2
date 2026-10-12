@@ -1,8 +1,3 @@
-/**
- * Successful tool answers, shared by tools/list and the server's result check.
- * Server-owned objects are closed at every level. The only untyped values are
- * caller-stored collection schemas and records, and data diagnostic details.
- */
 import { DECISION_STATUSES, DOCUMENT_KINDS, REQUIREMENT_STATUSES } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
@@ -10,7 +5,8 @@ import { strictInput } from "./inputs.js";
 const count = z.number().int().nonnegative();
 const uuid = z.string().describe("Document identity; a UUID, never a title or path.");
 const description = z.string().nullable().describe("Agent-facing document description; null when unwritten.");
-const tldr = z.string().nullable().describe("Person-facing document summary or decision line; null when unwritten.");
+const tldr = z.string().nullable().describe("Person-facing document summary; legacy decision summaries remain readable. Null when unwritten.");
+const discussion = z.string().nullable().describe("Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer.");
 const status = z.enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES]);
 const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
@@ -35,7 +31,6 @@ const hub = z.object({
   hubProtocolVersion: z.number().int().optional().describe("Hub protocol version, learned from a protocol refusal."),
 }).strict().describe("Current connection state; an acknowledgement does not claim hub storage.");
 
-/** The durability contract is declared once for every writing tool. */
 const durability = {
   applied: z.literal(true).describe("The write is durable in this replica's local update log."),
   synced: z.boolean().describe("The hub acknowledged this write; acknowledgement does not mean hub storage."),
@@ -49,7 +44,7 @@ const documentDurability = {
 };
 const contentReview = {
   tldr: z.null().optional().describe("Present when changed document content has no TL;DR."),
-  tldrHint: z.string().describe("Non-blocking request to review the TL;DR after changing document content."),
+  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records."),
 };
 const touchedRoom = z.object({
   purpose: z.string().describe("The independently written room's purpose."),
@@ -68,7 +63,6 @@ const tag = z.union([
 ]);
 const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
 
-/** Directory stubs expose normalized descriptions and catalog-aware tags. */
 const directoryEntry = z.object({
   uuid,
   title: z.string(),
@@ -82,6 +76,8 @@ const directoryEntry = z.object({
   topic: z.string().optional(),
   supersedes: z.string().optional(),
   tldr: z.string().optional(),
+  answerPreview: z.string().nullable().optional().describe("Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
+  discussion: discussion.optional().describe("Cached RFC discussion document UUID; null when none, absent when the cache is unknown."),
   agentStance: z.boolean().optional(),
   decidedBy: z.string().optional(),
   decidedAt: z.string().optional(),
@@ -104,7 +100,7 @@ const docLink = z.object({
 }).strict();
 const blockFields = {
   id: z.string(),
-  text: z.string().describe("Plain prose or source text; tables carry canonical GFM with cell formatting."),
+  text: z.string().describe("Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."),
   rev: z.string().describe("Content hash to assert on a later block edit."),
 };
 const linkRanges = {
@@ -117,7 +113,7 @@ function blockSchema(withLinks: boolean) {
     z.object({ ...prose, type: z.literal("heading"), level: z.number().int().min(1).max(6) }).strict(),
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(["bullet", "ordered"]), indent: z.number().int().min(0).max(3) }).strict(),
     z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
-    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart"]) }).strict(),
+    z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart", "card"]) }).strict(),
   ]);
 }
 const block = blockSchema(false);
@@ -130,6 +126,7 @@ const annotation = z.object({
   range: z.object({
     row: count.optional(),
     column: count.optional(),
+    part: z.enum(["label", "title", "body", "footer"]).optional(),
     start: count,
     end: count,
     collapsed: z.boolean(),
@@ -149,8 +146,8 @@ const dataSummary = z.object({
 }).strict();
 
 /**
- * The SDK requires a root object. The existing mode primitive keeps this
- * superset's runtime branch rules and advertised oneOf in one definition.
+ * The SDK requires a root object; strictInput must enforce and advertise the
+ * same branches through this superset.
  */
 const getData = strictInput({
   uuid,
@@ -236,6 +233,7 @@ export const outputSchemas = {
     governs: z.string().optional(),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
+    discussion: discussion.optional(),
     tldr: tldr.optional(),
     tldrHint: contentReview.tldrHint.optional(),
     ...decisionAuthority,
@@ -253,10 +251,13 @@ export const outputSchemas = {
     governs: z.string().optional(),
     topic: z.string().optional(),
     supersedes: z.string().optional(),
+    discussion: discussion.optional(),
     ...decisionAuthority,
     approvalFingerprint: z.string().optional(),
     room: z.string(),
-    decisions: z.array(decisionTopic),
+    decisions: z.array(decisionTopic.extend({
+      relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
+    }).strict()),
     predecessors: z.array(directoryEntry).optional(),
     successors: z.array(directoryEntry).optional(),
     resolution: decisionTopic.nullable().optional(),
@@ -303,6 +304,7 @@ export const outputSchemas = {
     tldr,
     tags,
     links: z.array(z.string()),
+    discussion: discussion.optional(),
   }).strict(),
   set_status: z.object({
     uuid,

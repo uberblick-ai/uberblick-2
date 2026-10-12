@@ -16,11 +16,17 @@ afterAll(() => {
     reactGlobal.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
   }
 });
-afterEach(() => {
+afterEach(async () => {
   try {
     cleanup();
   } finally {
-    cleanupTestResources();
+    try {
+      cleanupTestResources();
+    } finally {
+      // Radix defers focus-scope release to setTimeout(0) during unmount.
+      // Queue after cleanup so it finishes before jsdom tears down the file.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
   }
 });
 

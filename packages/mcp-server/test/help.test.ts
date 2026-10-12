@@ -40,6 +40,8 @@ it("lists every concept and registered tool once, with the same Markdown through
   const rig = await local();
   const { tools } = await rig.client.listTools();
   const { topics } = await rig.ok("get_help");
+  expect(topics.find(({ id }: { id: string }) => id === "lifecycle")?.description)
+    .toContain("when to create decision records");
   expect(topics.map(({ id }: { id: string }) => id).sort()).toEqual(
     [...concepts, ...tools.map(({ name }) => name)].sort(),
   );
@@ -176,6 +178,101 @@ it("keeps shared guarantees in the owning topics after shortening descriptions",
   expect(contracts).toContain("re-sends it on reconnect");
 });
 
+it("describes short decision answers, page context and previews without repository authority", async () => {
+  const rig = await local();
+  const { tools } = await rig.client.listTools();
+  for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const rule of ["answer blocks", "brief reason", "related", "linked", "answerPreview", "RFC"]) {
+      expect(text, `${topic}: ${rule}`).toContain(rule);
+    }
+    expect(text, topic).not.toMatch(/decision line|boundary table|owner's recorded GitHub decision|reasons and guidance/);
+    const description = tools.find((tool) => tool.name === topic)?.description;
+    if (description !== undefined) {
+      for (const rule of ["related", "linked", "answerPreview"]) expect(description, topic).toContain(rule);
+      expect(description, topic).not.toMatch(/decision line|boundary table|governs requires/);
+    }
+  }
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  for (const code of [
+    "decision_block_unsupported", "decision_answer_too_long", "decision_answer_empty",
+    "decision_tldr_unsupported", "decision_data_unsupported", "related_not_regular_document",
+  ]) expect(lifecycle, code).toContain(code);
+  expect(lifecycle).toContain("answer: {who, when, where}");
+  expect(lifecycle).toContain("missing preview is unknown");
+});
+
+it("explains explicit RFC connections, open-only corrections and cached discussion reads", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  for (const rule of [
+    "Create or reuse the RFC first as an ordinary regular document",
+    "ordinary `rfc` tag that can be applied deliberately", "no tool requires it",
+    "open first record with `related` and `discussion`", "no answer until one is recorded",
+    "open successor with `supersedes` and `discussion`", "current answer stays in force",
+    "A successor never inherits its predecessor's discussion",
+    "`discussion: null`", "fixed once the record leaves `open`",
+    "Settle, reject or withdraw with `set_status`", "recorded-answer contract",
+    "discussion_not_regular_document", "discussion_not_writable",
+    "never creates a document, tags or edits the RFC or related page",
+    "or changes `approvalFingerprint` or `approvalChanged`",
+    "A null discussion means no reference", "missing value means the cache is unknown",
+    "backlinks on an RFC finds its connected records", "unless the RFC is also its related page",
+  ]) expect(lifecycle, rule).toContain(rule);
+
+  const { tools } = await rig.client.listTools();
+  for (const topic of ["create_doc", "set_metadata", "get_doc", "list_docs"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
+    for (const rule of ["discussion", "RFC", "curated links", "recorded answer"]) {
+      expect(constraints, `${topic}: ${rule}`).toContain(rule);
+      expect(tools.find((tool) => tool.name === topic)?.description, `${topic}: ${rule}`).toContain(rule);
+    }
+  }
+  for (const topic of ["create_doc", "set_metadata"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const rule of ["discussion_not_regular_document", "doc_archived", "doc_not_found", "doc_not_hydrated"]) {
+      expect(text, `${topic}: ${rule}`).toContain(rule);
+    }
+  }
+});
+
+it("explains when a decision record is useful without turning examples into project policy", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  const guidance = lifecycle.split("### When to create a decision record\n")[1]?.split("\n## ")[0];
+  for (const rule of [
+    "deliberate architectural, product or UX choice", "its enduring reason",
+    "guidance future work should follow", "code or configuration alone cannot tell you",
+    "guide multiple tasks", "prevent a consequential accidental reversal",
+    "repeatedly debated or reconsidered", "A rarely consulted record can still be valuable",
+    "compatibility, security or product commitment", "they do not prove historical intent",
+    "**Do not** create a record just to describe existing code, configuration, a routine fix",
+    "a temporary workaround or implementation mechanics", "Do not turn every changed detail into policy",
+    "leaving its implementation flexible",
+    "What concrete future choice would it guide, or what consequential mistake would it prevent?",
+    "ordinary documentation, code comments, an issue or a PR", "Check existing decision topics first",
+    "Reuse the current topic", "follow the successor lifecycle",
+    "not automatically authorized for creation", "follow the project’s approval rules",
+    "they do not establish policies for your project",
+  ]) expect(guidance, rule).toContain(rule);
+
+  const examples = guidance!.split("\n").filter((line: string) => line.startsWith("| ")).slice(2);
+  expect(examples).toHaveLength(4);
+  for (const [index, choice, description] of [
+    [0, "users’ devices and maintenance budget", "The deployment target is set to this version."],
+    [1, "read and edit previously opened documents offline", "This function reads from the local database."],
+    [2, "shadcn/ui as the sole component library", "This screen imports a Button component from shadcn/ui."],
+    [3, "shared service rather than directly with each other", "A list of endpoints, classes or dependencies."],
+  ] as const) {
+    const cells = examples[index]!.split("|");
+    expect(cells[1]).toContain(choice);
+    expect(cells[2]?.trim()).toBe(description);
+  }
+  expect(examples[0]).toContain("minimum support, an explicit set or tested versions");
+  expect(examples[2]).toContain("Custom alternatives require clear justification and human approval");
+});
+
 it("advertises the server identity and instructions in initialize", async () => {
   const rig = await local();
   expect({
@@ -305,7 +402,7 @@ it("documents the table mapping through both help routes and accepts its source 
     sort: { field: "day", direction: "desc" },
   });
   expect(JSON.parse(source!)).not.toHaveProperty("pageSize");
-  expect(section).toContain("Every valid record appears in one continuous native table");
+  expect(section).toContain("Without limit, every valid record appears in one continuous native table");
   expect(section).toContain("Generated from document data · read-only");
   expect(section).toContain("never affect display; omit pageSize from new mappings");
   expect(section).not.toContain("Page controls");
@@ -322,7 +419,7 @@ it("documents the table mapping through both help routes and accepts its source 
     '"type":"table"', "one to thirty ordered columns", "text (default), number, date or link",
     "Only number accepts unit (a suffix) and decimals (an integer from zero to ten)",
     "sort (one column field, direction asc or desc)", "supplies only the table's accessible name",
-    "Every valid record appears in one continuous native table", "Generated from document data · read-only",
+    "Without limit, every valid record appears in one continuous native table", "Generated from document data · read-only",
     "Open table source appears on hover or keyboard focus and stays reachable without hover",
     "Unknown mapping keys and options are invalid", "contain no record values",
   ]) expect(constraints, guidance).toContain(guidance);
@@ -331,4 +428,37 @@ it("documents the table mapping through both help routes and accepts its source 
   expect(JSON.parse(insertSource!)).not.toHaveProperty("pageSize");
   expect((await rig.client.readResource({ uri: "uberblick://help/insert_block" })).contents[0])
     .toMatchObject({ text: insertHelp.text });
+});
+
+it("documents optional record limits for both views through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional limit is an integer of 1 or more",
+      "selects the latest N records with a valid x in x-then-record-id order, still at most 5,000",
+      "shows only the first N valid rows in sort order (record-id order without sort)",
+      "limit has no upper bound of its own", "Records hidden by the author limit are not omissions",
+      "no pager or page state", "footnote includes shown and total valid-record counts",
+      "when it hides nothing, no count appears", "notice and diagnostics when N exceeds 5,000",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
+});
+
+it("documents opt-in line panels through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional layout is overlay or panels, default overlay",
+      "panels draws one compact line chart per y series in mapping order, in a responsive grid",
+      "each panel shows its label and latest plotted value",
+      "Panels share the x range and share y ranges within each unit group",
+      "layout is invalid for table mappings",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
 });

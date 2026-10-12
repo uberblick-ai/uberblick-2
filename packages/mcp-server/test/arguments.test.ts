@@ -5,17 +5,15 @@
  * about any handler:
  *
  * - **A field nobody declared is refused, not dropped.** A stripped key is an
- *   input the caller believes it sent: `create_doc` with a top-level
- *   `pinned: true` created an unpinned document, and a misspelled mutation
- *   field wrote the document with the mistake silently discarded. The proof
- *   that a rejection is free is the durable one — the update log does not grow.
+ *   input the caller believes it sent; ignoring `pinned: true` or a misspelled
+ *   mutation field would claim success without performing the requested write.
+ *   A refusal must leave the durable update log unchanged.
  * - **`create_doc` lifecycle shapes select exactly one branch.** An omitted
  *   kind is ordinary; an explicit kind selects only its matching record shape.
  * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
  *   block and a range; a reply names a thread and may resolve or reopen it.
- *   Fields from both shapes at once were accepted and quietly ignored.
  * - **`sidebar_group` is three shapes, and each takes only its own field.** A
- *   `rename` carrying an `index` moved nothing and said nothing.
+ *   `rename` carrying an `index` must be refused before writing.
  *
  * `tools/list` is asserted alongside the calls on purpose: a caller that cannot
  * read the rule from the advertised schema has to learn it by being refused,
@@ -85,12 +83,13 @@ describe("unknown fields", () => {
         (tool.inputSchema as any).additionalProperties,
         `${tool.name} strips unknown fields instead of refusing them`,
       ).toBe(false);
+      expect((tool.inputSchema as any).properties, tool.name).not.toHaveProperty("answerPreview");
     }
 
     const logged = store.logSize();
     const before = (await rig.ok("list_docs")).docs.length;
 
-    // #314's boundary: placement implies pinning, so `pinned` is a field this
+    // Placement implies pinning, so `pinned` is a field this
     // input deliberately cannot express — and creating an UNPINNED document
     // for a caller that asked for a pinned one is the outcome refusing avoids.
     const created = await rig.call("create_doc", {
@@ -118,6 +117,14 @@ describe("unknown fields", () => {
     });
     expect(renamed.isError).toBe(true);
 
+    for (const [tool, args] of [
+      ["create_doc", { title: "Derived preview", description: "The preview cannot be authored.", kind: "decision", answerPreview: "Injected" }],
+      ["set_metadata", { uuid: doc.uuid, answerPreview: "Injected" }],
+    ] as const) {
+      const refused = await rig.call(tool, args);
+      expect(refused.payload.error).toBe("schema_validation");
+    }
+
     // No uuid, no room update, nothing durable: the handlers never ran.
     expect((await rig.ok("list_docs")).docs).toHaveLength(before);
     expect(store.logSize()).toBe(logged);
@@ -139,9 +146,10 @@ describe("create_doc lifecycle arguments", () => {
         required: ["kind"],
         properties: {
           kind: { const: "requirement" },
-          governs: false,
+          related: false,
           supersedes: false,
           answer: false,
+          discussion: false,
         },
       },
       {
@@ -149,9 +157,10 @@ describe("create_doc lifecycle arguments", () => {
         properties: {
           kind: false,
           status: false,
-          governs: false,
+          related: false,
           supersedes: false,
           answer: false,
+          discussion: false,
         },
       },
     ]);
@@ -252,8 +261,7 @@ describe("annotate", () => {
     expect(reopened.annotation.resolved).toBe(false);
 
     const refused = [
-      // A reply that also carries a range says two things at once. Each range
-      // field on its own, because the handler used to ignore all three.
+      // A reply cannot carry any range field, even one field on its own.
       { thread_id: threadId, block_id: doc.blockId },
       { thread_id: threadId, start: 0 },
       { thread_id: threadId, end: 3 },

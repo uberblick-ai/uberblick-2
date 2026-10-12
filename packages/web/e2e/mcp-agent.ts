@@ -45,8 +45,8 @@ export class McpAgent {
     this.state = mkdtempSync(join(tmpdir(), options.statePrefix));
   }
 
-  open(clientInfo: McpClientInfo): McpSession {
-    const session = new McpSession(this.state, this.options, clientInfo);
+  open(clientInfo: McpClientInfo, agentSession?: string): McpSession {
+    const session = new McpSession(this.state, this.options, clientInfo, agentSession);
     this.sessions.add(session);
     return session;
   }
@@ -81,6 +81,7 @@ export class McpSession {
     state: string,
     options: McpAgentOptions,
     clientInfo: McpClientInfo,
+    agentSession?: string,
   ) {
     this.child = spawn(process.execPath, [UB, "mcp", "serve"], {
       cwd: state,
@@ -89,6 +90,7 @@ export class McpSession {
         ...process.env,
         WORKSPACE_ID: undefined,
         HUB_URL: undefined,
+        UB_AGENT_SESSION: agentSession,
         UB_WORKSPACE_ID: options.workspace,
         UB_HUB_URL: options.hubUrl,
         HUB_AUTH_TOKEN: options.authSecret,

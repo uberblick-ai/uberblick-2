@@ -1,5 +1,5 @@
 /**
- * The sidebar's two anchored menus (#74): what they say, and what choosing
+ * The sidebar's two anchored menus: what they say, and what choosing
  * something in them actually changes.
  *
  * Both are driven from stubbed state — workspace names, an identity, a session
@@ -138,7 +138,7 @@ describe("the workspace switcher renders configuration", () => {
     const trigger = within(view.host).getByRole("button", { name: "Uberblick" });
     expect(trigger?.textContent).toContain("Uberblick");
     // The native button gets its accessible name from the visible name. No
-    // overriding label may replace that name with the old generic "Workspace".
+    // overriding label may replace that name with the generic "Workspace".
     expect(trigger?.tagName).toBe("BUTTON");
     expect(trigger?.hasAttribute("aria-label")).toBe(false);
     expect(trigger?.hasAttribute("aria-labelledby")).toBe(false);
@@ -428,7 +428,7 @@ describe("an agent session is one that says it is an agent", () => {
 
     // An MCP replica publishes a user and the agent marker beside it
     // (mcp-server's `presenceState`), and it is the marker — not the absence of
-    // ours — that makes it countable (#494).
+    // ours — that makes it countable.
     const agent = join(awareness, {
       user: { name: "claude", color: "#7b5ec7" },
       client: AGENT_CLIENT,

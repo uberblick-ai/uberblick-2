@@ -19,13 +19,9 @@ export interface DocumentSyncFacts {
 }
 
 /**
- * Name the facts the two document-chrome surfaces render.
- *
- * `hubAcked` uses three states deliberately: undefined is a page connected
- * directly to its hub, null is a locally served page with no current usable
- * answer, and a boolean is the answer for this room. Refusals and an unwritable
- * room preserve the existing cause-first reading and suppress the upstream
- * fact; "not saved" must never sit beside a more optimistic secondary claim.
+ * hubAcked distinguishes direct hub (undefined), unknown local upstream
+ * (null) and this room's boolean answer. Refusals or unwritable rooms take
+ * precedence and suppress optimistic upstream claims beside not saved.
  */
 export function documentSyncFacts(
   status: RoomStatus,

@@ -3,8 +3,7 @@
  * load-bearing three times: `WORKSPACE_ID` names the rooms this server opens,
  * the workspace claim in its hub token, and the SQLite file it hydrates from.
  * There is no default — a guess would silently open somebody else's corpus or
- * start an empty one — and a workspace id is a uuid, so the path-segment
- * question the old string workspaces raised is answered by construction.
+ * start an empty one — and a workspace id is a uuid, making it path-safe.
  */
 
 import { spawn } from "node:child_process";
@@ -15,12 +14,13 @@ import { describe, expect, it } from "vitest";
 import { InvalidWorkspaceIdError } from "@uberblick/schema";
 import {
   DEFAULT_HUB_URL,
-  defaultDatabasePath,
+  defaultWorkspaceDatabasePath,
+  resolveAgentSession,
   resolveMcpConfig,
 } from "../src/config.js";
 import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
 import { bridgeConfig } from "../src/remote.js";
-import { writeHubLogin } from "@uberblick/hub/auth-store";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -32,13 +32,14 @@ function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
 
 /** Run `src/main.ts` to completion and collect what it said and returned. */
 function runServer(
-  overrides: Record<string, string>,
+  overrides: NodeJS.ProcessEnv,
 ): Promise<{ code: number | null; stderr: string }> {
   const { command, args } = mainTsProcess();
   const child = spawn(command, args, {
     cwd: PACKAGE_ROOT,
     env: { PATH: process.env.PATH ?? "", ...overrides },
     stdio: ["ignore", "ignore", "pipe"],
+    timeout: 10_000,
   });
   let stderr = "";
   child.stderr.setEncoding("utf8");
@@ -51,6 +52,24 @@ function runServer(
 }
 
 describe("resolveMcpConfig", () => {
+  it("keeps non-serve callers independent of UB_AGENT_SESSION", () => {
+    for (const value of ["same-session", "invalid/session"]) {
+      const first = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
+      const second = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
+      expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
+      expect(first.sessionId).not.toBe(second.sessionId);
+    }
+  });
+
+  it("keeps the same caller-chosen identity and colour across reconnects", () => {
+    const session = "Caller.Run_1570-1";
+    const first = resolveMcpConfig(env(), resolveAgentSession(session));
+    const second = resolveMcpConfig(env(), resolveAgentSession(session));
+    expect(first.sessionId).toBe(session);
+    expect(second.sessionId).toBe(session);
+    expect(second.color).toBe(first.color);
+  });
+
   it.each(["wss://hub.example/ws", "ws://0.0.0.0:1234", "ws://[::]:1234", "ws://127.attacker.example:1234"])("requires stored login and suppresses the secret for %s", hubUrl => {
     const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
     expect(config.authSecret).toBeNull();
@@ -102,6 +121,7 @@ describe("resolveMcpConfig", () => {
   it("keys the rooms and the database by the workspace uuid", () => {
     const config = resolveMcpConfig(env());
     expect(config.workspaceId).toBe(WORKSPACE);
+    expect(DEFAULT_HUB_URL).toBe("ws://localhost:1234");
     expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
     expect(config.authSecret).toBeNull();
     expect(config.databasePath).toBe(
@@ -121,16 +141,16 @@ describe("resolveMcpConfig", () => {
   });
 
   it("puts both spellings of one workspace in one replica file", () => {
-    // The layout is `@uberblick/hub/storage`'s to decide and its suite's to
+    // The layout is `@uberblick/mcp-server/storage`'s to decide and its suite's to
     // prove; what matters here is that both spellings of one workspace land on
     // one file — two replicas of one corpus would converge with neither.
     const dataHome = mkdtempSync(join(tmpdir(), "uberblick-data-home-"));
     const expected = join(dataHome, "uberblick", `${WORKSPACE}.sqlite`);
-    expect(defaultDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
+    expect(defaultWorkspaceDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
       expected,
     );
     expect(
-      defaultDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
+      defaultWorkspaceDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
     ).toBe(expected);
     // Resolution reads; it never creates. Nothing to clean up but the shell.
     rmSync(dataHome, { recursive: true, force: true });
@@ -169,7 +189,32 @@ describe("resolveMcpConfig", () => {
   });
 });
 
+describe("serve's agent session input", () => {
+  it.each(["x", "A".repeat(64), "Caller.Run_1570-1"])("accepts %s exactly", (session) => {
+    expect(resolveAgentSession(session)).toBe(session);
+  });
+
+  it.each([undefined, "", " \t\n"])("uses a fresh process identity for blank %s", (session) => {
+    expect(resolveAgentSession(session)).toBeUndefined();
+    const first = resolveMcpConfig(env(), resolveAgentSession(session));
+    const second = resolveMcpConfig(env(), resolveAgentSession(session));
+    expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
+    expect(first.sessionId).not.toBe(second.sessionId);
+  });
+
+  it.each(["a".repeat(65), "a/b", "two words", " padded", "padded ", "é", "a\nb", "a\n"])("refuses nonblank %s instead of replacing it", (session) => {
+    expect(() => resolveAgentSession(session)).toThrow(/UB_AGENT_SESSION/);
+  });
+});
+
 describe("the server process", () => {
+  it("refuses an invalid agent session before serving", async () => {
+    const run = await runServer(env({ UB_AGENT_SESSION: "invalid/session" }));
+    expect(run.code).toBe(1);
+    expect(run.stderr).toMatch(/UB_AGENT_SESSION/);
+    expect(run.stderr).not.toContain("serving");
+  });
+
   it("exits non-zero and names `ub workspace create` when WORKSPACE_ID is unset", async () => {
     // The whole interface is the environment an MCP client hands the process,
     // so "it refuses" has to be true of the process, not only of the function.

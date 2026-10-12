@@ -1,0 +1,78 @@
+<head>
+<title>Agents over MCP · Uberblick docs</title>
+<meta name="description" content="Register the Uberblick MCP server with Claude Code or Codex, which workspace the agent sees, the tools an agent actually uses, and what to tell your agent.">
+<link rel="stylesheet" href="/css/sub.css">
+</head>
+<div class="wrap docs">
+<header class="top"><a class="brand" href="/">uberblick<i></i></a><nav aria-label="Site"><a href="/">Uberblick</a><a href="/#usecases">Use cases</a><a href="/compare">Compare</a><a href="/#docs" aria-current="page">Docs</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav><a class="gh" href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></header>
+<div class="dbody">
+<nav class="dnav" aria-label="Documentation">
+  <div class="dgroup"><span class="dlabel">Start</span><a href="/docs/install">Install and update</a><a href="/docs/workspaces">Workspaces</a><a href="/docs/editor">The editor</a></div>
+  <div class="dgroup"><span class="dlabel">Agents</span><a href="/docs/agents" aria-current="page">Agents over MCP</a><a href="/docs/decisions">Decisions</a></div>
+  <div class="dgroup"><span class="dlabel">Sharing</span><a href="/docs/hub">Run a hub</a><a href="/docs/access">Access and membership</a></div>
+  <div class="dgroup"><span class="dlabel">Reference</span><a href="/docs/cli">CLI reference</a><a href="/docs/configuration">Configuration</a><a href="/docs/markdown-data">Markdown and data</a></div>
+</nav>
+<main class="dmain">
+<article class="col">
+  <p class="crumb">Docs / Agents</p>
+  <h1>Agents over MCP</h1>
+  <p class="lede">Uberblick is built MCP first. The agent writes most of what is in a workspace: it searches, reads, edits block by block, keeps the data current and comments. The browser is where you review, adjust and settle what the agent should not decide. Register the server once with your agent's client and that is the whole setup.</p>
+
+  <section class="q" id="install"><h2>Register the server</h2>
+  <p>Run this in the project directory, with Claude Code or Codex installed:</p>
+  <section class="block terminal"><div class="cap"><span>Terminal</span><button type="button" data-copy="ub mcp install claude">Copy</button></div><pre><span class="c"># Project scope, following ./.uberblick.json</span>
+<span class="p">$</span> ub mcp install claude
+
+<span class="c"># Codex, or per-user instead of per-project</span>
+<span class="p">$</span> ub mcp install codex
+<span class="p">$</span> ub mcp install claude --user</pre></section>
+  <p>The command runs the client's own installer (<code>claude mcp add</code>, <code>codex mcp add</code>) and registers one server named <code>uberblick</code> that runs <code>ub mcp serve</code>. It never edits a config file itself. If an entry named <code>uberblick</code> already exists and is not ours, it is left alone and the snippet is printed instead. Restart the client, or reload its MCP servers, after installing.</p>
+  <p>For a client the command does not know, <code>ub mcp install cursor --print</code> prints the snippet and does nothing else.</p>
+  </section>
+
+  <section class="q" id="binding"><h2>Which workspace the agent sees</h2>
+  <p>The server follows the nearest <code>.uberblick.json</code> above the directory the client started in, the same binding the terminal commands use. Agents never choose a workspace; they inherit the project's selection. Restart a running agent after you change the binding, because it keeps the workspace it started with.</p>
+  <p>A session can use several workspaces through separately named entries in the client's own config, each with its own <code>UB_WORKSPACE_ID</code> and <code>UB_HUB_URL</code>; see <a href="/docs/configuration">Configuration</a>.</p>
+  </section>
+
+  <section class="q" id="tools"><h2>The tools an agent actually uses</h2>
+  <p>There are 25 tools; most sessions use these eight. Each tool's own description is the authority, and <code>get_help</code> returns the product help an agent should read before it writes. The full list, with every parameter, is in the <a href="/docs/mcp">MCP reference</a>.</p>
+  </section>
+</article>
+<div class="tablewrap tools"><table>
+  <thead><tr><th>Tool</th><th>When an agent reaches for it</th></tr></thead>
+  <tbody>
+    <tr><td><code>get_sidebar</code></td><td>First thing in an unfamiliar workspace: the pinned documents and their groups say what matters here.</td></tr>
+    <tr><td><code>search</code></td><td>Find the pages a change touches before touching anything.</td></tr>
+    <tr><td><code>get_doc</code></td><td>Read a page block by block, with the block ids needed to edit it.</td></tr>
+    <tr><td><code>find_decisions</code></td><td>Before changing behaviour an issue covers: which decision records link that issue or pull request.</td></tr>
+    <tr><td><code>edit_block</code></td><td>Change the one block that is wrong. The rest of the page stays as it was.</td></tr>
+    <tr><td><code>insert_block</code></td><td>Add a paragraph, a table or a chart at a position, rather than rewriting the page.</td></tr>
+    <tr><td><code>update_data</code></td><td>Write records into a document; every chart and table that reads them refreshes.</td></tr>
+    <tr><td><code>annotate</code></td><td>Comment on a range, or reply to and resolve a thread, the same threads people see beside the text.</td></tr>
+  </tbody>
+</table></div>
+<article class="col">
+  <p class="small">The rest: <code>create_doc</code>, <code>list_docs</code>, <code>backlinks</code>, <code>list_tags</code>, <code>delete_block</code>, <code>link_range</code>, <code>set_metadata</code>, <code>set_status</code>, <code>get_data</code>, <code>export_markdown</code>, <code>pin_doc</code>, <code>unpin_doc</code>, <code>sidebar_group</code>, <code>archive_doc</code>, <code>restore_doc</code>, <code>sync_status</code>, <code>get_help</code>.</p>
+  <section class="q" id="rules"><h2>What to tell your agent</h2>
+  <p>The server does not decide how an agent should behave; your instructions do. Three rules that have held up for us:</p>
+  <ul>
+    <li>Start from <code>get_sidebar</code> and <code>search</code>, not from memory. Cite pages by title and id.</li>
+    <li>Edit the block that is wrong with <code>edit_block</code>. Do not replace a page to change a sentence.</li>
+    <li>Before changing behaviour an issue touches, call <code>find_decisions</code> for that issue and read what comes back.</li>
+  </ul>
+  </section>
+</article>
+</main>
+</div>
+</div>
+<div class="toast" role="status" aria-live="polite"></div>
+<script>
+const toast = document.querySelector('.toast');
+for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', async () => {
+  const t = b.getAttribute('data-copy');
+  try { await navigator.clipboard.writeText(t); toast.textContent = 'Copied'; }
+  catch { const r = document.createRange(); r.selectNodeContents(b.closest('.block').querySelector('pre')); getSelection().removeAllRanges(); getSelection().addRange(r); toast.textContent = 'Select and copy'; }
+  toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1400);
+});
+</script>

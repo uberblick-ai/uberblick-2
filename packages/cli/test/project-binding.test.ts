@@ -4,7 +4,8 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../src/config.js";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
 import { rememberWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
-import { sandbox, unboundSandbox, removeTempDirs, runUb } from "./helpers.js";
+import { runUb, sandbox, unboundSandbox, removeTempDirs } from "./helpers.js";
+import { runInProcess } from "./in-process.js";
 
 afterAll(removeTempDirs);
 afterEach(() => vi.unstubAllEnvs());
@@ -94,7 +95,7 @@ describe("atomic project bindings", () => {
     await rememberWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
     vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
     for (const id of [first, `notes-${first}`]) {
-      const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
+      const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
       expect(run.status, run.output).toBe(0);
       expect(run.stdout).toContain(first);
       expect(run.stdout).toContain(hubUrl ?? "local");
@@ -116,7 +117,7 @@ describe("atomic project bindings", () => {
     expect(resolveProjectBinding({ env: {}, cwd: box.cwd }).origin).toBe("project config");
   });
 
-  it.each([first, `notes-${first}`])("refuses an unknown id-only override instead of inferring local or using the project hub: %s", (id) => {
+  it.each([first, `notes-${first}`])("refuses an unknown id-only override instead of inferring local or using the project hub: %s", async (id) => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
     const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
     expect(run.status).toBe(1);
@@ -129,7 +130,7 @@ describe("atomic project bindings", () => {
     const box = sandbox();
     await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
     const before = readFileSync(workspaceRegistryPath(box.env));
-    const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
+    const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("wss://explicit.example.test/ws");
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);

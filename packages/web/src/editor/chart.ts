@@ -1,3 +1,4 @@
+// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 /**
  * A document-owned data view. Only the JSON mapping is block content. Drawing,
  * diagnostics and subscriptions never dispatch a content transaction or repair
@@ -17,14 +18,15 @@ import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
 import {
   prepareChart, formatChartX, formatChartNumber, chartAccessibleName,
-  chartAccessibleDescription, chartDiagnosticsText,
+  CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
+import type { ChartReady } from "./chart-data.js";
 import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
 import { observationEndpoints, observationTicks } from "./chart-ticks.js";
-import { chartAxes, chartPointRadius, formatChartTick } from "./chart-presentation.js";
+import { chartAxes, chartPanelRanges, chartPointRadius, formatChartTick } from "./chart-presentation.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -34,10 +36,166 @@ type Point = { x: number; y: number | null };
 const LIGHT = ["#1d4ed8", "#b91c1c", "#047857", "#7e22ce", "#a16207", "#0e7490", "#be185d", "#334155"];
 const DARK = ["#93c5fd", "#fca5a5", "#6ee7b7", "#d8b4fe", "#fde047", "#67e8f9", "#f9a8d4", "#cbd5e1"];
 
+function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, palette: string[], canvas: HTMLCanvasElement) {
+  const { config } = result;
+  const layout = config.layout === "panels" ? "panels" : "overlay";
+  const axes = chartAxes(config.y);
+  // Chart.js also extends all-negative axes to zero when enabled.
+  const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
+    axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
+  const font = { family: colors.fontFamily, size: 11 };
+  const ranges = layout === "panels" ? chartPanelRanges(result.series) : [];
+  const panelUnit = (index: number): string => result.series[index]?.unit || "";
+  const formatValue = (index: number, value: number): string =>
+    `${formatChartNumber(value)}${panelUnit(index) ? ` ${panelUnit(index)}` : ""}`;
+  // Equal gutters give equal-width panels identical observation selections,
+  // even when their unit labels have different widths.
+  const measure = layout === "panels" ? canvas.getContext("2d") : null;
+  let panelAxisWidth = 0;
+  if (layout === "panels" && measure !== null) {
+    measure.save();
+    measure.font = `${font.size}px ${font.family}`;
+    ranges.forEach((range, index) => {
+      let { min, max } = range;
+      // Reserve native constant-range expansion and one extra digit when nice
+      // rounding crosses a decimal boundary (for example, 99 becomes 100).
+      if (min === max) {
+        const padding = max === 0 ? 1 : Math.abs(max * 0.05);
+        max += padding;
+        if (min < 0) min -= padding;
+      }
+      const ticks = [min, min / 2 + max / 2, max].map(value => ({ value }));
+      for (const tick of ticks) panelAxisWidth = Math.max(panelAxisWidth,
+        measure.measureText(formatChartTick(tick.value, panelUnit(index), ticks)).width + 12 + font.size);
+    });
+    measure.restore();
+  }
+  const xValues = [...new Set(result.series.flatMap(series =>
+    series.points.filter(point => point.y !== null).map(point => point.x)))].sort((a, b) => a - b);
+  const endpoints = layout === "panels" ? observationEndpoints(xValues, config.x.type) : null;
+  const fittedTicks = new Map<number, ReturnType<typeof observationTicks>>();
+  const configurationFor = (indices: number[]): ChartConfiguration<"line", Point[]> => {
+    const xLabels = new Map<number, string[]>();
+    const setTicks = (scale: Scale, ticks: ReturnType<typeof observationTicks>): void => {
+      xLabels.clear();
+      for (const tick of ticks) xLabels.set(tick.value, tick.label);
+      // Chart.js attaches a scale-specific context to each tick object.
+      scale.ticks = layout === "panels" ? ticks.map(tick => ({ ...tick })) : ticks;
+    };
+    const selectTicks = (scale: Scale): void => {
+      const ctx = scale.chart.ctx;
+      ctx.save();
+      ctx.font = `${font.size}px ${font.family}`;
+      let ticks = layout === "panels" ? fittedTicks.get(scale.width) : undefined;
+      if (ticks === undefined) {
+        ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
+          label => ctx.measureText(label).width + (layout === "panels" ? 6 : 0));
+        if (layout === "panels") fittedTicks.set(scale.width, ticks);
+      }
+      ctx.restore();
+      setTicks(scale, ticks);
+    };
+    // Equal explicit limits leave a zero range in Chart.js. Only this
+    // degenerate case gets a small range, placing its point in the middle.
+    const padding = config.x.type === "date" ? 30_000 : Math.max(1, Math.abs(result.firstX) * Number.EPSILON * 4);
+    const min = result.firstX === result.lastX ? Math.max(-Number.MAX_VALUE, result.firstX - padding) : result.firstX;
+    const max = result.firstX === result.lastX ? Math.min(Number.MAX_VALUE, result.lastX + padding) : result.lastX;
+    const configuration: ChartConfiguration<"line", Point[]> = {
+      type: "line",
+      data: { datasets: indices.map(index => {
+        const series = result.series[index];
+        if (series === undefined) throw new Error("Chart series is absent");
+        const plottedValues = series.points.filter(point => point.y !== null).length;
+        return {
+          label: axes.legendLabels[index] ?? series.label,
+          yAxisID: layout === "panels" ? "y" : axes.seriesAxes[index],
+          data: series.points.map(({ x, y }) => ({ x, y })),
+          borderColor: palette[index],
+          backgroundColor: palette[index],
+          borderWidth: 2,
+          // A dense gap-free panel has no visible points. A constant lets
+          // Chart.js share its point options instead of resolving every point.
+          pointRadius: layout === "panels" && plottedValues > 40 && plottedValues === series.points.length
+            ? 0 : context => chartPointRadius(series.points, context.dataIndex, plottedValues),
+          pointHoverRadius: 4,
+          pointHitRadius: 6,
+          spanGaps: false,
+        };
+      }) },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        color: colors.color,
+        font,
+        interaction: { mode: "nearest", axis: "x", intersect: false },
+        scales: {
+          x: {
+            type: "linear",
+            min, max,
+            title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
+            // Reserve both endpoints even if crowding will omit one, so
+            // the fitted selection cannot introduce an unpadded end label.
+            afterBuildTicks: scale => setTicks(scale, endpoints ?? observationEndpoints(xValues, config.x.type)),
+            afterFit: selectTicks,
+            ticks: {
+              color: colors.color, font,
+              autoSkip: false, minRotation: 0, maxRotation: 0,
+              callback: value => xLabels.get(Number(value)),
+            },
+            grid: { display: false },
+            border: { display: false },
+          },
+          y: {
+            type: "linear",
+            beginAtZero: layout === "panels" ? (ranges[indices[0] ?? 0]?.min ?? 0) >= 0 : beginAtZero("y"),
+            ...(layout === "panels" ? {
+              suggestedMin: ranges[indices[0] ?? 0]?.min,
+              suggestedMax: ranges[indices[0] ?? 0]?.max,
+              afterFit: (scale: Scale) => { scale.width = Math.min(panelAxisWidth, scale.maxWidth); },
+            } : {}),
+            ticks: { color: colors.color, font, maxTicksLimit: layout === "panels" ? 3 : 6,
+              callback: (value, _index, ticks) => formatChartTick(Number(value), layout === "panels" ? panelUnit(indices[0] ?? 0) : axes.leftUnit, ticks) },
+            grid: { color: colors.borderTopColor },
+            border: { display: false },
+          },
+          ...(layout === "overlay" && axes.rightUnit !== undefined ? { yRight: {
+            type: "linear" as const, position: "right" as const,
+            beginAtZero: beginAtZero("yRight"),
+            ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
+            grid: { drawOnChartArea: false },
+            border: { display: false },
+          } } : {}),
+        },
+        plugins: {
+          legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
+            color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
+          } },
+          tooltip: { callbacks: {
+            title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
+            label: item => {
+              const index = indices[item.datasetIndex] ?? 0;
+              const series = config.y[index];
+              return item.parsed.y === null ? "" : `${series?.label ?? series?.field ?? ""}: ${formatValue(index, item.parsed.y)}`;
+            },
+          } },
+        },
+      },
+    };
+    return configuration;
+  };
+  return { configurationFor, formatValue };
+}
+
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
+  // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
     let current: PMNode = node;
-    let instance: Chart<"line", Point[]> | null = null;
+    let instances: Chart<"line", Point[]>[] = [];
+    let drawnLayout: "overlay" | "panels" | null = null;
+    let seriesPanels: { header: HTMLElement; canvas: HTMLCanvasElement }[] = [];
     let destroyed = false;
     let dirty = true;
     let snapshot: DocData | null = null;
@@ -85,14 +243,22 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     dom.append(panel, footer, copy.element, contentDOM);
 
     const releaseChart = (): void => {
-      instance?.destroy();
-      instance = null;
+      for (const instance of instances) instance.destroy();
+      instances = [];
+      drawnLayout = null;
+      seriesPanels = [];
+      screen.replaceChildren(canvas);
+      screen.classList.remove("ub-chart-panels");
+      screen.removeAttribute("role");
+      screen.removeAttribute("aria-label");
+      screen.removeAttribute("aria-describedby");
     };
     const text = (element: HTMLElement, value: string): void => {
       element.textContent = value;
       element.hidden = value === "";
     };
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
     const draw = (data: DocData | null, readError?: unknown): void => {
       if (destroyed) return;
       try {
@@ -105,6 +271,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           dirty = false;
         }
         const result = prepared;
+        notice.classList.toggle("ub-chart-limit-notice", result.status === "ready" &&
+          result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
         // Reserve the actions beside the footnote, outside the table and its
@@ -136,7 +304,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           description.textContent = "";
           text(title, "");
           text(message, "");
-          text(notice, "Generated from document data · read-only");
+          text(notice, `Generated from document data · read-only${result.notice ? ` · ${result.notice}` : ""}`);
           text(diagnostics, tableDiagnosticsText(result));
           table.render(result);
           return;
@@ -148,115 +316,59 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         text(message, "");
         text(notice, result.notice ?? "");
         screen.hidden = false;
-        canvas.setAttribute("aria-label", chartAccessibleName(config));
+        const layout = config.layout === "panels" ? "panels" : "overlay";
+        if (drawnLayout !== layout || (layout === "panels" && seriesPanels.length !== result.series.length)) {
+          releaseChart();
+          drawnLayout = layout;
+          if (layout === "panels") {
+            screen.replaceChildren();
+            screen.classList.add("ub-chart-panels");
+            screen.setAttribute("role", "img");
+            screen.setAttribute("aria-describedby", description.id);
+            seriesPanels = result.series.map(() => {
+              const element = document.createElement("div");
+              element.className = "ub-chart-series-panel";
+              const header = document.createElement("p");
+              header.className = "ub-chart-series-header";
+              const plot = document.createElement("div");
+              plot.className = "ub-chart-series-plot";
+              const seriesCanvas = document.createElement("canvas");
+              seriesCanvas.setAttribute("aria-hidden", "true");
+              plot.append(seriesCanvas);
+              element.append(header, plot);
+              screen.append(element);
+              return { header, canvas: seriesCanvas };
+            });
+          }
+        }
+        (layout === "panels" ? screen : canvas).setAttribute("aria-label", chartAccessibleName(config));
         const colors = getComputedStyle(probe);
         const dark = document.documentElement.dataset.theme === "dark" ||
           (document.documentElement.dataset.theme !== "light" && appearance?.matches === true);
         const palette = dark ? DARK : LIGHT;
-        const axes = chartAxes(config.y);
-        // Chart.js also extends all-negative axes to zero when enabled.
-        const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
-          axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
-        const font = { family: colors.fontFamily, size: 11 };
-        const xValues = [...new Set(result.series.flatMap(series =>
-          series.points.filter(point => point.y !== null).map(point => point.x)))].sort((a, b) => a - b);
-        const xLabels = new Map<number, string[]>();
-        const setTicks = (scale: Scale, ticks: ReturnType<typeof observationTicks>): void => {
-          xLabels.clear();
-          for (const tick of ticks) xLabels.set(tick.value, tick.label);
-          scale.ticks = ticks;
-        };
-        const selectTicks = (scale: Scale): void => {
-          const ctx = scale.chart.ctx;
-          ctx.save();
-          ctx.font = `${font.size}px ${font.family}`;
-          const ticks = observationTicks(xValues, config.x.type, scale.min, scale.max, scale.width,
-            label => ctx.measureText(label).width);
-          ctx.restore();
-          setTicks(scale, ticks);
-        };
-        // Equal explicit limits leave a zero range in Chart.js. Only this
-        // degenerate case gets a small range, placing its point in the middle.
-        const padding = config.x.type === "date" ? 30_000 : Math.max(1, Math.abs(result.firstX) * Number.EPSILON * 4);
-        const min = result.firstX === result.lastX ? Math.max(-Number.MAX_VALUE, result.firstX - padding) : result.firstX;
-        const max = result.firstX === result.lastX ? Math.min(Number.MAX_VALUE, result.lastX + padding) : result.lastX;
-        const configuration: ChartConfiguration<"line", Point[]> = {
-          type: "line",
-          data: { datasets: result.series.map((series, index) => {
-            const plottedValues = series.points.filter(point => point.y !== null).length;
-            return {
-              label: axes.legendLabels[index] ?? series.label,
-              yAxisID: axes.seriesAxes[index],
-              data: series.points.map(({ x, y }) => ({ x, y })),
-              borderColor: palette[index],
-              backgroundColor: palette[index],
-              borderWidth: 2,
-              pointRadius: context => chartPointRadius(series.points, context.dataIndex, plottedValues),
-              pointHoverRadius: 4,
-              pointHitRadius: 6,
-              spanGaps: false,
-            };
-          }) },
-          options: {
-            animation: false,
-            responsive: true,
-            maintainAspectRatio: false,
-            parsing: false,
-            color: colors.color,
-            font,
-            interaction: { mode: "nearest", axis: "x", intersect: false },
-            scales: {
-              x: {
-                type: "linear",
-                min, max,
-                title: { display: config.x.type === "number", text: config.x.label || config.x.field, color: colors.color, font },
-                // Reserve both endpoints even if crowding will omit one, so
-                // the fitted selection cannot introduce an unpadded end label.
-                afterBuildTicks: scale => setTicks(scale, observationEndpoints(xValues, config.x.type)),
-                afterFit: selectTicks,
-                ticks: {
-                  color: colors.color, font,
-                  autoSkip: false, minRotation: 0, maxRotation: 0,
-                  callback: value => xLabels.get(Number(value)),
-                },
-                grid: { display: false },
-                border: { display: false },
-              },
-              y: {
-                type: "linear",
-                beginAtZero: beginAtZero("y"),
-                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value, _index, ticks) => formatChartTick(Number(value), axes.leftUnit, ticks) },
-                grid: { color: colors.borderTopColor },
-                border: { display: false },
-              },
-              ...(axes.rightUnit !== undefined ? { yRight: {
-                type: "linear" as const, position: "right" as const,
-                beginAtZero: beginAtZero("yRight"),
-                ticks: { color: colors.color, font, maxTicksLimit: 6, callback: (value: string | number, _index: number, ticks: { value: number }[]) => formatChartTick(Number(value), axes.rightUnit ?? "", ticks) },
-                grid: { drawOnChartArea: false },
-                border: { display: false },
-              } } : {}),
-            },
-            plugins: {
-              legend: { display: true, position: "bottom", align: "start", labels: {
-                color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
-              } },
-              tooltip: { callbacks: {
-                title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
-                label: item => {
-                  const series = config.y[item.datasetIndex];
-                  return item.parsed.y === null ? "" : `${series?.label ?? series?.field ?? ""}: ${formatChartNumber(item.parsed.y)}${series?.unit ? ` ${series.unit}` : ""}`;
-                },
-              } },
-            },
-          },
-        };
-        if (instance === null) instance = new Chart(canvas, configuration);
-        else {
-          instance.data = configuration.data;
-          instance.options = configuration.options ?? {};
-          instance.update("none");
-        }
+        const { configurationFor, formatValue } = lineConfigurations(result, colors, palette, canvas);
+        seriesPanels.forEach((target, index) => {
+          const series = result.series[index];
+          const latest = series?.points.findLast(point => point.y !== null)?.y;
+          const label = document.createElement("span");
+          label.textContent = series?.label ?? "";
+          const value = document.createElement("strong");
+          value.textContent = latest === undefined || latest === null ? "no plotted value" : formatValue(index, latest);
+          target.header.replaceChildren(label, value);
+          target.header.style.color = palette[index] ?? "";
+        });
+        const groups = layout === "panels" ? result.series.map((_, index) => [index]) : [result.series.map((_, index) => index)];
+        groups.forEach((indices, index) => {
+          const target = seriesPanels[index];
+          const configuration = configurationFor(indices);
+          const instance = instances[index];
+          if (instance === undefined) instances[index] = new Chart(target?.canvas ?? canvas, configuration);
+          else {
+            instance.data = configuration.data;
+            instance.options = configuration.options ?? {};
+            instance.update("none");
+          }
+        });
         // Updated after the synchronous canvas draw, without a live region.
         description.textContent = chartAccessibleDescription(result);
       } catch (error) {

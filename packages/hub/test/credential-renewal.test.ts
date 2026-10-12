@@ -8,7 +8,7 @@ import {
   importRootSecret,
   mintRequestProof,
   mintToken,
-} from "../src/token.js";
+} from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const PRINCIPAL = "person";

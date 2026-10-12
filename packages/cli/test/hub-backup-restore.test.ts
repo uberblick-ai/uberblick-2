@@ -36,7 +36,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createHub, silentLogger } from "@uberblick/hub";
+import { silentLogger } from "@uberblick/hub";
+import { createTeamHub as createHub } from "@uberblick/hub/team";
 import { getWorkspaceName, setWorkspaceName } from "@uberblick/schema";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";

@@ -1,0 +1,101 @@
+.ub-wireframe {
+  --wf-ink: var(--foreground);
+  --wf-muted: var(--muted-foreground);
+  --wf-paper: var(--card);
+  --wf-line: var(--input);
+  --wf-scrim: color-mix(in oklab, var(--foreground) 12%, transparent);
+  --wf-shadow: var(--shadow-float);
+  --wf-primary: var(--primary);
+  --wf-primary-ink: var(--primary-foreground);
+  --wf-danger: var(--destructive);
+  --wf-danger-ink: var(--destructive-foreground);
+  --wf-focus: var(--ring);
+  --wf-info: var(--syntax-name);
+  --wf-warning: var(--status-warning);
+  --wf-neutral-tint: var(--muted);
+  --wf-info-tint: color-mix(in oklab, var(--syntax-name) 8%, var(--card));
+  --wf-warning-tint: var(--status-warning-subtle);
+  --wf-danger-tint: var(--destructive-subtle);
+  --wf-radius: var(--radius-sm);
+  --wf-radius-lg: var(--radius);
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 0;
+  border-left: 3px solid light-dark(#64748b, #94a3b8);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: light-dark(oklch(0.97 0.006 250), oklch(0.22 0.012 250));
+  font-family: var(--font-sans);
+  white-space: normal;
+}
+
+.ub-wireframe-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.ub-wireframe .ub-code-caption {
+  position: static;
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  line-height: 1.3333;
+  letter-spacing: normal;
+}
+
+.ub-wireframe-actions { display: flex; gap: 0.3rem; }
+.ub-wireframe-actions > button {
+  position: static;
+  min-width: 0;
+  padding: 0.05rem 0.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 0.75rem/1.5 var(--font-sans);
+  letter-spacing: normal;
+  cursor: pointer;
+}
+.ub-wireframe-actions > button:hover { color: var(--foreground); }
+.ub-wireframe-actions > button:focus-visible,
+.ub-wireframe-viewport:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-wireframe-viewport {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+/* Clip the unscaled layout box, leaving only its scaled size to the scroller. */
+.ub-wireframe-fit { position: relative; overflow: hidden; }
+.ub-wireframe-drawing { position: absolute; transform-origin: top left; }
+.ub-wireframe .wf-root { overflow: visible; font-family: var(--font-sans); }
+
+.ub-wireframe-source {
+  display: none;
+  margin: 0.6rem 0 0;
+  padding: 0.6rem 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  font: 0.8rem/1.7 var(--font-mono);
+  white-space: pre;
+}
+.ub-wireframe-editing > .ub-wireframe-source,
+.ub-wireframe[data-annotated="true"] > .ub-wireframe-source { display: block; }
+.ub-wireframe-stale,
+.ub-wireframe-diagnostics { margin: 0.5rem 0 0; font: 0.75rem/1.5 var(--font-sans); color: var(--muted-foreground); }
+.ub-wireframe-diagnostics { padding-left: 1.2rem; overflow-wrap: anywhere; }
+.ub-wireframe-stale { font-weight: 500; }
+
+@media (any-pointer: coarse) {
+  .ub-wireframe-actions > button { min-width: 2.75rem; min-height: 2.75rem; }
+}

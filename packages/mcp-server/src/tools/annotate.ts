@@ -1,4 +1,4 @@
-import { addComment, createAnnotation, setAnnotationResolved } from "@uberblick/schema";
+import { addComment, createAnnotation, getBlock, setAnnotationResolved } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
@@ -7,13 +7,8 @@ import { uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 
 /**
- * `annotate`'s two shapes, stated once for the boundary and for `tools/list`.
- *
- * The fields are not independently optional: a reply names a thread, opening
- * one names a block and a range, and a call carrying both says two things at
- * once. A reply may also resolve or reopen its thread; opening one cannot.
- * The shape is selected on `thread_id` rather than on an added `action` field,
- * so every call an agent already writes stays valid.
+ * thread_id selects a reply with optional resolution; its absence requires
+ * a block/range and forbids resolution. The two field sets cannot mix.
  */
 const ANNOTATE_MODES: readonly ToolMode[] = [
   {
@@ -58,9 +53,7 @@ export const annotateOperation = documentOperation("annotate", inputSchema, (con
   const who = author ?? replicas.name;
 
   if (thread_id !== undefined) {
-    // Both schema helpers transact; this outer transaction folds a reply
-    // plus its resolution into one Yjs update and therefore one durable
-    // append, while keeping their independently reusable schema contracts.
+    // Combine nested reply/resolution transactions into one durable append.
     const updated = replica.doc.transact(() => {
       const added = addComment(replica.doc, thread_id, who, text);
       return added !== null && resolved !== undefined
@@ -80,10 +73,10 @@ export const annotateOperation = documentOperation("annotate", inputSchema, (con
     };
   }
 
-  // No `thread_id` is the other shape, and the input boundary refused the
-  // call unless all three range fields came with it — see
-  // {@link ANNOTATE_MODES}. The assertions stand in for what TypeScript
-  // cannot read off fields the object declares once for both shapes.
+  // ANNOTATE_MODES requires these range fields; TypeScript cannot infer the branch.
+  if (getBlock(replica.doc, block_id as string)?.type === "card") {
+    throw new ToolError("annotation_card", "Open new card comment threads in the web editor; MCP supports replies to existing card threads.", { blockId: block_id });
+  }
   if ((row === undefined) !== (column === undefined)) {
     throw new ToolError("annotation_cell", "Table cell coordinates require both row and column", { blockId: block_id, reason: "missing" });
   }

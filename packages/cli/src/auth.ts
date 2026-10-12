@@ -1,8 +1,8 @@
-/** Remote sign-in stores a device credential; live sync still uses its existing auth. */
 import { setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { hostname } from "node:os";
-import { isGithubUsername, sanitizeDeviceName } from "@uberblick/hub";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { parseWorkspaceId } from "@uberblick/schema";
 import {
   type StoredHubLogin,
@@ -17,9 +17,10 @@ import { budget } from "./budget.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
-import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/hub/remote-url";
+import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { manageRequest, ManagementResponseError } from "./access-management.js";
-export { authenticationOrigin } from "@uberblick/hub/remote-url";
+export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 
 export const AUTH_HELP = `usage: ub auth [command]
 
@@ -355,6 +356,26 @@ async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean
   } catch { return false; }
 }
 
+/** Released sign-in hubs check version before the empty token, without changing state. */
+async function checkSignInProtocol(origin: string, signal: AbortSignal): Promise<void> {
+  const response = await fetch(`${origin}/auth/credential/renew`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: wrapToken(""), redirect: "error",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_MS)]),
+  });
+  // Only a validated mismatch diagnoses skew. Leave unavailable sign-in or
+  // an older interface to the existing start request and its diagnostics.
+  if (response.status !== 409) {
+    await response.body?.cancel();
+    return;
+  }
+  let result: Record<string, unknown>;
+  try { result = await readResponse(response, () => new Error("invalid protocol reply")); } catch { return; }
+  if (result.status !== "protocol-mismatch" || typeof result.reason !== "string") return;
+  const hubVersion = readProtocolMismatch(result.reason);
+  if (hubVersion !== null) throw new SignInFailure(protocolSkew(hubVersion, SYNC_PROTOCOL_VERSION));
+}
+
 /** Every byte and every network wait is bounded, including a stalled JSON body. */
 async function post(
   origin: string, route: "start" | "collect" | "cancel", body: object,
@@ -405,6 +426,7 @@ function terminal(result: Record<string, unknown>): never {
   throw new SignInFailure(messages[String(result.status)] ?? "the hub returned an invalid GitHub sign-in response; update the hub");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 async function login(selection: Selection, io: Io, nextAction: boolean): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
@@ -420,6 +442,8 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
   let stored = false;
   let claimedWorkspaceId: string | undefined;
   try {
+    await checkSignInProtocol(selection.origin, interrupted.signal);
+    if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     const unclaimed = await isUnclaimed(selection.origin, interrupted.signal);
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     // A start interrupted before its reply has no collection secret to cancel
