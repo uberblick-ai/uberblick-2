@@ -10,7 +10,9 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
-const RECENT_WINDOW = 30 * DAY;
+const MONTH = 30 * DAY;
+const YEAR = 365 * DAY;
+const RECENT_WINDOW = MONTH;
 
 const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
@@ -63,7 +65,11 @@ export function formatTimestamp(
         ? [Math.floor(age / HOUR), "hour"]
         : age < WEEK
           ? [Math.floor(age / DAY), "day"]
-          : [Math.floor(age / WEEK), "week"];
+          : age < MONTH
+            ? [Math.floor(age / WEEK), "week"]
+            : age < YEAR
+              ? [Math.floor(age / MONTH), "month"]
+              : [Math.floor(age / YEAR), "year"];
   return {
     label: amount < 1 ? "just now" : `${amount} ${unit}${amount === 1 ? "" : "s"} ago`,
     dateTime,

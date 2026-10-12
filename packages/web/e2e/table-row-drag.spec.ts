@@ -6,9 +6,9 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
-  appendBlock, decisionDirectoryFields, deleteBlock, directoryRoom, editBlock,
-  getBlocks, getBlocksFragment, initDoc, roomForDoc, setKind, setStatus,
-  upsertDirectoryEntry,
+  appendBlock, deleteBlock, directoryRoom, editBlock,
+  getBlocks, getBlocksFragment, initDoc, roomForDoc,
+  tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
@@ -18,7 +18,7 @@ const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
 const INITIAL = ["alpha", "beta", "gamma"];
 
-async function publishTable(source = SOURCE, decision = false): Promise<{
+async function publishTable(source = SOURCE): Promise<{
   uuid: string; id: string; doc: Y.Doc; directory: Y.Doc; close: () => void;
 }> {
   const uuid = randomUUID();
@@ -26,7 +26,6 @@ async function publishTable(source = SOURCE, decision = false): Promise<{
   const title = "Shared row move";
   initDoc(doc, { uuid, title });
   const id = appendBlock(doc, { type: "table", text: source });
-  if (decision) { setKind(doc, "decision"); setStatus(doc, "open"); }
   const peers: Array<{ provider: HocuspocusProvider; ydoc: Y.Doc }> = [];
   const close = (): void => {
     for (const { provider, ydoc } of peers) { provider.destroy(); ydoc.destroy(); }
@@ -47,10 +46,7 @@ async function publishTable(source = SOURCE, decision = false): Promise<{
       return ydoc;
     };
     const directory = await connect(directoryRoom(harness().workspaceUuid));
-    upsertDirectoryEntry(directory, {
-      uuid, title,
-      ...(decision ? { kind: "decision", status: "open", ...decisionDirectoryFields(doc) } : {}),
-    });
+    upsertDirectoryEntry(directory, { uuid, title });
     await connect(roomForDoc(harness().workspaceUuid, uuid), doc);
     return { uuid, id, doc, directory, close };
   } catch (error) { close(); throw error; }
@@ -295,7 +291,7 @@ test("a drag keeps edits and inserted rows that arrive before the drop", async (
 
 for (const changed of ["row deletion", "table deletion", "row move", "ragged shape", "read-only"] as const) {
   test(`a received ${changed} cancels an active drag without another write`, async ({ page }) => {
-    const fixture = await publishTable(SOURCE, changed === "read-only");
+    const fixture = await publishTable();
     try {
       const table = await openTable(page, fixture.uuid);
       await startMouse(page, table);
@@ -324,11 +320,8 @@ for (const changed of ["row deletion", "table deletion", "row move", "ragged sha
         await expect(table.locator("tr").nth(2).locator("td")).toHaveCount(1);
         await expect(page.locator(".ub-table-controls")).toHaveCount(0);
       } else {
-        setStatus(fixture.doc, "decided");
-        upsertDirectoryEntry(fixture.directory, {
-          uuid: fixture.uuid, title: "Shared row move", kind: "decision", status: "decided",
-          ...decisionDirectoryFields(fixture.doc),
-        });
+        tombstoneDirectoryEntry(fixture.directory, fixture.uuid);
+        await expect(page.locator(".ub-archived-banner")).toBeVisible();
         await expect(editor(page)).toHaveAttribute("contenteditable", "false");
         await expect(page.locator(".ub-table-controls")).toHaveCount(0);
       }

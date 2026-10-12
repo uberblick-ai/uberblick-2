@@ -21,11 +21,13 @@ import {
   directoryRoom,
   getDirectoryEntry,
   initDoc,
+  readSidebar,
   restoreDirectoryEntry,
   resolveDecisionTopics,
   roomForDoc,
   settingsRoom,
   sidebarRoom,
+  unpinDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { DecisionTopicResolution, DocMeta } from "@uberblick/schema";
@@ -552,9 +554,12 @@ export function App(): ReactElement {
   const entries = useMemo(() => allEntries.filter((entry) => !entry.deleted), [allEntries]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
-  /** Whether the open document is pinned — what its actions menu shows. */
-  const pinned =
-    selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
+  const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
+  const pinnedRecords = sidebarGroups.flatMap((group) => group.docs).filter((uuid) => pinTargets.includes(uuid));
+  const pinned = pinnedRecords.length > 0;
+  const sidebarSelection = topic === null || (routedSelection !== null && pinnedRecords.includes(routedSelection))
+    ? routedSelection
+    : pinnedRecords[0] ?? topic.topic;
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
@@ -721,11 +726,23 @@ export function App(): ReactElement {
     },
     [sidebar],
   );
-  /** The keyboard-reachable path in, from the place that is always about the
-      open document. */
+  /** Header pinning follows the topic while its displayed answer changes. */
   const onTogglePin = useCallback(() => {
-    if (selected !== null) onTogglePinDoc(selected);
-  }, [onTogglePinDoc, selected]);
+    if (topic === null) {
+      if (selected !== null) onTogglePinDoc(selected);
+      return;
+    }
+    if (sidebar === null || !sidebar.status.writable || !sidebar.status.synced) return;
+    const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
+      .filter((uuid) => topic.records.some((record) => record.uuid === uuid));
+    if (pins.length === 0) {
+      togglePin(sidebar.ydoc, topic.topic);
+    } else {
+      sidebar.ydoc.transact(() => {
+        for (const uuid of pins) unpinDoc(sidebar.ydoc, uuid);
+      });
+    }
+  }, [onTogglePinDoc, selected, sidebar, topic]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -957,7 +974,7 @@ export function App(): ReactElement {
           identity={identity}
           account={servingStatus?.notSharedReason ? { state: "unavailable" } : account}
           agentSessions={agentSessions}
-          selected={routedSelection}
+          selected={sidebarSelection}
           onSelect={onSelect}
           onCreate={onCreate}
           onOpenAll={onOpenAll}

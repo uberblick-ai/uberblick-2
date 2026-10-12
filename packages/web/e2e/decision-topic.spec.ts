@@ -74,6 +74,24 @@ async function closeThreadDrawer(page: Page, touch: boolean): Promise<void> {
   if (await close.isVisible()) await activateControl(close, { touch });
 }
 
+async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
+  const show = page.getByRole("button", { name: "Show document list", exact: true });
+  if (await show.isVisible()) await activateControl(show, { touch });
+  const pin = page.locator(".ub-pin-row > button");
+  await expect(pin).toHaveCount(1);
+  await expect(pin).toBeVisible();
+  await expect(pin).toHaveText("Initial topic title");
+  await expect(pin).toHaveAttribute("aria-current", "page");
+  if (await page.getByRole("dialog", { name: "Sidebar", exact: true }).isVisible()) {
+    await activateControl(page.getByRole("button", { name: "Hide document list", exact: true }), { touch });
+  }
+}
+
+async function topicPins(writer: McpSession, records: string[]): Promise<string[]> {
+  const sidebar = await writer.call<{ groups: Array<{ docs: Array<{ uuid: string }> }> }>("get_sidebar", {});
+  return sidebar.groups.flatMap((group) => group.docs.map((doc) => doc.uuid)).filter((uuid) => records.includes(uuid));
+}
+
 async function captureClipboard(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const state = window as unknown as { copiedTexts: string[] };
@@ -110,6 +128,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const first = await create(writer, "Initial topic title", "Earlier answer remains available as history.", {
       kind: "decision", status: "decided", related: formerOwner.uuid, answer: answer("Earlier answerer"),
     });
+    await writer.call("pin_doc", { uuid: first.uuid, group: "Reading" });
     const current = await create(writer, "Current topic title", "Current answer stays in force during review.", {
       kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer("Recorded answerer"),
     });
@@ -143,6 +162,18 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.locator(".ub-decision-topic-state")).toHaveText("Under review");
     await expect(page.locator(".ub-decision-notice")).toContainText("The current answer stays in force.");
     await selected(page, current.uuid, answerText(current));
+    await selectedTopicPin(page, touch);
+    const topicRecords = [first.uuid, current.uuid, rejected.uuid, withdrawn.uuid, pending.uuid];
+    const actions = page.getByRole("button", { name: "Document actions", exact: true });
+    await activateControl(actions, { touch });
+    await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
+    await expect(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true })).toHaveCount(0);
+    await activateControl(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true }), { touch });
+    await expect.poll(() => topicPins(writer, topicRecords)).toEqual([]);
+    await activateControl(actions, { touch });
+    await activateControl(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true }), { touch });
+    await expect.poll(() => topicPins(writer, topicRecords)).toEqual([first.uuid]);
+    await selectedTopicPin(page, touch);
     const currentColor = await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color);
     await expect(page.locator(".ub-decision-attribution")).toHaveText("Decided by Recorded answerer · 2026-10-04T12:00:00Z");
     await expect(entry(page, first.uuid)).toContainText("Linked record");
@@ -173,6 +204,10 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     }
     await expect(page).toHaveURL(new RegExp(`${firstPath}$`));
     await selected(page, first.uuid, answerText(first));
+    await selectedTopicPin(page, touch);
+    await activateControl(actions, { touch });
+    await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
+    await page.keyboard.press("Escape");
     await expect(page.locator(".ub-decision-answer-label")).toContainText("History · Superseded");
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
     expect(await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color)).not.toBe(currentColor);

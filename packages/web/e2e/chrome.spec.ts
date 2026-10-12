@@ -3254,10 +3254,11 @@ test("decision archive and restore follow the whole topic and its first record",
     const earlier = await openApp(browser, `/${running.workspace}/${first}`);
     const map = getDirectoryMap(directory);
 
-    // A mirror-only tombstone leaves a successor writable and archivable.
+    // A mirror-only tombstone leaves the topic live and archivable.
     map.set(successor, { ...(map.get(successor) as object), deleted: true });
     await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
-    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     await page.getByRole("button", { name: "Document actions" }).click();
     await page.getByRole("menuitem", { name: "Archive document" }).click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
@@ -3269,20 +3270,24 @@ test("decision archive and restore follow the whole topic and its first record",
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 
     await page.getByRole("button", { name: "Restore", exact: true }).click();
-    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-    await expect(editor(earlier)).toHaveAttribute("contenteditable", "true");
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await expect(editor(earlier)).toHaveAttribute("contenteditable", "false");
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+    await expect(earlier.locator(".ub-archived-banner")).toHaveCount(0);
     await expect.poll(() => getDirectoryEntry(directory, first)?.deleted).toBeUndefined();
     await expect.poll(() => getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
 
-    // A partial archive's first tombstone alone gates every record's writes.
+    // A partial archive's first tombstone alone archives the whole topic.
     map.set(first, { ...(map.get(first) as object), deleted: true });
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-    await expect(page.locator(".ub-title")).toHaveAttribute("readonly", "");
+    await expect(page.locator("input.ub-title")).toHaveCount(0);
     expect(getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
     await page.getByRole("button", { name: "Restore", exact: true }).click();
-    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-    await expect(editor(earlier)).toHaveAttribute("contenteditable", "true");
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await expect(editor(earlier)).toHaveAttribute("contenteditable", "false");
+    await expect(page.locator(".ub-archived-banner")).toHaveCount(0);
+    await expect(earlier.locator(".ub-archived-banner")).toHaveCount(0);
   } finally {
     for (const { provider, doc } of peers.reverse()) {
       provider.destroy();

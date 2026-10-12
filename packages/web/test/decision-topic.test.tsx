@@ -1,18 +1,22 @@
 /** Topic navigation reads one record room while directory caches supply history. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   appendBlock,
   createAnnotation,
+  createGroup,
   decisionDirectoryFields,
   directoryRoom,
   getBlocks,
   getMetaMap,
   initDoc,
+  pinDoc,
+  readSidebar,
   roomForDoc,
   setKind,
   setStatus,
+  sidebarRoom,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -219,7 +223,47 @@ describe("decision topic navigation and history", () => {
     const host = (await open()).container;
     const time = item(host, FIRST).querySelector("time");
     expect(time?.dateTime).toBe("2020-01-01T00:00:00.000Z");
-    expect(time?.textContent).toMatch(/weeks ago$/);
+    expect(time?.textContent).toMatch(/years ago$/);
+  });
+
+  it.each([
+    [docPath(WORKSPACE, FIRST), FIRST],
+    [docPath(WORKSPACE, CURRENT), FIRST],
+    [decisionRecordPath(WORKSPACE, FIRST, REJECTED), FIRST],
+    [decisionRecordPath(WORKSPACE, FIRST, FIRST), CURRENT],
+  ])("keeps topic pins and their sidebar highlight while reading %s", async (path, pinnedRecord) => {
+    story();
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    const group = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, group, pinnedRecord);
+    pinDoc(sidebar, group, RELATED_CURRENT);
+    const host = (await open(path)).container;
+    const pinnedRow = within(host).getByRole("button", { name: pinnedRecord === FIRST ? "Original title" : "Current topic title", exact: true });
+    expect(pinnedRow.getAttribute("aria-current")).toBe("page");
+    await act(async () => within(host).getByRole("button", { name: "Document actions" })
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(screen.queryByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeNull();
+    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar", exact: true }).click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([RELATED_CURRENT]);
+    await act(async () => within(host).getByRole("button", { name: "Document actions" })
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await act(async () => screen.getByRole("menuitem", { name: "Pin to sidebar", exact: true }).click());
+    expect(readSidebar(sidebar)[0]?.docs).toEqual([RELATED_CURRENT, FIRST]);
+    expect(within(host).getByRole("button", { name: "Original title", exact: true }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("unpins every stored topic pin without unpinning another document", async () => {
+    story();
+    const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
+    const group = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, group, FIRST);
+    pinDoc(sidebar, createGroup(sidebar, "Later"), CURRENT);
+    pinDoc(sidebar, group, RELATED_CURRENT);
+    const host = (await open(decisionRecordPath(WORKSPACE, FIRST, REJECTED))).container;
+    await act(async () => within(host).getByRole("button", { name: "Document actions" })
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar", exact: true }).click());
+    expect(readSidebar(sidebar).flatMap((entry) => entry.docs)).toEqual([RELATED_CURRENT]);
   });
 
   it("opens a superseded link at the current answer and keeps the named record reachable", async () => {
