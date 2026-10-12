@@ -2,6 +2,8 @@
 node = "26"
 pnpm = "10"
 fnox = "1"
+# Line counts for the CI health report: code without comments or blank lines.
+"aqua:boyter/scc" = "4"
 
 # Plaintext local defaults. Only real secrets belong in fnox.toml.
 #
