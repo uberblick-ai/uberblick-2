@@ -1,5 +1,5 @@
 /**
- * Decided records protect their text while keeping discussion and metadata open.
+ * Decision records protect their text while keeping discussion and metadata open.
  * Shared Y.Docs exercise the document metadata authority and live pane wiring;
  * native pointer/touch selection belongs to the browser suite.
  */
@@ -31,6 +31,7 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import * as guardedBinding from "../src/editor/guarded-binding.js";
 import { findLinkConflicts } from "../src/editor/palette.js";
 import { plainText } from "../src/editor/ytext.js";
+import { EditorPane } from "../src/ui/EditorPane.js";
 import { threadCardId } from "../src/ui/threads.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -154,7 +155,36 @@ function card(host: HTMLElement, id: string): HTMLElement {
   return element;
 }
 
-describe("decided decision records", () => {
+describe("read-only decision records", () => {
+  it("never binds an editable frame when a decision route precedes room kind metadata", async () => {
+    const connection = room(roomForDoc(WORKSPACE, UUID));
+    initDoc(connection.ydoc, { uuid: UUID, title: "Known topic" });
+    appendBlock(connection.ydoc, { type: "paragraph", text: PROSE });
+    const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
+    const { container: host } = await renderSettled(<EditorPane
+      connection={connection}
+      segment={WORKSPACE}
+      presence={[]}
+      author="Reader"
+      archived={false}
+      decisionView
+      docLinks={null}
+      onRestore={null}
+      onSelectThread={() => {}}
+    />);
+    expect(binding.mock.calls[0]?.[0].editable).toBe(false);
+    const prose = editorElement(host);
+    expect(prose.getAttribute("contenteditable")).toBe("false");
+    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
+    expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
+    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title")!, "Changed"));
+    expect(getMeta(connection.ydoc).title).toBe("Known topic");
+    await act(async () => setKind(connection.ydoc, "decision"));
+    expect(binding).toHaveBeenCalledOnce();
+    expect(editorElement(host)).toBe(prose);
+    expect(prose.getAttribute("contenteditable")).toBe("false");
+  });
+
   it("shows a code caption without a language control when first opened decided", async () => {
     const ydoc = stage();
     appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
@@ -168,7 +198,7 @@ describe("decided decision records", () => {
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
   });
 
-  it("keeps code language as a caption and removes an open picker when the record becomes decided", async () => {
+  it("keeps open-record code read-only across every decision status", async () => {
     const ydoc = stage("open");
     const id = appendBlock(ydoc, { type: "code", text: "const answer = 42;", language: "ts" });
     const peer = new Y.Doc();
@@ -181,27 +211,52 @@ describe("decided decision records", () => {
     let pos = 0;
     editor.state.doc.forEach((node, offset) => { if (node.attrs.id === id) pos = offset; });
     act(() => editor.commands.setTextSelection(pos + 3));
-    const control = screen.getByRole("button", { name: "Code language" });
-    expect(host.querySelector(".ub-code-caption")?.contains(control)).toBe(true);
-    await act(async () => control.click());
-    expect(screen.getByRole("combobox", { name: "Search languages" })).not.toBeNull();
-
-    await act(async () => setStatus(peer, "decided"));
-    expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
-    expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
-    expect(getBlocks(ydoc).find((node) => node.id === id)?.language).toBe("ts");
-    expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector(".ub-toolbar")).toBeNull();
+    const prose = editorElement(host);
+    for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
+      await act(async () => setStatus(peer, status));
+      expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
+      expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+      expect(getBlocks(ydoc).find((node) => node.id === id)?.language).toBe("ts");
+      expect(editorElement(host)).toBe(prose);
+      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(host.querySelector(".ub-toolbar")).toBeNull();
+      expect(binding).toHaveBeenCalledOnce();
+    }
     peer.destroy();
   });
 
-  it("binds read-only immediately, guards the title, and keeps tags, pin and archive available", async () => {
-    const ydoc = stage();
+  it("keeps card links active without author controls across every decision status", async () => {
+    const ydoc = stage("open");
+    appendBlock(ydoc, { type: "card", text: "title: Answer\nbutton: [Read details](https://example.invalid/answer)\n\nStored answer." });
+    appendBlock(ydoc, { type: "card", text: "title: Earlier answer\n\nStored history." });
+    const original = getBlocks(ydoc);
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    const host = await openApp();
+    const prose = editorElement(host);
+
+    for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
+      await act(async () => setStatus(ydoc, status));
+      expect(editorElement(host)).toBe(prose);
+      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(screen.queryByRole("button", { name: "Add button" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit button" })).toBeNull();
+      const before = Y.encodeStateVector(ydoc);
+      await act(async () => screen.getByRole<HTMLButtonElement>("button", { name: "Read details" }).click());
+      expect(opened).toHaveBeenLastCalledWith("https://example.invalid/answer", "_blank", "noopener,noreferrer");
+      expect(Y.encodeStateVector(ydoc)).toEqual(before);
+      expect(getBlocks(ydoc)).toEqual(original);
+    }
+    expect(opened).toHaveBeenCalledTimes(4);
+  });
+
+  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`binds ${status} content read-only immediately and keeps tags, pin and archive available`, async () => {
+    const ydoc = stage(status);
     const originalBind = guardedBinding.bindGuardedEditor;
     const initialTitles: boolean[] = [];
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor").mockImplementation((options) => {
-      initialTitles.push(document.querySelector<HTMLInputElement>(".ub-title")?.readOnly ?? false);
+      const title = document.querySelector<HTMLElement>(".ub-title");
+      initialTitles.push(title?.tagName === "H1" || (title instanceof HTMLInputElement && title.readOnly));
       return originalBind(options);
     });
     const host = await openApp();
@@ -212,8 +267,9 @@ describe("decided decision records", () => {
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
     expect(editorElement(host).getAttribute("aria-readonly")).toBe("true");
     expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
-    const title = host.querySelector<HTMLInputElement>(".ub-title")!;
-    act(() => typeInto(title, "A wording fix"));
+    const title = host.querySelector<HTMLElement>(".ub-title")!;
+    if (title instanceof HTMLInputElement) act(() => typeInto(title, "A wording fix"));
+    else expect(title.textContent).toBe("Chosen protocol");
     expect(getMeta(ydoc).title).toBe("Chosen protocol");
     expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe("Keep one shared protocol.");
     act(() => host.querySelector<HTMLElement>(".ub-tldr-body > p")?.click());
@@ -248,12 +304,8 @@ describe("decided decision records", () => {
     const editor = binding.mock.results[0]?.value.editor;
     if (editor == null) throw new Error("fixture editor did not bind");
     act(() => editor.commands.setTextSelection({ from: 5, to: 16 }));
-    act(() => document.querySelector<HTMLButtonElement>(
-      '[data-slot="selection-composer"] button[aria-label="External link"]',
-    )?.click());
-    const linkField = document.querySelector<HTMLInputElement>('[aria-label="External link URL"]');
-    expect(linkField).not.toBeNull();
-    act(() => typeInto(linkField!, "https://example.com/uncommitted"));
+    expect(prose.getAttribute("contenteditable")).toBe("false");
+    expect(document.querySelector('[data-slot="selection-composer"] button[aria-label="External link"]')).toBeNull();
     const beforeText = textAt(ydoc).toDelta();
 
     const updates = vi.fn();
@@ -286,16 +338,16 @@ describe("decided decision records", () => {
       expect(binding).toHaveBeenCalledOnce();
       expect(editorElement(host)).toBe(prose);
       expect(pane.scrollTop).toBe(173);
-      expect(prose.getAttribute("contenteditable")).toBe("true");
+      expect(prose.getAttribute("contenteditable")).toBe("false");
       expect(host.querySelector(".ub-tldr-form")).toBeNull();
       expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
-      expect(host.querySelector('[aria-label="Insert block below"]')).not.toBeNull();
+      expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
     }
     peer.destroy();
   });
 
-  it("offers only Comment, then keeps highlights and reply, resolve and reopen usable", async () => {
-    const ydoc = stage();
+  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`keeps comments available on ${status} content`, async () => {
+    const ydoc = stage(status);
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor");
     const host = await openApp();
     const editor = binding.mock.results[0]?.value.editor;
@@ -350,7 +402,7 @@ describe("decided decision records", () => {
     expect(host.querySelector(".ub-editor .ProseMirror")).toBeNull();
     expect(host.querySelector(".ub-link-repair")).toBeNull();
     const fallback = host.querySelector(".ub-foreign-banner")?.textContent ?? "";
-    expect(fallback).toMatch(/new (?:decision )?record/i);
+    expect(fallback).toMatch(/decision content is read-only in the web/i);
     expect(fallback).not.toMatch(/restore|choose below/i);
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     const item = card(host, thread.id);
@@ -383,7 +435,8 @@ describe("decided decision records", () => {
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
     expect(prose.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
+    const title = host.querySelector<HTMLElement>(".ub-title");
+    expect(title instanceof HTMLInputElement ? title.readOnly : title?.tagName === "H1").toBe(true);
     expect(button(item, "Reply")).toBeDefined();
     expect(host.querySelector('[aria-label="Edit tags"]')).not.toBeNull();
     expect(getMeta(ydoc).status).toBe("decided");

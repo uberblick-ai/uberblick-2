@@ -11,22 +11,26 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactElement } from "react";
+import type { ComponentProps, ReactElement } from "react";
 import {
   appendBlock,
   archiveDocument,
   decisionDirectoryFields,
+  decisionCurrentRecord,
   decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
   initDoc,
+  readSidebar,
   restoreDirectoryEntry,
+  resolveDecisionTopics,
   roomForDoc,
   settingsRoom,
   sidebarRoom,
+  unpinDoc,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import type { DocMeta } from "@uberblick/schema";
+import type { DecisionTopicResolution, DocMeta } from "@uberblick/schema";
 import {
   browserSignInRequired,
   configuredWorkspaces,
@@ -49,6 +53,7 @@ import { CopyLink } from "./DocChrome.js";
 import { Sidebar, togglePin } from "./Sidebar.js";
 import { SidebarProvider, SIDEBAR_TOGGLE_CLASSES } from "./shadcn/sidebar.js";
 import { EditorPane, PaneNotice, StatusLine } from "./EditorPane.js";
+import { DecisionTopicPane } from "./DecisionTopicPane.js";
 import { RemoteHubGuide } from "./RemoteHubGuide.js";
 import { OutlinePane } from "./OutlinePane.js";
 import { SyncPanel } from "./SyncPanel.js";
@@ -76,7 +81,7 @@ import {
   useRoutePath,
   workspaceList,
 } from "./route.js";
-import type { Route, SettingsPage } from "./route.js";
+import type { Navigate, Route, SettingsPage } from "./route.js";
 import {
   useAgentSessions,
   useArchived,
@@ -162,6 +167,10 @@ export function RoutePane({
   threadsOpen = false,
   onToggleThreads,
   syncDetails = false,
+  topic = null,
+  selectedUuid,
+  navigate,
+  directoryConnection = null,
 }: {
   route: Route;
   /**
@@ -220,6 +229,10 @@ export function RoutePane({
   onToggleThreads?: (() => void) | undefined;
   /** The document-local sync reading opens the existing details panel. */
   syncDetails?: boolean;
+  topic?: DecisionTopicResolution | null;
+  selectedUuid?: string | null | undefined;
+  navigate?: Navigate;
+  directoryConnection?: RoomConnection | null;
 }): ReactElement {
   // Hooks precede early returns. The answer flag distinguishes a joining
   // empty room from an empty server answer.
@@ -260,14 +273,18 @@ export function RoutePane({
     );
   }
 
-  if (route.kind === "doc") {
+  if (route.kind === "doc" || route.kind === "decision") {
+    if (route.kind === "decision" && (topic === null || selectedUuid === null)) {
+      return <PaneNotice documentLayout><p className="ub-notice">Waiting for the selected record in this decision topic to sync.</p></PaneNotice>;
+    }
+    const uuid = selectedUuid ?? (route.kind === "doc" ? route.uuid : route.record);
     // Unread metadata or a joining empty room keeps the frame silent; neither
     // establishes waiting for sync.
     if (connection === null || !replicaHasAnswered(meta, hasAnswered)) {
       return <PaneNotice documentLayout>{null}</PaneNotice>;
     }
 
-    if (!docIsHydrated(route.uuid, meta)) {
+    if (!docIsHydrated(uuid, meta)) {
       return (
         <PaneNotice documentLayout>
           {/*
@@ -287,44 +304,34 @@ export function RoutePane({
             <CopyLink room={connection.room} segment={route.workspace.segment} />
           </div>
           <p className="ub-notice">
-            <strong>Waiting for sync.</strong> Document <code>{route.uuid}</code>{" "}
+            <strong>Waiting for sync.</strong> Document <code>{uuid}</code>{" "}
             has not reached this page yet. It opens here as soon as it arrives.
           </p>
         </PaneNotice>
       );
     }
+    if (meta?.kind === "decision" && (topic === null || topic.first === null) && navigate !== undefined) {
+      return <PaneNotice documentLayout><p className="ub-notice">Waiting for the decision topic to sync.</p></PaneNotice>;
+    }
   }
 
-  return (
-    <EditorPane
-      connection={connection}
-      // Only document routes reach this callback. Copy the workspace spelling
-      // carried by the address.
-      segment={route.workspace.segment}
-      presence={presence}
-      endpoint={endpoint}
-      hubAcked={hubAcked}
-      notSharedReason={notSharedReason}
-      author={author}
-      catalogConnection={catalogConnection}
-      archived={archived}
-      updatedAt={updatedAt}
-      onLastUpdatedChange={onLastUpdatedChange}
-      docLinks={docLinks}
-      pinned={pinned}
-      onTogglePin={onTogglePin}
-      onArchive={onArchive}
-      onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
-      focusRestore={focusRestore}
-      onRestoreFocused={onRestoreFocused}
-      onRestore={onRestore}
-      onSelectThread={onSelectThread}
-      threads={threads}
-      threadsOpen={threadsOpen}
-      onToggleThreads={onToggleThreads}
-      syncDetails={syncDetails}
-    />
-  );
+  const editorProps: ComponentProps<typeof EditorPane> = {
+    connection, segment: route.workspace.segment, presence, endpoint,
+    hubAcked, notSharedReason, author, catalogConnection, archived, updatedAt,
+    onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
+    onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
+    onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
+  };
+  if (navigate !== undefined) {
+    const current = topic === null ? null : decisionCurrentRecord(topic);
+    return <DecisionTopicPane {...editorProps}
+      topic={topic} selected={selectedUuid ?? null} navigate={navigate}
+      directoryConnection={directoryConnection}
+      explicit={route.kind === "decision"}
+      linkedRecord={route.kind === "doc" && route.uuid !== current?.uuid ? route.uuid : null}
+    />;
+  }
+  return <EditorPane {...editorProps} />;
 }
 
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
@@ -385,7 +392,7 @@ export function App(): ReactElement {
   );
   const account = useServingAccount(accountClient);
   const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
-  const selected = route.kind === "doc" ? route.uuid : null;
+  const routedSelection = route.kind === "doc" ? route.uuid : route.kind === "decision" ? route.record : null;
   const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
@@ -457,7 +464,7 @@ export function App(): ReactElement {
   /** Whether the sync detail panel is open. */
   const [syncOpen, setSyncOpen] = useState(false);
   useEffect(() => {
-    if (route.kind !== "doc" && syncOpen) setSyncOpen(false);
+    if (route.kind !== "doc" && route.kind !== "decision" && syncOpen) setSyncOpen(false);
   }, [route.kind, syncOpen]);
   /**
    * Remember the drawer opener so closing a hidden narrow rail restores
@@ -512,6 +519,21 @@ export function App(): ReactElement {
     roomReady && workspace !== null ? directoryRoom(workspace.uuid) : null,
     defaultIdentity,
   );
+  const allEntries = useDirectory(directory, true);
+  // The observer can lag a newly acquired directory by one effect. Resolve
+  // its synchronous seed too, so a known record link joins only the answer.
+  const topics = useMemo(() => resolveDecisionTopics(
+    allEntries.length === 0 && directory !== null ? directory.ydoc : allEntries,
+  ), [allEntries, directory]);
+  const topic = route.kind === "decision"
+    ? topics.find((candidate) => candidate.topic === route.topic) ?? null
+    : route.kind === "doc"
+      ? topics.find((candidate) => candidate.records.some((record) => record.uuid === route.uuid)) ?? null
+      : null;
+  const selected = directory === null ? null : topic === null ? (route.kind === "decision" ? null : routedSelection)
+    : route.kind === "decision"
+      ? topic.records.find((record) => record.uuid === route.record)?.uuid ?? null
+      : decisionCurrentRecord(topic)?.uuid ?? null;
   const doc = useRoom(
     roomReady && workspace !== null && selected !== null
       ? roomForDoc(workspace.uuid, selected)
@@ -532,12 +554,15 @@ export function App(): ReactElement {
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
-  const entries = useDirectory(directory);
+  const entries = useMemo(() => allEntries.filter((entry) => !entry.deleted), [allEntries]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
-  /** Whether the open document is pinned — what its actions menu shows. */
-  const pinned =
-    selected !== null && sidebarGroups.some((group) => group.docs.includes(selected));
+  const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
+  const pinnedRecords = sidebarGroups.flatMap((group) => group.docs).filter((uuid) => pinTargets.includes(uuid));
+  const pinned = pinnedRecords.length > 0;
+  const sidebarSelection = topic === null || (routedSelection !== null && pinnedRecords.includes(routedSelection))
+    ? routedSelection
+    : pinnedRecords[0] ?? topic.topic;
   const meta = useDocMeta(doc);
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
@@ -704,11 +729,23 @@ export function App(): ReactElement {
     },
     [sidebar],
   );
-  /** The keyboard-reachable path in, from the place that is always about the
-      open document. */
+  /** Header pinning follows the topic while its displayed answer changes. */
   const onTogglePin = useCallback(() => {
-    if (selected !== null) onTogglePinDoc(selected);
-  }, [onTogglePinDoc, selected]);
+    if (topic === null) {
+      if (selected !== null) onTogglePinDoc(selected);
+      return;
+    }
+    if (sidebar === null || !sidebar.status.writable || !sidebar.status.synced) return;
+    const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
+      .filter((uuid) => topic.records.some((record) => record.uuid === uuid));
+    if (pins.length === 0) {
+      togglePin(sidebar.ydoc, topic.topic);
+    } else {
+      sidebar.ydoc.transact(() => {
+        for (const uuid of pins) unpinDoc(sidebar.ydoc, uuid);
+      });
+    }
+  }, [onTogglePinDoc, selected, sidebar, topic]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -940,7 +977,7 @@ export function App(): ReactElement {
           identity={identity}
           account={servingStatus?.notSharedReason ? { state: "unavailable" } : account}
           agentSessions={agentSessions}
-          selected={selected}
+          selected={sidebarSelection}
           onSelect={onSelect}
           onCreate={onCreate}
           onOpenAll={onOpenAll}
@@ -991,6 +1028,10 @@ export function App(): ReactElement {
           <Popover open={syncOpen} onOpenChange={setSyncOpen}>
             <RoutePane
               route={route}
+              topic={topic}
+              selectedUuid={selected}
+              navigate={navigate}
+              directoryConnection={directory}
               configured={hubReady}
               connection={doc}
               presence={titlePresence}
@@ -1035,7 +1076,7 @@ export function App(): ReactElement {
               syncDetails
             />
             {/* Connection reporting excludes the title's retained departures. */}
-            {route.kind === "doc" && (
+            {(route.kind === "doc" || route.kind === "decision") && (
               <PopoverContent
                 align="start"
                 collisionPadding={8}
@@ -1075,7 +1116,7 @@ export function App(): ReactElement {
           threads={threads}
           focused={focusedThread}
           author={identity.name}
-          readOnly={archived || !docStatus.writable}
+          readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
           onFocus={onFocusThread}
           narrow={narrowThreads}
           open={threadsOpen}

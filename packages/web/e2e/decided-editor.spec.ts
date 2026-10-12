@@ -1,5 +1,5 @@
 /**
- * Decided records use the editor's native read-only selection in a browser.
+ * Decision records use the editor's native read-only selection in a browser.
  * Pointer dragging and touch ranges still reach comments; metadata arriving
  * over the real transport locks an existing view without replacing or moving it.
  */
@@ -99,7 +99,7 @@ test("a pointer selection on a decided record offers only Comment and keeps exis
 
   // Native Tab reaches the highlight even though the editor itself has no
   // editing caret. Enter moves keyboard focus into the matching rail card.
-  await page.locator(".ub-title").focus();
+  await page.getByRole("button", { name: "Document actions" }).focus();
   for (let count = 0; count < 20; count += 1) {
     if (await highlight.evaluate((element) => document.activeElement === element)) break;
     await page.keyboard.press("Tab");
@@ -145,7 +145,7 @@ test("a decided cell offers only Comment and its rail and highlight keep the app
   await expect(rail.locator(".ub-thread")).toHaveAttribute("aria-current", "true");
   await rail.locator(".ub-thread").click();
   await expect(highlight).toHaveClass(/ub-comment-flash/);
-  await page.locator(".ub-title").focus();
+  await page.getByRole("button", { name: "Document actions" }).focus();
   for (let count = 0; count < 20; count += 1) {
     if (await highlight.evaluate((element) => document.activeElement === element)) break;
     await page.keyboard.press("Tab");
@@ -246,7 +246,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
   }
 });
 
-test("a live decision locks title, line, prose and tables without replacing the view or moving its scroll", async ({ browser }) => {
+test("an open decision keeps its title, prose and tables read-only through later states", async ({ browser }) => {
   const writer = session();
   const prose = "Approved content survives every editor input.";
   const uuid = await record(writer, "open", [
@@ -256,7 +256,7 @@ test("a live decision locks title, line, prose and tables without replacing the 
   ]);
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   const view = editor(page);
-  await expect(view).toHaveAttribute("contenteditable", "true");
+  await expect(view).toHaveAttribute("contenteditable", "false");
   const originalView = await view.elementHandle();
   if (originalView === null) throw new Error("e2e: missing live editor");
   const pane = page.locator(".ub-pane");
@@ -269,7 +269,8 @@ test("a live decision locks title, line, prose and tables without replacing the 
   await expect(view).toHaveAttribute("contenteditable", "false");
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
   expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);
-  await expect(page.locator(".ub-title")).toHaveAttribute("readonly", "");
+  await expect(page.getByRole("heading", { name: "Decided editor", exact: true })).toBeVisible();
+  await expect(page.locator("input.ub-title")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
@@ -302,6 +303,13 @@ test("a live decision locks title, line, prose and tables without replacing the 
   await expect(header).toHaveText("Approved cell");
   await expect(view.locator(".ub-table td").first()).toHaveText("Approved value");
   await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
+  for (const status of ["open", "rejected", "withdrawn"] as const) {
+    peer.decide(status);
+    await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
+    await expect(view).toHaveAttribute("contenteditable", "false");
+    expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
+    await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
+  }
   const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
   expect(saved.blocks[0]?.text).toBe(prose);
   expect(saved.blocks[1]?.text).toContain("Approved cell");

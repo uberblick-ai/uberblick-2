@@ -36,6 +36,7 @@ import {
   getBlocksFragment,
   getMeta,
   initDoc,
+  restoreDirectoryEntry,
   tombstoneDirectoryEntry,
   tableCellText,
   tableRows,
@@ -388,6 +389,7 @@ describe("what a reference says about its target", () => {
       // link still opens it — it just says which of the two it is.
       tombstoneDirectoryEntry(directory, TARGET);
       expect(anchor?.getAttribute("data-doc-link-state")).toBe("archived");
+      expect(anchor?.getAttribute("title")).toBe("This document is archived. The link opens it read-only.");
 
       // The same element throughout: a restyle is a repaint, not a rebind, so
       // nothing under the reader's caret was torn down.
@@ -396,6 +398,9 @@ describe("what a reference says about its target", () => {
       expect(delta(ydoc)).toEqual([
         { insert: "the hub", attributes: { docLink: { docId: TARGET } } },
       ]);
+      restoreDirectoryEntry(directory, TARGET);
+      expect(anchor?.getAttribute("data-doc-link-state")).toBe("resolved");
+      expect(anchor?.getAttribute("title")).toBeNull();
     } finally {
       editor.destroy();
     }

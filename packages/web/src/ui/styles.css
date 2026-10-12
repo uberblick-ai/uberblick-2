@@ -1649,8 +1649,7 @@ h3.ub-heading {
   cursor: pointer;
 }
 
-/* Muted wavy and struck underlines distinguish unresolved and archived
-   references without removing their link affordance. */
+/* Unresolved and archived references retain their link affordance. */
 .ub-doclink[data-doc-link-state="unresolved"] {
   color: var(--muted-foreground);
   text-decoration-style: wavy;
@@ -1658,7 +1657,106 @@ h3.ub-heading {
 
 .ub-doclink[data-doc-link-state="archived"] {
   color: var(--muted-foreground);
-  text-decoration-line: underline line-through;
+}
+
+.ub-doclink[data-doc-link-state="archived"]::after {
+  content: " · archived";
+  font-size: 0.85em;
+}
+
+.ub-decision-related,
+.ub-decision-attribution,
+.ub-decision-record-meta {
+  font-size: 0.875rem;
+}
+
+.ub-decision-topic-state {
+  font-weight: 600;
+  margin-block: 1.25rem 0.5rem;
+}
+
+.ub-decision-notice {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.ub-decision-answer-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-block: 1rem 0.5rem;
+}
+
+.ub-decision-answer-label a {
+  text-decoration: underline;
+}
+
+.ub-decision-answer-history {
+  --prose-text: var(--muted-foreground);
+  --foreground: var(--muted-foreground);
+  color: var(--muted-foreground);
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.75rem;
+}
+
+.ub-decision-answer .tiptap {
+  min-height: 0;
+}
+
+.ub-decision-history {
+  margin-block-start: 2rem;
+}
+
+.ub-decision-history h2 {
+  font-weight: 600;
+}
+
+.ub-decision-timeline {
+  list-style: none;
+  padding-inline-start: 1rem;
+  border-inline-start: 1px solid var(--border);
+}
+
+.ub-decision-timeline > li {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  margin-block: 0.75rem;
+}
+
+.ub-decision-timeline > li[data-selected="true"] {
+  border-color: var(--foreground);
+  background: var(--card-accent);
+}
+
+.ub-decision-record {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  min-height: 2.75rem;
+}
+
+.ub-decision-record-state {
+  font-weight: 600;
+}
+
+.ub-decision-selection,
+.ub-decision-linked {
+  margin-inline-start: 0.75rem;
+  font-size: 0.8rem;
+}
+
+.ub-decision-preview {
+  display: block;
+  margin-block: 0.35rem;
+}
+
+.ub-decision-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  color: var(--muted-foreground);
 }
 
 /* Banner emphasis comes from its ground and edge. Foreground prose keeps
