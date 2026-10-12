@@ -12,7 +12,9 @@ export function registerExportMarkdown(server: ToolRegistrar, context: ToolConte
       "Render the document as markdown, including fenced code, mermaid, terminal and chart blocks. A chart " +
       "exports its JSON mapping in a chart fence, without record values. Tables export as GFM padded to their " +
       "widest row, with cell formatting as inline markdown and literal cell punctuation escaped. Cards " +
-      "export as separate :::card containers with inline Markdown parts and escaped ::: prose lines. Structured " +
+      "export as separate :::card containers with inline Markdown prose and escaped ::: lines. The optional " +
+      "button: [Text](destination) follows footer; its nonempty plain text links to an https URL or exact " +
+      "claude://code/new, claude-cli://open or codex://new, optionally with ?query. Structured " +
       "document data is omitted; documents holding data include an omission notice. Export only: markdown is " +
       "never the storage format, and there is no import tool." +
       helpPointer("export_markdown"),

@@ -199,9 +199,14 @@ function parensBalanced(href: string): boolean {
  * Preserve target bytes: balanced parentheses may stay bare; unbalanced ones
  * and angle brackets require <…> with escapes that matchAngleTarget undoes.
  */
-function renderTarget(target: string): string {
-  if (parensBalanced(target) && !/[<>]/.test(target)) return target;
+function renderTarget(target: string, angleWhitespace = false): string {
+  if (parensBalanced(target) && !/[<>]/.test(target) && (!angleWhitespace || !/\s/.test(target))) return target;
   return `<${target.replace(/[\\<>]/g, (char) => `\\${char}`)}>`;
+}
+
+/** A plain label and an opaque destination, using the inline writer's escapes. */
+export function renderMarkdownLink(text: string, href: string): string {
+  return `[${escapeInline(text, { insideLabel: true, hugged: false })}](${renderTarget(href, true)})`;
 }
 
 /**
@@ -884,6 +889,24 @@ function matchLink(
   source: string,
   start: number,
 ): { label: string; marks: InlineMarkSet; next: number } | null {
+  const link = matchLinkSyntax(source, start);
+  if (link === null) return null;
+  const docId = canonicalDocumentUuid(link.href);
+  if (docId !== null) return { label: link.label, marks: { docLink: docId }, next: link.next };
+  if (!isExternalHref(link.href)) return null;
+  return { label: link.label, marks: { link: link.href }, next: link.next };
+}
+
+/** Share link grammar without extending the destinations allowed in inline prose. */
+export function parseSingleMarkdownLink(source: string): { label: string; href: string } | null {
+  const link = matchLinkSyntax(source, 0);
+  return link === null || link.next !== source.length ? null : { label: link.label, href: link.href };
+}
+
+function matchLinkSyntax(
+  source: string,
+  start: number,
+): { label: string; href: string; next: number } | null {
   if (source[start] !== "[") return null;
   let i = start + 1;
   for (; i < source.length; i += 1) {
@@ -910,10 +933,7 @@ function matchLink(
       ? matchAngleTarget(source, i + 3)
       : matchBareTarget(source, i + 2);
   if (target === null || label === "") return null;
-  const docId = canonicalDocumentUuid(target.href);
-  if (docId !== null) return { label, marks: { docLink: docId }, next: target.next };
-  if (!isExternalHref(target.href)) return null;
-  return { label, marks: { link: target.href }, next: target.next };
+  return { label, href: target.href, next: target.next };
 }
 
 /** A bare `(target)`, ending at the `)` that balances. */

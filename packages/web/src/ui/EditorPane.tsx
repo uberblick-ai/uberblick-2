@@ -37,6 +37,7 @@ import { documentSyncFacts } from "./sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "./timestamps.js";
 import { BlockMenu } from "./BlockMenu.js";
 import { CodeLanguageControl } from "./CodeLanguageControl.js";
+import { CardButtonControls } from "./CardButtonControls.js";
 import { TableControls } from "./TableControls.js";
 import { MentionMenu } from "./MentionMenu.js";
 import {
@@ -774,6 +775,12 @@ const BoundEditor = memo(function BoundEditor({
           source DOM; the code caption's dedicated slot hosts React chrome. */}
       <div className="ub-editor-frame" ref={frame}>
         <div className="ub-editor" ref={host} />
+        {editor !== null && (
+          <CardButtonControls
+            editor={editor}
+            canWrite={() => !contentReadOnly && !isDecided(connection) && connection.status.writable}
+          />
+        )}
         {editor !== null && !contentReadOnly && writable && (
           <CodeLanguageControl
             editor={editor}

@@ -90,11 +90,11 @@ export {
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
 export {
-  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardInline, cardPartElement,
-  cardPartTexts, cardText, cardTextParts, isSupportedCard, parseCardInput,
-  seedNewCardParts, writeCardText,
+  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardButton, cardInline, cardPartElement,
+  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardInput,
+  seedNewCardParts, writeCardButton, writeCardText,
 } from "./card.js";
-export type { CardInline, CardPart, CardText } from "./card.js";
+export type { CardButton, CardInline, CardPart, CardText } from "./card.js";
 
 export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {

@@ -886,6 +886,7 @@ h3.ub-heading {
 }
 
 .ub-card {
+  position: relative;
   margin: 12px 0;
   padding: 20px 24px;
   border: 1px solid var(--border);
@@ -895,6 +896,22 @@ h3.ub-heading {
 }
 
 .ub-card + .ub-card { margin-top: 12px; }
+.ub-card-parts { display: contents; }
+.ub-card-actions:has(.ub-card-button) { margin-top: 12px; }
+.ub-card-button { max-width: 100%; }
+.ub-card-button-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  pointer-events: none;
+}
+.ub-card:hover .ub-card-button-edit,
+.ub-card[data-card-focused="true"] .ub-card-button-edit,
+.ub-card:focus-within .ub-card-button-edit {
+  opacity: 1;
+  pointer-events: auto;
+}
 .ub-card .ub-paragraph { margin: 0; color: inherit; white-space: pre-wrap; }
 .ub-card-label, .ub-card-footer {
   color: var(--muted-foreground);
@@ -918,13 +935,19 @@ h3.ub-heading {
   font-weight: 400;
 }
 .ub-card [data-empty="true"]:not(.ub-card-title) { display: none; }
-.ub-card:has(> .ub-card-label[data-empty="true"]) > .ub-card-title { margin-top: 0; }
+.ub-card:has(.ub-card-parts > .ub-card-label[data-empty="true"]) .ub-card-parts > .ub-card-title { margin-top: 0; }
 .ProseMirror-focused .ub-card[data-card-focused="true"] {
   border-color: var(--ring);
   box-shadow: 0 0 0 1px var(--ring);
 }
 .ProseMirror-focused .ub-card[data-card-focused="true"] [data-empty="true"] { display: block; }
-.ProseMirror-focused .ub-card[data-card-focused="true"] > .ub-card-title { margin-top: 6px; }
+.ProseMirror-focused .ub-card[data-card-focused="true"] .ub-card-parts > .ub-card-title { margin-top: 6px; }
+/* Editor focus must not move a selected footer action during a native press. */
+.ProseMirror[contenteditable="true"]:not(.ProseMirror-focused) .ub-card[data-card-button][data-card-focused="true"] [data-empty="true"]:not(.ub-card-title) {
+  display: block;
+  visibility: hidden;
+}
+.ProseMirror[contenteditable="true"]:not(.ProseMirror-focused) .ub-card[data-card-button][data-card-focused="true"] .ub-card-parts > .ub-card-title { margin-top: 6px; }
 
 /* Lists are flat sibling blocks: suppress native markers and draw each
    item's ::before from data-list and data-indent. Ordered markers read

@@ -5,7 +5,7 @@ import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "y-prosemirror";
-import { CARD_NODE_NAMES, CARD_PARTS, TABLE_CELL_MARKS } from "@uberblick/schema";
+import { CARD_NODE_NAMES, CARD_PARTS, TABLE_CELL_MARKS, parseCardButton } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 
 const PLACEHOLDERS: Record<CardPart, string> = {
@@ -21,11 +21,52 @@ export const Card = Node.create({
   isolating: true,
   draggable: true,
   addAttributes() {
-    return { id: { default: null, parseHTML: (element: HTMLElement) => element.getAttribute("id") } };
+    return {
+      id: { default: null, parseHTML: (element: HTMLElement) => element.getAttribute("id") },
+      button: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("data-card-button"),
+        renderHTML: (attrs: Record<string, unknown>) =>
+          typeof attrs.button === "string" ? { "data-card-button": attrs.button } : {},
+      },
+    };
   },
   parseHTML() { return [{ tag: "article[data-block-type=card]" }]; },
   renderHTML({ HTMLAttributes }) {
     return ["article", mergeAttributes({ class: "ub-card", "data-block-type": "card" }, HTMLAttributes), 0];
+  },
+  addNodeView() {
+    return ({ node }) => {
+      let current = node;
+      const dom = document.createElement("article");
+      dom.className = "ub-card";
+      dom.dataset.blockType = "card";
+      const contentDOM = document.createElement("div");
+      contentDOM.className = "ub-card-parts";
+      const actions = document.createElement("div");
+      actions.className = "ub-card-actions";
+      actions.contentEditable = "false";
+      const sync = (): void => {
+        if (typeof current.attrs.id === "string") dom.id = current.attrs.id;
+        else dom.removeAttribute("id");
+        if (typeof current.attrs.button === "string") dom.dataset.cardButton = current.attrs.button;
+        else delete dom.dataset.cardButton;
+      };
+      sync();
+      dom.append(contentDOM, actions);
+      return {
+        dom,
+        contentDOM,
+        update(updated) {
+          if (updated.type !== current.type) return false;
+          current = updated;
+          sync();
+          return true;
+        },
+        stopEvent: (event) => event.target instanceof globalThis.Node && actions.contains(event.target),
+        ignoreMutation: (mutation) => actions.contains(mutation.target) || mutation.type === "attributes" && mutation.target === dom,
+      };
+    };
   },
 });
 
@@ -55,6 +96,9 @@ export function cardTitleOffset(card: ProseMirrorNode): number {
 
 function supportedCard(node: ProseMirrorNode): boolean {
   if (node.childCount !== CARD_PARTS.length) return false;
+  if (node.attrs.button !== null) {
+    try { parseCardButton(node.attrs.button); } catch { return false; }
+  }
   return CARD_PARTS.every((part, index) => {
     const child = node.child(index);
     const paragraph = child.firstChild;
