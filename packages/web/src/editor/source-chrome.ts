@@ -164,7 +164,7 @@ export const codeBlockChrome: SourceBlockChrome = {
   },
 };
 
-/** `<div class="ub-mermaid" data-block-type="mermaid"><button …><pre>…</pre></div>` */
+/** Literal Mermaid source and identity, shared with the diagram NodeView. */
 export const mermaidChrome: SourceBlockChrome = {
   root: () => {
     const div = document.createElement("div");

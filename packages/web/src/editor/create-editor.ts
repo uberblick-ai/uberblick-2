@@ -20,6 +20,7 @@ import { ListBlocks } from "./list-keys.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
 import { ChartBlocks } from "./chart.js";
 import { WireframeBlocks } from "./wireframe.js";
+import { MermaidBlocks } from "./mermaid.js";
 import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
@@ -88,6 +89,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     TerminalBlocks,
     ChartBlocks,
     WireframeBlocks,
+    MermaidBlocks,
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
