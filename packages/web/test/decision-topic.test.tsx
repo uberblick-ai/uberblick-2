@@ -384,6 +384,17 @@ describe("decision topic navigation and history", () => {
 });
 
 describe("decision hydration never exposes editable content", () => {
+  it("waits for topic context when the directory cannot yet repair a known decision room", async () => {
+    const ydoc = record(FIRST, "Room without topic context", "open", "An open proposal.", { publish: false });
+    Object.defineProperty(room(directoryRoom(WORKSPACE)), "status", { value: { ...LIVE, synced: false } });
+    const host = (await open()).container;
+    expect(host.textContent).toContain("Waiting for the decision topic to sync.");
+    expect(host.querySelector(".ProseMirror")).toBeNull();
+    await act(async () => publishRecord(ydoc));
+    expect(answer(host).textContent).toContain("An open proposal.");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
   it("binds read-only on every frame when the open decision room arrives first", async () => {
     const ydoc = record(FIRST, "Room before directory", "open", "An open decision answer.", { publish: false });
     const bindings: boolean[] = [];

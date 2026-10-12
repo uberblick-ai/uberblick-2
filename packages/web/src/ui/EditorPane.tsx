@@ -1018,7 +1018,7 @@ export function EditorPane({
           {foreign.length > 0 ? (
             <ForeignFallback
               connection={connection}
-              summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decided: decision })}
+              summary={describeForeignBlocks(foreign, { repairable: !contentReadOnly, decision })}
               contentReadOnly={contentReadOnly}
               writable={writable}
               docLinks={docLinks}

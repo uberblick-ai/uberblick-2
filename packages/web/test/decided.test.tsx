@@ -378,7 +378,7 @@ describe("read-only decision records", () => {
     expect(host.querySelector(".ub-editor .ProseMirror")).toBeNull();
     expect(host.querySelector(".ub-link-repair")).toBeNull();
     const fallback = host.querySelector(".ub-foreign-banner")?.textContent ?? "";
-    expect(fallback).toMatch(/new (?:decision )?record/i);
+    expect(fallback).toMatch(/decision content is read-only in the web/i);
     expect(fallback).not.toMatch(/restore|choose below/i);
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     const item = card(host, thread.id);

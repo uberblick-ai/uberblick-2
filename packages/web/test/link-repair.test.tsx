@@ -383,17 +383,23 @@ describe("the fallback offers the person the choice, and takes only that write",
     peer.destroy();
   });
 
-  it.each(["archived", "decided"] as const)("offers no repair for %s table cells and keeps both marks", async (restriction) => {
+  it.each(["archived", "open", "decided", "rejected", "withdrawn"] as const)("offers no repair for %s table cells and keeps both marks", async (restriction) => {
     const { ydoc } = stageTableConflicts();
     if (restriction === "archived") tombstoneDirectoryEntry(room(directoryRoom(WORKSPACE)).ydoc, UUID);
-    else { setKind(ydoc, "decision"); setStatus(ydoc, "decided"); }
+    else {
+      setKind(ydoc, "decision");
+      setStatus(ydoc, restriction);
+      upsertDirectoryEntry(room(directoryRoom(WORKSPACE)).ydoc, {
+        uuid: UUID, title: "Cell choices", kind: "decision", status: restriction,
+      });
+    }
     let writes = 0;
     ydoc.on("update", () => { writes += 1; });
     const host = await openApp(`/${WORKSPACE}/${UUID}`);
     expect(prose(host)).toBeNull();
     expect(repairOffer(host)).toBeNull();
     expect(findLinkConflicts(getBlocksFragment(ydoc))).toHaveLength(2);
-    expect(banner(host)).toContain(restriction === "archived" ? "restore this document" : "a change to a decided record needs a new record");
+    expect(banner(host)).toContain(restriction === "archived" ? "restore this document" : "decision content is read-only in the web");
     expect(writes).toBe(0);
   });
 
