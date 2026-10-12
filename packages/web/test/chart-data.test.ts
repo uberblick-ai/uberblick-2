@@ -9,6 +9,7 @@ import {
   formatChartNumber, formatChartX, parseChartConfig, prepareChart,
 } from "../src/editor/chart-data.js";
 import type { ChartConfig, ChartReady } from "../src/editor/chart-data.js";
+import { parseTableConfig } from "../src/editor/table-data.js";
 
 const mapping: ChartConfig = {
   version: 1, type: "line", collection: "observations", x: { field: "x", type: "number" },
@@ -33,6 +34,17 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it.each(["overlay", "panels"] as const)("accepts line layout %s and rejects it for tables", (layout) => {
+    expect(parseChartConfig(JSON.stringify({ ...mapping, layout }))).toMatchObject({ ok: true, config: { layout } });
+    expect(parseTableConfig(JSON.stringify({
+      version: 1, type: "table", collection: "observations", columns: [{ field: "y" }], layout,
+    }))).toMatchObject({ ok: false });
+  });
+
+  it.each([null, "", "grid", 0, true, [], {}])("refuses unsupported line layout %j", (layout) => {
+    expect(prepareChart(JSON.stringify({ ...mapping, layout }), null).status).toBe("invalid-configuration");
+  });
+
   it.each([1, 90, 5_001, Number.MAX_VALUE])("accepts positive integer limit %s without an authoring ceiling", (limit) => {
     expect(parseChartConfig(JSON.stringify({ ...mapping, limit }))).toMatchObject({ ok: true, config: { limit } });
   });
@@ -49,7 +61,7 @@ describe("chart mapping", () => {
     const partial = ready(data, { ...mapping, y: [...mapping.y, { field: "absent", label: "Sparse" }] });
     expect(chartDiagnosticsText(partial)).toBe("0 records not plotted. Omitted series values: Sparse: 1 absent or null.");
   });
-  it("holds only the versioned mapping, with a detached gap default", () => {
+  it("holds only the versioned mapping, with detached gap and overlay defaults", () => {
     const source = JSON.stringify({
       version: 1, type: "line", collection: "observations", x: { field: "x", type: "date", label: "Day" },
       y: [{ field: "y", label: "Delivered", unit: "issues" }], title: "Delivery",
@@ -57,9 +69,10 @@ describe("chart mapping", () => {
     const parsed = parseChartConfig(source);
     expect(parsed).toEqual({ ok: true, config: {
       version: 1, type: "line", collection: "observations", x: { field: "x", type: "date", label: "Day" },
-      y: [{ field: "y", label: "Delivered", unit: "issues" }], title: "Delivery", missing: "gap",
+      y: [{ field: "y", label: "Delivered", unit: "issues" }], title: "Delivery", missing: "gap", layout: "overlay",
     } });
     expect(source).not.toContain("missing");
+    expect(source).not.toContain("layout");
   });
 
   it.each([

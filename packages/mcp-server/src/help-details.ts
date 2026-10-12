@@ -215,7 +215,10 @@ export const toolHelpDetails = {
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
     "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
-    "missing (gap or connect, default gap) control presentation. Optional limit is an integer of 1 or more " +
+    "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
+    "panels draws one compact line chart per y series in mapping order, in a responsive grid; each panel shows its label " +
+    "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
+    "layout is invalid for table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
