@@ -324,6 +324,7 @@ export function StatusLine({
   syncDetails = false,
   onActivatePresence,
   documentLayout = false,
+  statusLink,
 }: {
   connection: RoomConnection;
   /**
@@ -349,6 +350,7 @@ export function StatusLine({
   onActivatePresence?: ((session: RemotePresence) => void) | undefined;
   /** Reserve the capped presence width beside hydrated prose. */
   documentLayout?: boolean;
+  statusLink?: ReactNode;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -468,6 +470,11 @@ export function StatusLine({
     );
   const shownUpdatedAt =
     blank || formattedUpdatedAt === null ? undefined : lastUpdated;
+  const statusFacts = <>
+    {syncReading}
+    {!blank && saveNote}
+    {!blank && updatedReading}
+  </>;
   // Report the displayed timestamp before paint, paired with its room
   // including cleanup. The separately mounted details panel must not restart
   // its settle window or invent an omitted stamp.
@@ -480,9 +487,10 @@ export function StatusLine({
   return (
     <div className="ub-status min-w-0 text-[0.8rem]/[1.2] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="flex min-w-0 min-h-7 items-center gap-2">
-        {syncReading}
-        {!blank && saveNote}
-        {!blank && updatedReading}
+        {statusLink ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          {statusFacts}
+          {statusLink}
+        </div> : statusFacts}
         {/*
             * Use bounded circles so roster changes leave status geometry still;
             * readPresence supplies names and resolved caret locations for hover.
@@ -846,6 +854,7 @@ export function EditorPane({
   header,
   beforeAnswer,
   afterAnswer,
+  statusLink,
   answerClassName,
   copyPath,
   decisionView = false,
@@ -900,6 +909,8 @@ export function EditorPane({
   header?: ReactNode;
   beforeAnswer?: ReactNode;
   afterAnswer?: ReactNode;
+  /** Read-only page chrome in the line under the title. */
+  statusLink?: ReactNode;
   answerClassName?: string;
   /** Copy the topic or explicit history selection currently displayed. */
   copyPath?: string;
@@ -1007,6 +1018,7 @@ export function EditorPane({
           notSharedReason={notSharedReason}
           syncDetails={syncDetails}
           onActivatePresence={revealPresence}
+          statusLink={statusLink}
         />
         {beforeAnswer}
         <div className={answerClassName}>

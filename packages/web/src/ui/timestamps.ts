@@ -32,6 +32,22 @@ function timestampDate(value: string | number): Date | null {
   return Number.isFinite(date.getTime()) ? date : null;
 }
 
+function relativeAge(age: number): { amount: number; unit: string; shortUnit: string } {
+  const [amount, unit, shortUnit] =
+    age < HOUR
+      ? [Math.floor(age / MINUTE), "minute", "m"] as const
+      : age < DAY
+        ? [Math.floor(age / HOUR), "hour", "h"] as const
+        : age < WEEK
+          ? [Math.floor(age / DAY), "day", "d"] as const
+          : age < MONTH
+            ? [Math.floor(age / WEEK), "week", "w"] as const
+            : age < YEAR
+              ? [Math.floor(age / MONTH), "month", "mo"] as const
+              : [Math.floor(age / YEAR), "year", "y"] as const;
+  return { amount, unit, shortUnit };
+}
+
 /** The exact local date and time used by hover previews and sync details. */
 export function formatExactTimestamp(
   value: string | number,
@@ -58,22 +74,26 @@ export function formatTimestamp(
     return { label: DATE_FORMAT.format(at), dateTime };
   }
 
-  const [amount, unit] =
-    age < HOUR
-      ? [Math.floor(age / MINUTE), "minute"]
-      : age < DAY
-        ? [Math.floor(age / HOUR), "hour"]
-        : age < WEEK
-          ? [Math.floor(age / DAY), "day"]
-          : age < MONTH
-            ? [Math.floor(age / WEEK), "week"]
-            : age < YEAR
-              ? [Math.floor(age / MONTH), "month"]
-              : [Math.floor(age / YEAR), "year"];
+  const { amount, unit } = relativeAge(age);
   return {
     label: amount < 1 ? "just now" : `${amount} ${unit}${amount === 1 ? "" : "s"} ago`,
     dateTime,
     title: DATE_TIME_FORMAT.format(at),
+  };
+}
+
+/** Compact recorded-answer ages keep an exact date on hover at every age. */
+export function formatShortTimestamp(
+  value: string | number,
+  now: number = Date.now(),
+): FormattedTimestamp | null {
+  const date = timestampDate(value);
+  if (date === null) return null;
+  const { amount, shortUnit } = relativeAge(Math.max(0, now - date.getTime()));
+  return {
+    label: amount < 1 ? "now" : `${amount}${shortUnit}`,
+    dateTime: date.toISOString(),
+    title: DATE_TIME_FORMAT.format(date),
   };
 }
 

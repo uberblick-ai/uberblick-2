@@ -22,6 +22,7 @@ import {
   initDoc,
   listDirectory,
   readDecisions,
+  relatedDecisionTopics,
   resolveDecisionTopics,
   restoreDirectoryEntry,
   setKind,
@@ -490,5 +491,26 @@ describe("stubs-only topic resolution", () => {
     expect(readDecisions(page, directory).map((topic) => topic.topic)).toEqual([C, A]);
     setKind(page, "decision");
     expect(readDecisions(page, directory)).toEqual([]);
+  });
+
+  it("shares regular-page membership from resolved stubs without writes or linked-only topics", () => {
+    const directory = new Y.Doc();
+    stub(directory, A, { topic: A, governs: REQUIREMENT, createdAt: 10 });
+    stub(directory, B, { supersedes: A, governs: E, createdAt: 20 });
+    stub(directory, C, { topic: C, governs: REQUIREMENT, createdAt: 5 });
+    stub(directory, D, { topic: D, discussion: REQUIREMENT, createdAt: 1 });
+    const before = Y.encodeStateAsUpdate(directory);
+    const topics = resolveDecisionTopics(listDirectory(directory, { includeDeleted: true }));
+    expect(relatedDecisionTopics(topics, { uuid: REQUIREMENT }).map((topic) => topic.topic)).toEqual([C, A]);
+    expect(relatedDecisionTopics(topics, { uuid: E, kind: "requirement" }).map((topic) => topic.topic)).toEqual([A]);
+    expect(relatedDecisionTopics(topics, { uuid: REQUIREMENT, kind: "decision" })).toEqual([]);
+    expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    const page = new Y.Doc();
+    initDoc(page, { uuid: REQUIREMENT, title: "Regular page" });
+    expect(relatedDecisionTopics(topics, getMeta(page))).toEqual(readDecisions(page, directory));
+    tombstoneDirectoryEntry(directory, C);
+    const archived = resolveDecisionTopics(listDirectory(directory, { includeDeleted: true }));
+    expect(relatedDecisionTopics(archived, getMeta(page))).toEqual(readDecisions(page, directory));
+    expect(relatedDecisionTopics(archived, getMeta(page)).map((topic) => topic.topic)).toEqual([A]);
   });
 });

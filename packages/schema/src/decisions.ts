@@ -2,7 +2,7 @@
 import type * as Y from "yjs";
 import { getMeta } from "./doc.js";
 import { listDirectory } from "./directory.js";
-import type { DecisionTopicResolution, DirectoryEntry } from "./types.js";
+import type { DecisionTopicResolution, DirectoryEntry, DocMeta } from "./types.js";
 
 function compareAge(left: DirectoryEntry, right: DirectoryEntry): number {
   const age = (left.createdAt ?? Number.POSITIVE_INFINITY) -
@@ -101,12 +101,19 @@ export function decisionCurrentRecord(resolution: DecisionTopicResolution): Dire
   return resolution.inForce ?? resolution.records.at(-1) ?? null;
 }
 
+/** Related-page membership may be on any record; retain the resolver's order. */
+export function relatedDecisionTopics(
+  topics: readonly DecisionTopicResolution[],
+  page: Pick<DocMeta, "uuid" | "kind">,
+): DecisionTopicResolution[] {
+  if (page.kind === "decision") return [];
+  return topics.filter((topic) => !topic.archived && topic.records.some((record) => record.governs === page.uuid));
+}
+
 /** Related-page membership may be on any record; topics stay oldest first. */
 export function readDecisions(doc: Y.Doc, directory?: Y.Doc): DecisionTopicResolution[] {
   if (directory === undefined) return [];
-  const meta = getMeta(doc);
-  if (meta.kind === "decision") return [];
-  return resolveDecisionTopics(directory).filter((topic) => !topic.archived && topic.records.some((record) => record.governs === meta.uuid));
+  return relatedDecisionTopics(resolveDecisionTopics(directory), getMeta(doc));
 }
 
 /** All predecessors and direct successors, each carrying its own cached status. */

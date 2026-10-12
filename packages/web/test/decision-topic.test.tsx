@@ -13,6 +13,7 @@ import {
   initDoc,
   pinDoc,
   readSidebar,
+  exportMarkdown,
   roomForDoc,
   setKind,
   setStatus,
@@ -217,6 +218,65 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it("shows live related topics as page chrome without acquiring record rooms or changing page content", async () => {
+    story();
+    const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
+    initDoc(ydoc, { uuid: RELATED_FIRST, title: "Original related page" });
+    appendBlock(ydoc, { type: "paragraph", text: "The owning page's prose." });
+    appendBlock(ydoc, { type: "heading", text: "Related", level: 2 });
+    appendBlock(ydoc, { type: "paragraph", text: "Other guidance." });
+    const blocks = getBlocks(ydoc);
+    const markdown = exportMarkdown(ydoc, { directory: directory() });
+    const pageUpdates = vi.fn();
+    ydoc.on("update", pageUpdates);
+    const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
+    const block = within(host).getByRole("region", { name: "Decisions" });
+    expect(within(block).getByRole("link", { name: "Under review: Current topic title" }).getAttribute("href"))
+      .toBe(docPath(WORKSPACE, FIRST));
+    expect(block.textContent).toContain("Use the current answer.");
+    expect(block.textContent).not.toContain("A replacement under discussion.");
+    expect(block.closest(".ub-editor")).toBeNull();
+    expect((host.querySelector(".ub-editor")?.compareDocumentPosition(block) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .not.toBe(0);
+    expect(getBlocks(ydoc)).toEqual(blocks);
+    expect(exportMarkdown(ydoc, { directory: directory() })).toBe(markdown);
+    const jump = within(host).getByRole("link", { name: /1 decision · 1 under review/ });
+    await act(async () => jump.click());
+    expect(document.activeElement).toBe(block);
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, RELATED_FIRST));
+    expect(within(host).getByRole("button", { name: "Contents 2" })).toBeDefined();
+    await act(async () => tombstoneDirectoryEntry(directory(), FIRST));
+    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
+    expect(host.querySelector(".ub-decisions-link")).toBeNull();
+    expect(within(host).getByRole("button", { name: "Contents 1" })).toBeDefined();
+    expect(pageUpdates).not.toHaveBeenCalled();
+    expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([]);
+    ydoc.off("update", pageUpdates);
+  });
+
+  it("adds the block and heading-free outline when a related topic arrives, then opens its current answer", async () => {
+    const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
+    initDoc(ydoc, { uuid: RELATED_FIRST, title: "A page without headings" });
+    appendBlock(ydoc, { type: "paragraph", text: "Read this first." });
+    regular(RELATED_FIRST, "A page without headings");
+    const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
+    expect(within(host).queryByRole("button", { name: /^Contents/ })).toBeNull();
+    await act(async () => {
+      record(FIRST, "A new question", "decided", "A current answer with no cached preview.", { related: RELATED_FIRST, cache: false });
+      upsertDirectoryEntry(directory(), { uuid: FIRST, title: "A new question", governs: RELATED_FIRST });
+    });
+    expect(within(host).getByRole("button", { name: "Contents 1" })).toBeDefined();
+    const row = within(host).getByRole("link", { name: "In force: A new question" });
+    expect(row.querySelector(".ub-decisions-row-preview")).toBeNull();
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, FIRST));
+    await act(async () => row.click());
+    expect(window.location.pathname).toBe(docPath(WORKSPACE, FIRST));
+    expect(host.querySelector(".ub-decisions-block")).toBeNull();
+    expect(selection(host)).toBe(FIRST);
+    await back();
+    expect(within(host).getByRole("region", { name: "Decisions" })).toBeDefined();
+  });
+
   it("keeps older recorded answer dates relative without using edit timestamps", async () => {
     record(FIRST, "Longstanding answer", "decided", "A longstanding answer.", { answerer: "Ben", answerDate: "2020-01-01T00:00:00Z" });
     upsertDirectoryEntry(directory(), { uuid: FIRST, title: "Longstanding answer", updatedAt: Date.now() });
