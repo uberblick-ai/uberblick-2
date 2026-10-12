@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS doc_index_seq (
   indexed_through_seq INTEGER NOT NULL,
   catalog_through_seq INTEGER NOT NULL DEFAULT 0,
   github_refs_indexed INTEGER NOT NULL DEFAULT 0,
-  search_indexed      INTEGER NOT NULL DEFAULT 0
+  search_rowid        INTEGER
 );
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
@@ -405,6 +405,7 @@ export class MirrorStore {
     putGithubRef: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
     putFts: Prepared<[string, string, string, string, string]>;
+    markSearch: Prepared<[number | bigint, string]>;
     search: Prepared<[string, string, string | null, string | null, number]>;
     backlinks: Prepared<[string]>;
     decisionsForGithub: Prepared<[string]>;
@@ -524,21 +525,19 @@ export class MirrorStore {
       ),
       listPending: prepare("SELECT room, seq FROM pending_rooms ORDER BY room"),
       advanceIndex: prepare(
-        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, github_refs_indexed, search_indexed) VALUES (?, ?, ?, 1, 1) " +
+        "INSERT INTO doc_index_seq (uuid, indexed_through_seq, catalog_through_seq, github_refs_indexed) VALUES (?, ?, ?, 1) " +
           "ON CONFLICT (uuid) DO UPDATE SET " +
           "indexed_through_seq = excluded.indexed_through_seq, " +
           "catalog_through_seq = excluded.catalog_through_seq, " +
-          "github_refs_indexed = excluded.github_refs_indexed, " +
-          "search_indexed = excluded.search_indexed " +
+          "github_refs_indexed = excluded.github_refs_indexed " +
           "WHERE doc_index_seq.indexed_through_seq <= excluded.indexed_through_seq " +
           "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
           "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
           "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
           "OR doc_index_seq.github_refs_indexed = 0 " +
-          "OR doc_index_seq.search_indexed = 0 " +
           // An older peer can replace the row using only the original columns.
-          "OR EXISTS (SELECT 1 FROM docs_fts f WHERE f.uuid = excluded.uuid " +
-          "AND (f.description IS NULL OR f.tag_names IS NULL)))",
+          "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
+          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL))",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
@@ -564,6 +563,7 @@ export class MirrorStore {
       putFts: prepare(
         "INSERT INTO docs_fts (uuid, title, body, description, tag_names) VALUES (?, ?, ?, ?, ?)",
       ),
+      markSearch: prepare("UPDATE doc_index_seq SET search_rowid = ? WHERE uuid = ?"),
       // Pack unambiguous JSON IDs into each hit to keep search to one query.
       search: prepare(
         "WITH requested_tags AS (SELECT value AS tag FROM json_each(?)) " +
@@ -689,13 +689,14 @@ export class MirrorStore {
         this.statements.putGithubRef.run(doc.uuid, target);
       }
       this.statements.dropFts.run(doc.uuid);
-      this.statements.putFts.run(
+      const indexed = this.statements.putFts.run(
         doc.uuid,
         doc.title,
         doc.body,
         doc.description,
         (doc.tagNames ?? []).join("\n"),
       );
+      this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
@@ -1084,7 +1085,7 @@ export class MirrorStore {
         .get(table, name) !== undefined;
     const current = (): boolean =>
       hasColumn("doc_index", "kind") &&
-      hasColumn("doc_index_seq", "search_indexed") &&
+      hasColumn("doc_index_seq", "search_rowid") &&
       hasColumn("docs_fts", "tag_names");
     if (current()) return;
 
@@ -1094,8 +1095,8 @@ export class MirrorStore {
       if (!hasColumn("doc_index", "kind")) {
         this.db.exec("ALTER TABLE doc_index ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular'");
       }
-      if (!hasColumn("doc_index_seq", "search_indexed")) {
-        this.db.exec("ALTER TABLE doc_index_seq ADD COLUMN search_indexed INTEGER NOT NULL DEFAULT 0");
+      if (!hasColumn("doc_index_seq", "search_rowid")) {
+        this.db.exec("ALTER TABLE doc_index_seq ADD COLUMN search_rowid INTEGER");
       }
       if (!hasColumn("docs_fts", "tag_names")) {
         // Preserve searchable content while replicas hydrate and enrich rows.

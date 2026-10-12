@@ -176,7 +176,7 @@ describe("replica search derivation", () => {
       legacy.exec("INSERT INTO docs_fts SELECT uuid, title, body FROM legacy_search_rows");
       legacy.exec("DROP TABLE legacy_search_rows");
       legacy.exec("ALTER TABLE doc_index DROP COLUMN kind");
-      legacy.exec("ALTER TABLE doc_index_seq DROP COLUMN search_indexed");
+      legacy.exec("ALTER TABLE doc_index_seq DROP COLUMN search_rowid");
     } finally {
       legacy.close();
     }

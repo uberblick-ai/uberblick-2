@@ -103,7 +103,7 @@ function downgrade(path: string): void {
       "DROP TABLE docs_fts; CREATE VIRTUAL TABLE docs_fts USING fts5(uuid UNINDEXED, title, body); " +
       "INSERT INTO docs_fts SELECT * FROM old_rows; DROP TABLE old_rows; " +
       "ALTER TABLE doc_index DROP COLUMN kind; " +
-      "ALTER TABLE doc_index_seq DROP COLUMN search_indexed;",
+      "ALTER TABLE doc_index_seq DROP COLUMN search_rowid;",
   );
   db.close();
 }
@@ -154,6 +154,26 @@ describe("search index upgrade", () => {
       expect(titles(store, "protocol")).toEqual(["Launching"]);
     } finally {
       old.close();
+    }
+  });
+
+  it("repairs a missing row even when another document reuses its cached rowid", () => {
+    const path = tempDatabasePath();
+    const store = open(path);
+    const doc = row("1", "Launching", { tagNames: ["protocol"] });
+    store.indexDoc(doc, 2, 7);
+    const peer = new DatabaseSync(path);
+    try {
+      peer.prepare("DELETE FROM docs_fts WHERE uuid = ?").run(doc.uuid);
+      store.indexDoc(row("2", "Unrelated", { tagNames: ["untouched"] }), 1, 7);
+      expect(peer.prepare("SELECT rowid FROM docs_fts WHERE uuid = '2'").get()).toEqual(
+        peer.prepare("SELECT search_rowid AS rowid FROM doc_index_seq WHERE uuid = '1'").get(),
+      );
+      store.indexDoc(doc, 2, 7);
+      expect(titles(store, "protocol")).toEqual(["Launching"]);
+      expect(titles(store, "untouched")).toEqual(["Unrelated"]);
+    } finally {
+      peer.close();
     }
   });
 
