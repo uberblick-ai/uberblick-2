@@ -203,6 +203,14 @@ function filter(host: HTMLElement): HTMLInputElement {
   });
 }
 
+async function traverseHistory(direction: "back" | "forward"): Promise<void> {
+  await act(async () => {
+    const popped = new Promise<void>((resolve) => window.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true }));
+    window.history[direction]();
+    await popped;
+  });
+}
+
 /**
  * Let anything the render scheduled actually run.
  *
@@ -929,7 +937,7 @@ describe("decision topics in the list", () => {
     expect(pin().getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("opens the topic address at its current answer and retains Decisions and the state on Back", async () => {
+  it.each(["All docs", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
     const peer = peerOf(directoryDoc());
     for (const [uuid, title, supersedes] of [
       [ONE, "Original answer", undefined], [TWO, "Current answer", ONE],
@@ -947,18 +955,45 @@ describe("decision topics in the list", () => {
     const host = await openApp(allPath(WORKSPACE));
     await chooseDecisions(host);
     await chooseState(host, "changed-after-approval");
+    await act(async () => typeInto(filter(host), "Current"));
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Title", exact: true }).click());
     await act(async () => openButtons(host)[0]?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
     expect(within(host).getByRole("heading", { name: "Current answer", level: 1 }).textContent).toBe("Current answer");
-    await act(async () => {
-      const popped = new Promise<void>((resolve) => window.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true }));
-      window.history.back();
-      await popped;
-    });
-    expect(window.location.pathname).toBe(allPath(WORKSPACE));
-    expect(within(within(host).getByRole("group", { name: "Document type" }))
-      .getByRole("button", { name: "Decisions" }).getAttribute("aria-pressed")).toBe("true");
-    expect(stateFilter(host).value).toBe("changed-after-approval");
+    const assertRestored = (): void => {
+      expect(window.location.pathname).toBe(allPath(WORKSPACE));
+      expect(within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole("button", { name: "Decisions" }).getAttribute("aria-pressed")).toBe("true");
+      expect(stateFilter(host).value).toBe("changed-after-approval");
+      expect(filter(host).value).toBe("Current");
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("ascending");
+    };
+    await traverseHistory("back");
+    assertRestored();
+    await traverseHistory("forward");
+    if (entry === "Back to workspace") {
+      await act(async () => within(host).getByRole("button", { name: "Workspace settings", exact: true }).click());
+    }
+    await act(async () => within(host).getByRole("button", { name: entry === "All docs" ? entry : /^Back to / }).click());
+    const assertDefaults = (): void => {
+      expect(window.location.pathname).toBe(entry === "All docs" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
+      expect(within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole("button", { name: "Working" }).getAttribute("aria-pressed")).toBe("true");
+      expect(filter(host).value).toBe("");
+      expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Last changed/ }).getAttribute("aria-sort")).toBe("descending");
+    };
+    assertDefaults();
+    await traverseHistory("back");
+    if (entry === "Back to workspace") await traverseHistory("back");
+    await traverseHistory("back");
+    assertRestored();
+    await traverseHistory("forward");
+    if (entry === "Back to workspace") await traverseHistory("forward");
+    await traverseHistory("forward");
+    assertDefaults();
+    await chooseDecisions(host);
+    expect(stateFilter(host).value).toBe("all");
   });
 });
 
@@ -1208,10 +1243,13 @@ describe("an empty list", () => {
     );
   }
 
-  it("says the workspace is empty only once the directory has synced", async () => {
+  it.each([
+    { scenario: "no entries", entries: [] },
+    { scenario: "only archived entries", entries: [entry({ uuid: GONE, title: "Archived", deleted: true })] },
+  ])("says the workspace is empty only once the directory has synced with $scenario", async ({ entries }) => {
     // Nothing heard yet is not an answer: a workspace full of documents would
     // otherwise be told it has none.
-    const waiting = await open(false, []);
+    const waiting = await open(false, entries);
     expect(documentTable(waiting)).not.toBeNull();
     expect(pinUnavailable(waiting)).toBeNull();
     expect(within(waiting).getByText(/has not synced/).textContent).toContain(
@@ -1219,7 +1257,7 @@ describe("an empty list", () => {
     );
     unmount();
 
-    const synced = await open(true, []);
+    const synced = await open(true, entries);
     expect(pinUnavailable(synced)).toBeNull();
     expect(within(synced).getByText("No documents in this workspace yet.").textContent).toBe(
       "No documents in this workspace yet.",

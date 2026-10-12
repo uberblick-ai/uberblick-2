@@ -297,6 +297,19 @@ function Probe({ to }: { to: string }): ReactElement {
   );
 }
 
+function EntryStateProbe({ to, mode = "push", value }: {
+  to: string;
+  mode?: "push" | "replace";
+  value: string;
+}): ReactElement {
+  const [path, navigate, entryState, setEntryState] = useRoutePath<string>();
+  return <>
+    <output>{path}: {entryState ?? "default"}</output>
+    <button type="button" onClick={() => navigate(to, mode)}>Open target</button>
+    <button type="button" onClick={() => setEntryState(value)}>Keep controls</button>
+  </>;
+}
+
 describe("the URL and the app are two-way bound", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", `/${WS}`);
@@ -335,6 +348,48 @@ describe("the URL and the app are two-way bound", () => {
       await waitForPop();
     });
     expect(shown()).toBe(`/${WS}/${OTHER}`);
+  });
+
+  it("keeps controls with each history entry across same-address traversal and canonicalization", async () => {
+    const listPath = `/${WS}/all`;
+    window.history.replaceState(null, "", `${listPath}/?from=sidebar#list`);
+    const initialLength = window.history.length;
+    const view = render(<EntryStateProbe to={listPath} mode="replace" value="earlier" />);
+    const shown = (): string => within(view.container).getByRole("status").textContent ?? "";
+    const click = (name: string): void => {
+      act(() => within(view.container).getByRole<HTMLButtonElement>("button", { name }).click());
+    };
+
+    click("Keep controls");
+    expect(shown()).toBe(`${listPath}/: earlier`);
+    expect(window.history.length).toBe(initialLength);
+    expect(window.location.search).toBe("?from=sidebar");
+    expect(window.location.hash).toBe("#list");
+
+    click("Open target");
+    expect(shown()).toBe(`${listPath}: earlier`);
+    expect(window.history.length).toBe(initialLength);
+
+    view.rerender(<EntryStateProbe to={`/${WS}/${UUID}`} value="later" />);
+    click("Open target");
+    expect(shown()).toBe(`/${WS}/${UUID}: default`);
+    view.rerender(<EntryStateProbe to={listPath} value="later" />);
+    click("Open target");
+    expect(shown()).toBe(`${listPath}: default`);
+    click("Keep controls");
+    expect(shown()).toBe(`${listPath}: later`);
+    expect(window.history.length).toBe(initialLength + 2);
+
+    await act(async () => {
+      window.history.go(-2);
+      await waitForPop();
+    });
+    expect(shown()).toBe(`${listPath}: earlier`);
+    await act(async () => {
+      window.history.go(2);
+      await waitForPop();
+    });
+    expect(shown()).toBe(`${listPath}: later`);
   });
 
   it("restores explicit record selection from copied addresses and browser history", async () => {

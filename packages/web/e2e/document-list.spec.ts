@@ -246,6 +246,27 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(titleFilter).toHaveValue(prefix);
     await expect(listedTitles(page)).toHaveText([currentTitle]);
 
+    await page.goForward();
+    await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
+    if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+    await activateControl(page.getByRole("button", { name: "All docs", exact: true }), { touch });
+    await expect(page.getByRole("button", { name: "Working", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(titleFilter).toHaveValue("");
+    await expect(state).toHaveCount(0);
+    await expect(page.getByRole("columnheader", { name: /^Last changed/ })).toHaveAttribute("aria-sort", "descending");
+    await page.goBack();
+    await page.goBack();
+    await expect(type).toHaveAttribute("aria-pressed", "true");
+    await expect(state).toHaveValue("under-review");
+    await expect(titleFilter).toHaveValue(prefix);
+    await expect(listedTitles(page)).toHaveText([currentTitle]);
+    await page.goForward();
+    await page.goForward();
+    await expect(page.getByRole("button", { name: "Working", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(titleFilter).toHaveValue("");
+    await page.goBack();
+    await page.goBack();
+
     await activateControl(state, { touch });
     await state.selectOption("agent-stance");
     await expect(listedTitles(page)).toHaveText([stanceTitle]);

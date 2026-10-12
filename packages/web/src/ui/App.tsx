@@ -336,7 +336,7 @@ export function RoutePane({
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function App(): ReactElement {
-  const [path, navigate] = useRoutePath();
+  const [path, navigate, documentList, onDocumentListStateChange] = useRoutePath<DocumentListState>();
   // Wait for configuration before acquiring rooms: the first room fixes the
   // shared socket endpoint for the session, and this read also supplies the
   // workspace list.
@@ -395,15 +395,7 @@ export function App(): ReactElement {
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
-  const [documentList, setDocumentList] = useState({ workspaceUuid, state: INITIAL_DOCUMENT_LIST_STATE });
-  useEffect(() => {
-    setDocumentList({ workspaceUuid, state: INITIAL_DOCUMENT_LIST_STATE });
-  }, [workspaceUuid]);
-  const documentListState = documentList.workspaceUuid === workspaceUuid
-    ? documentList.state : INITIAL_DOCUMENT_LIST_STATE;
-  const onDocumentListStateChange = (state: DocumentListState): void => {
-    setDocumentList({ workspaceUuid, state });
-  };
+  const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
   const [narrowSidebar, setNarrowSidebar] = useState(
     () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );

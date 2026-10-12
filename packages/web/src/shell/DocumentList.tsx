@@ -3,8 +3,8 @@
  * sidebar groups supply pin labels. Kind modes and title filtering use cached
  * data only, equally for local and direct serving. Working includes unknown kinds.
  * Before directory sync, empty/filter messages describe only what has arrived.
- * Sort starts last-changed first; shell state preserves filters and sorting
- * through topic visits, but not reload or workspace switches.
+ * Sort starts last-changed first; browser history restores that visit's filters
+ * and sorting on Back/Forward. A new list visit starts at the defaults.
  * Stamps are greatest-authored cache hints, not history;
  * a future-skewed clock can pin one. Missing stamps sort last only by changed.
  * Ages turn absolute at 30 days and refresh at most a minute late. dateTime
@@ -368,7 +368,7 @@ export function DocumentList({
                       ? status.synced
                         ? `No ${MODE_EMPTY_LABELS[mode]} have a matching title.`
                         : `No ${MODE_EMPTY_LABELS[mode]} synced so far have a matching title.`
-                      : entries.length !== 0
+                      : entries.some((entry) => !entry.deleted)
                         ? status.synced
                           ? `No ${MODE_EMPTY_LABELS[mode]} in this workspace.`
                           : `No ${MODE_EMPTY_LABELS[mode]} among the documents synced so far.`

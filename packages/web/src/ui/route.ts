@@ -268,26 +268,35 @@ export type Navigate = (path: string, mode?: "push" | "replace") => void;
 
 /**
  * popstate handles browser history; Navigate updates local state for
- * pushState, which emits no popstate. Both must carry the same pathname.
+ * pushState, which emits no popstate. Both carry the pathname and entry state.
  */
-export function useRoutePath(): [string, Navigate] {
-  const [path, setPath] = useState(() => window.location.pathname);
+export function useRoutePath<State = unknown>(): [string, Navigate, State | null, (state: State) => void] {
+  const [route, setRoute] = useState(() => ({
+    path: window.location.pathname, state: window.history.state as State | null,
+  }));
+  const read = useCallback(() => setRoute({
+    path: window.location.pathname, state: window.history.state as State | null,
+  }), []);
 
   useEffect(() => {
-    const read = (): void => setPath(window.location.pathname);
     window.addEventListener("popstate", read);
     return () => window.removeEventListener("popstate", read);
-  }, []);
+  }, [read]);
 
   const navigate = useCallback<Navigate>((next, mode = "push") => {
     // Guarded: pushing the address we are already at would put a duplicate
     // entry in the history, so Back would appear to do nothing.
     if (next !== window.location.pathname) {
-      if (mode === "replace") window.history.replaceState(null, "", next);
+      if (mode === "replace") window.history.replaceState(window.history.state, "", next);
       else window.history.pushState(null, "", next);
     }
-    setPath(next);
-  }, []);
+    read();
+  }, [read]);
 
-  return [path, navigate];
+  const setEntryState = useCallback((state: State) => {
+    window.history.replaceState(state, "");
+    read();
+  }, [read]);
+
+  return [route.path, navigate, route.state, setEntryState];
 }
