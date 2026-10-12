@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setDiscussion, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import { roomStages, stoppedPartWay } from "./helpers.js";
 import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
 import type { ToolContext } from "./context.js";
+import { discussionTarget } from "./discussion.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
@@ -21,12 +22,12 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "A requirement document (`kind: requirement`)",
     when: { field: "kind", is: "requirement" },
-    forbids: ["related", "supersedes", "answer"],
+    forbids: ["related", "supersedes", "answer", "discussion"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status", "related", "supersedes", "answer"],
+    forbids: ["status", "related", "supersedes", "answer", "discussion"],
   },
 ];
 
@@ -99,6 +100,9 @@ export const inputSchema = strictInput(
       .describe(
         "Live, locally readable regular document UUID this decision relates to. Fixed at creation; omitted successors inherit their predecessor's page. Accepted only with `kind: decision`.",
       ),
+    discussion: uuidArg
+      .optional()
+      .describe("Live, locally readable regular document UUID holding this record's RFC discussion. Accepted only with `kind: decision`; never inherited. Correct or clear with set_metadata only while open; fixed after leaving open. Does not create or tag a document."),
     supersedes: uuidArg
       .optional()
       .describe(
@@ -153,6 +157,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       kind,
       status,
       related,
+      discussion,
       supersedes,
       blocks,
       sidebar,
@@ -188,6 +193,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       { related, kind: "decision" },
     );
   }
+
+  const discussionUuid = discussion === undefined ? null : discussionTarget(context, discussion);
 
   const supersedesUuid =
     supersedes === undefined
@@ -260,6 +267,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
         setStatus(replica.doc, lifecycle.status);
       }
       if (tldr !== undefined) setTldr(replica.doc, tldr);
+      if (discussionUuid !== null) setDiscussion(replica.doc, discussionUuid);
       for (const input of inputs) {
         appendBlock(replica.doc, input);
       }
@@ -333,7 +341,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
     ...(governs === undefined ? {} : { governs }),
-    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic } : {}),
+    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic, discussion: getMeta(replica.doc).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
     ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
     ...decisionAuthorityJson(replica),

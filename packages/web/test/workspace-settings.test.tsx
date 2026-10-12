@@ -386,7 +386,7 @@ it("leaves focus on the nearest lifecycle control after a retire or restore", as
 
   // The last entry has no successor, so the new last one takes the focus.
   activate(lifecycle(host, "Retire sync"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire permissions"));
+  expect(document.activeElement).toBe(lifecycle(host, "Retire rfc"));
 });
 
 it("leaves focus untouched when a peer changes the catalog", async () => {

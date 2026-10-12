@@ -1,6 +1,7 @@
 /** Workspace settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
+import { EXAMPLE_TAGS } from "@uberblick/schema";
 import type { Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { setupHarness } from "./app-helpers.js";
@@ -98,7 +99,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   const path = `/${harness().workspace}/settings/tags`;
   const first = await openApp(browser, path);
   const second = await openApp(browser, path);
-  const examples = ["auth", "billing", "mcp", "permissions", "sync"];
+  const examples = EXAMPLE_TAGS.map((entry) => entry.name);
 
   await expect(first).toHaveURL(new URL(path, harness().appUrl).href);
   await expect(first.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
@@ -124,7 +125,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await first.getByRole("button", { name: "Retire product" }).press("Enter");
   await expectSuccess(first, "Retired “product”.");
   await expect(second.getByRole("button", { name: "Restore product" })).toBeVisible();
-  await expect(first.getByRole("button", { name: "Retire sync" })).toBeFocused();
+  await expect(first.getByRole("button", { name: "Retire rfc" })).toBeFocused();
   await first.getByRole("button", { name: "Restore product" }).press("Enter");
   await expectSuccess(first, "Restored “product”.");
   await expect(second.getByRole("button", { name: "Retire product" })).toBeVisible();
@@ -152,7 +153,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   const picker = first.getByRole("button", { name: "Edit tags" });
   await picker.focus();
   await picker.press("Enter");
-  // Six entries is under the panel's ten-entry search threshold, so the
+  // This catalog is under the panel's ten-entry search threshold, so the
   // keyboard enters the list itself and walks it to the entry just created.
   await expect(first.getByRole("searchbox", { name: "Search tags" })).toHaveCount(
     0,

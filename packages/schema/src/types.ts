@@ -220,6 +220,8 @@ export interface DocMeta {
   topic?: string;
   /** Earlier decision this decision replaces, by immutable document UUID. */
   supersedes?: string;
+  /** Explicit discussion document; null means this record has none. */
+  discussion?: string | null;
   /** Whether the answer records an agent's initial stance. */
   agentStance?: boolean;
   /** Person whose answer was recorded. */
@@ -336,6 +338,8 @@ export interface DirectoryEntry {
   governs?: string;
   topic?: string;
   supersedes?: string;
+  /** Explicit discussion; absence means an older client has not cached it. */
+  discussion?: string | null;
   tldr?: string;
   /** Derived answer text; absence means an older client has not cached it. */
   answerPreview?: string | null;

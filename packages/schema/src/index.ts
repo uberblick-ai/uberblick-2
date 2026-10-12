@@ -11,6 +11,7 @@ export {
   getMetaMap,
   initDoc,
   setDescription,
+  setDiscussion,
   setTldr,
   setKind,
   setLinks,

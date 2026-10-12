@@ -202,6 +202,41 @@ it("describes short decision answers, page context and previews without reposito
   expect(lifecycle).toContain("missing preview is unknown");
 });
 
+it("explains explicit RFC connections, open-only corrections and cached discussion reads", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  for (const rule of [
+    "Create or reuse the RFC first as an ordinary regular document",
+    "ordinary `rfc` tag that can be applied deliberately", "no tool requires it",
+    "open first record with `related` and `discussion`", "no answer until one is recorded",
+    "open successor with `supersedes` and `discussion`", "current answer stays in force",
+    "A successor never inherits its predecessor's discussion",
+    "`discussion: null`", "fixed once the record leaves `open`",
+    "Settle, reject or withdraw with `set_status`", "recorded-answer contract",
+    "discussion_not_regular_document", "discussion_not_writable",
+    "never creates a document, tags or edits the RFC or related page",
+    "or changes `approvalFingerprint` or `approvalChanged`",
+    "A null discussion means no reference", "missing value means the cache is unknown",
+    "backlinks on an RFC finds its connected records", "unless the RFC is also its related page",
+  ]) expect(lifecycle, rule).toContain(rule);
+
+  const { tools } = await rig.client.listTools();
+  for (const topic of ["create_doc", "set_metadata", "get_doc", "list_docs"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    const constraints = text.split("## Constraints\n")[1]?.split("\n## ")[0];
+    for (const rule of ["discussion", "RFC", "curated links", "recorded answer"]) {
+      expect(constraints, `${topic}: ${rule}`).toContain(rule);
+      expect(tools.find((tool) => tool.name === topic)?.description, `${topic}: ${rule}`).toContain(rule);
+    }
+  }
+  for (const topic of ["create_doc", "set_metadata"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const rule of ["discussion_not_regular_document", "doc_archived", "doc_not_found", "doc_not_hydrated"]) {
+      expect(text, `${topic}: ${rule}`).toContain(rule);
+    }
+  }
+});
+
 it("explains when a decision record is useful without turning examples into project policy", async () => {
   const rig = await local();
   const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;

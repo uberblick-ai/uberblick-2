@@ -9,20 +9,21 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
   server.registerTool("create_doc", {
     title: "Create a document",
     description:
-      "Create a document and directory stub with optional seed blocks and regular-page TL;DR. Nonblank title " +
-      "and description are required. Tags select active catalog ids or exact names; unknown or retired " +
-      "selections refuse creation. A kind defaults to its first status; incompatible kind/status refuses. " +
-      "Decisions use one to three short answer blocks with a brief reason, with guidance on the related " +
-      "regular page and discussion in an RFC; they refuse TL;DR, unsupported blocks and excess answer blocks. " +
-      "related selects one live, locally readable regular page; successors inherit it unless another is given. " +
-      "Decisions start open or decided; deciding requires a non-blank valid answer without TL;DR or data. " +
-      "supersedes names a hydrated decision in a live topic. Invalid targets or a decided successor without " +
-      "a person's answer refuse before writes. Optional sidebar placement pins into a get_sidebar group id; " +
-      "unknown or empty ids return group_not_found and create nothing. Omit placement to create unpinned. " +
-      "Rooms persist independently; partial persistence_failed carries uuid, completed and failed rooms, " +
-      "rolledBack: false and stage-aware recovery that avoids duplicate creation. Directory answerPreview uses " +
-      "legacy TL;DR or the first paragraph/list; page get_doc reads mark topics related or linked. Answer " +
-      "blocks differ from recorded answer attribution {who, when, where}." +
+      "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. " +
+      "Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. " +
+      "Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, " +
+      "discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid " +
+      "nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a " +
+      "live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated " +
+      "decision in a live topic. Invalid targets refuse before writes. discussion connects a live, " +
+      "readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. " +
+      "Discussion never inherits; " +
+      "set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. " +
+      "Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing " +
+      "get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. " +
+      "Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery " +
+      "avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, " +
+      "absent if unknown. Page get_doc marks topics related or linked." +
       helpPointer("create_doc"),
     outputSchema: outputSchemas.create_doc,
     inputSchema,

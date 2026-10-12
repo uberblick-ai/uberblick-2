@@ -38,6 +38,7 @@ interface StoredEntry {
   governs?: string;
   topic?: string;
   supersedes?: string;
+  discussion?: string | null;
   tldr?: string;
   answerPreview?: string | null;
   agentStance?: boolean;
@@ -78,6 +79,7 @@ export function directoryStubDiffers(
       stub.governs !== meta.governs ||
       stub.topic !== meta.topic ||
       stub.supersedes !== meta.supersedes ||
+      stub.discussion !== (meta.discussion ?? null) ||
       (stub.tldr ?? null) !== (meta.tldr ?? null) ||
       stub.agentStance !== meta.agentStance ||
       stub.decidedBy !== meta.decidedBy ||
@@ -165,7 +167,7 @@ function withResolvedUpdatedAt(
 
 const DECISION_CACHE_KEYS = [
   "governs", "topic", "supersedes", "tldr", "agentStance", "decidedBy",
-  "decidedAt", "approvalChanged", "commentCount", "answerPreview",
+  "decidedAt", "approvalChanged", "commentCount", "answerPreview", "discussion",
 ] as const;
 
 /** Tolerant reads of the decision-only cache; unknown foreign values vanish. */
@@ -175,6 +177,8 @@ function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry
     const uuid = canonicalDocumentUuid(value[key]);
     if (uuid !== null) fields[key] = uuid;
   }
+  const discussion = canonicalDocumentUuid(value.discussion);
+  if (value.discussion === null || discussion !== null) fields.discussion = discussion;
   if (typeof value.tldr === "string" && value.tldr !== "") fields.tldr = value.tldr;
   if (value.answerPreview === null || typeof value.answerPreview === "string") fields.answerPreview = value.answerPreview;
   for (const key of ["decidedBy", "decidedAt"] as const) {
@@ -264,6 +268,7 @@ export interface DirectoryUpsert {
   governs?: string | null;
   topic?: string | null;
   supersedes?: string | null;
+  discussion?: string | null;
   tldr?: string | null;
   answerPreview?: string | null;
   agentStance?: boolean | null;
@@ -275,7 +280,7 @@ export interface DirectoryUpsert {
 
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
-  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview">;
+  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
 export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
@@ -285,6 +290,7 @@ export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
     governs: meta.governs ?? null,
     topic: meta.topic ?? meta.uuid,
     supersedes: meta.supersedes ?? null,
+    discussion: meta.discussion ?? null,
     tldr: meta.tldr ?? null,
     answerPreview: decisionAnswerPreview(doc),
     agentStance: meta.agentStance ?? null,

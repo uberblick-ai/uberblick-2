@@ -23,6 +23,7 @@ import {
   restoreDirectoryEntry,
   setAnnotationResolved,
   setDescription,
+  setDiscussion,
   setInlineLink,
   setBlockType,
   setKind,
@@ -161,6 +162,11 @@ describe("decision approval content", () => {
     setDescription(doc, "Changed description");
     setTags(doc, ["another-tag"]);
     setLinks(doc, [TARGET]);
+    for (const discussion of [TARGET, UUID, null]) {
+      setDiscussion(doc, discussion);
+      expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+      expect(decisionApprovalChanged(doc)).toBe(false);
+    }
     const meta = getMetaMap(doc);
     meta.set("changelogSuggestion", "A legacy release note");
     meta.set("agentStance", false);
