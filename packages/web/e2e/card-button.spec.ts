@@ -27,6 +27,7 @@ async function activate(control: Locator, touch: boolean): Promise<void> {
 }
 
 async function buttonPaint(button: Locator): Promise<{ ink: string; ground: string; under: string }> {
+  await expect.poll(() => button.evaluate((element) => element.getAnimations().length)).toBe(0);
   return button.evaluate((element) => {
     const card = element.closest(".ub-card");
     if (card === null) throw new Error("e2e: button has no card");
