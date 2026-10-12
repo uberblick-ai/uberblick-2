@@ -68,7 +68,8 @@ import type { SelectThread, ThreadFocus, ThreadView } from "./threads.js";
 import { useServingRoomStatus } from "./serving-status.js";
 import { useServingAccount } from "./serving-account.js";
 import { createAccountClient } from "../shell/account.js";
-import { DocumentList } from "../shell/DocumentList.js";
+import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../shell/DocumentList.js";
+import type { DocumentListState } from "../shell/DocumentList.js";
 import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
   allPath,
@@ -344,7 +345,7 @@ export function RoutePane({
 // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function App(): ReactElement {
-  const [path, navigate] = useRoutePath();
+  const [path, navigate, documentList, onDocumentListStateChange] = useRoutePath<DocumentListState>();
   // Wait for configuration before acquiring rooms: the first room fixes the
   // shared socket endpoint for the session, and this read also supplies the
   // workspace list.
@@ -403,6 +404,7 @@ export function App(): ReactElement {
   // Both addresses that name the workspace render the document list, so the
   // sidebar's entry for it is the current page at either one.
   const listing = route.kind === "all" || route.kind === "list";
+  const documentListState = documentList ?? INITIAL_DOCUMENT_LIST_STATE;
   const [narrowSidebar, setNarrowSidebar] = useState(
     () => window.matchMedia?.(NARROW_LAYOUT_QUERY).matches ?? false,
   );
@@ -560,7 +562,6 @@ export function App(): ReactElement {
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
-  const entries = useMemo(() => allEntries.filter((entry) => !entry.deleted), [allEntries]);
   /** Read the same synced sidebar document used by browser and MCP readers. */
   const sidebarGroups = useSidebar(sidebar);
   const pinTargets = topic?.records.map((record) => record.uuid) ?? (selected === null ? [] : [selected]);
@@ -577,8 +578,7 @@ export function App(): ReactElement {
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
-  // `entries` is the live directory observer, while this exact lookup keeps the
-  // selected tombstone available after archiving removes it from that listing.
+  // Read the selected stub directly while its directory observer catches up.
   const selectedDirectoryEntry =
     directory === null || selected === null
       ? undefined
@@ -735,9 +735,15 @@ export function App(): ReactElement {
       ) {
         return;
       }
-      togglePin(sidebar.ydoc, uuid);
+      const target = topics.find((candidate) => candidate.topic === uuid);
+      const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
+        .filter((pinnedUuid) => target?.records.some((record) => record.uuid === pinnedUuid));
+      if (pins.length === 0) togglePin(sidebar.ydoc, uuid);
+      else sidebar.ydoc.transact(() => {
+        for (const pinnedUuid of pins) unpinDoc(sidebar.ydoc, pinnedUuid);
+      });
     },
-    [sidebar],
+    [sidebar, topics],
   );
   /** Header pinning follows the topic while its displayed answer changes. */
   const onTogglePin = useCallback(() => {
@@ -745,17 +751,8 @@ export function App(): ReactElement {
       if (selected !== null) onTogglePinDoc(selected);
       return;
     }
-    if (sidebar === null || !sidebar.status.writable || !sidebar.status.synced) return;
-    const pins = readSidebar(sidebar.ydoc).flatMap((group) => group.docs)
-      .filter((uuid) => topic.records.some((record) => record.uuid === uuid));
-    if (pins.length === 0) {
-      togglePin(sidebar.ydoc, topic.topic);
-    } else {
-      sidebar.ydoc.transact(() => {
-        for (const uuid of pins) unpinDoc(sidebar.ydoc, uuid);
-      });
-    }
-  }, [onTogglePinDoc, selected, sidebar, topic]);
+    onTogglePinDoc(topic.topic);
+  }, [onTogglePinDoc, selected, topic]);
 
   /** Opening a document is navigating to it. There is nothing else to update. */
   const segment = workspace?.segment ?? null;
@@ -1015,16 +1012,16 @@ export function App(): ReactElement {
           />
         ) : listing ? (
           /*
-           * Key filters by workspace UUID: a real switch clears them, while
-           * decorated spellings and the two listing routes retain the same
-           * query.
+           * Shell state survives opening a topic and returning to the list.
            */
           <DocumentList
             key={workspace?.uuid}
             connection={directory}
-            entries={entries}
+            entries={allEntries}
             groups={sidebarGroups}
             onSelect={onSelect}
+            state={documentListState}
+            onStateChange={onDocumentListStateChange}
             onTogglePin={
               sidebarStatus.writable && sidebarStatus.synced
                 ? onTogglePinDoc
