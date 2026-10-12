@@ -90,7 +90,7 @@ async function textPoint(target: Locator, offset: number): Promise<{ x: number; 
   }, offset);
 }
 
-test("dragging and Shift-clicking a link select text, and the toolbar still edits its URL", { tag: "@webkit" }, async ({ page }) => {
+test("Shift-clicking a link extends the selection and opens the toolbar without following it", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
   const link = page.locator(".ub-editor a.ub-link");
   const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
@@ -99,11 +99,12 @@ test("dragging and Shift-clicking a link select text, and the toolbar still edit
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
   await expect(toolbar).toBeVisible();
   expect(page.context().pages()).toHaveLength(1);
+});
 
-  // Start the separate drag gesture with the original, unsplit link and a
-  // fresh editor selection rather than a toolbar field's retained focus.
-  await page.reload();
-  await expect(link).toBeVisible();
+test("dragging a link selects text and the toolbar still edits its URL", { tag: "@webkit" }, async ({ page }) => {
+  await openDoc(page);
+  const link = page.locator(".ub-editor a.ub-link");
+  const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
   const start = await textPoint(link, 1);
   const end = await textPoint(link, 13);
   await page.mouse.move(start.x, start.y);
