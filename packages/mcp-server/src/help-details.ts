@@ -13,9 +13,9 @@ export const toolHelpDetails = {
     "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
     "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
     "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
-    "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
-    "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
-    "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
+    "`tags` is a complete assignment set of existing catalog ids or exact names. Names are selectors; " +
+    "the document stores canonical ids and the answer gives existing tags with their names and optional descriptions. " +
+    "A deleted or unknown selection refuses the whole call before a document exists; list_tags is the vocabulary.\n\n" +
     "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
     "nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
@@ -154,9 +154,9 @@ export const toolHelpDetails = {
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
     "room, and combine with `tag`. A tag filter accepts a catalog id or exact current name; a value this " +
-    "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
-    "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
-    "state.",
+    "catalog does not have is refused rather than answered with an empty listing. Only existing catalog tags " +
+    "appear in answers, with canonical id, name and optional description. Missing catalog entries do not " +
+    "authorize deleting stored references.",
   search:
     "Full-text search over document titles, descriptions and block text, from the local FTS5 index. The index " +
     "is derived from the replicas and updated as updates are observed, so it reflects edits from any client " +
@@ -171,7 +171,7 @@ export const toolHelpDetails = {
     "by itself mean the index is empty.\n\n" +
     "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
     "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
-    "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
+    "canonical ids, names and optional descriptions for existing tags. Pass `tag` as a catalog id or exact name to " +
     "restrict hits to that assignment; a value this catalog does not have is refused rather than answered " +
     "with no hits.",
   find_decisions:
@@ -312,16 +312,17 @@ export const toolHelpDetails = {
     "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
-    "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
-    "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
-    "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
+    "Tags replace the existing assignment set with catalog ids or exact names; names resolve to canonical ids " +
+    "before storage. References awaiting catalog synchronization stay stored, including with tags: []; " +
+    "confirmed-deleted references are dropped during this permitted document write. Deleted or unknown " +
+    "values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
     "directory or index changes.\n\n" +
     "Links replace the curated UUID array and update backlinks. A newly added target unknown to this " +
     "replica's directory produces `doclink_target_not_known_locally` with `field: \"links\"`; archived " +
     "targets are accepted and an existing curated target can be retained unchanged. Passing get_doc's " +
     "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
-    "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
+    "deduplicates the resulting edges. Empty arrays clear existing tags or curated links.\n\n" +
     "An open decision accepts `discussion` as a live, locally readable non-decision document UUID, including " +
     "a requirement, or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
     "A decision target refuses with `discussion_not_regular_document`; archived, unknown and unhydrated " +

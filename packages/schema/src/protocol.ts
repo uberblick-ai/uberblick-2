@@ -10,8 +10,8 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * 409 protocol-mismatch with reason protocol-mismatch:<hubVersion> on skew,
  * or 401 sign-in-required on equality.
  */
-// Structured table cells cannot synchronize with protocol-2 clients.
-export const SYNC_PROTOCOL_VERSION = 3;
+// Older clients cannot preserve identity deletions or deferred tag cleanup.
+export const SYNC_PROTOCOL_VERSION = 4;
 
 /** Room for the JSON around the token — `{"protocolVersion":1,"token":""}` is 32 characters. */
 const ENVELOPE_ALLOWANCE = 128;

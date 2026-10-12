@@ -15,8 +15,8 @@ import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 const DESCRIPTION = "Metadata contract fixture.";
-const AUTH = { ...EXAMPLE_TAGS[0], state: "active" };
-const MCP = { ...EXAMPLE_TAGS[2], state: "active" };
+const AUTH = { ...EXAMPLE_TAGS[0] };
+const MCP = { ...EXAMPLE_TAGS[2] };
 
 async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
@@ -283,7 +283,7 @@ describe("set_metadata", () => {
       tldr: "An otherwise valid summary.",
       tags: [MCP.name, "missing-metadata-tag"],
     }, "invalid_tag_assignment", source.uuid);
-    expect(tags).toMatchObject({ field: "tags", unknown: ["missing-metadata-tag"], retired: [] });
+    expect(tags).toMatchObject({ field: "tags", unknown: ["missing-metadata-tag"] });
     const unknown = randomUUID();
     const links = await refuseUnchanged(rig, {
       uuid: source.uuid,

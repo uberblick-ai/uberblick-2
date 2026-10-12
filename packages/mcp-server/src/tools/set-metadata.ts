@@ -81,7 +81,7 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", { uuid, field: "tldr" });
   }
   const tagIds = tags === undefined ? undefined : forField("tags", () =>
-    resolveTagSelectors(context.replicas, tags, context.documentTags(replica)));
+    resolveTagSelectors(context.replicas, tags));
   if (links !== undefined) {
     // getMeta also adds decision-derived edges; only the stored curated set
     // can preserve an unknown target without creating a new curated reference.

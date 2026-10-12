@@ -7,6 +7,9 @@ import { memo, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, 
 import type { ReactElement, ReactNode } from "react";
 import {
   getAnnotation,
+  getDirectoryEntry,
+  cleanupDocumentTags,
+  decisionTopicArchived,
   getBlocksFragment,
   getMeta,
   isExternalHref,
@@ -27,6 +30,7 @@ import type { LinkSurvivor } from "../editor/link-repair.js";
 import { endpointSourceLabel } from "../config.js";
 import type { HubEndpoint } from "../config.js";
 import type { RoomConnection } from "../collab/rooms.js";
+import { writeDocument } from "../collab/directory-stub.js";
 import type { NotSharedReason } from "../shell/document-search.js";
 import { notifySticky, resolveSticky } from "../notifications.js";
 import { rawSyncState, useCalmSyncState } from "./calm.js";
@@ -178,7 +182,7 @@ function TldrCallout({
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
     if (archived || getMeta(connection.ydoc).kind === "decision" || !connection.status.writable) return;
-    setTldr(connection.ydoc, next);
+    writeDocument(connection.ydoc, () => setTldr(connection.ydoc, next));
     onEditingChange(false);
   };
 
@@ -514,7 +518,7 @@ function LinkConflictRepair({
   const repair = (conflict: LinkConflict, keep: LinkSurvivor): void => {
     // Guard the write too: the room can become a decision before React observes it.
     if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
-    repairLinkConflict(conflict, keep);
+    writeDocument(connection.ydoc, () => repairLinkConflict(conflict, keep));
     // Unconditional: a repair changes the list, and a refusal means live state
     // has already moved on without this render hearing about it yet.
     refresh();
@@ -603,6 +607,8 @@ function ForeignFallback({
 // live, and actual binding inputs still pass through React's props comparison.
 const BoundEditor = memo(function BoundEditor({
   connection,
+  catalogConnection,
+  directoryConnection,
   author,
   archived,
   contentReadOnly,
@@ -610,6 +616,8 @@ const BoundEditor = memo(function BoundEditor({
   onSelectThread,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
+  directoryConnection: RoomConnection | null;
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
@@ -633,6 +641,7 @@ const BoundEditor = memo(function BoundEditor({
    * changes must not rebind.
    */
   const readContentReadOnly = useEffectEvent(() => contentReadOnly);
+  const readArchived = useEffectEvent(() => archived);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The epoch rebinds after the synchronous guard destroys an editor that normalization immediately made bindable again.
   useEffect(() => {
@@ -648,6 +657,10 @@ const BoundEditor = memo(function BoundEditor({
       editable: !readContentReadOnly() && !isDecision(connection) && connection.status.writable,
       canWrite: () => connection.status.writable,
       canNormalize: () => connection.status.writable && connection.status.synced,
+      onAuthoredUpdate: () => {
+        if (readArchived() || readContentReadOnly() || isDecision(connection) || !connection.status.writable || catalogConnection === null || directoryConnection === null || !directoryConnection.status.synced || !directoryConnection.status.writable || getDirectoryEntry(directoryConnection.ydoc, getMeta(connection.ydoc).uuid)?.deleted === true || decisionTopicArchived(directoryConnection.ydoc, getMeta(connection.ydoc).uuid)) return;
+        cleanupDocumentTags(connection.ydoc, catalogConnection.ydoc);
+      },
       onUnbind: () => {
         setEditor(null);
         setBindingEpoch((epoch) => epoch + 1);
@@ -747,7 +760,7 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, docLinks, onSelectThread, bindingEpoch]);
+  }, [connection, catalogConnection, directoryConnection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Change ProseMirror editable in place to preserve caret, scroll, selection
@@ -824,6 +837,7 @@ export function EditorPane({
   presence,
   author,
   catalogConnection = null,
+  directoryConnection = null,
   archived,
   updatedAt,
   onLastUpdatedChange,
@@ -859,6 +873,7 @@ export function EditorPane({
   author: string;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
+  directoryConnection?: RoomConnection | null;
   /**
    * Observe directory tombstones in both directions so remote archive and
    * restore update this pane.
@@ -991,7 +1006,7 @@ export function EditorPane({
           // this readOnly render updates.
           onChange={(event) => {
             if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
-            setTitle(connection.ydoc, event.target.value);
+            writeDocument(connection.ydoc, () => setTitle(connection.ydoc, event.target.value));
           }}
         />}
         {/* The editor draws only for a document that is here: `RoutePane` sends
@@ -1033,6 +1048,8 @@ export function EditorPane({
           ) : (
             <BoundEditor
               connection={connection}
+              catalogConnection={catalogConnection}
+              directoryConnection={directoryConnection}
               author={author}
               archived={archived}
               contentReadOnly={contentReadOnly}

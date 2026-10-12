@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { cleanupDocumentTags } from "@uberblick/schema";
 import { DOCUMENT_MUTATING_TOOLS } from "../failures.js";
 import type { Replica } from "../replica.js";
 import type { ToolContext } from "./context.js";
@@ -59,7 +60,21 @@ export function documentOperation<Args extends { uuid: string }, Payload extends
   return operation(tool, input, (context, args, request) => {
     const policy = DOCUMENT_WRITES[tool];
     const replica = context.requireWritableDoc(args.uuid, policy.content);
-    const payload = body(context, args, request, replica);
+    let wrote = false;
+    const recordWrite = () => { wrote = true; };
+    // The body is synchronous: receipt, hydration and repairs outside this
+    // authored write cannot authorize deleting stored tag references.
+    replica.doc.on("update", recordWrite);
+    let payload: Payload;
+    try {
+      payload = body(context, args, request, replica);
+    } finally {
+      replica.doc.off("update", recordWrite);
+    }
+    if (wrote) {
+      context.replicas.assertHealthy();
+      cleanupDocumentTags(replica.doc, context.tagCatalog());
+    }
     return {
       ...payload,
       ...(policy.contentDurability ? context.contentDurability(replica) : context.durability(replica)),

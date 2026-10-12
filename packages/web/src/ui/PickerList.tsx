@@ -79,7 +79,7 @@ export function PickerList({
           </span>
           <span>{option.label}</span>
           {option.detail !== undefined && (
-            <span className={`${multiple ? "ub-tag-retired " : ""}ub-picker-detail ml-auto text-muted-foreground`}>
+            <span className="ub-picker-detail ml-auto text-muted-foreground">
               {option.detail}
             </span>
           )}

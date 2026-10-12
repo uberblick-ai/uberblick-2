@@ -114,7 +114,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     navigate: Navigate; explicit: boolean;
     directoryConnection: RoomConnection | null;
   }): ReactElement {
-  if (topic === null || selected === null) return <EditorPane {...editorProps} />;
+  if (topic === null || selected === null) return <EditorPane {...editorProps} directoryConnection={directoryConnection} />;
   const current = decisionCurrentRecord(topic);
   const record = topic.records.find((entry) => entry.uuid === selected);
   if (current === null || record === undefined) throw new Error("Decision selection must belong to its topic");
@@ -125,6 +125,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const relatedTitle = current.governs === undefined || directoryConnection === null ? undefined
     : getDirectoryEntry(directoryConnection.ydoc, current.governs)?.title || undefined;
   return <EditorPane {...editorProps}
+    directoryConnection={directoryConnection}
     decisionView
     copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
     header={<>

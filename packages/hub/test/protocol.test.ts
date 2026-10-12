@@ -18,7 +18,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { appendBlock, editBlock, findBlockElement, getBlock, tableCellText, tableRows } from "@uberblick/schema";
+import { appendBlock, createTagCatalogEntry, deleteTagCatalogEntry, editBlock, findBlockElement, getBlock, listTagCatalog, tableCellText, tableRows } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { HubLogRecord } from "../src/log.js";
 import type { Hub } from "../src/server.js";
@@ -117,6 +117,38 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
+  it("refuses a shipped protocol-3 restoration before it can reach a deleted tag", async () => {
+    const room = testRoom();
+    const current = createClient({ port: hub.port, room, token: await token() });
+    clients.push(current);
+    await current.synced;
+    const tag = createTagCatalogEntry(current.doc, "reports");
+    deleteTagCatalogEntry(current.doc, tag.id);
+    await waitUntil("the tag deletion to be acknowledged", () => !current.provider.hasUnsyncedChanges);
+    const deletedState = Y.encodeStateVector(current.doc);
+    const oldDoc = new Y.Doc();
+    try {
+      Y.applyUpdate(oldDoc, Y.encodeStateAsUpdate(current.doc));
+      oldDoc.getMap("tag-restored").set("reports#123", 100);
+      const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
+        protocolVersion: 3, reconnectDelayMs: 60_000 });
+      clients.push(old);
+      await expect(old.denied).resolves.toBe(protocolMismatchReason());
+      await expect(old.synced).rejects.toThrow(protocolMismatchReason());
+      expect(old.provider.hasUnsyncedChanges).toBe(true);
+      clients.splice(clients.indexOf(old), 1);
+      old.destroy();
+
+      const updated = createClient({ port: hub.port, room, token: await token() });
+      clients.push(updated);
+      await updated.synced;
+      expect(Y.encodeStateVector(updated.doc)).toEqual(deletedState);
+      expect(listTagCatalog(updated.doc)).toEqual([]);
+    } finally {
+      oldDoc.destroy();
+    }
+  });
+
   it("refuses the shipped protocol-2 table writer before sync or acknowledgement", async () => {
     const room = testRoom();
     const current = createClient({ port: hub.port, room, token: await token() });

@@ -326,17 +326,18 @@ export class InvalidTagIdentityError extends Error {
 /** A whole-request refusal from the catalog-aware document assignment boundary. */
 export class InvalidTagAssignmentError extends Error {
   readonly unknown: string[];
-  readonly retired: string[];
 
-  constructor(unknown: string[], retired: string[]) {
-    const details = [
-      ...(unknown.length === 0 ? [] : [`unknown: ${unknown.join(", ")}`]),
-      ...(retired.length === 0 ? [] : [`retired: ${retired.join(", ")}`]),
-    ].join("; ");
-    super(`Invalid tag assignment (${details})`);
+  constructor(unknown: string[]) {
+    super(`Invalid tag assignment (unknown: ${unknown.join(", ")})`);
     this.name = "InvalidTagAssignmentError";
     this.unknown = [...unknown];
-    this.retired = [...retired];
+  }
+}
+
+export class InvalidTagDescriptionError extends Error {
+  constructor() {
+    super("A tag description must be one line of at most 300 characters");
+    this.name = "InvalidTagDescriptionError";
   }
 }
 

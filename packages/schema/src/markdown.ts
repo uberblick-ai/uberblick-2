@@ -45,7 +45,7 @@ export interface ExportMarkdownOptions {
    */
   annotations?: "html-comments" | "drop";
   /**
-   * Project current names, including retired assignments; omit unknown IDs and
+   * Project existing catalog names; omit deleted and unknown identities and
    * provisional strings. Without a catalog, export stored assignments.
    */
   tagCatalog?: Y.Doc;
@@ -609,9 +609,7 @@ export function exportMarkdown(
     const tags =
       options.tagCatalog === undefined
         ? meta.tags
-        : resolveTagAssignments(options.tagCatalog, meta.tags).flatMap(
-            (entry) => entry.name === null ? [] : [entry.name],
-          );
+        : resolveTagAssignments(options.tagCatalog, meta.tags).map((entry) => entry.name);
     const lines = [
       "---",
       `uuid: ${emitScalar(meta.uuid)}`,

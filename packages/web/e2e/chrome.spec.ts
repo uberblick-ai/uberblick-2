@@ -63,7 +63,7 @@ import {
   getDirectoryMap,
   initDoc,
   MAX_TAG_NAME_LENGTH,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   pinDoc,
   readSidebar,
   roomForDoc,
@@ -2301,7 +2301,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   for (const name of ["design", "hub", "release", "schema", "storage"]) {
     await page.getByLabel("Create a tag").fill(name);
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toBeVisible();
   }
   await page.goto(documentUrl);
 
@@ -2439,10 +2439,10 @@ for (const scheme of ["light"] as const) {
     readings.push(...await surface(page, "[data-settings-page]"));
 
     // The field's value, both action variants on their hover grounds, and the
-    // active/retired duplicate feedback all paint text beyond the resting page.
+    // duplicate feedback all paint text beyond the resting page.
     await field.fill(name);
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("already an active tag");
+    await expect(page.getByRole("alert")).toContainText("already exists");
     readings.push(...await surface(page, "[data-settings-page]"));
     for (const variant of ["default", "outline"]) {
       const button = page.locator(`[data-settings-page] button[data-variant=${variant}]`).first();
@@ -2450,10 +2450,10 @@ for (const scheme of ["light"] as const) {
       await expect.poll(() => button.evaluate((element) => element.getAnimations().length)).toBe(0);
       readings.push(...await surface(page, "[data-settings-page]"));
     }
-    await page.getByRole("button", { name: `Retire ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("is retired");
+    await page.getByRole("button", { name: `Delete ${name}` }).click();
+    readings.push(...await surface(page, "[data-slot=alert-dialog-content]"));
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toHaveCount(0);
     readings.push(...await surface(page, "[data-settings-page]"));
 
     // A connected client becomes read-only; a fresh replica waits for the
@@ -2532,9 +2532,9 @@ async function contrastDocument(
     const catalog = (await peer(settingsRoom(harness().workspaceUuid))).doc;
     seedTagCatalog(catalog);
     for (let index = 0; index < 6; index += 1) createTagCatalogEntry(catalog, `contrast-${index}`);
-    const retired = createTagCatalogEntry(catalog, `retired-${scheme}-${randomUUID().slice(0, 8)}`);
-    assignDocumentTags(doc, catalog, [retired.id]);
-    retireTagCatalogEntry(catalog, retired.id);
+    const deleted = createTagCatalogEntry(catalog, `deleted-${scheme}-${randomUUID().slice(0, 8)}`);
+    assignDocumentTags(doc, catalog, [deleted.id]);
+    deleteTagCatalogEntry(catalog, deleted.id);
     for (let index = 0; index < 4; index += 1) {
       const { provider } = await peer(`${harness().workspaceUuid}/${uuid}`);
       provider.setAwarenessField("user", { name: `Contrast peer ${index}`, color: "#0675c9" });
@@ -2912,7 +2912,7 @@ for (const scheme of ["light"] as const) {
       await expect(page.getByPlaceholder("Search tags")).toBeVisible();
       await check(picker);
       // Include every option's neutral check box over the highlighted ground,
-      // and the retired small text, rather than only reading a panel at rest.
+      // rather than only reading a panel at rest.
       for (const option of await page.locator(`${picker} [role=option]`).all()) {
         await option.hover();
         await check(picker);

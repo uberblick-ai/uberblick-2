@@ -24,11 +24,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   appendBlock,
+  createTagCatalogEntry,
+  deleteTagCatalogEntry,
   addComment,
   createAnnotation,
   editBlock,
   getDirectoryEntry,
   getMetaMap,
+  getMeta,
   initDoc,
   setDescription,
   setKind,
@@ -36,6 +39,7 @@ import {
   setTags,
   setTldr,
   setTitle,
+  restoreDirectoryEntry,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -43,6 +47,7 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import {
   UPDATED_AT_COARSENESS_MS,
   watchDocumentStub,
+  writeDocument,
 } from "../src/collab/directory-stub.js";
 
 /** Midnight of a day that is not now, so a real clock could never pass for it. */
@@ -126,6 +131,54 @@ afterEach(() => {
 });
 
 describe("directory stamps from the web", () => {
+  it("cleans confirmed deletions only on a successful permitted user write", () => {
+    const catalog = new Y.Doc();
+    const deleted = createTagCatalogEntry(catalog, "deleted");
+    deleteTagCatalogEntry(catalog, deleted.id);
+    const unresolved = "90000000-0000-4000-8000-000000000001";
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: UUID, title: "Before", tags: [deleted.id, unresolved] });
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Before", tags: [deleted.id, unresolved] });
+    let writable = true;
+    let synchronized = false;
+    const listeners = new Set<() => void>();
+    const stop = watchDocumentStub(doc, directory, {
+      writable: () => true,
+      documentWritable: () => writable,
+      synchronized: () => synchronized,
+      subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    }, catalog);
+    const stored = getMeta(doc).tags;
+    try {
+      expect(getMeta(doc).tags).toEqual(stored);
+      for (const listener of listeners) listener();
+      writeDocument(doc, () => setTitle(doc, "Before archive state arrives"));
+      expect(getMeta(doc).tags).toEqual(stored);
+      synchronized = true;
+      for (const listener of listeners) listener();
+      expect(getMeta(doc).tags).toEqual(stored);
+      setTitle(doc, "Local repair");
+      expect(getMeta(doc).tags).toEqual(stored);
+      expect(() => writeDocument(doc, () => {
+        setTitle(doc, "Partial refused write");
+        throw new Error("refused");
+      })).toThrow("refused");
+      expect(getMeta(doc).tags).toEqual(stored);
+      writable = false;
+      writeDocument(doc, () => setTitle(doc, "Without admission"));
+      expect(getMeta(doc).tags).toEqual(stored);
+      writable = true;
+      tombstoneDirectoryEntry(directory, UUID);
+      writeDocument(doc, () => setTitle(doc, "Archived write"));
+      expect(getMeta(doc).tags).toEqual(stored);
+      // An archive must be restored separately before another edit can clean.
+      restoreDirectoryEntry(directory, UUID);
+      writeDocument(doc, () => writeDocument(doc, () => setTitle(doc, "Permitted")));
+      expect(getMeta(doc).tags).toEqual([unresolved]);
+    } finally { stop(); }
+  });
+
   it("repairs decision relationships, summary and discussion counts from the document", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Lease duration" });

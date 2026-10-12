@@ -4,7 +4,7 @@ import { getMeta, listDirectory, readDocumentTags } from "@uberblick/schema";
 import { ToolError } from "./failures.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
-import { activeTagCatalog } from "./tag-catalog.js";
+import { existingTagCatalog } from "./tag-catalog.js";
 
 export const GUIDANCE_INSTRUCTIONS =
   "Document writes require a briefing on this replica's live, hydrated documents carrying the active " +
@@ -25,7 +25,7 @@ export class GuidanceBriefing {
   /** No settle or room hydration: the gate must add no network wait. */
   documents(): { uuid: string; title: string }[] {
     const catalog = this.replicas.settings().doc;
-    const marker = activeTagCatalog(catalog).find((tag) => tag.name === "guidance");
+    const marker = existingTagCatalog(catalog).find((tag) => tag.name === "guidance");
     if (marker === undefined) return [];
     return listDirectory(this.replicas.directory().doc).flatMap(({ uuid }) => {
       if (!this.replicas.hydrated(uuid)) return [];

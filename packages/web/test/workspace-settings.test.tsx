@@ -5,10 +5,15 @@ import * as Y from "yjs";
 import {
   EXAMPLE_TAGS,
   createTagCatalogEntry,
+  getTagCatalogIdentities,
+  isTagCatalogIdentityDeleted,
+  seedTagCatalog,
+  TAG_CATALOG_RETIRED_KEY,
+  TAG_CATALOG_RESTORED_KEY,
   listTagCatalog,
   getWorkspaceName,
   setWorkspaceName,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   settingsRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -232,7 +237,7 @@ it("counts only the routed directory after server state, across disconnects", as
   expect(facts(host).get("Documents")).toBe("—");
 });
 
-it("waits for server state, seeds once, and keeps a retired-only reading offline", async () => {
+it("waits for server state, seeds once, and keeps deleted examples absent offline", async () => {
   const room = statusRoom(
     {
       ...SYNCED,
@@ -260,7 +265,7 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   });
   await act(async () => {});
   expect(
-    within(within(host).getByRole("region", { name: "Active" })).getAllByRole("listitem", { hidden: true }).map(
+    within(within(host).getByRole("region", { name: "Existing tags" })).getAllByRole("listitem", { hidden: true }).map(
       // The tag is repeated in the button's screen-reader text; the row's
       // visible label precedes that second occurrence.
       (row) => within(row).getAllByText(/^[a-z0-9-]+$/)[0]?.textContent,
@@ -269,34 +274,41 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
 
   act(() => {
     for (const entry of listTagCatalog(room.connection.ydoc)) {
-      retireTagCatalogEntry(room.connection.ydoc, entry.id);
+      deleteTagCatalogEntry(room.connection.ydoc, entry.id);
     }
   });
-  expect(host.textContent).toContain("No active tags.");
-  expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole("listitem", { hidden: true }),
-  ).toHaveLength(EXAMPLE_TAGS.length);
+  expect(host.textContent).toContain("No tags.");
+  expect(within(host).queryByRole("region", { name: "Retired" })).toBeNull();
 
   room.update({ connected: false, synced: false, writable: false });
   expect(host.textContent).not.toContain("Waiting for the tag catalog");
   expect(host.textContent).toContain("Tag changes are unavailable");
   const controls = within(host).getAllByRole<HTMLButtonElement>("button", { hidden: true });
-  expect(controls).toHaveLength(EXAMPLE_TAGS.length + 1);
+  expect(controls).toHaveLength(1);
   expect(controls.every((button) => button.disabled)).toBe(true);
   expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" }).disabled).toBe(true);
 
   room.update({ connected: true, synced: true, writable: true });
-  expect(
-    within(within(host).getByRole("region", { name: "Retired" })).getAllByRole<HTMLButtonElement>("button", { hidden: true }).every(
-      (button) => !button.disabled,
-    ),
-  ).toBe(true);
-  expect(listTagCatalog(room.connection.ydoc)).toHaveLength(EXAMPLE_TAGS.length);
-  expect(listTagCatalog(room.connection.ydoc).every((entry) => entry.state === "retired"))
-    .toBe(true);
+  expect(listTagCatalog(room.connection.ydoc)).toHaveLength(0);
 });
 
-it("validates unique names and converges create, retire, and restore with a peer", async () => {
+it("waits for current catalog sync before making a cached legacy retirement permanent", async () => {
+  const room = statusRoom({ ...SYNCED, synced: false }, settingsRoom(WORKSPACE.uuid));
+  seedTagCatalog(room.connection.ydoc);
+  const billing = EXAMPLE_TAGS.find((tag) => tag.name === "billing");
+  if (billing === undefined) throw new Error("missing billing example");
+  // Legacy clients curate these name-keyed levels independently.
+  getTagCatalogIdentities(room.connection.ydoc).set(billing.id, billing.name);
+  room.connection.ydoc.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("billing#1", 1);
+  await mountTags(room.connection);
+  expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(false);
+  act(() => room.connection.ydoc.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("billing#2", 1));
+  room.update({ synced: true });
+  expect(isTagCatalogIdentityDeleted(room.connection.ydoc, billing.id)).toBe(false);
+  expect(listTagCatalog(room.connection.ydoc).some((entry) => entry.id === billing.id)).toBe(true);
+});
+
+it("validates names and converges confirmed deletion and fresh recreation with a peer", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
@@ -316,7 +328,7 @@ it("validates unique names and converges create, retire, and restore with a peer
     submit.click();
   });
   expect(within(host).getByRole("alert").textContent).toBe(
-    "“auth” is already an active tag.",
+    "“auth” already exists.",
   );
   expect(notifyTransient).not.toHaveBeenCalled();
 
@@ -324,33 +336,21 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
   const created = listTagCatalog(peer).find((entry) => entry.name === "product");
-  expect(created).toMatchObject({ name: "product", state: "active" });
+  expect(created).toMatchObject({ name: "product" });
   expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Created “product”.", severity: "success" });
   expect(host.textContent).not.toContain("Created “product”.");
 
-  act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*product$/ }).click());
-  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
-    "retired",
-  );
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Retired “product”.", severity: "success" });
-  expect(host.textContent).not.toContain("Retired “product”.");
-
-  act(() => {
-    typeInto(input, "product");
-    submit.click();
-  });
-  expect(within(host).getByRole("alert").textContent).toBe(
-    "“product” is retired. Restore it from the retired list.",
-  );
-  expect(notifyTransient).toHaveBeenCalledTimes(2);
-
-  act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*product$/ }).click());
-  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
-    "active",
-  );
-  expect(within(host).queryByRole("alert")).toBeNull();
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Restored “product”.", severity: "success" });
-  expect(host.textContent).not.toContain("Restored “product”.");
+  activate(lifecycle(host, "Delete product"));
+  expect(screen.getByRole("alertdialog", { name: "Delete “product”?" }).textContent).toContain("cannot be undone");
+  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)).toBeDefined();
+  await act(async () => screen.getByRole<HTMLButtonElement>("button", { name: "Cancel" }).click());
+  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)).toBeDefined();
+  activate(lifecycle(host, "Delete product"));
+  await confirmDeletion();
+  expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)).toBeUndefined();
+  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Deleted “product”.", severity: "success" });
+  act(() => { typeInto(input, "product"); submit.click(); });
+  expect(listTagCatalog(peer).find((entry) => entry.name === "product")?.id).not.toBe(created?.id);
 
   act(() => {
     createTagCatalogEntry(peer, "zeta");
@@ -358,7 +358,7 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(host.textContent).toContain("zeta");
 });
 
-/** The Retire or Restore control of one entry, by its accessible name. */
+/** The Delete control of one entry, by its accessible name. */
 function lifecycle(host: HTMLElement, name: string): HTMLButtonElement {
   // Without the Tailwind stylesheet, jsdom joins the sr-only tag to the verb.
   return within(host).getByRole<HTMLButtonElement>("button", { name: new RegExp(`^${name.replace(" ", "\\s*")}$`) });
@@ -372,37 +372,50 @@ function activate(control: HTMLButtonElement): void {
   });
 }
 
-it("leaves focus on the nearest lifecycle control after a retire or restore", async () => {
+async function confirmDeletion(): Promise<void> {
+  await act(async () => within(screen.getByRole("alertdialog")).getByRole<HTMLButtonElement>("button", { name: "Delete" }).click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+}
+
+it("returns focus to a nearby control after confirmation removes its trigger", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const host = await mountTags(room.connection);
 
-  // The entry that took the retired one's place in the list it left.
-  activate(lifecycle(host, "Retire billing"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire mcp"));
-
-  // Restoring the only retired entry empties that list: its own new control.
-  activate(lifecycle(host, "Restore billing"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire billing"));
+  activate(lifecycle(host, "Delete billing"));
+  await confirmDeletion();
+  expect(document.activeElement).toBe(lifecycle(host, "Delete mcp"));
 
   // The last entry has no successor, so the new last one takes the focus.
-  activate(lifecycle(host, "Retire sync"));
-  expect(document.activeElement).toBe(lifecycle(host, "Retire rfc"));
+  activate(lifecycle(host, "Delete sync"));
+  await confirmDeletion();
+  expect(document.activeElement).toBe(lifecycle(host, "Delete rfc"));
 });
 
 it("leaves focus untouched when a peer changes the catalog", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
-  const focused = lifecycle(host, "Retire mcp");
+  const focused = lifecycle(host, "Delete mcp");
   act(() => focused.focus());
 
   act(() => createTagCatalogEntry(peer, "product"));
   expect(document.activeElement).toBe(focused);
 
   const auth = listTagCatalog(peer).find((entry) => entry.name === "auth");
-  act(() => retireTagCatalogEntry(peer, auth?.id ?? ""));
-  expect(host.textContent).toContain("Restore auth");
+  act(() => deleteTagCatalogEntry(peer, auth?.id ?? ""));
+  expect(host.textContent).not.toContain("Delete auth");
   expect(document.activeElement).toBe(focused);
+});
+
+it("rechecks live admission before a pending deletion acts", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const host = await mountTags(room.connection);
+  activate(lifecycle(host, "Delete auth"));
+  room.connection.status = { ...room.connection.status, writable: false };
+  await confirmDeletion();
+  expect(listTagCatalog(room.connection.ydoc).find((entry) => entry.name === "auth")).toBeDefined();
+  expect(screen.getByRole("alertdialog", { name: "Delete “auth”?" })).toBeTruthy();
+  expect(notifyTransient).not.toHaveBeenCalled();
 });
 
 it("takes offline and refusal readings live from the shared status derivation", async () => {

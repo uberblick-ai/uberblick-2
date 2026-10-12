@@ -40,7 +40,7 @@ const documentDurability = {
   ...durability,
   description: z.null().optional().describe("Present when the written document has no agent-facing description."),
   descriptionHint: z.string().optional().describe("Non-blocking request to supply the missing document description."),
-  tagHint: z.string().optional().describe("Non-blocking request to assign tags from the active vocabulary."),
+  tagHint: z.string().optional().describe("Non-blocking request to assign tags from the existing vocabulary."),
 };
 const contentReview = {
   tldr: z.null().optional().describe("Present when changed document content has no TL;DR."),
@@ -57,11 +57,12 @@ const multipleRoomDurability = {
   rooms: z.array(touchedRoom).describe("Each independently persisted room touched; top-level synced is their conjunction."),
 };
 
-const tag = z.union([
-  z.object({ id: z.string(), name: z.string(), state: z.enum(["active", "retired"]) }).strict(),
-  z.object({ id: z.string(), name: z.null(), state: z.literal("unresolved") }).strict(),
-]);
-const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
+const tag = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional().describe("Optional one-line explanation of this tag's workspace purpose."),
+}).strict();
+const tags = z.array(tag).describe("Existing catalog tags with canonical identities, names and optional descriptions.");
 
 const directoryEntry = z.object({
   uuid,
@@ -218,7 +219,7 @@ export const outputSchemas = {
   list_tags: z.object({
     workspace: z.string(),
     complete: z.boolean(),
-    tags: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
+    tags,
     hub,
   }).strict(),
   create_doc: z.object({

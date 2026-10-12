@@ -1,5 +1,5 @@
 import { strictInput } from "../inputs.js";
-import { activeTagCatalog, tagCatalogComplete } from "../tag-catalog.js";
+import { existingTagCatalog, tagCatalogComplete } from "../tag-catalog.js";
 import { operation } from "./operation.js";
 
 export const inputSchema = strictInput({});
@@ -10,7 +10,7 @@ export const listTagsOperation = operation("list_tags", inputSchema, (context, _
   return {
     workspace: replicas.config.workspaceId,
     complete: tagCatalogComplete(replicas),
-    tags: activeTagCatalog(tagCatalog()).map(({ id, name }) => ({ id, name })),
+    tags: existingTagCatalog(tagCatalog()),
     hub: replicas.sync.state(),
   };
 });

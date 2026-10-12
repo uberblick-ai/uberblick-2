@@ -12,11 +12,33 @@
 import type * as Y from "yjs";
 import {
   decisionDirectoryFields,
+  decisionTopicArchived,
+  cleanupDocumentTags,
   directoryStubDiffers,
   getDirectoryEntry,
   getMeta,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+
+/** Explicit UI writes, separate from local hydration and normalization repairs. */
+const DOCUMENT_EDIT_ORIGIN = Symbol("document-edit");
+const authoredDocuments = new WeakSet<Y.Doc>();
+const writingDocuments = new WeakSet<Y.Doc>();
+
+export function writeDocument<T>(ydoc: Y.Doc, write: () => T, origin: unknown = DOCUMENT_EDIT_ORIGIN): T {
+  if (writingDocuments.has(ydoc)) return write();
+  writingDocuments.add(ydoc);
+  try {
+    return ydoc.transact(() => {
+      const result = write();
+      authoredDocuments.add(ydoc);
+      return result;
+    }, origin);
+  } finally {
+    authoredDocuments.delete(ydoc);
+    writingDocuments.delete(ydoc);
+  }
+}
 
 /**
  * At most one stamp per document per window for edits not already writing the
@@ -66,6 +88,8 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
  */
 export interface StubWriteGate {
   writable(): boolean;
+  /** The document's current admission, checked only for an explicit UI write. */
+  documentWritable?(): boolean;
   /** Whether the directory has synchronized on its current connection. */
   synchronized(): boolean;
   subscribe(listener: () => void): () => void;
@@ -75,6 +99,7 @@ export function watchDocumentStub(
   docDoc: Y.Doc,
   dirDoc: Y.Doc,
   gate?: StubWriteGate,
+  catalog?: Y.Doc,
 ): () => void {
   let pendingChangedAt: number | null = null;
   const attempt = (changed: boolean): void => {
@@ -93,7 +118,17 @@ export function watchDocumentStub(
     _origin: unknown,
     _doc: Y.Doc,
     transaction: Y.Transaction,
-  ): void => attempt(transaction.local);
+  ): void => {
+    if (
+      transaction.local && authoredDocuments.has(docDoc) &&
+      catalog !== undefined && gate?.documentWritable?.() === true && gate.writable() && gate.synchronized() &&
+      getDirectoryEntry(dirDoc, getMeta(docDoc).uuid)?.deleted !== true &&
+      !decisionTopicArchived(dirDoc, getMeta(docDoc).uuid)
+    ) {
+      cleanupDocumentTags(docDoc, catalog);
+    }
+    attempt(transaction.local);
+  };
   attempt(false);
   docDoc.on("update", onUpdate);
   const stopGate = gate?.subscribe(() => attempt(false));

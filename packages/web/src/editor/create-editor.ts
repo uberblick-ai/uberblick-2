@@ -7,6 +7,7 @@ import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
+import { ySyncPluginKey } from "y-prosemirror";
 import { seedNewCardParts, seedNewTableCells } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import { CaretMenuKeys } from "./caret-menu.js";
@@ -46,6 +47,8 @@ export interface CreateEditorOptions {
   newBlockId?: () => string;
   /** Gate for editor-side CRDT repairs while the room is not writable. */
   canWrite?: () => boolean;
+  /** A local content edit after binding, excluding changes received from Yjs. */
+  onAuthoredUpdate?: () => void;
   /**
    * Per-editor directory and routing context. Null still permits references but
    * leaves them inert because there is no workspace address to navigate.
@@ -109,6 +112,13 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // inserted types so the content parser cannot silently drop them.
     enableContentCheck: true,
     injectCSS: false,
+  });
+  editor.on("transaction", ({ transaction }) => {
+    if (!transaction.docChanged) return;
+    const sync = transaction.getMeta(ySyncPluginKey) as
+      { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean } | undefined;
+    if (sync?.isChangeOrigin === true && sync.isUndoRedoOperation !== true) return;
+    options.onAuthoredUpdate?.();
   });
   ydoc?.on("beforeObserverCalls", seedCells);
   editor.on("destroy", () => ydoc?.off("beforeObserverCalls", seedCells));

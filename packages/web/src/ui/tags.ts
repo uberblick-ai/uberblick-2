@@ -1,7 +1,7 @@
 /** Live reads over the workspace-curated tag catalog. */
 
 import { useEffect, useState } from "react";
-import { isTagCatalogSeeded, listTagCatalog } from "@uberblick/schema";
+import { isTagCatalogSeeded, listTagCatalog, migrateTagCatalog } from "@uberblick/schema";
 import type { TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 
@@ -19,6 +19,9 @@ export function useTagCatalog(
   useEffect(() => {
     if (connection === null) return;
     const read = (): void => {
+      if (connection.status.synced && connection.status.hasReceivedServerState && connection.status.writable) {
+        migrateTagCatalog(connection.ydoc);
+      }
       setReading({
         connection,
         entries: listTagCatalog(connection.ydoc),
@@ -27,7 +30,8 @@ export function useTagCatalog(
     };
     read();
     connection.ydoc.on("update", read);
-    return () => connection.ydoc.off("update", read);
+    const stop = connection.onStatusChange(read);
+    return () => { connection.ydoc.off("update", read); stop(); };
   }, [connection]);
   if (connection === null) return null;
   return reading?.connection === connection

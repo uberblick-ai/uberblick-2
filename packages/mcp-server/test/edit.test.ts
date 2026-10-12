@@ -265,7 +265,6 @@ describe("the directory stub as a cache", () => {
       {
         id: "00000000-0000-4000-8000-000000000003",
         name: "mcp",
-        state: "active",
       },
     ]);
 
@@ -485,12 +484,10 @@ describe("the derived index", () => {
           {
             id: "00000000-0000-4000-8000-000000000001",
             name: "auth",
-            state: "active",
           },
           {
             id: "00000000-0000-4000-8000-000000000002",
             name: "billing",
-            state: "active",
           },
         ],
         description: "A test document.",
@@ -508,7 +505,6 @@ describe("the derived index", () => {
       {
         id: "00000000-0000-4000-8000-000000000003",
         name: "mcp",
-        state: "active",
       },
     ]);
   });
@@ -531,17 +527,14 @@ describe("the derived index", () => {
       {
         id: "00000000-0000-4000-8000-000000000001",
         name: "auth",
-        state: "active",
       },
       {
         id: "00000000-0000-4000-8000-000000000004",
         name: "permissions",
-        state: "active",
       },
       {
         id: "00000000-0000-4000-8000-000000000005",
         name: "sync",
-        state: "active",
       },
     ]);
 

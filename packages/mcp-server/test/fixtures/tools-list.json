@@ -27,6 +27,10 @@
               },
               "name": {
                 "type": "string"
+              },
+              "description": {
+                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                "type": "string"
               }
             },
             "required": [
@@ -34,7 +38,8 @@
               "name"
             ],
             "additionalProperties": false
-          }
+          },
+          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
         },
         "hub": {
           "type": "object",
@@ -112,7 +117,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "The active workspace tag catalog, in deterministic name order. Each entry carries the stable canonical `id` documents store and its current display `name`. Retired entries are absent here but remain visible, marked retired, on documents that still carry them. MCP cannot curate this catalog.\n\n`complete` says whether this is the whole workspace vocabulary. It is false while a configured hub has not delivered the catalog room to this replica: what is listed is then a local copy that may be missing curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that connection stands.\n\nHelp: list_tags, workspaces, tool-contracts.",
+    "description": "The existing workspace tag catalog, in deterministic name order. Each entry carries the stable canonical `id` documents store, its display `name` and its optional one-line `description`. MCP cannot create, describe or delete catalog tags.\n\n`complete` says whether the initial catalog synchronization has completed. It is false while a configured hub has not delivered the catalog room to this replica: what is listed is then a local copy that may be missing curated entries, and a tag value this replica has never seen is refused rather than assigned. `hub` says where that connection stands.\n\nHelp: list_tags, workspaces, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -473,7 +478,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         },
         "rooms": {
@@ -521,55 +526,26 @@
         "tags": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "state": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "retired"
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
               },
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "null"
-                  },
-                  "state": {
-                    "type": "string",
-                    "const": "unresolved"
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                "type": "string"
               }
-            ]
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
           },
-          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
         },
         "kind": {
           "type": "string",
@@ -951,7 +927,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated decision in a live topic. Invalid targets refuse before writes. discussion connects a live, readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. Discussion never inherits; set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, absent if unknown. Page get_doc marks topics related or linked.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. Tags use existing ids/exact names; deleted/unknown refuse. Kind defaults to its first status; invalid pairs refuse. Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a live, locally readable regular page; successors inherit unless supplied. supersedes names a hydrated decision in a live topic. Invalid targets refuse before writes. discussion connects a live, readable non-decision RFC UUID. Reuse or create the RFC first; new workspaces have an ordinary rfc tag. Discussion never inherits; set_metadata corrects/clears only while open, then it is fixed. Connecting leaves RFC and page untouched. Discussion differs from curated links and recorded answer {who, when, where}. Sidebar uses an existing get_sidebar group id; invalid ids give group_not_found and create nothing; omit to stay unpinned. Independent rooms: persistence_failed names uuid, completed/failed rooms, rolledBack: false and recovery avoiding duplicates. answerPreview uses legacy TL;DR/first paragraph/list; discussion is UUID/null, absent if unknown. Page get_doc marks topics related or linked.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -1013,55 +989,26 @@
         "tags": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "state": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "retired"
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
               },
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "null"
-                  },
-                  "state": {
-                    "type": "string",
-                    "const": "unresolved"
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                "type": "string"
               }
-            ]
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
           },
-          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
         },
         "links": {
           "type": "array",
@@ -1148,55 +1095,26 @@
               "tags": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "description": "Optional one-line explanation of this tag's workspace purpose.",
+                      "type": "string"
                     }
-                  ]
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "description": "Existing catalog tags with canonical identities, names and optional descriptions."
               },
               "description": {
                 "anyOf": [
@@ -1307,55 +1225,26 @@
                       "tags": {
                         "type": "array",
                         "items": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "string"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "enum": [
-                                    "active",
-                                    "retired"
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "null"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "const": "unresolved"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "description": "Optional one-line explanation of this tag's workspace purpose.",
+                              "type": "string"
                             }
-                          ]
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
                         },
-                        "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                        "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                       },
                       "description": {
                         "anyOf": [
@@ -1480,55 +1369,26 @@
                     "tags": {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": [
-                                  "active",
-                                  "retired"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name",
-                              "state"
-                            ],
-                            "additionalProperties": false
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "null"
-                              },
-                              "state": {
-                                "type": "string",
-                                "const": "unresolved"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name",
-                              "state"
-                            ],
-                            "additionalProperties": false
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "description": "Optional one-line explanation of this tag's workspace purpose.",
+                            "type": "string"
                           }
-                        ]
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "additionalProperties": false
                       },
-                      "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                      "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                     },
                     "description": {
                       "anyOf": [
@@ -1648,55 +1508,26 @@
                     "tags": {
                       "type": "array",
                       "items": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "state": {
-                                "type": "string",
-                                "enum": [
-                                  "active",
-                                  "retired"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name",
-                              "state"
-                            ],
-                            "additionalProperties": false
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "name": {
-                                "type": "null"
-                              },
-                              "state": {
-                                "type": "string",
-                                "const": "unresolved"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "name",
-                              "state"
-                            ],
-                            "additionalProperties": false
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "description": "Optional one-line explanation of this tag's workspace purpose.",
+                            "type": "string"
                           }
-                        ]
+                        },
+                        "required": [
+                          "id",
+                          "name"
+                        ],
+                        "additionalProperties": false
                       },
-                      "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                      "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                     },
                     "description": {
                       "anyOf": [
@@ -1843,55 +1674,26 @@
               "tags": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "description": "Optional one-line explanation of this tag's workspace purpose.",
+                      "type": "string"
                     }
-                  ]
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "description": "Existing catalog tags with canonical identities, names and optional descriptions."
               },
               "description": {
                 "anyOf": [
@@ -2011,55 +1813,26 @@
               "tags": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "description": "Optional one-line explanation of this tag's workspace purpose.",
+                      "type": "string"
                     }
-                  ]
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "description": "Existing catalog tags with canonical identities, names and optional descriptions."
               },
               "description": {
                 "anyOf": [
@@ -2179,55 +1952,26 @@
                 "tags": {
                   "type": "array",
                   "items": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "active",
-                              "retired"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name",
-                          "state"
-                        ],
-                        "additionalProperties": false
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "null"
-                          },
-                          "state": {
-                            "type": "string",
-                            "const": "unresolved"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "name",
-                          "state"
-                        ],
-                        "additionalProperties": false
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "description": "Optional one-line explanation of this tag's workspace purpose.",
+                        "type": "string"
                       }
-                    ]
+                    },
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "additionalProperties": false
                   },
-                  "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                  "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                 },
                 "description": {
                   "anyOf": [
@@ -2338,55 +2082,26 @@
                         "tags": {
                           "type": "array",
                           "items": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "enum": [
-                                      "active",
-                                      "retired"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "null"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "const": "unresolved"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                                "type": "string"
                               }
-                            ]
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
                           },
-                          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                         },
                         "description": {
                           "anyOf": [
@@ -2511,55 +2226,26 @@
                       "tags": {
                         "type": "array",
                         "items": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "string"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "enum": [
-                                    "active",
-                                    "retired"
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "null"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "const": "unresolved"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "description": "Optional one-line explanation of this tag's workspace purpose.",
+                              "type": "string"
                             }
-                          ]
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
                         },
-                        "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                        "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                       },
                       "description": {
                         "anyOf": [
@@ -2679,55 +2365,26 @@
                       "tags": {
                         "type": "array",
                         "items": {
-                          "anyOf": [
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "string"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "enum": [
-                                    "active",
-                                    "retired"
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
                             },
-                            {
-                              "type": "object",
-                              "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "null"
-                                },
-                                "state": {
-                                  "type": "string",
-                                  "const": "unresolved"
-                                }
-                              },
-                              "required": [
-                                "id",
-                                "name",
-                                "state"
-                              ],
-                              "additionalProperties": false
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "description": "Optional one-line explanation of this tag's workspace purpose.",
+                              "type": "string"
                             }
-                          ]
+                          },
+                          "required": [
+                            "id",
+                            "name"
+                          ],
+                          "additionalProperties": false
                         },
-                        "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                        "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                       },
                       "description": {
                         "anyOf": [
@@ -3783,7 +3440,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         }
       },
@@ -3873,55 +3530,26 @@
                   "tags": {
                     "type": "array",
                     "items": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "active",
-                                "retired"
-                              ]
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name",
-                            "state"
-                          ],
-                          "additionalProperties": false
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
                         },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "null"
-                            },
-                            "state": {
-                              "type": "string",
-                              "const": "unresolved"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name",
-                            "state"
-                          ],
-                          "additionalProperties": false
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "description": "Optional one-line explanation of this tag's workspace purpose.",
+                          "type": "string"
                         }
-                      ]
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
                     },
-                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                    "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                   },
                   "description": {
                     "anyOf": [
@@ -4042,55 +3670,26 @@
                   "tags": {
                     "type": "array",
                     "items": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "active",
-                                "retired"
-                              ]
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name",
-                            "state"
-                          ],
-                          "additionalProperties": false
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
                         },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "null"
-                            },
-                            "state": {
-                              "type": "string",
-                              "const": "unresolved"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "name",
-                            "state"
-                          ],
-                          "additionalProperties": false
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "description": "Optional one-line explanation of this tag's workspace purpose.",
+                          "type": "string"
                         }
-                      ]
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
                     },
-                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                    "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                   },
                   "description": {
                     "anyOf": [
@@ -4201,55 +3800,26 @@
                           "tags": {
                             "type": "array",
                             "items": {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "name": {
-                                      "type": "string"
-                                    },
-                                    "state": {
-                                      "type": "string",
-                                      "enum": [
-                                        "active",
-                                        "retired"
-                                      ]
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "name",
-                                    "state"
-                                  ],
-                                  "additionalProperties": false
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
                                 },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "name": {
-                                      "type": "null"
-                                    },
-                                    "state": {
-                                      "type": "string",
-                                      "const": "unresolved"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "name",
-                                    "state"
-                                  ],
-                                  "additionalProperties": false
+                                "name": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "description": "Optional one-line explanation of this tag's workspace purpose.",
+                                  "type": "string"
                                 }
-                              ]
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ],
+                              "additionalProperties": false
                             },
-                            "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                            "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                           },
                           "description": {
                             "anyOf": [
@@ -4374,55 +3944,26 @@
                         "tags": {
                           "type": "array",
                           "items": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "enum": [
-                                      "active",
-                                      "retired"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "null"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "const": "unresolved"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                                "type": "string"
                               }
-                            ]
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
                           },
-                          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                         },
                         "description": {
                           "anyOf": [
@@ -4542,55 +4083,26 @@
                         "tags": {
                           "type": "array",
                           "items": {
-                            "anyOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "enum": [
-                                      "active",
-                                      "retired"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "name": {
-                                    "type": "null"
-                                  },
-                                  "state": {
-                                    "type": "string",
-                                    "const": "unresolved"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "name",
-                                  "state"
-                                ],
-                                "additionalProperties": false
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                                "type": "string"
                               }
-                            ]
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "additionalProperties": false
                           },
-                          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
                         },
                         "description": {
                           "anyOf": [
@@ -4865,55 +4377,26 @@
               "tags": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "description": "Optional one-line explanation of this tag's workspace purpose.",
+                      "type": "string"
                     }
-                  ]
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "description": "Existing catalog tags with canonical identities, names and optional descriptions."
               },
               "snippet": {
                 "type": "string"
@@ -5450,7 +4933,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         },
         "tldr": {
@@ -5855,7 +5338,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         },
         "tldr": {
@@ -6003,7 +5486,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         },
         "tldr": {
@@ -6236,7 +5719,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         },
         "title": {
@@ -6256,55 +5739,26 @@
         "tags": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "state": {
-                    "type": "string",
-                    "enum": [
-                      "active",
-                      "retired"
-                    ]
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
               },
-              {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "null"
-                  },
-                  "state": {
-                    "type": "string",
-                    "const": "unresolved"
-                  }
-                },
-                "required": [
-                  "id",
-                  "name",
-                  "state"
-                ],
-                "additionalProperties": false
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "description": "Optional one-line explanation of this tag's workspace purpose.",
+                "type": "string"
               }
-            ]
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
           },
-          "description": "Canonical tag identities, current names and active, retired or unresolved state."
+          "description": "Existing catalog tags with canonical identities, names and optional descriptions."
         },
         "links": {
           "type": "array",
@@ -6338,7 +5792,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer {who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or cleared; tldr: null clears the person-facing summary. Tags replace existing assignments; [] clears them. Use list_tags ids/exact names; references awaiting catalog sync stay stored. Links replace the curated set; [] clears it. New link UUIDs must be directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated links and answer, it is fixed once settled. No RFC/page edits or tags, document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer {who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6540,7 +5994,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         }
       },
@@ -7192,7 +6646,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         }
       },
@@ -7368,7 +6822,7 @@
           "type": "string"
         },
         "tagHint": {
-          "description": "Non-blocking request to assign tags from the active vocabulary.",
+          "description": "Non-blocking request to assign tags from the existing vocabulary.",
           "type": "string"
         }
       },

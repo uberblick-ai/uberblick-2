@@ -5,11 +5,12 @@ import {
   InvalidTagAssignmentError,
   canonicalDocumentUuid,
   getTagCatalogEntry,
+  isTagCatalogIdentityDeleted,
   isTagCatalogSeeded,
   listTagCatalog,
   seedTagCatalog,
 } from "@uberblick/schema";
-import type { TagAssignment, TagCatalogEntry } from "@uberblick/schema";
+import type { TagCatalogEntry } from "@uberblick/schema";
 import { ToolError, incompleteCatalogRecovery } from "./failures.js";
 import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
@@ -44,9 +45,9 @@ export async function seedTagCatalogOnce(replicas: Replicas): Promise<void> {
   });
 }
 
-/** The complete active catalog, in schema-owned deterministic name order. */
-export function activeTagCatalog(catalog: Y.Doc): TagCatalogEntry[] {
-  return listTagCatalog(catalog).filter((entry) => entry.state === "active");
+/** Existing catalog entries, in schema-owned deterministic name order. */
+export function existingTagCatalog(catalog: Y.Doc): TagCatalogEntry[] {
+  return listTagCatalog(catalog);
 }
 
 /**
@@ -62,18 +63,16 @@ export function tagCatalogComplete(replicas: Replicas): boolean {
 
 /**
  * An incomplete catalog may explain an unknown value, so recovery waits for it.
- * Retired values always need manual curation; hydration cannot make them active.
+ * Positive deletion evidence means waiting cannot make an identity assignable.
  */
 function refuseTagValues(
   replicas: Replicas,
   unknown: string[],
-  retired: string[],
 ): never {
-  const { message } = new InvalidTagAssignmentError(unknown, retired);
+  const { message } = new InvalidTagAssignmentError(unknown);
   throw new ToolError("invalid_tag_assignment", message, {
     unknown,
-    retired,
-    ...(retired.length > 0 || tagCatalogComplete(replicas)
+    ...(unknown.some((value) => isTagCatalogIdentityDeleted(replicas.settings().doc, value)) || tagCatalogComplete(replicas)
       ? {}
       : incompleteCatalogRecovery(replicas.sync.state().status)),
   });
@@ -94,36 +93,23 @@ export function resolveTagFilter(
     (entry) => entry.name === selector,
   );
   if (byName !== undefined) return byName.id;
-  return refuseTagValues(replicas, [selector], []);
+  return refuseTagValues(replicas, [selector]);
 }
 
 /**
  * Resolve mutation selectors before any document write.
  *
- * Names select active entries only. Identities can additionally preserve a
- * retired or still-unresolved assignment the document already holds; this is
- * why reads return canonical ids beside display names.
+ * Only existing entries can be selected. Schema assignment preserves delayed
+ * references already stored in the document without accepting them as input.
  */
 export function resolveTagSelectors(
   replicas: Replicas,
   selectors: readonly string[],
-  existing: readonly TagAssignment[] = [],
 ): string[] {
   const catalog = replicas.settings().doc;
   const entries = listTagCatalog(catalog);
-  const activeNames = new Map(
-    entries
-      .filter((entry) => entry.state === "active")
-      .map((entry) => [entry.name, entry] as const),
-  );
-  const retiredNames = new Set(
-    entries
-      .filter((entry) => entry.state === "retired")
-      .map((entry) => entry.name),
-  );
-  const assigned = new Set(existing.map((entry) => entry.id));
+  const names = new Map(entries.map((entry) => [entry.name, entry] as const));
   const unknown: string[] = [];
-  const retired: string[] = [];
   const resolved: string[] = [];
   const seen = new Set<string>();
 
@@ -133,17 +119,10 @@ export function resolveTagSelectors(
     let id: string | null = null;
 
     if (entry !== null) {
-      if (entry.state === "retired" && !assigned.has(entry.id)) {
-        retired.push(selector);
-        continue;
-      }
       id = entry.id;
-    } else if (identity !== null && assigned.has(identity)) {
-      id = identity;
     } else {
-      const named = activeNames.get(selector);
+      const named = names.get(selector);
       if (named !== undefined) id = named.id;
-      else if (retiredNames.has(selector)) retired.push(selector);
       else unknown.push(selector);
     }
 
@@ -153,8 +132,8 @@ export function resolveTagSelectors(
     }
   }
 
-  if (unknown.length > 0 || retired.length > 0) {
-    refuseTagValues(replicas, unknown, retired);
+  if (unknown.length > 0) {
+    refuseTagValues(replicas, unknown);
   }
   return resolved;
 }

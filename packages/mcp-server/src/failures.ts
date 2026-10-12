@@ -368,8 +368,7 @@ const RECOVERIES: Record<string, Recovery> = {
   invalid_tag_assignment: {
     recoveryClass: "manual",
     guidance:
-      "Call list_tags for the complete active catalog, then call again with active ids or exact active names. " +
-      "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
+      "Call list_tags for the existing catalog, then call again with listed ids or exact names. Nothing was written.",
   },
   supersedes_not_decision: {
     recoveryClass: "reread",
@@ -627,7 +626,6 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
       error: "invalid_tag_assignment",
       message: error.message,
       unknown: error.unknown,
-      retired: error.retired,
       ...(tool === "set_metadata" ? { field: "tags" } : {}),
     });
   }

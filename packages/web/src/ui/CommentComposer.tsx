@@ -8,6 +8,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactElement, ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
+import { writeDocument } from "../collab/directory-stub.js";
 import { autoUpdate, computePosition, flip, hide, inline, offset, shift, size } from "@floating-ui/dom";
 import type * as Y from "yjs";
 import {
@@ -454,7 +455,7 @@ export function CommentComposer({
 
   const create = (text: string): boolean => {
     try {
-      const thread = createAnnotation(
+      const thread = writeDocument(ydoc, () => createAnnotation(
         ydoc,
         target.blockId,
         target.start,
@@ -462,7 +463,7 @@ export function CommentComposer({
         author,
         text,
         cell ? { row: target.row, column: target.column } : card ? { part: target.part } : undefined,
-      );
+      ));
       close();
       onCreated(thread.id);
       editor.commands.focus(target.contentStart + target.end);

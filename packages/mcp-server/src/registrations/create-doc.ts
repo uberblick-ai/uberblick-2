@@ -10,7 +10,7 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
     title: "Create a document",
     description:
       "Create a document and stub; optional blocks and regular-page TL;DR. Nonblank title/description required. " +
-      "Tags use active ids/exact names; unknown/retired refuse. Kind defaults to its first status; invalid pairs refuse. " +
+      "Tags use existing ids/exact names; deleted/unknown refuse. Kind defaults to its first status; invalid pairs refuse. " +
       "Decisions use one to three short answer blocks and a brief reason; guidance belongs on the related page, " +
       "discussion in an RFC. TL;DR, unsupported/excess blocks refuse. Open/decided only; deciding needs valid " +
       "nonblank blocks without TL;DR/data, and successors need a person's recorded answer. related selects a " +

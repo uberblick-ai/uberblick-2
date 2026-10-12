@@ -38,7 +38,7 @@ import { docLinkRanges } from "../replica.js";
 import type { Replica, Replicas } from "../replica.js";
 import type { ServerWork } from "../server-work.js";
 import { HelpCatalog } from "../help.js";
-import { activeTagCatalog } from "../tag-catalog.js";
+import { existingTagCatalog } from "../tag-catalog.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./descriptions.js";
 import type { DecisionAnswer, blockInputSchema, inlineArg } from "./schemas.js";
 
@@ -49,7 +49,7 @@ const DESCRIPTION_NUDGE =
 
 /** The one-line prompt a mutating tool carries when a document has no tags. */
 const TAG_NUDGE =
-  "This document has no tag assignments: call list_tags for the active workspace vocabulary, then call set_metadata " +
+  "This document has no tag assignments: call list_tags for the existing workspace vocabulary, then call set_metadata " +
   "with `tags` to assign one or more tags.";
 
 /** The stronger prompt returned when a changed document has no summary yet. */
@@ -342,8 +342,8 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       return {};
     }
     if (
-      getMeta(replica.doc).tags.length > 0 ||
-      activeTagCatalog(tagCatalog()).length === 0
+      documentTags(replica).length > 0 ||
+      existingTagCatalog(tagCatalog()).length === 0
     ) {
       return {};
     }

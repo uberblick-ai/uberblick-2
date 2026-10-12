@@ -12,7 +12,10 @@ import {
   getDirectoryEntry,
   getMeta,
   initDoc,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
+  editBlock,
+  getBlocks,
+  getBlocksFragment,
   roomForDoc,
   settingsRoom,
   setTags,
@@ -20,6 +23,7 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import * as editorFactory from "../src/editor/create-editor.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -188,7 +192,7 @@ function options(): HTMLButtonElement[] {
 function option(name: string): HTMLButtonElement | undefined {
   const list = screen.queryByRole("listbox", { name: "Available tags" });
   return list === null ? undefined : within(list).queryByRole<HTMLButtonElement>("option", {
-    name: name === "legacy" ? /^legacy\s*retired$/ : name,
+    name,
   }) ?? undefined;
 }
 
@@ -225,12 +229,12 @@ describe("the document tag picker", () => {
 
   it("offers the search field only from ten entries, and takes its filter away with it", async () => {
     const fix = documentFixture([TAGS.legacy]);
-    addManyTags(fix.catalog.ydoc, 9);
+    addManyTags(fix.catalog.ydoc, 10);
     addCatalogTags(fix.catalog.ydoc, ["legacy"]);
-    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    deleteTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
     const host = await openApp();
 
-    // Nine active entries plus the one assigned retired entry: ten.
+    // Deleted assignments do not count toward the catalog threshold.
     click(picker(host));
     expect(options()).toHaveLength(10);
     expect(document.activeElement).toBe(search());
@@ -243,7 +247,7 @@ describe("the document tag picker", () => {
     act(() => press(search(), "ArrowDown", { isComposing: true }));
     expect(document.activeElement).toBe(search());
     act(() => press(search(), "ArrowDown"));
-    expect(document.activeElement?.textContent).toContain("legacy");
+    expect(document.activeElement?.textContent).toContain("topic-00");
 
     act(() => typeInto(search(), "topic-03"));
     expect(options().map((entry) => entry.textContent?.trim())).toEqual([
@@ -255,12 +259,10 @@ describe("the document tag picker", () => {
       "No matching tags.",
     );
 
-    // The 10-to-9 case: searching out the retired entry and removing it drops
-    // the count below the threshold. The field goes, the text left in it stops
-    // hiding the other nine, and the focus its option held lands in the list.
-    act(() => typeInto(search(), "legacy"));
-    click(option("legacy"));
-    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
+    // A remote deletion drops the count below the threshold. The field goes
+    // and its previous filter cannot keep hiding the remaining catalog.
+    act(() => deleteTagCatalogEntry(fix.catalog.ydoc, "20000000-0000-4000-8000-000000000009"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
     expect(search()).toBeNull();
     expect(options().map((entry) => entry.textContent?.trim())).toEqual([
       "topic-00",
@@ -273,7 +275,6 @@ describe("the document tag picker", () => {
       "topic-07",
       "topic-08",
     ]);
-    expect(document.activeElement).toBe(options()[0]);
   });
 
   it("distinguishes a hydrated empty catalog from a catalog that has not arrived", async () => {
@@ -301,41 +302,33 @@ describe("the document tag picker", () => {
     expect(picker(waitingHost)).toBeNull();
   });
 
-  it("toggles identities on live state, preserves concurrent tags, and removes retired tags", async () => {
-    const fix = documentFixture([TAGS.sync, TAGS.legacy]);
+  it("toggles live assignments, preserves unresolved and concurrent tags, and cleans deleted references", async () => {
+    const unresolved = "90000000-0000-4000-8000-000000000001";
+    const fix = documentFixture([TAGS.sync, TAGS.legacy, unresolved]);
     addCatalogTags(fix.catalog.ydoc, ["auth", "billing", "legacy", "sync"]);
-    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    deleteTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
     const documentPeer = peerOf(fix.document.ydoc);
     const directoryPeer = peerOf(fix.directory.ydoc);
     const host = await openApp();
 
-    expect(picker(host)?.textContent).toContain("legacy (retired)");
+    expect(picker(host)?.textContent).not.toContain("legacy");
+    expect(getMeta(fix.document.ydoc).tags).toContain(TAGS.legacy);
     click(picker(host));
-    expect(option("legacy")?.getAttribute("aria-selected")).toBe("true");
-    expect(option("legacy")?.textContent).toContain("retired");
+    expect(option("legacy")).toBeUndefined();
 
     // One act keeps the render stale while the Y.Doc is already current.
     const auth = option("auth");
     act(() => {
-      setTags(documentPeer, [TAGS.billing, TAGS.legacy, TAGS.sync]);
+      setTags(documentPeer, [TAGS.billing, TAGS.legacy, TAGS.sync, unresolved]);
       auth?.click();
     });
     expect(getMeta(fix.document.ydoc).tags).toEqual(
-      [TAGS.auth, TAGS.billing, TAGS.legacy, TAGS.sync].sort(),
+      [TAGS.auth, TAGS.billing, TAGS.sync, unresolved].sort(),
     );
     expect(getMeta(documentPeer).tags).toEqual(getMeta(fix.document.ydoc).tags);
     expect(getDirectoryEntry(directoryPeer, UUID)?.tags).toEqual(
       getMeta(fix.document.ydoc).tags,
     );
-
-    option("legacy")?.focus();
-    expect(document.activeElement).toBe(option("legacy"));
-    click(option("legacy"));
-    expect(getMeta(fix.document.ydoc).tags).not.toContain(TAGS.legacy);
-    expect(option("legacy")).toBeUndefined();
-    // The option that held focus has unmounted; below the threshold there is no
-    // search field to fall back to, so the list's first option takes it.
-    expect(document.activeElement).toBe(options()[0]);
 
     // The button can be stale too; the write boundary reads live writability.
     const before = getMeta(fix.document.ydoc).tags;
@@ -370,18 +363,64 @@ describe("the document tag picker", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("shows archived assignments read-only, including retired names", async () => {
+  it("keeps deleted references through opening, remote edits and local repairs, then cleans a permitted title write", async () => {
+    const unresolved = "90000000-0000-4000-8000-000000000001";
+    const fix = documentFixture([TAGS.legacy, unresolved]);
+    addCatalogTags(fix.catalog.ydoc, ["legacy"]);
+    deleteTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    const peer = peerOf(fix.document.ydoc);
+    const before = getMeta(fix.document.ydoc).tags;
+    const host = await openApp();
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    const block = getBlocks(peer)[0];
+    if (block === undefined) throw new Error("missing fixture paragraph");
+    act(() => editBlock(peer, block.id, block.text, "updated elsewhere"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    // Local schema repairs have no explicit person-write boundary.
+    act(() => editBlock(fix.document.ydoc, block.id, "updated elsewhere", "local repair"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    fix.document.status.writable = false;
+    act(() => typeInto(title, "Refused title"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    fix.document.status.writable = true;
+    act(() => typeInto(title, "Permitted title"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([unresolved]);
+    expect(getMeta(peer).tags).toEqual([unresolved]);
+  });
+
+  it("cleans a content edit but leaves remote binding repairs and permission refreshes alone", async () => {
+    const fix = documentFixture([TAGS.legacy]);
+    addCatalogTags(fix.catalog.ydoc, ["legacy"]);
+    deleteTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    const createEditor = vi.spyOn(editorFactory, "createUberblickEditor");
+    await openApp();
+    const editor = createEditor.mock.results[0]?.value as ReturnType<typeof editorFactory.createUberblickEditor> | undefined;
+    if (editor === undefined) throw new Error("missing fixture editor");
+    const peer = peerOf(fix.document.ydoc);
+    const block = getBlocksFragment(peer).get(0);
+    if (!(block instanceof Y.XmlElement)) throw new Error("missing fixture paragraph");
+    act(() => block.removeAttribute("id"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
+    act(() => editor.view.dispatch(editor.state.tr.setMeta("uberblick:writable", true)));
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy]);
+    act(() => { editor.commands.insertContent("written here"); });
+    expect(getMeta(fix.document.ydoc).tags).toEqual([]);
+  });
+
+  it("hides deleted assignments on an archived document without removing their references", async () => {
     const fix = documentFixture([TAGS.legacy, TAGS.sync]);
     addCatalogTags(fix.catalog.ydoc, ["legacy", "sync"]);
-    retireTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
+    deleteTagCatalogEntry(fix.catalog.ydoc, TAGS.legacy);
     tombstoneDirectoryEntry(fix.directory.ydoc, UUID);
     const host = await openApp();
 
-    expect(within(host).getByText("legacy (retired)").textContent).toContain("legacy (retired)");
+    expect(within(host).queryByText("legacy")).toBeNull();
     expect(within(host).getByText("sync").textContent).toContain("sync");
     // The same pills as the writable header draws, and nothing to open.
     // Pill wrappers have no role/name; count all of them, including unexpected labels.
-    expect(host.querySelectorAll(".ub-tag")).toHaveLength(2);
+    expect(host.querySelectorAll(".ub-tag")).toHaveLength(1);
+    expect(getMeta(fix.document.ydoc).tags).toEqual([TAGS.legacy, TAGS.sync]);
     expect(picker(host)).toBeNull();
     expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     expect(screen.queryByRole("option")).toBeNull();

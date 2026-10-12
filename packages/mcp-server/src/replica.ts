@@ -16,6 +16,7 @@ import {
   getMeta,
   isProseBlockType,
   listDirectory,
+  migrateTagCatalog,
   normalizeLegacyTables,
   repairDuplicateBlocks,
   resolveTagAssignments,
@@ -531,6 +532,7 @@ export class Replicas {
     }
     // Workspace curation has no stub; a catalog change re-derives all tag rows.
     if (replica.isSettings) {
+      this.migrateTagsIfReady();
       for (const document of this.replicas.values()) {
         if (
           document.isDirectory ||
@@ -888,6 +890,7 @@ export class Replicas {
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
   private refreshReplicas(): void {
     this.pollAll();
+    this.migrateTagsIfReady();
     this.adoptKnownDocs();
     // Retry even without another directory update; each call drains at most
     // one previously refused entry, so untouched documents still recover.
@@ -918,9 +921,20 @@ export class Replicas {
     }
 
     if (this.persistenceFailure !== null) return;
+    this.migrateTagsIfReady();
+    if (this.persistenceFailure !== null) return;
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();
+  }
+
+  /** Merge current hub lifecycle state before making legacy deletion durable. */
+  private migrateTagsIfReady(): void {
+    if (this.persistenceFailure !== null) return;
+    const catalog = this.replicas.get(settingsRoom(this.config.workspaceId));
+    if (catalog !== undefined && (!this.sync.enabled || this.isRoomQuiet(catalog.room))) {
+      migrateTagCatalog(catalog.doc);
+    }
   }
 
   /**

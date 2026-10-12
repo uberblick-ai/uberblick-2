@@ -1,6 +1,6 @@
 /** General facts, tag-catalog curation and live workspace access. */
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactElement, ReactNode } from "react";
 import {
   createTagCatalogEntry,
@@ -9,8 +9,7 @@ import {
   isTagName,
   listDirectory,
   listTagCatalog,
-  restoreTagCatalogEntry,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
   seedTagCatalog,
   setWorkspaceName,
   settingsRoom,
@@ -29,6 +28,7 @@ import { statusReading } from "./status-reading.js";
 import { useTagCatalog } from "./tags.js";
 import { useWorkspaceName } from "./workspace-names.js";
 import { AccessSettings } from "./AccessSettings.js";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "./shadcn/alert-dialog.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
@@ -179,6 +179,39 @@ function WorkspaceNameForm({
   );
 }
 
+function DeleteTag({ entry, writable, onDelete, onDeletedFocus }: {
+  entry: TagCatalogEntry;
+  writable: boolean;
+  onDelete: () => boolean;
+  onDeletedFocus: () => void;
+}): ReactElement {
+  const deleted = useRef(false);
+  return <AlertDialog>
+    <AlertDialogTrigger asChild>
+      <Button variant="outline" size="sm" type="button" data-tag-entry={entry.id} disabled={!writable}>
+        Delete<span className="sr-only"> {entry.name}</span>
+      </Button>
+    </AlertDialogTrigger>
+    <AlertDialogContent onCloseAutoFocus={(event) => {
+      if (!deleted.current) return;
+      event.preventDefault();
+      onDeletedFocus();
+    }}>
+      <AlertDialogTitle>Delete “{entry.name}”?</AlertDialogTitle>
+      <AlertDialogDescription>
+        It disappears from the catalog and document tags. This cannot be undone.
+      </AlertDialogDescription>
+      <AlertDialogFooter>
+        <AlertDialogCancel>Cancel</AlertDialogCancel>
+        <AlertDialogAction variant="destructive" disabled={!writable} onClick={(event) => {
+          deleted.current = onDelete();
+          if (!deleted.current) event.preventDefault();
+        }}>Delete</AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
+}
+
 function TagSettings({
   workspace,
   connection,
@@ -191,16 +224,7 @@ function TagSettings({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const groups = useRef<HTMLDivElement | null>(null);
-  /**
-   * Remember position only for a local lifecycle gesture: moving catalog
-   * entries unmounts their focused button. Resolve a surviving focus target
-   * after both lists commit; remote catalog changes must not move focus.
-   */
-  const [refocus, setRefocus] = useState<{
-    from: "active" | "retired";
-    at: number;
-    moved: string;
-  } | null>(null);
+  const createInput = useRef<HTMLInputElement | null>(null);
   const arrived =
     connection !== null &&
     connection.room === settingsRoom(workspace.uuid) &&
@@ -210,36 +234,19 @@ function TagSettings({
 
   // The examples are one schema-owned, merge-safe transition. Wait for the
   // server's answer first: seeding an empty Y.Doc before that answer could
-  // recreate an example another client already retired.
+  // recreate an example another client already deleted.
   useEffect(() => {
     if (
       connection === null ||
       !arrived ||
+      !status.synced ||
       !status.writable ||
       isTagCatalogSeeded(connection.ydoc)
     ) {
       return;
     }
     seedTagCatalog(connection.ydoc);
-  }, [arrived, connection, status.writable]);
-
-  useLayoutEffect(() => {
-    if (refocus === null) return;
-    setRefocus(null);
-    const card = groups.current;
-    if (card === null) return;
-    const left = [
-      ...card.querySelectorAll<HTMLButtonElement>(
-        `[aria-labelledby="ub-${refocus.from}-tags"] [data-tag-entry]`,
-      ),
-    ];
-    // The control that took the moved entry's place, the last one when it was
-    // last, and the entry's own new control when the list it left is now empty.
-    const target =
-      left[Math.min(refocus.at, left.length - 1)] ??
-      card.querySelector<HTMLButtonElement>(`[data-tag-entry="${refocus.moved}"]`);
-    target?.focus();
-  }, [refocus]);
+  }, [arrived, connection, status.synced, status.writable]);
 
   if (!seeded) {
     return (
@@ -259,8 +266,6 @@ function TagSettings({
   }
 
   const entries = catalog?.entries ?? [];
-  const active = entries.filter((entry) => entry.state === "active");
-  const retired = entries.filter((entry) => entry.state === "retired");
 
   const create = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -276,9 +281,7 @@ function TagSettings({
       (entry) => entry.name === draft,
     );
     if (existing !== undefined) {
-      setError(existing.state === "retired"
-        ? `“${draft}” is retired. Restore it from the retired list.`
-        : `“${draft}” is already an active tag.`);
+      setError(`“${draft}” already exists.`);
       return;
     }
     createTagCatalogEntry(connection.ydoc, draft);
@@ -287,45 +290,37 @@ function TagSettings({
     setDraft("");
   };
 
-  const changeState = (entry: TagCatalogEntry, at: number): void => {
-    if (connection === null || !connection.status.writable) return;
-    if (entry.state === "active") retireTagCatalogEntry(connection.ydoc, entry.id);
-    else restoreTagCatalogEntry(connection.ydoc, entry.id);
-    setRefocus({ from: entry.state, at, moved: entry.id });
+  const remove = (entry: TagCatalogEntry): boolean => {
+    if (connection === null || !connection.status.writable) return false;
+    deleteTagCatalogEntry(connection.ydoc, entry.id);
     setError(null);
     notifyTransient({
       key: "workspace-settings",
-      message: `${entry.state === "active" ? "Retired" : "Restored"} “${entry.name}”.`,
+      message: `Deleted “${entry.name}”.`,
       severity: "success",
     });
+    return true;
   };
 
-  const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (
-    <section className="min-w-0" aria-labelledby={`ub-${state}-tags`}>
-      <h2 id={`ub-${state}-tags`} className="mt-0 mb-2 text-base font-medium">
-        {state === "active" ? "Active" : "Retired"}
-      </h2>
-      {items.length === 0 ? (
-        <p className="m-0 text-sm">No {state} tags.</p>
+  const list = (
+    <section className="min-w-0" aria-labelledby="ub-existing-tags">
+      <h2 id="ub-existing-tags" className="mt-0 mb-2 text-base font-medium">Existing tags</h2>
+      {entries.length === 0 ? (
+        <p className="m-0 text-sm">No tags.</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
-          {items.map((entry, at) => (
+          {entries.map((entry, at) => (
             <li
               key={entry.id}
               className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 text-sm"
             >
               <span className="min-w-0 wrap-anywhere">{entry.name}</span>
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                data-tag-entry={entry.id}
-                disabled={!writable}
-                onClick={() => changeState(entry, at)}
-              >
-                {entry.state === "active" ? "Retire" : "Restore"}
-                <span className="sr-only"> {entry.name}</span>
-              </Button>
+              <DeleteTag entry={entry} writable={writable} onDelete={() => remove(entry)} onDeletedFocus={() => {
+                const left = groups.current?.querySelectorAll<HTMLButtonElement>("[data-tag-entry]");
+                const target = left?.[Math.min(at, left.length - 1)];
+                if (target !== undefined) target.focus();
+                else createInput.current?.focus();
+              }} />
             </li>
           ))}
         </ul>
@@ -344,6 +339,7 @@ function TagSettings({
             <label htmlFor="ub-new-tag" className="text-sm font-medium">Create a tag</label>
             <div className="flex gap-2">
               <Input
+                ref={createInput}
                 className="flex-1"
                 id="ub-new-tag"
                 value={draft}
@@ -373,9 +369,8 @@ function TagSettings({
               {error}
             </p>
           )}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" ref={groups}>
-            {list("active", active)}
-            {list("retired", retired)}
+          <div ref={groups}>
+            {list}
           </div>
         </div>
       </div>

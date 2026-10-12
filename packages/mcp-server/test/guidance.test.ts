@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, expect, it, vi } from "vitest";
 import {
-  createTagCatalogEntry, retireTagCatalogEntry, restoreTagCatalogEntry,
+  createTagCatalogEntry, deleteTagCatalogEntry,
   setTags, setTitle, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import { DOCUMENT_MUTATING_TOOLS, PERSISTENCE_ERROR_MESSAGE } from "../src/failures.js";
@@ -13,6 +13,7 @@ import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
 const marker = "5a7808ea-1c79-4330-af35-3f67f9f38a3b";
+const recreatedMarker = "5a7808ea-1c79-4330-af35-3f67f9f38a3c";
 async function local(config = testConfig()): Promise<Rig> {
   const rig = await startServer(config);
   rigs.push(rig);
@@ -159,9 +160,10 @@ it("lists and serves current guidance independently of leases and stale cached t
   tombstoneDirectoryEntry(replicas.directory().doc, first.uuid);
   expect((await guidanceResources(rig)).resources).toMatchObject([{ title: "Current title" }]);
   await expect(rig.client.readResource({ uri: `uberblick://doc/${first.uuid}` })).rejects.toThrow("No locally readable guidance");
-  retireTagCatalogEntry(replicas.settings().doc, marker);
+  deleteTagCatalogEntry(replicas.settings().doc, marker);
   expect((await guidanceResources(rig)).resources).toEqual([]);
-  restoreTagCatalogEntry(replicas.settings().doc, marker);
+  createTagCatalogEntry(replicas.settings().doc, "guidance", recreatedMarker);
+  setTags(replicas.replica(next.uuid).doc, [recreatedMarker]);
   expect((await guidanceResources(rig)).resources).toHaveLength(1);
 });
 
@@ -225,7 +227,7 @@ it.each(["list", "read"] as const)("sanitizes an unexpected guidance %s exceptio
   expect(log).toContain(original.stack);
 });
 
-it("is inert for absent or retired markers and for archived or unhydrated guidance", async () => {
+it("is inert for absent or deleted markers and for archived or unhydrated guidance", async () => {
   const rig = await local();
   const guide = await doc(rig, "Guide");
   const replicas = rig.instance.replicas;
@@ -233,11 +235,12 @@ it("is inert for absent or retired markers and for archived or unhydrated guidan
   setTags(replicas.replica(guide.uuid).doc, [marker]);
   await rig.ok("set_metadata", { uuid: guide.uuid, title: "Absent marker" });
   mark(rig, guide.uuid);
-  retireTagCatalogEntry(replicas.settings().doc, marker);
-  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Retired marker" });
-  restoreTagCatalogEntry(replicas.settings().doc, marker);
+  deleteTagCatalogEntry(replicas.settings().doc, marker);
+  await rig.ok("set_metadata", { uuid: guide.uuid, title: "Deleted marker" });
+  createTagCatalogEntry(replicas.settings().doc, "guidance", recreatedMarker);
+  setTags(replicas.replica(guide.uuid).doc, [recreatedMarker]);
   tombstoneDirectoryEntry(replicas.directory().doc, guide.uuid);
-  upsertDirectoryEntry(replicas.directory().doc, { uuid: randomUUID(), title: "Not hydrated", tags: [marker] });
+  upsertDirectoryEntry(replicas.directory().doc, { uuid: randomUUID(), title: "Not hydrated", tags: [recreatedMarker] });
   const result = await doc(rig, "No readable guidance");
   expect(result.applied).toBe(true);
   expect(result).not.toHaveProperty("unread");
@@ -254,6 +257,6 @@ it("refreshes guidance resources from another process's durable local updates", 
   expect((await guidanceResources(reader)).resources).toMatchObject([{ title: "Another process" }]);
   setTitle(writer.instance.replicas.replica(guide.uuid).doc, "Updated remotely");
   expect((await reader.client.readResource({ uri: `uberblick://doc/${guide.uuid}` })).contents[0]).toMatchObject({ text: expect.stringContaining("Updated remotely") });
-  retireTagCatalogEntry(writer.instance.replicas.settings().doc, marker);
+  deleteTagCatalogEntry(writer.instance.replicas.settings().doc, marker);
   expect((await guidanceResources(reader)).resources).toEqual([]);
 });

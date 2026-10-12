@@ -220,7 +220,6 @@ describe("archive_doc", () => {
         {
           id: "00000000-0000-4000-8000-000000000003",
           name: "mcp",
-          state: "active",
         },
       ],
       description: "A test document.",
@@ -485,7 +484,6 @@ describe("an archived document is read-only", () => {
       {
         id: "00000000-0000-4000-8000-000000000003",
         name: "mcp",
-        state: "active",
       },
     ]);
   });
@@ -580,7 +578,6 @@ describe("restore_doc", () => {
         {
           id: "00000000-0000-4000-8000-000000000003",
           name: "mcp",
-          state: "active",
         },
       ],
       description: "A test document.",
@@ -785,7 +782,6 @@ describe("restore_doc", () => {
         {
           id: "00000000-0000-4000-8000-000000000002",
           name: "billing",
-          state: "active",
         },
       ],
       description: "A test document.",

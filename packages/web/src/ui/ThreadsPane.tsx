@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { addComment, getAnnotation, setAnnotationResolved } from "@uberblick/schema";
 import type { AnnotationComment } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
+import { writeDocument } from "../collab/directory-stub.js";
 import { CommentForm } from "./CommentForm.js";
 import {
   commentTimestamp,
@@ -325,7 +326,7 @@ export function ThreadsPane({
         }
         // addComment performs the final lookup and returns null if the thread
         // disappeared.
-        if (addComment(ydoc, thread.id, author, text) === null) {
+        if (writeDocument(ydoc, () => addComment(ydoc, thread.id, author, text)) === null) {
           setRefusal({ id: thread.id, message: "This thread no longer exists." });
           return false;
         }
@@ -334,7 +335,7 @@ export function ThreadsPane({
       }}
       onResolve={(next) => {
         if (!connection.status.writable) return;
-        setAnnotationResolved(ydoc, thread.id, next);
+        writeDocument(ydoc, () => setAnnotationResolved(ydoc, thread.id, next));
         setReplyTo((current) => (current === thread.id ? null : current));
         setExpanded(null);
       }}

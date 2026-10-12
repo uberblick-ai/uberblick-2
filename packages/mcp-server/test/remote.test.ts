@@ -20,13 +20,17 @@ import {
   addComment,
   appendBlock,
   createAnnotation,
+  createTagCatalogEntry,
+  deleteTagCatalogEntry,
   findBlockElement,
   getBlocks,
   getMeta,
   getMetaMap,
+  getTagCatalogIdentities,
   initDoc,
   listAnnotationRanges,
   listAnnotations,
+  listTagCatalog,
   setDescription,
   setKind,
   setLinks,
@@ -36,10 +40,12 @@ import {
   setTitle,
   tableCellText,
   tableRows,
+  setTagCatalogDescription,
+  TAG_CATALOG_DELETED_KEY,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
-import { compareCorpus, docFingerprint, isIdentical } from "../src/remote.js";
+import { compareCorpus, docFingerprint, isIdentical, workspaceSnapshot } from "../src/remote.js";
 import type { CorpusDoc } from "../src/remote.js";
 
 const UUID = "3f0a3d4c-6f6c-4e5f-9b9a-1f2e3d4c5b6a";
@@ -286,6 +292,35 @@ describe("docFingerprint", () => {
 });
 
 describe("compareCorpus", () => {
+  it("verifies tag descriptions and deletion evidence in the promoted workspace", () => {
+    const settings = new Y.Doc();
+    const sidebar = new Y.Doc();
+    const tag = createTagCatalogEntry(settings, "reports", DECISION_A, "Published reports");
+    const copy = replicate(settings);
+    const snapshot = (doc: Y.Doc) => workspaceSnapshot(doc, sidebar);
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+
+    setTagCatalogDescription(settings, tag.id, "Reviewed reports");
+    expect(compareCorpus(snapshot(settings), snapshot(copy)).differing.map(doc => doc.uuid)).toEqual(["_settings"]);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(settings));
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+
+    deleteTagCatalogEntry(settings, tag.id);
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(false);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(settings));
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(true);
+
+    // A delete-set-only loss leaves clocks and visible entries identical.
+    copy.getMap(TAG_CATALOG_DELETED_KEY).delete(tag.id);
+    getTagCatalogIdentities(copy).delete(tag.id);
+    expect(Y.encodeStateVector(copy)).toEqual(Y.encodeStateVector(settings));
+    expect(listTagCatalog(copy)).toEqual(listTagCatalog(settings));
+    expect(isIdentical(compareCorpus(snapshot(settings), snapshot(copy)))).toBe(false);
+    settings.destroy();
+    copy.destroy();
+    sidebar.destroy();
+  });
+
   it("reports a formatting-only difference as differing, not identical", () => {
     const doc = source();
     const copy = replicate(doc);

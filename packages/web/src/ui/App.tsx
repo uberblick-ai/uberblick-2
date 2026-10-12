@@ -43,6 +43,7 @@ import {
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
+import { useTagCatalog } from "./tags.js";
 import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
 import type { DocLinkContext } from "../editor/doc-links.js";
@@ -315,7 +316,7 @@ export function RoutePane({
 
   const editorProps: ComponentProps<typeof EditorPane> = {
     connection, segment: route.workspace.segment, presence, endpoint,
-    hubAcked, notSharedReason, author, catalogConnection, archived, updatedAt,
+    hubAcked, notSharedReason, author, catalogConnection, directoryConnection, archived, updatedAt,
     onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
     onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
     onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
@@ -548,6 +549,7 @@ export function App(): ReactElement {
       : null,
     defaultIdentity,
   );
+  useTagCatalog(catalog);
   const directoryStatus = useRoomStatus(directory);
   const docStatus = useRoomStatus(doc);
   const sidebarStatus = useRoomStatus(sidebar);
@@ -908,10 +910,11 @@ export function App(): ReactElement {
     if (doc === null || directory === null) return;
     return watchDocumentStub(doc.ydoc, directory.ydoc, {
       writable: () => directory.status.writable,
+      documentWritable: () => doc.status.writable,
       synchronized: () => directory.status.synced,
       subscribe: (listener) => directory.onStatusChange(() => listener()),
-    });
-  }, [doc, directory]);
+    }, catalog?.ydoc);
+  }, [doc, directory, catalog]);
 
   const sidebarHidden = narrowSidebar ? !sidebarOpen : collapsed;
   const sidebarName = settings ? "sidebar" : "document list";

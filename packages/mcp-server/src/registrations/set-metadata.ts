@@ -12,11 +12,12 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
       "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted " +
       "fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. " +
       "Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or " +
-      "cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag " +
-      "ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be " +
+      "cleared; tldr: null clears the person-facing summary. Tags replace existing assignments; [] clears them. " +
+      "Use list_tags ids/exact names; references awaiting catalog sync stay stored. " +
+      "Links replace the curated set; [] clears it. New link UUIDs must be " +
       "directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: " +
       "a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated " +
-      "links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, " +
+      "links and answer, it is fixed once settled. No RFC/page edits or tags, " +
       "document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null " +
       "tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; " +
       "description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief " +

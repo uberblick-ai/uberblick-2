@@ -6,6 +6,7 @@ import * as Y from "yjs";
 import { ySyncPluginKey } from "y-prosemirror";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
 import { isOrdinaryTable } from "./table.js";
+import { writeDocument } from "../collab/directory-stub.js";
 
 export interface TableRowTarget {
   tableId: string;
@@ -83,7 +84,7 @@ export function deleteTableColumn(editor: Editor, target: TableColumnTarget): bo
   const doc = target.table.doc;
   if (live === null || live.node.child(0).childCount === 1 || doc === null) return false;
   endUndoCapture(editor.state);
-  doc.transact(() => {
+  writeDocument(doc, () => {
     for (const row of target.table.toArray()) (row as Y.XmlElement).delete(live.columnIndex, 1);
   }, ySyncPluginKey);
   endUndoCapture(editor.state);
@@ -144,7 +145,7 @@ export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number
   const copy = target.row.clone();
   const destination = gap > live.rowIndex ? gap - 1 : gap;
   endUndoCapture(editor.state);
-  doc.transact(() => {
+  writeDocument(doc, () => {
     target.table.delete(live.rowIndex, 1);
     target.table.insert(destination, [copy]);
   }, ySyncPluginKey);

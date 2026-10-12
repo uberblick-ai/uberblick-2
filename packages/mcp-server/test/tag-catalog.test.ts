@@ -6,10 +6,19 @@ import type { Hub } from "@uberblick/hub";
 import {
   EXAMPLE_TAGS,
   createTagCatalogEntry,
-  getDirectoryEntry,
-  retireTagCatalogEntry,
+  deleteTagCatalogEntry,
+  getBlocksFragment,
+  getMeta,
+  getTagCatalogIdentities,
+  isTagCatalogIdentityDeleted,
+  roomForDoc,
+  TAG_CATALOG_FLAGS_KEY,
+  setTagCatalogDescription,
+  setBlockType,
   setTags,
   settingsRoom,
+  TAG_CATALOG_RETIRED_KEY,
+  TAG_CATALOG_RESTORED_KEY,
 } from "@uberblick/schema";
 import {
   FailingStore,
@@ -27,6 +36,7 @@ import {
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
+import { MirrorStore } from "../src/store.js";
 
 const rigs: Rig[] = [];
 const hubs: Hub[] = [];
@@ -35,12 +45,10 @@ const peers: PeerClient[] = [];
 const AUTH = {
   id: EXAMPLE_TAGS[0].id,
   name: EXAMPLE_TAGS[0].name,
-  state: "active",
 } as const;
 const MCP = {
   id: EXAMPLE_TAGS[2].id,
   name: EXAMPLE_TAGS[2].name,
-  state: "active",
 } as const;
 /** A catalog identity no replica in these tests has an entry for. */
 const OFF_CATALOG = "3f5c0b1e-6f6a-4a2b-9c1d-0e7a5b3c9d21";
@@ -116,29 +124,29 @@ describe("the workspace tag catalog", () => {
     expect(archived.tagHint).toBeUndefined();
   });
 
-  it("does not nudge an assigned document or one with no active local choices", async () => {
+  it("nudges a document after its last tag is deleted and stays quiet with no catalog choices", async () => {
     const rig = await local();
     const assigned = await rig.ok("create_doc", {
-      title: "Classified before retirement",
-      description: "A retired assignment still records that classification happened.",
+      title: "Classified before deletion",
+      description: "A deleted assignment no longer classifies the document.",
       tags: [AUTH.id],
     });
     expect(assigned.tagHint).toBeUndefined();
 
-    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
     const retained = await rig.ok("insert_block", {
       uuid: assigned.uuid,
       type: "paragraph",
-      text: "The only assignment is retired, but it remains an assignment.",
+      text: "The deleted assignment is cleaned during this write.",
     });
-    expect(retained.tagHint).toBeUndefined();
+    expect(retained.tagHint).toContain("list_tags");
 
     for (const tag of EXAMPLE_TAGS.filter(({ id }) => id !== AUTH.id)) {
-      retireTagCatalogEntry(rig.instance.replicas.settings().doc, tag.id);
+      deleteTagCatalogEntry(rig.instance.replicas.settings().doc, tag.id);
     }
     const noChoices = await rig.ok("create_doc", {
       title: "No local vocabulary",
-      description: "An untagged document when the local catalog has no active entry.",
+      description: "An untagged document when the local catalog has no entry.",
     });
     expect(noChoices.tagHint).toBeUndefined();
   });
@@ -193,6 +201,68 @@ describe("the workspace tag catalog", () => {
     );
   });
 
+  it("migrates persisted retired catalog identities without rewriting their document", async () => {
+    const databasePath = tempDatabasePath();
+    const first = await local(databasePath);
+    getTagCatalogIdentities(first.instance.replicas.settings().doc).set(OFF_CATALOG, "legacy");
+    const created = await first.ok("create_doc", {
+      title: "Legacy classification", description: "Retirement migration must touch only the catalog.", tags: [OFF_CATALOG],
+    });
+    const room = roomForDoc(WORKSPACE, created.uuid);
+    const updates = first.instance.store.updateCount(room);
+    await first.close();
+    rigs.splice(rigs.indexOf(first), 1);
+
+    const legacy = new Y.Doc();
+    legacy.getMap<boolean>(TAG_CATALOG_FLAGS_KEY).set("examples-seeded", true);
+    legacy.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("legacy#123", 1);
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    try {
+      store.appendUpdate(settingsRoom(WORKSPACE), Y.encodeStateAsUpdate(legacy), "remote");
+    } finally {
+      store.close();
+      legacy.destroy();
+    }
+    const restarted = await local(databasePath);
+    expect((await restarted.ok("list_tags")).tags).not.toContainEqual({ id: OFF_CATALOG, name: "legacy" });
+    expect((await restarted.ok("get_doc", { uuid: created.uuid })).tags).toEqual([]);
+    expect(getMeta(restarted.instance.replicas.replica(created.uuid).doc).tags).toEqual([OFF_CATALOG]);
+    expect(restarted.instance.store.updateCount(room)).toBe(updates);
+    const recreated = createTagCatalogEntry(restarted.instance.replicas.settings().doc, "legacy");
+    expect(recreated.id).not.toBe(OFF_CATALOG);
+    expect((await restarted.ok("get_doc", { uuid: created.uuid })).tags).toEqual([]);
+    await restarted.ok("set_metadata", { uuid: created.uuid, description: "The later update permits cleanup." });
+    expect(getMeta(restarted.instance.replicas.replica(created.uuid).doc).tags).toEqual([]);
+  });
+
+  it("merges the current hub restoration before migrating a stale retired cache", async () => {
+    const hub = await startHub();
+    hubs.push(hub);
+    const curator = await peerClient(hub.port, settingsRoom(WORKSPACE));
+    peers.push(curator);
+    await curator.synced;
+    const stale = new Y.Doc();
+    getTagCatalogIdentities(stale).set(OFF_CATALOG, "legacy");
+    stale.getMap<boolean>(TAG_CATALOG_FLAGS_KEY).set("examples-seeded", true);
+    stale.getMap<number>(TAG_CATALOG_RETIRED_KEY).set("legacy#123", 1);
+    const retiredState = Y.encodeStateAsUpdate(stale);
+    Y.applyUpdate(curator.doc, retiredState);
+    curator.doc.getMap<number>(TAG_CATALOG_RESTORED_KEY).set("legacy#123", 1);
+    await waitUntil("the current restored catalog to reach the hub", async () => !curator.provider.hasUnsyncedChanges);
+    stale.destroy();
+
+    const databasePath = tempDatabasePath();
+    const store = new MirrorStore(databasePath, WORKSPACE);
+    try {
+      store.appendUpdate(settingsRoom(WORKSPACE), retiredState, "remote");
+    } finally {
+      store.close();
+    }
+    const restarted = await synced(hub.port, databasePath);
+    expect((await restarted.ok("list_tags")).tags).toContainEqual({ id: OFF_CATALOG, name: "legacy" });
+    expect(isTagCatalogIdentityDeleted(restarted.instance.replicas.settings().doc, OFF_CATALOG)).toBe(false);
+  });
+
   it("never claims a catalog the hub has not delivered is the complete one", async () => {
     const rig = await startServer(
       testConfig({ authSecret: TEST_SECRET, hubUrl: hubUrl(1) }),
@@ -219,18 +289,18 @@ describe("the workspace tag catalog", () => {
     });
     expect(refused.payload.recovery).toContain("has not reached this replica");
 
-    // A retirement this replica already holds is not waiting on the hub:
+    // A deletion this replica already holds is not waiting on the hub:
     // hydration cannot make the value assignable, so the caller is told to
     // correct the call rather than to repeat it.
-    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
     const blocked = await rig.call("create_doc", {
       title: "Must not exist either",
-      description: "A retirement this replica already knows about.",
+      description: "A deletion this replica already knows about.",
       tags: [AUTH.id],
     });
     expect(blocked.payload).toMatchObject({
       error: "invalid_tag_assignment",
-      retired: [AUTH.id],
+      unknown: [AUTH.id],
       recoveryClass: "manual",
     });
     expect(blocked.payload.recovery).not.toContain("has not reached this replica");
@@ -276,6 +346,8 @@ describe("the workspace tag catalog", () => {
 
   it("resolves ids and names through every structured read, filter and export", async () => {
     const rig = await local();
+    setTagCatalogDescription(rig.instance.replicas.settings().doc, AUTH.id, "Authentication in this workspace.");
+    const describedAuth = { ...AUTH, description: "Authentication in this workspace." };
     const created = await rig.ok("create_doc", {
       title: "Catalog contract",
       description: "A searchable document with catalog-owned assignments.",
@@ -283,9 +355,9 @@ describe("the workspace tag catalog", () => {
       blocks: [{ type: "paragraph", text: "catalog capybara" }],
     });
 
-    expect(created.tags).toEqual([AUTH, MCP]);
+    expect(created.tags).toEqual([describedAuth, MCP]);
     expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([
-      AUTH,
+      describedAuth,
       MCP,
     ]);
 
@@ -293,7 +365,7 @@ describe("the workspace tag catalog", () => {
       const listed = await rig.ok("list_docs", { tag });
       expect(listed.docs).toHaveLength(1);
       expect(listed.docs[0]).toMatchObject({ uuid: created.uuid });
-      expect(listed.docs[0].tags).toEqual([AUTH, MCP]);
+      expect(listed.docs[0].tags).toEqual([describedAuth, MCP]);
     }
 
     for (const tag of ["mcp", MCP.id]) {
@@ -303,7 +375,7 @@ describe("the workspace tag catalog", () => {
       });
       expect(searched.hits).toHaveLength(1);
       expect(searched.hits[0]).toMatchObject({ uuid: created.uuid });
-      expect(searched.hits[0].tags).toEqual([AUTH, MCP]);
+      expect(searched.hits[0].tags).toEqual([describedAuth, MCP]);
     }
 
     // A selector the catalog does not have is refused, not answered with an
@@ -316,7 +388,6 @@ describe("the workspace tag catalog", () => {
       expect(refused.payload).toMatchObject({
         error: "invalid_tag_assignment",
         unknown: ["mpc"],
-        retired: [],
         recoveryClass: "manual",
       });
     }
@@ -325,102 +396,127 @@ describe("the workspace tag catalog", () => {
     expect(exported.markdown).toContain("tags: [auth, mcp]");
     expect(exported.markdown).not.toContain(AUTH.id);
     expect(exported.markdown).not.toContain(MCP.id);
+    expect(exported.markdown).not.toContain(describedAuth.description);
+    expect((await rig.ok("list_tags")).tags).toContainEqual(describedAuth);
   });
 
-  it("preserves or removes assigned retired tags and rejects every invalid value atomically", async () => {
+  it("hides missing and deleted references on reads, retains delayed references and cleans only permitted writes", async () => {
     const rig = await local();
-    const keeper = await rig.ok("create_doc", {
-      title: "Retired keeper",
-      description: "A document that already carries the soon-retired tag.",
-      tags: [AUTH.id],
+    const created = await rig.ok("create_doc", {
+      title: "Deletion boundary",
+      description: "References outlive their visible catalog entries.",
+      tags: [AUTH.id, MCP.id],
+      blocks: [{ type: "paragraph", text: "boundary armadillo" }],
     });
-    const target = await rig.ok("create_doc", {
-      title: "Atomic target",
-      description: "A document whose invalid retag must write nothing.",
-      blocks: [{ type: "paragraph", text: "atomic armadillo" }],
-    });
+    const replica = rig.instance.replicas.replica(created.uuid);
+    setTags(replica.doc, [AUTH.id, MCP.id, OFF_CATALOG]);
+    const room = roomForDoc(WORKSPACE, created.uuid);
+    const beforeDeletion = rig.instance.store.updateCount(room);
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    expect(rig.instance.store.updateCount(room)).toBe(beforeDeletion);
 
-    retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
-    const retiredAuth = { ...AUTH, state: "retired" } as const;
-    expect((await rig.ok("list_tags")).tags).not.toContainEqual({
-      id: AUTH.id,
-      name: AUTH.name,
-    });
-    expect((await rig.ok("get_doc", { uuid: keeper.uuid })).tags).toEqual([
-      retiredAuth,
-    ]);
+    expect((await rig.ok("list_tags")).complete).toBe(true);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([MCP]);
+    expect((await rig.ok("list_docs")).docs[0].tags).toEqual([MCP]);
+    expect((await rig.ok("search", { query: "armadillo" })).hits[0].tags).toEqual([MCP]);
+    expect((await rig.ok("export_markdown", { uuid: created.uuid })).markdown).toContain("tags: [mcp]");
+    expect(rig.instance.store.updateCount(room)).toBe(beforeDeletion);
+    expect(getMeta(replica.doc).tags).toEqual([AUTH.id, MCP.id, OFF_CATALOG]);
 
-    const preserved = await rig.ok("set_metadata", {
-      uuid: keeper.uuid,
-      tags: [AUTH.id, "mcp"],
-    });
-    expect(preserved.tags).toEqual([retiredAuth, MCP]);
-    for (const tag of [AUTH.id, AUTH.name]) {
-      expect((await rig.ok("list_docs", { tag })).docs).toEqual([
-        expect.objectContaining({ uuid: keeper.uuid }),
-      ]);
+    for (const tag of [AUTH.id, AUTH.name, OFF_CATALOG]) {
+      expect((await rig.call("list_docs", { tag })).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: [tag],
+      });
+      expect((await rig.call("search", { query: "armadillo", tag })).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: [tag],
+      });
     }
-    expect(
-      (await rig.ok("set_metadata", { uuid: keeper.uuid, tags: [MCP.id] })).tags,
-    ).toEqual([MCP]);
-
-    // An identity assigned by a client whose catalog this replica has not
-    // received: unresolved rather than invalid, so passing it back preserves
-    // the assignment nobody here can name.
-    const unresolved = { id: OFF_CATALOG, name: null, state: "unresolved" };
-    setTags(rig.instance.replicas.replica(keeper.uuid).doc, [
-      MCP.id,
-      OFF_CATALOG,
-    ]);
-    expect(
-      (await rig.ok("set_metadata", { uuid: keeper.uuid, tags: [OFF_CATALOG] }))
-        .tags,
-    ).toEqual([unresolved]);
-
-    const beforeDoc = await rig.ok("get_doc", { uuid: target.uuid });
-    const beforeStub = getDirectoryEntry(
-      rig.instance.replicas.directory().doc,
-      target.uuid,
-    );
-    const beforeIndex = rig.instance.store.search("armadillo", 10);
     const refused = await rig.call("set_metadata", {
-      uuid: target.uuid,
-      tags: ["missing", AUTH.id, AUTH.name, "also-missing", OFF_CATALOG],
+      uuid: created.uuid, title: "Must remain unchanged", tags: [AUTH.id, AUTH.name, OFF_CATALOG, "missing"],
     });
-
-    expect(refused.isError).toBe(true);
     expect(refused.payload).toMatchObject({
-      error: "invalid_tag_assignment",
-      field: "tags",
-      applied: false,
-      partial: false,
-      // The unresolved identity the keeper preserves is still unknown here:
-      // only a document that already carries one may keep it.
-      unknown: ["missing", "also-missing", OFF_CATALOG],
-      retired: [AUTH.id, AUTH.name],
-      recoveryClass: "manual",
+      error: "invalid_tag_assignment", field: "tags", applied: false, partial: false,
+      unknown: [AUTH.id, AUTH.name, OFF_CATALOG, "missing"],
     });
-    expect(refused.payload.recovery).toContain("list_tags");
-    expect(await rig.ok("get_doc", { uuid: target.uuid })).toEqual(beforeDoc);
-    expect(
-      getDirectoryEntry(rig.instance.replicas.directory().doc, target.uuid),
-    ).toEqual(beforeStub);
-    expect(rig.instance.store.search("armadillo", 10)).toEqual(beforeIndex);
+    expect(rig.instance.store.updateCount(room)).toBe(beforeDeletion);
+    expect(getMeta(replica.doc).title).toBe("Deletion boundary");
+    await rig.ok("update_data", { uuid: created.uuid, operations: [] });
+    expect(rig.instance.store.updateCount(room)).toBe(beforeDeletion);
+    expect(getMeta(replica.doc).tags).toEqual([AUTH.id, MCP.id, OFF_CATALOG]);
 
+    expect((await rig.ok("set_metadata", { uuid: created.uuid, tags: [] })).tags).toEqual([]);
+    expect(getMeta(replica.doc).tags).toEqual([OFF_CATALOG]);
+    createTagCatalogEntry(rig.instance.replicas.settings().doc, "arrived", OFF_CATALOG);
+    const afterWrite = rig.instance.store.updateCount(room);
+    const arrived = { id: OFF_CATALOG, name: "arrived" };
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([arrived]);
+    expect((await rig.ok("search", { query: "armadillo", tag: "arrived" })).hits[0].tags).toEqual([arrived]);
+    expect(rig.instance.store.updateCount(room)).toBe(afterWrite);
+
+    const recreated = createTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.name);
+    expect(recreated.id).not.toBe(AUTH.id);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([arrived]);
     const beforeCreate = (await rig.ok("list_docs")).docs;
-    const invalidCreate = await rig.call("create_doc", {
-      title: "Must not exist",
-      description: "An invalid catalog selection refuses before identity.",
-      tags: ["unknown-create", AUTH.id],
-    });
-    expect(invalidCreate.payload).toMatchObject({
-      error: "invalid_tag_assignment",
-      unknown: ["unknown-create"],
-      retired: [AUTH.id],
-      applied: false,
-      partial: false,
-    });
+    expect((await rig.call("create_doc", {
+      title: "Must not exist", description: "Deleted identities cannot be selected.", tags: [AUTH.id],
+    })).payload).toMatchObject({ error: "invalid_tag_assignment", unknown: [AUTH.id], applied: false });
     expect((await rig.ok("list_docs")).docs).toEqual(beforeCreate);
+  });
+
+  it("cleans after authored content or metadata writes, while archive and content-lock refusals preserve references", async () => {
+    const rig = await local();
+    const page = await rig.ok("create_doc", {
+      title: "Authored content", description: "A content edit permits cleanup.", tags: [AUTH.id],
+    });
+    const archived = await rig.ok("create_doc", {
+      title: "Archived", description: "Archived documents keep stored references.", tags: [AUTH.id],
+    });
+    const decided = await rig.ok("create_doc", {
+      title: "Locked decision", description: "Content writes remain forbidden.", tags: [AUTH.id],
+      kind: "decision", status: "decided", blocks: [{ type: "paragraph", text: "A settled answer." }],
+    });
+    await rig.ok("archive_doc", { uuid: archived.uuid });
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    const archivedDoc = rig.instance.replicas.replica(archived.uuid).doc;
+    const decidedDoc = rig.instance.replicas.replica(decided.uuid).doc;
+    expect((await rig.call("set_metadata", { uuid: archived.uuid, description: "Must be refused." })).payload.error).toBe("doc_archived");
+    expect((await rig.call("insert_block", { uuid: decided.uuid, type: "paragraph", text: "Must be refused." })).payload.error).toBe("decision_read_only");
+    expect(getMeta(archivedDoc).tags).toEqual([AUTH.id]);
+    expect(getMeta(decidedDoc).tags).toEqual([AUTH.id]);
+    expect((await rig.ok("get_doc", { uuid: archived.uuid })).tags).toEqual([]);
+    await rig.ok("restore_doc", { uuid: archived.uuid });
+    expect(getMeta(archivedDoc).tags).toEqual([AUTH.id]);
+    await rig.ok("insert_block", { uuid: page.uuid, type: "paragraph", text: "A permitted update." });
+    expect(getMeta(rig.instance.replicas.replica(page.uuid).doc).tags).toEqual([]);
+    await rig.ok("set_metadata", { uuid: decided.uuid, description: "Metadata remains writable." });
+    expect(getMeta(decidedDoc).tags).toEqual([]);
+    expect(getMeta(archivedDoc).tags).toEqual([AUTH.id]);
+  });
+
+  it("keeps deletion references through local block repairs prompted by synchronized updates", async () => {
+    const rig = await local();
+    const created = await rig.ok("create_doc", {
+      title: "Synchronization repair", description: "Repairing remote content is not an authored cleanup boundary.",
+      tags: [AUTH.id], blocks: [{ type: "paragraph", text: "Shared answer." }],
+    });
+    const document = rig.instance.replicas.replica(created.uuid).doc;
+    deleteTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
+    const initial = Y.encodeStateAsUpdate(document);
+    const updates = (["heading", "code"] as const).map(type => {
+      const peer = new Y.Doc();
+      try {
+        Y.applyUpdate(peer, initial);
+        const before = Y.encodeStateVector(peer);
+        setBlockType(peer, created.blocks[0].id, type);
+        return Y.encodeStateAsUpdate(peer, before);
+      } finally {
+        peer.destroy();
+      }
+    });
+    rig.instance.store.appendUpdate(roomForDoc(WORKSPACE, created.uuid), Y.mergeUpdates(updates), "remote");
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).tags).toEqual([]);
+    expect(getBlocksFragment(document).length).toBe(1);
+    expect(getMeta(document).tags).toEqual([AUTH.id]);
   });
 
   it("rebuilds and converges the derived tag index across the hub and an offline restart", async () => {
@@ -449,25 +545,24 @@ describe("the workspace tag catalog", () => {
     const curator = await peerClient(hub.port, settingsRoom(WORKSPACE));
     peers.push(curator);
     await curator.synced;
-    retireTagCatalogEntry(curator.doc, AUTH.id);
-    await waitUntil("the retired catalog entry to reach the fresh server", async () => {
+    deleteTagCatalogEntry(curator.doc, AUTH.id);
+    await waitUntil("the deleted catalog entry to reach the fresh server", async () => {
       const tags = (await fresh.ok("list_tags")).tags as { id: string }[];
       return !tags.some((tag) => tag.id === AUTH.id);
     });
 
     const converged = await fresh.ok("get_doc", { uuid: created.uuid });
-    expect(converged.tags).toEqual([{ ...AUTH, state: "retired" }]);
+    expect(converged.tags).toEqual([]);
+    expect(getMeta(fresh.instance.replicas.replica(created.uuid).doc).tags).toEqual([AUTH.id]);
     for (const tag of [AUTH.id, AUTH.name]) {
-      expect(
-        (await fresh.ok("search", { query: "wombat", tag })).hits[0]?.uuid,
-      ).toBe(created.uuid);
+      expect((await fresh.call("search", { query: "wombat", tag })).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: [tag],
+      });
     }
 
     fresh.instance.replicas.rebuildIndex();
-    expect(
-      (await fresh.ok("search", { query: "wombat", tag: AUTH.id })).hits[0]
-        ?.uuid,
-    ).toBe(created.uuid);
+    expect((await fresh.ok("search", { query: "wombat" })).hits[0].tags).toEqual([]);
+    expect(getMeta(fresh.instance.replicas.replica(created.uuid).doc).tags).toEqual([AUTH.id]);
     await fresh.close();
     rigs.splice(rigs.indexOf(fresh), 1);
 
@@ -476,9 +571,7 @@ describe("the workspace tag catalog", () => {
       id: AUTH.id,
       name: AUTH.name,
     });
-    expect(
-      (await offline.ok("search", { query: "wombat", tag: AUTH.id })).hits[0]
-        ?.uuid,
-    ).toBe(created.uuid);
+    expect((await offline.ok("search", { query: "wombat" })).hits[0].tags).toEqual([]);
+    expect(getMeta(offline.instance.replicas.replica(created.uuid).doc).tags).toEqual([AUTH.id]);
   });
 });

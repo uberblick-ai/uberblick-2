@@ -2,6 +2,7 @@ import type * as Y from "yjs";
 import { getMeta, setTags } from "./doc.js";
 import {
   InvalidTagAssignmentError,
+  InvalidTagDescriptionError,
   InvalidTagIdentityError,
   InvalidTagNameError,
 } from "./errors.js";
@@ -11,6 +12,7 @@ import type {
   TagAssignment,
   TagCatalogEntry,
 } from "./types.js";
+import { MAX_DESCRIPTION_LENGTH } from "./types.js";
 
 /** One settings Y.Doc holds a flat vocabulary of UUIDs mapped to immutable names. */
 export const TAG_CATALOG_IDENTITIES_KEY = "tag-identities";
@@ -20,6 +22,15 @@ export const TAG_CATALOG_RETIRED_KEY = "tag-retired";
 
 /** `<name>#<clientID>` -> restoration level. */
 export const TAG_CATALOG_RESTORED_KEY = "tag-restored";
+
+/** Identity tombstones are set-once and survive stale catalog writes. */
+export const TAG_CATALOG_DELETED_KEY = "tag-deleted";
+
+/** Descriptions replace independently of immutable identity and name. */
+export const TAG_CATALOG_DESCRIPTIONS_KEY = "tag-descriptions";
+
+/** Explicit new identities do not inherit a legacy name's lifecycle levels. */
+export const TAG_CATALOG_CREATED_KEY = "tag-created-v2";
 
 /** Set-once facts about the catalog itself. */
 export const TAG_CATALOG_FLAGS_KEY = "tag-flags";
@@ -82,11 +93,53 @@ function levelFor(map: Y.Map<number>, name: string): number {
 }
 
 // Per-client levels are monotone; restoration wins a tie with retirement.
-function stateFor(catalogDoc: Y.Doc, name: string): "active" | "retired" {
-  return levelFor(getRestoredLevels(catalogDoc), name) >=
-    levelFor(getRetiredLevels(catalogDoc), name)
-    ? "active"
-    : "retired";
+function legacyNameIsRetired(catalogDoc: Y.Doc, name: string): boolean {
+  return levelFor(getRestoredLevels(catalogDoc), name) <
+    levelFor(getRetiredLevels(catalogDoc), name);
+}
+
+function getDeletedIdentities(catalogDoc: Y.Doc): Y.Map<boolean> {
+  return catalogDoc.getMap<boolean>(TAG_CATALOG_DELETED_KEY);
+}
+
+function getCreatedIdentities(catalogDoc: Y.Doc): Y.Map<boolean> {
+  return catalogDoc.getMap<boolean>(TAG_CATALOG_CREATED_KEY);
+}
+
+function getDescriptions(catalogDoc: Y.Doc): Y.Map<string> {
+  return catalogDoc.getMap<string>(TAG_CATALOG_DESCRIPTIONS_KEY);
+}
+
+export function isTagCatalogIdentityDeleted(
+  catalogDoc: Y.Doc,
+  identity: unknown,
+): boolean {
+  const canonical = canonicalDocumentUuid(identity);
+  return canonical !== null && getDeletedIdentities(catalogDoc).get(canonical) === true;
+}
+
+export function listDeletedTagIdentities(catalogDoc: Y.Doc): string[] {
+  return [...getDeletedIdentities(catalogDoc).entries()]
+    .filter(([id, deleted]) => deleted === true && canonicalDocumentUuid(id) === id)
+    .map(([id]) => id)
+    .sort();
+}
+
+function legacyIdentityIsRetired(catalogDoc: Y.Doc, id: string, name: string): boolean {
+  return getCreatedIdentities(catalogDoc).get(id) !== true && legacyNameIsRetired(catalogDoc, name);
+}
+
+/** Materialize legacy retirement as identity deletion, including delayed aliases. */
+export function migrateTagCatalog(catalogDoc: Y.Doc): void {
+  const deleted = getDeletedIdentities(catalogDoc);
+  catalogDoc.transact(() => {
+    for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
+      if (canonicalDocumentUuid(id) === id && isTagName(name) &&
+        deleted.get(id) !== true && legacyIdentityIsRetired(catalogDoc, id, name)) {
+        deleted.set(id, true);
+      }
+    }
+  });
 }
 
 interface CatalogIndex {
@@ -99,6 +152,7 @@ function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
   const identitiesByName = new Map<string, string[]>();
   for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
     if (canonicalDocumentUuid(id) !== id || !isTagName(name)) continue;
+    if (isTagCatalogIdentityDeleted(catalogDoc, id) || legacyIdentityIsRetired(catalogDoc, id, name)) continue;
     const identities = identitiesByName.get(name);
     if (identities === undefined) identitiesByName.set(name, [id]);
     else identities.push(id);
@@ -113,8 +167,9 @@ function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
     const entry: TagCatalogEntry = {
       id,
       name,
-      state: stateFor(catalogDoc, name),
     };
+    const description = getDescriptions(catalogDoc).get(id);
+    if (typeof description === "string" && description !== "") entry.description = description;
     entries.push(entry);
     for (const identity of identities) byIdentity.set(identity, entry);
   }
@@ -124,7 +179,7 @@ function catalogIndex(catalogDoc: Y.Doc): CatalogIndex {
   return { entries, byIdentity };
 }
 
-/** Every catalog entry, active and retired, in replica-stable name order. */
+/** Existing catalog entries in replica-stable name order. */
 export function listTagCatalog(catalogDoc: Y.Doc): TagCatalogEntry[] {
   return catalogIndex(catalogDoc).entries;
 }
@@ -139,13 +194,25 @@ export function getTagCatalogEntry(
   return catalogIndex(catalogDoc).byIdentity.get(canonical) ?? null;
 }
 
-/** Existing names keep their entry; new creates never write lifecycle levels or undo retirement. */
+function normalizeDescription(description: string | null | undefined): string | undefined {
+  if (description === null || description === undefined) return undefined;
+  if (typeof description !== "string") throw new InvalidTagDescriptionError();
+  const trimmed = description.trim();
+  if (trimmed.length > MAX_DESCRIPTION_LENGTH || /[\r\n\u2028\u2029]/.test(trimmed)) {
+    throw new InvalidTagDescriptionError();
+  }
+  return trimmed === "" ? undefined : trimmed;
+}
+
+/** Existing names keep their entry; deleted names require a new identity. */
 export function createTagCatalogEntry(
   catalogDoc: Y.Doc,
   name: string,
   identity?: string,
+  description?: string | null,
 ): TagCatalogEntry {
   if (!isTagName(name)) throw new InvalidTagNameError(name);
+  const normalizedDescription = normalizeDescription(description);
   const existing = listTagCatalog(catalogDoc).find((entry) => entry.name === name);
   if (existing !== undefined) return existing;
 
@@ -154,9 +221,15 @@ export function createTagCatalogEntry(
     throw new InvalidTagIdentityError("not-a-uuid", id);
   }
   const identities = getTagCatalogIdentities(catalogDoc);
-  if (identities.has(id)) throw new InvalidTagIdentityError("in-use", id);
-  identities.set(id, name);
-  return { id, name, state: "active" };
+  if (identities.has(id) || isTagCatalogIdentityDeleted(catalogDoc, id)) {
+    throw new InvalidTagIdentityError("in-use", id);
+  }
+  catalogDoc.transact(() => {
+    identities.set(id, name);
+    getCreatedIdentities(catalogDoc).set(id, true);
+    if (normalizedDescription !== undefined) getDescriptions(catalogDoc).set(id, normalizedDescription);
+  });
+  return { id, name, ...(normalizedDescription === undefined ? {} : { description: normalizedDescription }) };
 }
 
 function requireEntry(catalogDoc: Y.Doc, identity: string): TagCatalogEntry {
@@ -165,38 +238,29 @@ function requireEntry(catalogDoc: Y.Doc, identity: string): TagCatalogEntry {
   return entry;
 }
 
-// Explicit lifecycle changes advance beyond every visible retire/restore level.
-function nextLifecycleLevel(catalogDoc: Y.Doc, name: string): number {
-  return (
-    Math.max(
-      levelFor(getRetiredLevels(catalogDoc), name),
-      levelFor(getRestoredLevels(catalogDoc), name),
-    ) + 1
-  );
+export function setTagCatalogDescription(
+  catalogDoc: Y.Doc,
+  identity: string,
+  description?: string | null,
+): void {
+  const normalized = normalizeDescription(description);
+  const entry = requireEntry(catalogDoc, identity);
+  // An empty register value clears the description under Yjs's convergent map semantics.
+  getDescriptions(catalogDoc).set(entry.id, normalized ?? "");
 }
 
-export function retireTagCatalogEntry(
+export function deleteTagCatalogEntry(
   catalogDoc: Y.Doc,
   identity: string,
 ): void {
+  if (isTagCatalogIdentityDeleted(catalogDoc, identity)) return;
   const entry = requireEntry(catalogDoc, identity);
-  if (entry.state === "retired") return;
-  getRetiredLevels(catalogDoc).set(
-    `${entry.name}${CLIENT_SEPARATOR}${catalogDoc.clientID}`,
-    nextLifecycleLevel(catalogDoc, entry.name),
-  );
-}
-
-export function restoreTagCatalogEntry(
-  catalogDoc: Y.Doc,
-  identity: string,
-): void {
-  const entry = requireEntry(catalogDoc, identity);
-  if (entry.state === "active") return;
-  getRestoredLevels(catalogDoc).set(
-    `${entry.name}${CLIENT_SEPARATOR}${catalogDoc.clientID}`,
-    nextLifecycleLevel(catalogDoc, entry.name),
-  );
+  const deleted = getDeletedIdentities(catalogDoc);
+  catalogDoc.transact(() => {
+    for (const [id, name] of getTagCatalogIdentities(catalogDoc).entries()) {
+      if (name === entry.name && canonicalDocumentUuid(id) === id) deleted.set(id, true);
+    }
+  });
 }
 
 export function isTagCatalogSeeded(catalogDoc: Y.Doc): boolean {
@@ -208,13 +272,18 @@ export function seedTagCatalog(catalogDoc: Y.Doc): void {
   if (isTagCatalogSeeded(catalogDoc)) return;
   catalogDoc.transact(() => {
     for (const example of EXAMPLE_TAGS) {
-      createTagCatalogEntry(catalogDoc, example.name, example.id);
+      if (isTagCatalogIdentityDeleted(catalogDoc, example.id) ||
+        listTagCatalog(catalogDoc).some((entry) => entry.name === example.name)) continue;
+      // Fixed examples remain legacy identities so delayed retirement can migrate them.
+      if (!getTagCatalogIdentities(catalogDoc).has(example.id)) {
+        getTagCatalogIdentities(catalogDoc).set(example.id, example.name);
+      }
     }
     getTagCatalogFlags(catalogDoc).set(SEEDED_FLAG, true);
   });
 }
 
-/** Keep unresolved UUIDs in supplied order; omit provisional names and canonicalize aliases. */
+/** Show only existing tags, canonicalizing aliases without changing stored references. */
 export function resolveTagAssignments(
   catalogDoc: Y.Doc,
   identities: readonly unknown[],
@@ -226,10 +295,9 @@ export function resolveTagAssignments(
     const canonical = canonicalDocumentUuid(identity);
     if (canonical === null) continue;
     const entry = index.byIdentity.get(canonical);
-    const id = entry?.id ?? canonical;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    resolved.push(entry ?? { id, name: null, state: "unresolved" });
+    if (entry === undefined || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    resolved.push(entry);
   }
   return resolved;
 }
@@ -250,8 +318,8 @@ export function readDirectoryTags(
 
 /**
  * Validate the whole request before replacing assignments with canonical UUIDs.
- * Assigned retired/unresolved tags may remain but cannot be newly added;
- * successful writes remove provisional names.
+ * Replace existing-tag assignments while retaining unresolved stored references.
+ * Only positive identity tombstones permit removing hidden references.
  */
 export function assignDocumentTags(
   document: Y.Doc,
@@ -259,13 +327,7 @@ export function assignDocumentTags(
   identities: readonly string[],
 ): void {
   const index = catalogIndex(catalogDoc);
-  const existing = new Set(
-    resolveTagAssignments(catalogDoc, getMeta(document).tags).map(
-      (entry) => entry.id,
-    ),
-  );
   const unknown: string[] = [];
-  const retired: string[] = [];
   const next: string[] = [];
   const seen = new Set<string>();
 
@@ -274,18 +336,7 @@ export function assignDocumentTags(
     const entry =
       canonical === null ? undefined : index.byIdentity.get(canonical);
     if (entry === undefined) {
-      if (canonical !== null && existing.has(canonical)) {
-        if (!seen.has(canonical)) {
-          seen.add(canonical);
-          next.push(canonical);
-        }
-        continue;
-      }
       unknown.push(requested);
-      continue;
-    }
-    if (entry.state === "retired" && !existing.has(entry.id)) {
-      retired.push(requested);
       continue;
     }
     if (!seen.has(entry.id)) {
@@ -294,8 +345,22 @@ export function assignDocumentTags(
     }
   }
 
-  if (unknown.length > 0 || retired.length > 0) {
-    throw new InvalidTagAssignmentError(unknown, retired);
+  if (unknown.length > 0) {
+    throw new InvalidTagAssignmentError(unknown);
+  }
+  for (const stored of getMeta(document).tags) {
+    const identity = canonicalDocumentUuid(stored);
+    if ((identity === null || !index.byIdentity.has(identity)) && !isTagCatalogIdentityDeleted(catalogDoc, stored) && !seen.has(stored)) {
+      seen.add(stored);
+      next.push(stored);
+    }
   }
   setTags(document, next);
+}
+
+/** Call only inside a permitted authored write; reads and synchronization never clean. */
+export function cleanupDocumentTags(document: Y.Doc, catalogDoc: Y.Doc): void {
+  const stored = getMeta(document).tags;
+  const retained = stored.filter((id) => !isTagCatalogIdentityDeleted(catalogDoc, id));
+  if (retained.length !== stored.length) setTags(document, retained);
 }
