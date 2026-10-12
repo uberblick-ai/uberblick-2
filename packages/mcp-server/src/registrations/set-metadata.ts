@@ -9,8 +9,8 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
   server.registerTool("set_metadata", {
     title: "Set document metadata together",
     description:
-      "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted " +
-      "fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. " +
+      "Set supplied metadata; omitted fields stay unchanged except confirmed-deleted tag references cleaned " +
+      "by a permitted write. All validate before writes; refusals change nothing and field failures name field. " +
       "Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or " +
       "cleared; tldr: null clears the person-facing summary. Tags replace existing assignments; [] clears them. " +
       "Use list_tags ids/exact names; references awaiting catalog sync stay stored. " +
