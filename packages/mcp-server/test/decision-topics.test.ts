@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as Y from "yjs";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { getDirectoryEntry, getDirectoryMap, getMetaMap, listDirectory, upsertDirectoryEntry } from "@uberblick/schema";
+import { getDirectoryEntry, getDirectoryMap, getMetaMap, listDirectory, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import { FailingStore, removeTempDirs, startServer, tempDatabasePath, testConfig, WORKSPACE } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -10,7 +10,7 @@ const stores: FailingStore[] = [];
 afterEach(async () => { for (const rig of rigs.splice(0)) await rig.close(); for (const store of stores.splice(0)) store.close(); });
 afterAll(removeTempDirs);
 async function localRig() { const rig = await startServer(testConfig()); rigs.push(rig); return rig; }
-const blocks = [{ type: "heading", text: "Topic", level: 2 }, { type: "paragraph", text: "Choose the implementation under these constraints." }];
+const blocks = [{ type: "paragraph", text: "Choose the implementation under these constraints." }];
 const answer = { who: "A person", when: "2026-10-04T12:00:00Z", where: "A recorded team discussion." };
 async function decision(rig: Rig, fields: Record<string, unknown> = {}) {
   return rig.ok("create_doc", { title: "Topic", description: "A decision record.", kind: "decision", blocks, ...fields });
@@ -25,12 +25,25 @@ describe("decision topics through directory stubs", () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
     const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(requirement.uuid).doc);
-    const first = await decision(rig, { governs: requirement.uuid });
-    const next = await decision(rig, { supersedes: first.uuid, governs: requirement.uuid });
+    const first = await decision(rig, { related: requirement.uuid });
+    const next = await decision(rig, { supersedes: first.uuid });
+    const otherPage = await rig.ok("create_doc", { title: "Other page", description: "A regular owning page." });
+    const redirected = await decision(rig, { supersedes: next.uuid, related: otherPage.uuid });
+    const inherited = await decision(rig, { supersedes: redirected.uuid });
     expect(first.topic).toBe(first.uuid);
     expect(next.topic).toBe(first.uuid);
     expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(requirement.uuid).doc)).toEqual(before);
     expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("governs")).toBe(requirement.uuid);
+    for (const record of [redirected, inherited]) {
+      expect(record.topic).toBe(first.uuid);
+      expect(getMetaMap(rig.instance.replicas.replica(record.uuid).doc).get("governs")).toBe(otherPage.uuid);
+    }
+    for (const page of [requirement, otherPage]) {
+      expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: first.uuid, relation: "related" }]);
+    }
+    const stored = Y.encodeStateAsUpdate(rig.instance.replicas.replica(inherited.uuid).doc);
+    expect((await rig.call("set_metadata", { uuid: inherited.uuid, related: requirement.uuid })).payload.error).toBe("schema_validation");
+    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(inherited.uuid).doc)).toEqual(stored);
     expect((await rig.call("create_doc", { title: "Invalid", description: "Caller topic is forbidden.", kind: "decision", topic: first.uuid })).isError).toBe(true);
     const adopted = await rig.ok("create_doc", { title: "Adopted", description: "Becomes a decision through status." });
     await rig.ok("set_status", { uuid: adopted.uuid, status: "open" });
@@ -40,7 +53,7 @@ describe("decision topics through directory stubs", () => {
   it("resolves the full fork with rejected intermediates and never hydrates the other decision rooms", async () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
-    const a = await decision(rig, { status: "decided", governs: requirement.uuid });
+    const a = await decision(rig, { status: "decided", related: requirement.uuid });
     const [b, c, d, e, f] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()] as const;
     const directory = rig.instance.replicas.directory().doc;
     for (const entry of [
@@ -107,8 +120,9 @@ describe("decision topics through directory stubs", () => {
   it("uses only the first tombstone for listing, read-only refusal and derived log; archive and restore affect all records", async () => {
     const rig = await localRig();
     const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
-    const a = await decision(rig, { status: "decided", governs: requirement.uuid });
-    const b = await decision(rig, { status: "decided", supersedes: a.uuid, governs: requirement.uuid, answer, tldr: "The answer." });
+    const a = await decision(rig, { status: "decided", related: requirement.uuid });
+    const b = await decision(rig, { status: "decided", supersedes: a.uuid, answer });
+    setTldr(rig.instance.replicas.replica(b.uuid).doc, "The answer.");
     await rig.ok("pin_doc", { uuid: a.uuid, group: "Reading" });
     await rig.ok("pin_doc", { uuid: b.uuid, group: "Reading" });
     rawDeleted(rig, b.uuid, true);
@@ -189,8 +203,8 @@ describe("decision topics through directory stubs", () => {
       getMetaMap(doc).set("decidedBy", "A person");
       getMetaMap(doc).set("decidedAt", "2026-10-04T12:00:00Z");
     });
-    await rig.ok("set_metadata", { uuid: record.uuid, tldr: "A concise answer." });
-    const opened = await rig.ok("annotate", { uuid: record.uuid, block_id: record.blocks[1].id, start: 0, end: 2, text: "Question" });
+    setTldr(doc, "A concise answer.");
+    const opened = await rig.ok("annotate", { uuid: record.uuid, block_id: record.blocks[0].id, start: 0, end: 2, text: "Question" });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: opened.annotation.id, text: "Reply" });
     const directory = rig.instance.replicas.directory().doc;
     expect(getDirectoryEntry(directory, record.uuid)).toMatchObject({ topic: record.uuid, tldr: "A concise answer.", agentStance: false, decidedBy: "A person", decidedAt: "2026-10-04T12:00:00Z", commentCount: 2 });

@@ -3,14 +3,16 @@
  * Pointer dragging and touch ranges still reach comments; metadata arriving
  * over the real transport locks an existing view without replacing or moving it.
  */
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
+const peers: Array<{ close: () => void }> = [];
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -20,7 +22,10 @@ test.beforeAll(() => {
     statePrefix: "uberblick-e2e-decided-editor-",
   });
 });
-test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterEach(async () => {
+  for (const peer of peers.splice(0)) peer.close();
+  await agent?.closeSessions();
+});
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
 function session(): McpSession {
@@ -36,8 +41,12 @@ async function record(
   const result = await writer.call<{ uuid: string }>("create_doc", {
     title: "Decided editor",
     description: "Read-only reasoning with an open conversation.",
-    kind: "decision", status, tldr: "Keep the approved wording.", blocks,
+    blocks,
   });
+  const peer = await legacyDecisionPeer(harness(), result.uuid);
+  peers.push(peer);
+  peer.decide(status, "Keep the approved wording.");
+  await expect.poll(async () => (await writer.call<{ status: string }>("get_doc", { uuid: result.uuid })).status).toBe(status);
   return result.uuid;
 }
 
@@ -205,28 +214,36 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 
-test("a live decision makes an already open TL;DR editor read-only without saving its draft", async ({ browser }) => {
+for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) test(`legacy decision summaries offer no authoring on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
   const writer = session();
   const uuid = await record(writer, "open");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
-  await page.getByRole("button", { name: "Edit TL;DR", exact: true }).click();
-  const summary = page.getByLabel(
-    "Write one or two plain-English sentences that help a reader understand this document.",
-  );
-  await expect(summary).toBeFocused();
-  await summary.fill("An unsaved draft must not change the approved line.");
-  await writer.call("set_status", { uuid, status: "decided" });
-  await expect(summary).toHaveAttribute("readonly", "");
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Clear", exact: true })).toBeDisabled();
-  await summary.press("Enter");
-  await expect(summary).toHaveValue("An unsaved draft must not change the approved line.");
-  const saved = await writer.call<{ tldr: string | null }>("get_doc", { uuid });
-  expect(saved.tldr).toBe("Keep the approved wording.");
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.locator(".ub-tldr-body > p").click();
-  await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
-  await expect(page.locator(".ub-tldr-body > p")).toHaveText("Keep the approved wording.");
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    upstream: true, contextOptions: { ...(touch ? devices["iPad (gen 7)"] : {}), colorScheme: appearance },
+  });
+  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
+    peer.decide(status, "Keep the approved wording.");
+    await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
+    const summary = page.locator(".ub-tldr-body > p");
+    await expect(summary).toHaveText("Keep the approved wording.");
+    if (touch) await summary.tap();
+    else await summary.click();
+    await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
+    const actions = page.getByRole("button", { name: "Document actions" });
+    if (touch) await actions.tap();
+    else { await actions.focus(); await page.keyboard.press("Enter"); }
+    await expect(page.getByRole("menu")).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    peer.decide(status, null);
+    await expect(page.locator(".ub-tldr")).toHaveCount(0);
+    if (touch) await actions.tap();
+    else await actions.click();
+    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  }
 });
 
 test("a live decision locks title, line, prose and tables without replacing the view or moving its scroll", async ({ browser }) => {
@@ -246,7 +263,9 @@ test("a live decision locks title, line, prose and tables without replacing the 
   await pane.evaluate((element) => { element.scrollTop = 400; });
   const scroll = await pane.evaluate((element) => element.scrollTop);
   expect(scroll).toBeGreaterThan(0);
-  await writer.call("set_status", { uuid, status: "decided" });
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  peer.decide("decided");
   await expect(view).toHaveAttribute("contenteditable", "false");
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
   expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);

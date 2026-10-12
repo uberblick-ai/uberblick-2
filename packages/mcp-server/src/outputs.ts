@@ -5,7 +5,7 @@ import { strictInput } from "./inputs.js";
 const count = z.number().int().nonnegative();
 const uuid = z.string().describe("Document identity; a UUID, never a title or path.");
 const description = z.string().nullable().describe("Agent-facing document description; null when unwritten.");
-const tldr = z.string().nullable().describe("Person-facing document summary or decision line; null when unwritten.");
+const tldr = z.string().nullable().describe("Person-facing document summary; legacy decision summaries remain readable. Null when unwritten.");
 const status = z.enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES]);
 const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
@@ -43,7 +43,7 @@ const documentDurability = {
 };
 const contentReview = {
   tldr: z.null().optional().describe("Present when changed document content has no TL;DR."),
-  tldrHint: z.string().describe("Non-blocking request to review the TL;DR after changing document content."),
+  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records."),
 };
 const touchedRoom = z.object({
   purpose: z.string().describe("The independently written room's purpose."),
@@ -75,6 +75,7 @@ const directoryEntry = z.object({
   topic: z.string().optional(),
   supersedes: z.string().optional(),
   tldr: z.string().optional(),
+  answerPreview: z.string().nullable().optional().describe("Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
   agentStance: z.boolean().optional(),
   decidedBy: z.string().optional(),
   decidedAt: z.string().optional(),
@@ -250,7 +251,9 @@ export const outputSchemas = {
     ...decisionAuthority,
     approvalFingerprint: z.string().optional(),
     room: z.string(),
-    decisions: z.array(decisionTopic),
+    decisions: z.array(decisionTopic.extend({
+      relation: z.enum(["related", "linked"]).describe("Related page membership takes precedence over an indexed link from any record in the topic."),
+    }).strict()),
     predecessors: z.array(directoryEntry).optional(),
     successors: z.array(directoryEntry).optional(),
     resolution: decisionTopic.nullable().optional(),

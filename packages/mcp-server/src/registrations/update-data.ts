@@ -9,18 +9,22 @@ export function registerUpdateData(server: ToolRegistrar, context: ToolContext):
   server.registerTool("update_data", {
     title: "Update document data",
     description:
-      "Apply one validated batch through the shared applyDocData operation. Name each touched collection once. " +
+      "Apply one validated batch through applyDocData, naming each touched collection once. " +
       "Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` " +
-      "whole `{id, value}` records. `deleteCollection: true` is exclusive of other changes. Schema and value " +
-      "JSON reach the shared validator unaltered; unsupported schema versions/rules and invalid retained " +
-      "records are refused before mutation. The whole batch commits as one local transaction. An identical " +
-      "refresh reports `changed: false` and emits no update. The answer summarizes touched collection names, " +
-      "counts and deletion without schemas or record values, plus the normal durability fields.\n\n" +
-      "A producer owns its collections and refreshes them by upsert or full-set replacement. Keep human " +
-      "dispositions in a separate collection keyed by the producer's record ids; refreshing producer records " +
-      "leaves that collection unchanged. Split changes exceeding the 1 MiB operation budget (schemas plus " +
-      "changed record values) across calls; those calls are not atomic together. No CAS, distributed lock or " +
-      "new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data." +
+      "whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON " +
+      "reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. " +
+      "The batch is one local transaction; identical refreshes return `changed: false` without an update. " +
+      "The result summarizes touched collection names, counts and deletion with durability, without values.\n\n" +
+      "Refresh producer-owned collections by upsert or full-set replacement. Keep human " +
+      "dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB " +
+      "schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. " +
+      "Read with get_data; get_doc summarizes collections. " +
+      "Decisions refuse data with decision_data_unsupported; decided records " +
+      "keep decision_read_only, and legacy data stays readable. Decisions use one to three short answer " +
+      "blocks with a brief reason, guidance on the related regular page and discussion in an RFC. Their " +
+      "directory answerPreview uses legacy TL;DR or the first paragraph/list; get_doc page " +
+      "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
+      "the answer's content blocks." +
       helpPointer("update_data"),
     outputSchema: outputSchemas.update_data,
     inputSchema,

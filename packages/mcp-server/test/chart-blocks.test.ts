@@ -1,6 +1,7 @@
 /** Existing content tools author chart mappings while retaining ordinary locks and indexing. */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
+import { setKind, setStatus } from "@uberblick/schema";
 import { removeTempDirs, startServer } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -75,10 +76,13 @@ describe.each([
     const rig = await local();
     const created = await rig.ok("create_doc", {
       title: "Locked trend", description: "A read-only chart mapping.",
-      ...(state === "decided" ? { kind: "decision", status: "decided" } : {}),
       blocks: [{ type: "chart", text: mapping }],
     });
     const { uuid } = created;
+    if (state === "decided") {
+      const legacy = rig.instance.replicas.replica(uuid).doc;
+      legacy.transact(() => { setKind(legacy, "decision"); setStatus(legacy, "decided"); });
+    }
     if (state === "archived") await rig.ok("archive_doc", { uuid });
     const read = await rig.ok("get_doc", { uuid });
     expect(read.blocks[0]).toMatchObject({ type: "chart", text: mapping });

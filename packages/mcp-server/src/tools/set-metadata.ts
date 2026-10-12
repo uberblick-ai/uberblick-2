@@ -61,6 +61,9 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
   if (contentField !== undefined) {
     forField(contentField, () => context.requireWritableDoc(uuid, true));
   }
+  if (getMeta(replica.doc).kind === "decision" && tldr !== undefined && tldr !== null) {
+    throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", { uuid, field: "tldr" });
+  }
   const tagIds = tags === undefined ? undefined : forField("tags", () =>
     resolveTagSelectors(context.replicas, tags, context.documentTags(replica)));
   if (links !== undefined) {

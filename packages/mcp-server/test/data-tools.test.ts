@@ -5,8 +5,12 @@ import {
   createTagCatalogEntry,
   DATA_KEY,
   DATA_LIMITS,
+  decisionApprovalFingerprint,
+  getMetaMap,
   readDocData,
   setTags,
+  setKind,
+  setStatus,
 } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -356,11 +360,21 @@ describe("dedicated document data MCP tools", () => {
     expect((await rig.ok("get_doc", { uuid: target.uuid })).data.collections).toEqual([{ name: "observations", recordCount: 1 }]);
     await refuse(rig, target.uuid, operations, "doc_archived");
     const decision = await create(rig, { kind: "decision", title: "Data decision" });
-    await rig.ok("update_data", { uuid: decision.uuid, operations });
+    await refuse(rig, decision.uuid, operations, "decision_data_unsupported");
     await rig.ok("set_status", { uuid: decision.uuid, status: "decided" });
-    const decidedData = await rig.ok("get_data", { uuid: decision.uuid, collection: "observations" });
     await refuse(rig, decision.uuid, operations, "decision_read_only");
-    expect(await rig.ok("get_data", { uuid: decision.uuid, collection: "observations" })).toEqual(decidedData);
+    const legacy = await create(rig, { title: "Legacy data decision" });
+    await rig.ok("update_data", { uuid: legacy.uuid, operations });
+    const legacyDoc = document(rig, legacy.uuid);
+    legacyDoc.transact(() => {
+      setKind(legacyDoc, "decision");
+      setStatus(legacyDoc, "decided");
+      getMetaMap(legacyDoc).set("approvalFingerprint", decisionApprovalFingerprint(legacyDoc));
+    });
+    const decidedData = await rig.ok("get_data", { uuid: legacy.uuid, collection: "observations" });
+    expect((await rig.ok("get_doc", { uuid: legacy.uuid })).approvalChanged).toBe(false);
+    await refuse(rig, legacy.uuid, operations, "decision_read_only");
+    expect(await rig.ok("get_data", { uuid: legacy.uuid, collection: "observations" })).toEqual(decidedData);
   });
 
   it("observes merged schemas and invalid records without repairing them or leaking off-page diagnostics", async () => {

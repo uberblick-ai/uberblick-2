@@ -178,6 +178,30 @@ it("keeps shared guarantees in the owning topics after shortening descriptions",
   expect(contracts).toContain("re-sends it on reconnect");
 });
 
+it("describes short decision answers, page context and previews without repository authority", async () => {
+  const rig = await local();
+  const { tools } = await rig.client.listTools();
+  for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const rule of ["answer blocks", "brief reason", "related", "linked", "answerPreview", "RFC"]) {
+      expect(text, `${topic}: ${rule}`).toContain(rule);
+    }
+    expect(text, topic).not.toMatch(/decision line|boundary table|owner's recorded GitHub decision|reasons and guidance/);
+    const description = tools.find((tool) => tool.name === topic)?.description;
+    if (description !== undefined) {
+      for (const rule of ["related", "linked", "answerPreview"]) expect(description, topic).toContain(rule);
+      expect(description, topic).not.toMatch(/decision line|boundary table|governs requires/);
+    }
+  }
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  for (const code of [
+    "decision_block_unsupported", "decision_answer_too_long", "decision_answer_empty",
+    "decision_tldr_unsupported", "decision_data_unsupported", "related_not_regular_document",
+  ]) expect(lifecycle, code).toContain(code);
+  expect(lifecycle).toContain("answer: {who, when, where}");
+  expect(lifecycle).toContain("missing preview is unknown");
+});
+
 it("explains when a decision record is useful without turning examples into project policy", async () => {
   const rig = await local();
   const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;

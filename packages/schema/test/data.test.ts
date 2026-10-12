@@ -109,7 +109,6 @@ describe("document-owned data", () => {
 
   it("round-trips accepted Unicode and prototype-like names with stable approval and refreshes", () => {
     const { doc, directory, apply } = rig();
-    setKind(doc, "decision");
     const schema: CollectionSchema = { version: 1, schema: {
       type: "object",
       properties: {
@@ -174,6 +173,8 @@ describe("document-owned data", () => {
     expect(failUnchanged(doc, () => apply([{ collection: "a", schema: SCHEMA }])).code).toBe("doc_archived");
     const open = rig();
     setKind(open.doc, "decision");
+    expect(failUnchanged(open.doc, () => open.apply([{ collection: "a", schema: SCHEMA }])).code).toBe("decision_data_unsupported");
+    expect(failUnchanged(open.doc, () => open.apply([])).code).toBe("decision_data_unsupported");
     setStatus(open.doc, "decided");
     expect(failUnchanged(open.doc, () => open.apply([{ collection: "a", schema: SCHEMA }])).code).toBe("decision_read_only");
     const successor = rig();
@@ -182,6 +183,18 @@ describe("document-owned data", () => {
     upsertDirectoryEntry(successor.directory, { uuid: UUID, title: "Successor", tags: [], kind: "decision", status: "open", topic });
     tombstoneDirectoryEntry(successor.directory, topic);
     expect(failUnchanged(successor.doc, () => successor.apply([{ collection: "a", schema: SCHEMA }])).code).toBe("doc_archived");
+  });
+
+  it("retains readable legacy decision data while refusing every new mutation", () => {
+    const { doc, apply } = rig();
+    apply([{ collection: "legacy", schema: SCHEMA, upsert: [{ id: "kept", value: { answer: "Existing" } }] }]);
+    setKind(doc, "decision");
+    const legacy = readDocData(doc);
+    expect(legacy!.collections[0]!.records[0]!.value).toEqual({ answer: "Existing" });
+    expect(failUnchanged(doc, () => apply([{ collection: "legacy", deleteCollection: true }])).code).toBe("decision_data_unsupported");
+    setStatus(doc, "decided");
+    expect(failUnchanged(doc, () => apply([{ collection: "legacy", upsert: [{ id: "kept", value: {} }] }])).code).toBe("decision_read_only");
+    expect(readDocData(doc)).toEqual(legacy);
   });
 
   it("converges independent keys and reports incompatible schema/record winners without writes", () => {

@@ -171,7 +171,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     const replica = requireDoc(uuid);
     const meta = getMeta(replica.doc);
     if (contentMutation && decisionContentLocked(meta)) {
-      throw new ToolError("decision_read_only", "A decided record's title, decision line, blocks and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
+      throw new ToolError("decision_read_only", "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only; create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
     return replica;
   };
@@ -352,7 +352,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** A non-blocking reminder returned only after document content changes. */
   const tldrReview = (replica: Replica): Record<string, unknown> =>
-    getMeta(replica.doc).tldr === null
+    getMeta(replica.doc).kind === "decision" ? {} : getMeta(replica.doc).tldr === null
       ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
       : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };
 

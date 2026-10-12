@@ -83,6 +83,7 @@ describe("unknown fields", () => {
         (tool.inputSchema as any).additionalProperties,
         `${tool.name} strips unknown fields instead of refusing them`,
       ).toBe(false);
+      expect((tool.inputSchema as any).properties, tool.name).not.toHaveProperty("answerPreview");
     }
 
     const logged = store.logSize();
@@ -116,6 +117,14 @@ describe("unknown fields", () => {
     });
     expect(renamed.isError).toBe(true);
 
+    for (const [tool, args] of [
+      ["create_doc", { title: "Derived preview", description: "The preview cannot be authored.", kind: "decision", answerPreview: "Injected" }],
+      ["set_metadata", { uuid: doc.uuid, answerPreview: "Injected" }],
+    ] as const) {
+      const refused = await rig.call(tool, args);
+      expect(refused.payload.error).toBe("schema_validation");
+    }
+
     // No uuid, no room update, nothing durable: the handlers never ran.
     expect((await rig.ok("list_docs")).docs).toHaveLength(before);
     expect(store.logSize()).toBe(logged);
@@ -137,7 +146,7 @@ describe("create_doc lifecycle arguments", () => {
         required: ["kind"],
         properties: {
           kind: { const: "requirement" },
-          governs: false,
+          related: false,
           supersedes: false,
           answer: false,
         },
@@ -147,7 +156,7 @@ describe("create_doc lifecycle arguments", () => {
         properties: {
           kind: false,
           status: false,
-          governs: false,
+          related: false,
           supersedes: false,
           answer: false,
         },

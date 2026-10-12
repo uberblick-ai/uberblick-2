@@ -1,4 +1,4 @@
-import { InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, decisionRelations, getMeta, getMetaMap, isDocumentStatusForKind, setKind, setStatus } from "@uberblick/schema";
+import { InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, decisionDocAnswerFailure, decisionRelations, getMeta, getMetaMap, isDocumentStatusForKind, setKind, setStatus } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
@@ -61,6 +61,10 @@ export const setStatusOperation = documentOperation("set_status", inputSchema, (
       if (!first || answered) {
         throw new ToolError("decision_answer_required", "Deciding this record requires recording a person's answer (who, when, where).", { uuid, kind, status });
       }
+    }
+    if (status === "decided" && stored.status !== "decided") {
+      const failure = decisionDocAnswerFailure(replica.doc);
+      if (failure !== null) throw new ToolError(failure, "A decided record needs a non-empty answer in one to three supported content blocks, without TL;DR or structured data.", { uuid, kind, status });
     }
   }
 

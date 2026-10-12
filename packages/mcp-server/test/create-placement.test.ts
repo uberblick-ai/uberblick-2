@@ -534,7 +534,7 @@ describe("a create that gets part-way", () => {
     ]);
   });
 
-  it("never writes the governed requirement room", async () => {
+  it("never writes the related page room", async () => {
     const databasePath = tempDatabasePath();
     const store = failingStore(databasePath);
     const rig = await server(databasePath, store);
@@ -546,8 +546,8 @@ describe("a create that gets part-way", () => {
     store.failRoom = room => room === requirementRoom;
     store.failing = true;
     const decision = await rig.ok("create_doc", {
-      title: "Own metadata", description: "Stores its governing link itself.",
-      kind: "decision", governs: requirement.uuid,
+      title: "Own metadata", description: "Stores its related page itself.",
+      kind: "decision", related: requirement.uuid,
     });
     expect(store.appends.get(requirementRoom)).toBe(before);
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual(["document", "directory"]);

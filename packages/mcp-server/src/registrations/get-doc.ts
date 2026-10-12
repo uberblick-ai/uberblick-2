@@ -10,6 +10,11 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
     title: "Read a document",
     description:
       "Read one document's metadata, blocks and annotation threads, including lifecycle and decision context. " +
+      "Decision records hold one to three short answer blocks with a brief reason; guidance belongs on the " +
+      "related regular page and discussion in an RFC. " +
+      "Regular pages return live topics first as related to this page, then as linked to it by any record, " +
+      "with each relation marked. Directory decision entries include a cached answerPreview when known: " +
+      "legacy TL;DR, else the first paragraph or list shortened to 300 characters. " +
       "Missing description and TL;DR return null. Structured data is summarized by collection names and record " +
       "counts; use get_data for schemas and values. Blocks include rev for edit assertions. Table text is " +
       "canonical GFM; card text is canonical container content. Both have formatting-sensitive rev; other " +

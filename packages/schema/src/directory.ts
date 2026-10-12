@@ -9,6 +9,7 @@ import { canonicalDocumentUuid } from "./rooms.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations } from "./annotations.js";
 import { decisionApprovalChanged } from "./approval.js";
+import { decisionAnswerPreview } from "./decision-answer.js";
 import type {
   DirectoryEntry,
   DocMeta,
@@ -38,6 +39,7 @@ interface StoredEntry {
   topic?: string;
   supersedes?: string;
   tldr?: string;
+  answerPreview?: string | null;
   agentStance?: boolean;
   decidedBy?: string;
   decidedAt?: string;
@@ -81,6 +83,7 @@ export function directoryStubDiffers(
       stub.decidedBy !== meta.decidedBy ||
       stub.decidedAt !== meta.decidedAt ||
       (fields !== undefined && stub.approvalChanged !== fields.approvalChanged) ||
+      (fields !== undefined && stub.answerPreview !== fields.answerPreview) ||
       (fields !== undefined && stub.commentCount !== fields.commentCount)
     ))
   );
@@ -162,7 +165,7 @@ function withResolvedUpdatedAt(
 
 const DECISION_CACHE_KEYS = [
   "governs", "topic", "supersedes", "tldr", "agentStance", "decidedBy",
-  "decidedAt", "approvalChanged", "commentCount",
+  "decidedAt", "approvalChanged", "commentCount", "answerPreview",
 ] as const;
 
 /** Tolerant reads of the decision-only cache; unknown foreign values vanish. */
@@ -173,6 +176,7 @@ function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry
     if (uuid !== null) fields[key] = uuid;
   }
   if (typeof value.tldr === "string" && value.tldr !== "") fields.tldr = value.tldr;
+  if (value.answerPreview === null || typeof value.answerPreview === "string") fields.answerPreview = value.answerPreview;
   for (const key of ["decidedBy", "decidedAt"] as const) {
     const text = value[key];
     if (typeof text === "string" && text.trim() !== "") fields[key] = text;
@@ -261,6 +265,7 @@ export interface DirectoryUpsert {
   topic?: string | null;
   supersedes?: string | null;
   tldr?: string | null;
+  answerPreview?: string | null;
   agentStance?: boolean | null;
   decidedBy?: string | null;
   decidedAt?: string | null;
@@ -270,7 +275,7 @@ export interface DirectoryUpsert {
 
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
-  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount">;
+  "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview">;
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
 export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
@@ -281,6 +286,7 @@ export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
     topic: meta.topic ?? meta.uuid,
     supersedes: meta.supersedes ?? null,
     tldr: meta.tldr ?? null,
+    answerPreview: decisionAnswerPreview(doc),
     agentStance: meta.agentStance ?? null,
     decidedBy: meta.decidedBy ?? null,
     decidedAt: meta.decidedAt ?? null,

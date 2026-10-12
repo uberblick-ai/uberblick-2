@@ -5,9 +5,14 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
-    "Optional `tldr` supplies the decision line before a decided record freezes it, under set_metadata rules and " +
-    "limit. When the call seeds at least one block and stays editable, its answer carries the non-blocking " +
-    "TL;DR review reminder; a metadata-only create carries no such reminder.\n\n" +
+    "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
+    "Decision records instead hold one to three short answer blocks with a brief reason: paragraph, code, " +
+    "table or a maximal run of adjacent list-item blocks. Other types refuse with decision_block_unsupported; " +
+    "more than three answer blocks refuse with decision_answer_too_long, and either writes nothing. Guidance " +
+    "belongs on the related regular page and discussion in an RFC. A decision refuses non-null tldr with " +
+    "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
+    "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
+    "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
     "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
@@ -16,18 +21,21 @@ export const toolHelpDetails = {
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
     "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
     "without `kind`, or a status owned by the other kind, is refused before a document is created. A decision " +
-    "may pass `governs`, the UUID of a live, hydrated requirement in this replica. The decision stores " +
-    "`governs` in its own metadata; the requirement's decision log is derived from directory stubs. Any other " +
-    "use of `governs` is refused before a UUID is allocated or a room is written. A decision may also pass " +
+    "may pass `related`, the UUID of one live, locally readable regular page, including a requirement. " +
+    "A decision target refuses with related_not_regular_document. The page is fixed at creation, stored as " +
+    "`governs` for compatibility; existing governs values stay related pages without migration. Any other " +
+    "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
     "`supersedes`, the UUID of a hydrated decision in a live topic it replaces. The reference is immutable, " +
-    "and its predecessor's topic is copied forward; a first record uses its own UUID as topic. `topic` is " +
+    "and its predecessor's topic is copied forward; a successor without related also inherits its page. " +
+    "An explicit related selects the page given. A first record uses its own UUID as topic. `topic` is " +
     "never an input. Supersession is returned by get_doc and is a derived link: backlinks on the earlier " +
     "decision exposes every successor without editing that earlier document. A non-decision target or a " +
     "self-reference is refused before any room is written. An archived predecessor topic is refused with " +
     "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering " +
     "it. Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as " +
     "proposals. A decided successor without an answer is refused before allocating a UUID or writing any " +
-    "room.\n\n" +
+    "room. Directory decision entries derive answerPreview from the legacy TL;DR or first paragraph/list; " +
+    "get_doc on the related page returns its topic marked related, and other linking topics marked linked.\n\n" +
     "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is " +
     "created unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group " +
     "that ALREADY exists — the id comes from get_sidebar, `position` is clamped into range and omitted means " +
@@ -37,7 +45,7 @@ export const toolHelpDetails = {
     "brings a group into being. The answer echoes the placement it made as `sidebar: {group: {id, name}, " +
     "position}`.\n\n" +
     "This call writes up to three independently persisted rooms — the document, the directory, and the " +
-    "sidebar when you place it — so it reports them one by one. The governing requirement is never written. " +
+    "sidebar when you place it — so it reports them one by one. The related page is never written. " +
     "If the local update log refuses a write part-way, the call fails with `persistence_failed` carrying the " +
     "`uuid`, the rooms already `completed`, the `failed` room, `rolledBack: false`, and a stage-aware " +
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
@@ -47,6 +55,15 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
+    "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
+    "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
+    "is oldest-topic-first, deduplicated, with archived topics omitted; indexed links can lag content. " +
+    "Decision entries include a cached answerPreview: legacy TL;DR or the first paragraph/list as plain " +
+    "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
+    "It is null without a paragraph or list, or absent when the cache is unknown. Decision answers use " +
+    "one to three short answer blocks with a brief reason; guidance belongs on the related page and " +
+    "discussion in an RFC. Recorded `answer: {who, when, where}` is attribution, not the answer content.\n\n" +
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
     "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
@@ -87,7 +104,12 @@ export const toolHelpDetails = {
     "true` returns every record with predicates applied per record. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
-    "synced.\n\n" +
+    "synced. Decision answers use one to three short blocks with a brief reason, with guidance on their " +
+    "related regular page and discussion in an RFC. Every decision directory entry carries a derived " +
+    "answerPreview when known: legacy TL;DR, else plain text of the first paragraph or list, list items " +
+    "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
+    "neither exists, and absent when unknown. Page get_doc reads mark related and linked topics separately; " +
+    "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
     "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
@@ -249,8 +271,12 @@ export const toolHelpDetails = {
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
     "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
     "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +
-    "overlong TL;DR values are refused; use null to clear it. Decision stubs cache it as the decision line, " +
-    "while ordinary document stubs, search and Markdown do not carry it.\n\n" +
+    "overlong TL;DR values are refused; use null to clear it. On an open decision, non-null tldr refuses with " +
+    "decision_tldr_unsupported; null clears a legacy value. Decisions hold one to three short answer blocks " +
+    "with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Their " +
+    "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
+    "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
+    "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
     "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
     "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
     "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +

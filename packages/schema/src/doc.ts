@@ -54,7 +54,7 @@ export interface InitDocOptions {
   uuid: string;
   title: string;
   tags?: string[];
-  /** Product document this decision shapes. */
+  /** Related page; its presence and target are fixed at creation. */
   governs?: string;
   /** Internal creation input, copied from the predecessor; never a MCP argument. */
   topic?: string;
@@ -68,7 +68,7 @@ export interface InitDocOptions {
 
 /**
  * Reinitialisation restates title/tags, preserves existing links and omitted
- * descriptions, and cannot add/change predecessor, decision identity or topic.
+ * descriptions, and cannot add/change related page, predecessor, decision identity or topic.
  * A successor supplies its predecessor's topic; first records own their topic.
  */
 export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
@@ -115,6 +115,9 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   // Absence is also fixed at creation: a later reinitialisation cannot add a
   // predecessor or change an adopted decision's implicit self topic.
   if (meta.has("uuid")) {
+    if (governs !== undefined && canonicalDocumentUuid(meta.get("governs")) !== governs) {
+      throw new Error("Decision related page is immutable after creation");
+    }
     if (supersedes !== undefined && canonicalDocumentUuid(meta.get("supersedes")) !== supersedes) {
       throw new InvalidSupersedesReferenceError("immutable", supersedes);
     }
