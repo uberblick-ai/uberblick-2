@@ -214,8 +214,8 @@ importers:
         specifier: workspace:*
         version: link:../schema
       '@uberblick/wireframe':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       chart.js:
         specifier: 4.5.1
         version: 4.5.1
@@ -1408,8 +1408,8 @@ packages:
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
-  '@uberblick/wireframe@0.2.0':
-    resolution: {integrity: sha512-uj3E4iFAw7RpaCiWgVAZUNz7h5501GX99wzrI0SOcb3P2xBrWyxEONZvDVRbl4xcFZMpbkOcw3bHJ9aCDo6ulw==}
+  '@uberblick/wireframe@0.3.0':
+    resolution: {integrity: sha512-eCccUU0iw/WoK0R4vToGPhP6FUkCJ3ItpQXUG8Lt6qNwjizJxg5sK4wuPN+blHJsLfOyfrV1z2skMQFXLebpnQ==}
 
   '@upsetjs/venn.js@2.0.0':
     resolution: {integrity: sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==}
@@ -3804,7 +3804,7 @@ snapshots:
 
   '@types/unist@3.0.3': {}
 
-  '@uberblick/wireframe@0.2.0': {}
+  '@uberblick/wireframe@0.3.0': {}
 
   '@upsetjs/venn.js@2.0.0':
     optionalDependencies:
