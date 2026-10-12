@@ -23,8 +23,8 @@ export const WORKSPACE_PROMOTE_HELP = `usage: ub workspace promote <hub>
 
 Share the selected local-only workspace on a GitHub-enabled hub. Sign in first
 with ub auth login <hub>; promote reuses this machine's stored login. Your account
-must currently be a member or administrator of at least one workspace on that
-hub. On a fresh hub, its first login claims the default workspace and qualifies.
+must currently be a hub administrator. On a fresh hub, the first login claims
+hub administration and the default workspace. Workspace membership does not qualify.
 
 The hub can be a bare host, an HTTP(S) URL or a WS(S) endpoint. Bare hosts and
 HTTP(S) URLs without a path use /ws; WS(S) endpoints keep their supplied path.
@@ -82,7 +82,7 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
   if (status === 200 && (result.status === "created" || result.status === "resumed") &&
       result.workspaceId === workspaceId && result.attemptId === attemptId) return result.status;
   const reasons: Record<string, string> = {
-    "member-required": "your GitHub account must currently belong to at least one workspace on this hub; ask a workspace administrator for access or choose another hub",
+    "hub-admin-required": "only a current hub administrator can add a workspace to this hub; ask a hub administrator. Nothing was uploaded",
     "admin-required": "your GitHub account must already administer a workspace on this hub; ask a workspace administrator for access or choose another hub",
     "workspace-conflict": "the hub already holds this workspace UUID, or it belongs to a different promotion attempt; resume from the original machine and receipt, or create a different local workspace",
     "protocol-mismatch": "hub and client sync versions differ; update them together",

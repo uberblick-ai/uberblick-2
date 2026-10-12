@@ -2,6 +2,7 @@
 import type { StoredHubLogin } from "./auth-store.js";
 import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "@uberblick/schema/token";
 
@@ -70,6 +71,33 @@ function member(value: unknown): Record<string, unknown> {
     githubUsername: value.githubUsername, role: value.role };
 }
 
+function count(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function hubAdmin(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
+  if (!object(value) || !uuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
+      !isGithubUsername(value.githubUsername) || !count(value.workspaces) ||
+      (value.lastSignedInAt !== null && !count(value.lastSignedInAt)) || typeof value.current !== "boolean" ||
+      (login !== undefined && value.current !== (value.principalId === login.identity.id))) {
+    throw new ManagementResponseError();
+  }
+  return { principalId: value.principalId, githubAccountId: value.githubAccountId,
+    githubUsername: value.githubUsername, workspaces: value.workspaces,
+    lastSignedInAt: value.lastSignedInAt, current: value.current };
+}
+
+function hubWorkspace(value: unknown, login?: StoredHubLogin): Record<string, unknown> {
+  if (!object(value) || !uuid(value.workspaceId) || !count(value.members) ||
+      !Array.isArray(value.admins) || !value.admins.every(isGithubUsername)) {
+    throw new ManagementResponseError();
+  }
+  const name = sanitizeWorkspaceNames({ [value.workspaceId]: value.name }, [value.workspaceId],
+    login?.credential.key ?? "\u0000")?.[value.workspaceId];
+  return { workspaceId: value.workspaceId, members: value.members, admins: value.admins,
+    ...(name === undefined ? {} : { name }) };
+}
+
 /** Project only public contract fields; upstream extras and messages may contain credentials. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
 export function sanitizeManagementReply(
@@ -94,6 +122,26 @@ export function sanitizeManagementReply(
     return result({ status: state, applied: true });
   }
   switch (action.operation) {
+    case "own-hub-role":
+      if (status === 200 && state === "ok" && body.role === "admin") {
+        return result({ status: state, role: "admin" });
+      }
+      break;
+    case "list-hub-admins":
+      if (status === 200 && state === "ok" && Array.isArray(body.admins)) {
+        const admins = body.admins.map(value => hubAdmin(value, login));
+        if (new Set(admins.map(row => row.principalId)).size !== admins.length ||
+            admins.filter(row => row.current).length !== 1) throw new ManagementResponseError();
+        return result({ status: state, admins });
+      }
+      break;
+    case "list-hub-workspaces":
+      if (status === 200 && state === "ok" && Array.isArray(body.workspaces)) {
+        const workspaces = body.workspaces.map(value => hubWorkspace(value, login));
+        if (new Set(workspaces.map(row => row.workspaceId)).size !== workspaces.length) throw new ManagementResponseError();
+        return result({ status: state, workspaces });
+      }
+      break;
     case "resolve-account":
       if (status === 200 && state === "ok" && isGithubAccountId(body.githubAccountId) &&
           isGithubUsername(body.githubUsername)) {
@@ -141,6 +189,7 @@ export function sanitizeManagementReply(
     case "revoke-device":
     case "change-role":
     case "remove-member":
+    case "remove-hub-admin":
       if (status === 200 && state === "ok") return result({ status: state });
       break;
   }
@@ -150,6 +199,9 @@ export function sanitizeManagementReply(
   }
   if (status === 404 && state === "device-not-found" && action.operation === "revoke-device") return result({ status: state });
   if (status === 404 && state === "member-not-found" && action.operation === "change-role") return result({ status: state });
+  if (action.operation === "remove-hub-admin" &&
+      ((status === 404 && state === "admin-not-found") ||
+       (status === 409 && (state === "self-admin" || state === "last-admin")))) return result({ status: state });
   if (status === 409 && state === "last-admin" &&
       (action.operation === "change-role" || action.operation === "remove-member")) return result({ status: state });
   throw new ManagementResponseError();

@@ -9,6 +9,7 @@ import { protocolMismatchReason } from "@uberblick/schema/protocol";
 import { clampToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
 
 import type { WorkspacePromotions } from "./workspace-promotion.js";
+import { HubAdminRefusal, type HubAdminRegistry } from "./hub-admins.js";
 
 type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 
@@ -23,6 +24,7 @@ export async function handleAccessManagement(
   response: ServerResponse,
   promotions?: WorkspacePromotions,
   accounts?: GithubAccountLookup,
+  hubAdmins?: HubAdminRegistry,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => {
@@ -128,8 +130,26 @@ export async function handleAccessManagement(
           break;
         }
         const status = promotions.reserve(action.workspaceId, action.attemptId, current.principalId);
-        reply(status === "member-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
+        reply(status === "hub-admin-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
           { status, workspaceId: action.workspaceId, attemptId: action.attemptId });
+        break;
+      }
+      case "own-hub-role":
+      case "list-hub-admins":
+      case "remove-hub-admin":
+      case "list-hub-workspaces": {
+        if (hubAdmins === undefined) {
+          reply(503, { status: "not-configured" });
+          break;
+        }
+        hubAdmins.requireAdmin(current.principalId);
+        if (action.operation === "own-hub-role") reply(200, { status: "ok", role: "admin" });
+        else if (action.operation === "list-hub-admins") reply(200, { status: "ok", admins: hubAdmins.listAdmins(current.principalId) });
+        else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", workspaces: hubAdmins.listWorkspaces(current.principalId) });
+        else {
+          hubAdmins.remove(current.principalId, action.principalId);
+          reply(200, { status: "ok" });
+        }
         break;
       }
       case "list-devices":
@@ -167,7 +187,10 @@ export async function handleAccessManagement(
         break;
     }
   } catch (error) {
-    if (error instanceof MembershipRefusal) {
+    if (error instanceof HubAdminRefusal) {
+      const statuses = { "hub-admin-required": 403, "self-admin": 409, "last-admin": 409, "admin-not-found": 404 };
+      reply(statuses[error.code], { status: error.code === "hub-admin-required" ? "forbidden" : error.code });
+    } else if (error instanceof MembershipRefusal) {
       const statuses = { "admin-required": 403, "member-required": 403, "member-not-found": 404, "last-admin": 409 };
       reply(statuses[error.code], { status: error.code === "admin-required" || error.code === "member-required"
         ? "forbidden" : error.code });

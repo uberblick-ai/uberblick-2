@@ -112,6 +112,7 @@ type SidebarProps = {
   settingsOpen: boolean;
   /** The selected settings destination, when settings is open. */
   settingsPage: SettingsPage | null;
+  hubAdmin?: boolean;
 };
 
 export function Sidebar(props: SidebarProps): ReactElement {
@@ -175,6 +176,7 @@ function SidebarContent({
   allOpen,
   settingsOpen,
   settingsPage,
+  hubAdmin = false,
 }: SidebarProps & {
   drawer: boolean;
   sidebarRoot: RefObject<HTMLElement | null>;
@@ -360,6 +362,7 @@ function SidebarContent({
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           active={settingsOpen && !collapsed}
           page={settingsPage}
+          hubAdmin={hubAdmin}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
@@ -389,6 +392,7 @@ function SettingsNavigation({
   workspaceLabel: label,
   active,
   page,
+  hubAdmin,
   onSelect,
   onBack,
 }: {
@@ -396,6 +400,7 @@ function SettingsNavigation({
   workspaceLabel: string;
   active: boolean;
   page: SettingsPage | null;
+  hubAdmin: boolean;
   onSelect: (page: SettingsPage) => void;
   onBack: () => void;
 }): ReactElement {
@@ -460,6 +465,17 @@ function SettingsNavigation({
             </li>
           </ul>
         </section>
+        {hubAdmin && <section className="ub-nav ub-settings-nav" aria-label="Hub">
+          <p className="ub-nav-label">Hub</p>
+          <ul>
+            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
+              aria-current={page === "hub-admins" ? "page" : undefined}
+              onClick={() => onSelect("hub-admins")}><GearIcon />Admins</button></li>
+            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
+              aria-current={page === "hub-workspaces" ? "page" : undefined}
+              onClick={() => onSelect("hub-workspaces")}><GearIcon />Workspaces</button></li>
+          </ul>
+        </section>}
       </SidebarScrollContent>
     </nav>
   );

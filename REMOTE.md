@@ -726,21 +726,22 @@ gives each route's login and use commands. Include `http://` for loopback:
 a bare `localhost:8080` is interpreted as an HTTPS endpoint.
 
 A deployed hub creates exactly one default workspace only when its database
-contains no documents, sign-in principals, credentials, memberships or setup
-receipts on its first start with this version. Its UUID, name and one-time
+contains no documents, sign-in principals, credentials, memberships, hub
+administrators, promotion receipts or setup receipts on its first start with this version. Its UUID, name and one-time
 claim state persist in `hub.sqlite`. Restarts, container replacement and
 release updates reuse them, including a later rename in Workspace Settings.
 The hub created by `ub open` never initializes or claims a default workspace.
 An existing deployment is never claimable, even if it has no membership; keep
 using host-only first-admin setup there.
 
-Claiming commits the first account's admin membership and device credential
-together. Failure before commit claims nothing. If the completed response is
+Claiming commits the first account's hub administration, default-workspace
+admin membership and device credential together. Failure before commit claims nothing. If the completed response is
 lost, the claim still stands: signing in again with that account receives a
-credential for its workspace. Other completed logins grant no membership.
+credential for its workspace. Other completed logins grant neither membership nor hub administration.
 The first successful host-only first-admin grant, for any workspace, also
 closes claiming. Claiming and host setup racing for the default workspace
 can establish only one initial administrator.
+Host-only first-admin setup grants workspace administration only.
 
 A claim made by someone else cannot be recovered in place. There is no operator
 override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
@@ -797,8 +798,8 @@ without another GitHub approval, including to discover later membership grants.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
 credential for its workspace memberships. Only the first completed sign-in
-on a fresh, unclaimed hub creates the default workspace's admin membership;
-later sign-ins grant no membership.
+on a fresh, unclaimed hub grants hub administration and creates the default
+workspace's admin membership; later sign-ins grant neither role nor membership.
 Remote hubs require these credentials for live sync and re-check membership.
 Revocation or membership removal closes existing sessions. MCP and `ub open`
 keep their downloaded documents and pending edits locally; sign-in or restored
@@ -830,7 +831,7 @@ its credential UUID as `kid`, the operation and all targets below, and
 `lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
 `typ: "request"`, those exact fields, and `iat` and `exp` in epoch seconds.
 The key stays on the device. The hub verifies against its own issued,
-unrevoked, unreplaced credential and current membership. A proof cannot
+unrevoked, unreplaced credential and the current authority for the operation. A proof cannot
 authorize a different operation, workspace, device, person or role. Renewal
 proofs, room tokens, GitHub tokens, another hub's credentials and the local
 signing secret authorize no management. Management proofs open no room and
@@ -841,6 +842,10 @@ may repeat its effect; there is no replay cache.
 | --- | --- | --- |
 | `list-devices` | none | `{status: "ok", devices}` |
 | `revoke-device` | `deviceId` | `{status: "ok"}` |
+| `own-hub-role` | none | `{status: "ok", role: "admin"}` |
+| `list-hub-admins` | none | `{status: "ok", admins}` |
+| `remove-hub-admin` | `principalId` | `{status: "ok"}` |
+| `list-hub-workspaces` | none | `{status: "ok", workspaces}` |
 | `own-role` | `workspaceId` | `{status: "ok", role}` |
 | `list-members` | `workspaceId` | `{status: "ok", members}` |
 | `resolve-account` | `workspaceId`, `githubUsername` | `{status: "ok", githubAccountId, githubUsername}` |
@@ -856,6 +861,26 @@ can read their own role. Member rows contain `principalId`,
 sign-in), and `role`. The final admin cannot be demoted or removed.
 A non-admin member cannot remove themselves; an admin can
 leave while another admin remains.
+
+Hub operations require current hub administration, independently of workspace
+membership and credential workspace scope. Hub administrators live only in the
+hub-private `hub_admins` table; synchronized settings grant no hub authority.
+Claiming a fresh hub grants this role once. Existing deployments receive no
+automatic appointment, and there is no product route to add or restore it.
+Administrator rows contain `principalId`, `githubAccountId`, `githubUsername`,
+`workspaces` (membership count), `lastSignedInAt` (epoch milliseconds or null)
+and `current` (the requesting account). The last sign-in comes from the newest
+original device-credential row, including revoked devices; renewal does not
+count. Removing another hub administrator preserves all workspace memberships
+and roles. Self-removal returns 409 `self-admin`; an absent target returns 404
+`admin-not-found`. Current authority and last-admin protection are checked in
+the same transaction, so mutual removals cannot empty the registry.
+
+Workspace inventory rows contain `workspaceId`, optional valid `name`,
+`members` (count) and `admins` (workspace-admin handles). The inventory includes
+the default workspace and UUIDs present in stored document prefixes,
+memberships, promotion receipts or first-admin setup grants. Names come from
+each workspace's readable `_settings`; no other document content is returned.
 
 To add an account, first resolve its handle, then have the admin confirm the
 returned permanent GitHub account ID and current login. Resolution grants
@@ -906,7 +931,7 @@ All answers are `no-store`. Send proofs only in JSON bodies of at most 4096
 bytes, never URLs or an `Authorization` header. Successful operations return
 HTTP 200. Invalid bodies or methods return 400 `invalid-request`; protocol
 skew returns 409 `protocol-mismatch` with the hub's version. Failed proof
-authentication returns 401 `sign-in-required`. Missing workspace authority
+authentication returns 401 `sign-in-required`. Missing workspace or hub authority
 returns 403 `forbidden`, revealing no members. A foreign or unknown device
 returns the same 404 `device-not-found`; an admin changing an absent member's
 role receives 404 `member-not-found`. The final-admin guard returns 409
@@ -937,6 +962,14 @@ Every visit and change needs a reachable hub; access state is never saved in
 collaborative settings, stored locally or queued for later. Local-only
 workspaces have no members until `ub workspace promote` shares them, and hubs
 without GitHub sign-in offer no access controls.
+
+Settings also shows **Hub → Admins** and **Hub → Workspaces** to current hub
+administrators, even without membership in the open workspace. These pages
+manage only that workspace's bound hub; another stored login is never a
+fallback. Admins lists accounts, membership counts and relative last sign-in
+dates, with confirmation before removing another administrator. Workspaces is
+read-only. Hub role changes are enforced immediately on every hub request;
+the browser rechecks authority during navigation, on focus and while open.
 
 Removing a member ends that account's access to this workspace on every device.
 Revoking a device ends that one device's access to the hub. Downloaded documents
@@ -1385,7 +1418,7 @@ reconnect, and the corpus comes back off that replica.
 What no replica gives you is **point-in-time recovery** — yesterday's text of a
 document somebody has since mangled, in a system where every mangling replicates
 within a second. Backups also preserve the hub's private principal, credential
-and membership registries, default workspace identity and claim state in
+membership and hub-administrator registries, default workspace identity and claim state in
 `hub.sqlite`. Client replicas cannot restore those private records; restoring
 an older backup also restores its older access state. The default workspace's
 name lives in its synchronized settings room and is included in the same backup.
@@ -1407,9 +1440,10 @@ ub workspace promote http://localhost:8080
 `create` makes and selects a local-only workspace with a fresh UUID, name and
 starter documents/sidebar. Sign in first with `ub auth login <hub>`; `promote`
 reuses this hub's stored login and refuses if sign-in is required. Your account
-must currently be a member or administrator of at least one workspace on the hub.
-The login that claims a fresh hub's default workspace qualifies. Signing in
-otherwise grants nothing.
+must currently be a hub administrator. The login that claims a fresh hub also
+grants hub administration and qualifies. Signing in otherwise, workspace
+membership and workspace administration do not qualify. A refusal uploads
+nothing and leaves the workspace local; ask a hub administrator.
 
 Promotion grants this account the new workspace's sole initial admin membership,
 then renews its device credential, uploads documents (including archived
@@ -1423,8 +1457,10 @@ Promotion prints the complete connection link for use on another machine.
 A destination with documents or memberships is refused. The exception is the
 same recorded promotion attempt: after a failure or interruption, rerun the
 command on this machine. Keep its private saved attempt with the local data;
-the hub stores its receipt atomically with the grant. The project binding stays
-unchanged on failure and local work remains available. Close other clients while
+the hub stores its receipt atomically with the grant. Resuming still requires
+the receipt's account to administer that workspace, even if its hub administration
+has been removed. The project binding stays unchanged on failure and local work
+remains available. Close other clients while
 promoting. A workspace already bound to a hub cannot be promoted. The reservation
 itself does not change the hub's default workspace, first-claim state or other
 memberships. On a fresh hub, the separate sign-in before promotion can claim the
@@ -1433,7 +1469,7 @@ default workspace through the normal first-login flow.
 Host-only first-administrator setup remains a separate operation for workspaces
 without membership, existing or new. Its Unix-socket authority and restrictions are
 unchanged. Promotion's authenticated HTTP request can reserve only a new, empty
-UUID for an existing workspace member or administrator; it cannot adopt an
+UUID for a current hub administrator; it cannot adopt an
 unrelated populated one.
 
 Plain MCP registrations follow the project's `.uberblick.json` after creation

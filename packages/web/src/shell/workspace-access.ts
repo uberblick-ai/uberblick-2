@@ -2,6 +2,7 @@
 import { mintHubAuthMessage } from "../collab/rooms.js";
 import type { RequestAction } from "@uberblick/schema/token";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { validateWorkspaceName } from "@uberblick/schema";
 
 export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
 export type AccessRole = "member" | "admin";
@@ -17,6 +18,20 @@ export interface AccessDevice {
   signedInAt: number;
   current: boolean;
 }
+export interface HubAdmin {
+  principalId: string;
+  githubAccountId: string;
+  githubUsername: string;
+  workspaces: number;
+  lastSignedInAt: number | null;
+  current: boolean;
+}
+export interface HubWorkspace {
+  workspaceId: string;
+  name?: string;
+  members: number;
+  admins: string[];
+}
 export interface AccessAnswer {
   status: string;
   hub: string | null;
@@ -27,6 +42,8 @@ export interface AccessAnswer {
   member?: AccessMember;
   members?: AccessMember[];
   devices?: AccessDevice[];
+  admins?: HubAdmin[];
+  workspaces?: HubWorkspace[];
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -44,6 +61,34 @@ function member(value: unknown): AccessMember {
   return { principalId: item.principalId, githubAccountId: item.githubAccountId,
     githubUsername: item.githubUsername, role: item.role };
 }
+function count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function hubAdmin(value: unknown): HubAdmin {
+  const item = object(value);
+  if (item === null || typeof item.principalId !== "string" ||
+    typeof item.githubAccountId !== "string" || typeof item.githubUsername !== "string" ||
+    !count(item.workspaces) || typeof item.current !== "boolean" ||
+    (item.lastSignedInAt !== null && (typeof item.lastSignedInAt !== "number" ||
+      !Number.isFinite(new Date(item.lastSignedInAt).getTime())))) throw new Error("Invalid access answer");
+  return { principalId: item.principalId, githubAccountId: item.githubAccountId,
+    githubUsername: item.githubUsername, workspaces: item.workspaces,
+    lastSignedInAt: item.lastSignedInAt, current: item.current };
+}
+function hubWorkspace(value: unknown): HubWorkspace {
+  const item = object(value);
+  if (item === null || typeof item.workspaceId !== "string" || !count(item.members) ||
+    !Array.isArray(item.admins) || !item.admins.every((admin) => typeof admin === "string")) {
+    throw new Error("Invalid access answer");
+  }
+  let name: string | undefined;
+  if (item.name !== undefined) {
+    if (typeof item.name !== "string") throw new Error("Invalid access answer");
+    name = validateWorkspaceName(item.name);
+  }
+  return { workspaceId: item.workspaceId, ...(name === undefined ? {} : { name }),
+    members: item.members, admins: item.admins };
+}
 
 /** Keep only the response fields this page needs, never arbitrary diagnostics. */
 function answer(value: unknown, action: AccessAction): AccessAnswer {
@@ -58,6 +103,18 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
     case "own-role":
       if (!role(body.role)) throw new Error("Invalid access answer");
       parsed.role = body.role;
+      break;
+    case "own-hub-role":
+      if (body.role !== "admin") throw new Error("Invalid access answer");
+      parsed.role = body.role;
+      break;
+    case "list-hub-admins":
+      if (!Array.isArray(body.admins)) throw new Error("Invalid access answer");
+      parsed.admins = body.admins.map(hubAdmin);
+      break;
+    case "list-hub-workspaces":
+      if (!Array.isArray(body.workspaces)) throw new Error("Invalid access answer");
+      parsed.workspaces = body.workspaces.map(hubWorkspace);
       break;
     case "resolve-account":
       if (typeof body.githubAccountId !== "string" || typeof body.githubUsername !== "string") {

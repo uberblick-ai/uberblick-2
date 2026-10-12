@@ -70,6 +70,10 @@ export type RequestAction =
   | { operation: "renew-credential" }
   | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
   | { operation: "list-devices" }
+  | { operation: "own-hub-role" }
+  | { operation: "list-hub-admins" }
+  | { operation: "list-hub-workspaces" }
+  | { operation: "remove-hub-admin"; principalId: string }
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
   | { operation: "list-members"; workspaceId: string }
@@ -353,7 +357,14 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       action = { operation, workspaceId, attemptId };
       break;
     case "list-devices":
+    case "own-hub-role":
+    case "list-hub-admins":
+    case "list-hub-workspaces":
       action = { operation };
+      break;
+    case "remove-hub-admin":
+      if (!isSubject(principalId)) return null;
+      action = { operation, principalId };
       break;
     case "revoke-device":
       if (!isSubject(deviceId)) return null;

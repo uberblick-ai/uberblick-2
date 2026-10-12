@@ -32,13 +32,14 @@ async function localWorkspace(name = "Project notes") {
   expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
   return box;
 }
-async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin") {
+async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin", hubAdmin = true) {
   const hub = await createHub({ port: 0, address: "127.0.0.1", databasePath: join(sandbox().cwd, "hub.sqlite"),
     github: { clientId: "Iv1.0123456789abcdef", fetch: async () => { throw new Error("GitHub should not be called with a working login"); } },
     log: silentLogger, debounce: 10, maxDebounce: 20,
   }, { deviceCredentials: true, initializeDefaultWorkspace: true });
   hubs.push(hub);
   const identity = hub.principals!.identify("1201", "test-promoter");
+  if (hubAdmin) hub.hubAdmins!.grant(identity.id);
   const administered = randomUUID();
   if (role !== null) hub.memberships!.grant({ workspaceId: administered, principalId: identity.id, role });
   const credential = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: role === null ? [] : [administered] });
@@ -52,6 +53,7 @@ function accessRows(hub: Hub) {
   const db = new DatabaseSync(hub.databasePath, { readOnly: true });
   try {
     return { memberships: db.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all(),
+      hubAdmins: db.prepare("SELECT * FROM hub_admins ORDER BY principal_id").all(),
       claims: db.prepare("SELECT * FROM hub_claim_state").all(),
       receipts: db.prepare("SELECT * FROM hub_workspace_promotions").all() };
   } finally { db.close(); }
@@ -64,7 +66,8 @@ describe("workspace creation and promotion", () => {
     expect(result.stdout).toContain("bare host, an HTTP(S) URL or a WS(S) endpoint");
     expect(result.stdout).toContain("ub workspace promote https://hub.example.com");
     expect(result.stdout).toContain("ub workspace promote wss://hub.example.com/ws");
-    expect(result.stdout).toContain("member or administrator of at least one workspace");
+    expect(result.stdout).toContain("must currently be a hub administrator");
+    expect(result.stdout).toContain("Workspace membership does not qualify");
     expect(result.stdout).toContain("Sign in first\nwith ub auth login <hub>");
     expect(result.stdout).not.toContain("ask for GitHub approval");
   });
@@ -207,7 +210,7 @@ describe("workspace creation and promotion", () => {
     }
   });
 
-  it.each(["admin", "member"] as const)("uploads the same history for a current %s and joins from a machine with no local workspace", async role => {
+  it.each(["admin", "member", null] as const)("uploads the same history for a hub administrator with prior workspace role %s and joins from a machine with no local workspace", async role => {
     const box = await localWorkspace();
     const local = createMcpServer(offline(box));
     try {
@@ -238,6 +241,7 @@ describe("workspace creation and promotion", () => {
     expect(isIdentical(compareCorpus(expected.workspace!, remote.workspace!))).toBe(true);
     const after = accessRows(hub);
     expect(after.claims).toEqual(before.claims);
+    expect(after.hubAdmins).toEqual(before.hubAdmins);
     expect(after.memberships.filter(row => row.workspace_id === administered)).toEqual(before.memberships);
     expect(after.memberships.filter(row => row.workspace_id === selected(box).workspaceId)).toEqual([
       expect.objectContaining({ principal_id: login.identity.id, role: "admin" }),
@@ -254,18 +258,26 @@ describe("workspace creation and promotion", () => {
     expect(isIdentical(compareCorpus(expected.workspace!, hydrated.workspace!))).toBe(true);
   });
 
-  it("refuses an account with no memberships without changing the hub or project binding", async () => {
+  it.each(["admin", "member", null] as const)("refuses a non-hub administrator with workspace role %s without upload or changing the hub or project binding", async role => {
     const box = await localWorkspace();
-    const { hub, endpoint } = await hubFor(box, null);
+    const { hub, endpoint } = await hubFor(box, role, false);
     const before = accessRows(hub);
     const binding = bindingBytes(box);
     const result = await runInProcess(["workspace", "promote", endpoint], box);
     expect(result.status, result.output).toBe(1);
-    expect(result.stderr).toContain("currently belong to at least one workspace");
+    expect(result.stderr).toContain("ask a hub administrator");
+    expect(result.stderr).toContain("Nothing was uploaded");
     expect(result.stderr).not.toContain("rerun this command");
     expect(accessRows(hub)).toEqual(before);
     expect(bindingBytes(box)).toBe(binding);
+    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBeNull();
     expect(result.output).not.toContain("waiting for approval…");
+    const prefix = `${selected(box).workspaceId}/`;
+    expect([...hub.hocuspocus.documents.keys()].filter(name => name.startsWith(prefix))).toEqual([]);
+    const db = new DatabaseSync(hub.databasePath, { readOnly: true });
+    try {
+      expect(db.prepare("SELECT name FROM documents WHERE substr(name, 1, ?) = ?").all(prefix.length, prefix)).toEqual([]);
+    } finally { db.close(); }
   });
 
   it("refuses an existing destination and a workspace already bound to a hub", async () => {
@@ -288,9 +300,9 @@ describe("workspace creation and promotion", () => {
     expect(accessRows(hub)).toEqual(before);
   });
 
-  it("keeps a local binding after interruption at verification and resumes the same durable attempt", async () => {
+  it("keeps a local binding after interruption and resumes its reservation after hub administration is removed", async () => {
     const box = await localWorkspace();
-    const { hub, endpoint } = await hubFor(box);
+    const { hub, endpoint, login } = await hubFor(box);
     const binding = bindingBytes(box);
     const interrupted = await new Promise<{ status: number | null; output: string }>((resolve, reject) => {
       const child = spawn(process.execPath, [UB_BIN, "workspace", "promote", endpoint], { cwd: box.cwd, env: box.env, timeout: 25_000 });
@@ -307,12 +319,25 @@ describe("workspace creation and promotion", () => {
     expect(interrupted.status, interrupted.output).toBe(1);
     expect(interrupted.output).toContain("promotion interrupted");
     expect(bindingBytes(box)).toBe(binding);
+    const other = hub.principals!.identify("1202", "other-hub-admin");
+    hub.hubAdmins!.grant(other.id);
+    hub.hubAdmins!.remove(other.id, login.identity.id);
+    expect(hub.hubAdmins!.isAdmin(login.identity.id)).toBe(false);
     const before = accessRows(hub);
     expect(before.receipts).toHaveLength(1);
     const retried = await runInProcess(["workspace", "promote", endpoint], box);
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);
     expect(selected(box).hubUrl).toBe(endpoint);
+    const created = await runInProcess(["workspace", "create", "Another local workspace"], box);
+    expect(created.status, created.output).toBe(0);
+    const nextBinding = bindingBytes(box);
+    const refused = await runInProcess(["workspace", "promote", endpoint], box);
+    expect(refused.status, refused.output).toBe(1);
+    expect(refused.stderr).toContain("ask a hub administrator");
+    expect(accessRows(hub)).toEqual(before);
+    expect(bindingBytes(box)).toBe(nextBinding);
+    expect(selected(box).hubUrl).toBeNull();
   });
 
   it("validates names and URLs without side effects or echoing pasted credentials", async () => {

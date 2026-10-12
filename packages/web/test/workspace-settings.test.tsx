@@ -598,6 +598,10 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
     else if (options.status !== undefined) body = { status: options.status, hub: options.status === "local-only" ? null : ACCESS_HUB };
     else if (!signedIn) body = { status: "sign-in-required", hub: ACCESS_HUB };
     else switch (action.operation) {
+      case "own-hub-role":
+      case "list-hub-admins":
+      case "list-hub-workspaces":
+      case "remove-hub-admin": body = { status: "forbidden", hub: ACCESS_HUB }; break;
       case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
       case "list-devices": body = { status: "ok", hub: ACCESS_HUB, devices: [...devices] }; break;
       case "list-members": body = { status: "ok", hub: ACCESS_HUB, members: members.map((item) => ({ ...item })) }; break;

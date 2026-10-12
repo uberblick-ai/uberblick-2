@@ -9,6 +9,7 @@ import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
+import { HubAdminRegistry } from "./hub-admins.js";
 import { MembershipRegistry } from "./memberships.js";
 import { PrincipalRegistry } from "./principals.js";
 import { isEphemeralDatabase } from "./persistence.js";
@@ -20,6 +21,7 @@ export interface TeamHub extends Hub {
   readonly credentials?: CredentialRegistry;
   readonly memberships?: MembershipRegistry;
   readonly principals?: PrincipalRegistry;
+  readonly hubAdmins?: HubAdminRegistry;
 }
 
 export interface TeamHubOptions {
@@ -32,7 +34,7 @@ export interface TeamHubOptions {
 function createTeamExtension(
   config: TeamHubConfig, options: TeamHubOptions,
   { database, server, deviceCredentials, protocolVersion, log }: HubExtensionContext,
-): HubExtension & Pick<TeamHub, "credentials" | "memberships" | "principals"> {
+): HubExtension & Pick<TeamHub, "credentials" | "memberships" | "principals" | "hubAdmins"> {
   let signIn: GithubSignIn | undefined;
   let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
@@ -41,6 +43,7 @@ function createTeamExtension(
   let claims: HubClaimState | undefined;
   let admission: CredentialAdmission | undefined;
   let promotions: WorkspacePromotions | undefined;
+  let hubAdmins: HubAdminRegistry | undefined;
   const workspaceNames = new WorkspaceNameReader(database, room => server().hocuspocus.documents.get(room));
   const hasLiveDocuments = (workspaceId: string) =>
     [...server().hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`));
@@ -49,9 +52,10 @@ function createTeamExtension(
   if (config.github !== undefined || options.operatorSetup) {
     principals = new PrincipalRegistry(database);
     memberships = new MembershipRegistry(database);
+    hubAdmins = new HubAdminRegistry(database, workspaceNames);
     if (config.github !== undefined) {
       credentials = new CredentialRegistry(database);
-      promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments);
+      promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
       signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
       accounts = new GithubAccountLookup(config.github.fetch);
     }
@@ -65,13 +69,14 @@ function createTeamExtension(
     ...(credentials === undefined ? {} : { credentials }),
     ...(memberships === undefined ? {} : { memberships }),
     ...(principals === undefined ? {} : { principals }),
+    ...(hubAdmins === undefined ? {} : { hubAdmins }),
     extensions: admission === undefined ? [] : [admission],
     admissionConfigured: admission !== undefined,
     signInConfigured: signIn !== undefined,
     async handleRequest(request, response) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts)) return true;
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins)) return true;
       return handleGithubSignIn(signIn, request, response);
     },
     async start() {
@@ -108,5 +113,6 @@ export async function createTeamHub(config: TeamHubConfig, options: TeamHubOptio
     ...(team?.credentials === undefined ? {} : { credentials: team.credentials }),
     ...(team?.memberships === undefined ? {} : { memberships: team.memberships }),
     ...(team?.principals === undefined ? {} : { principals: team.principals }),
+    ...(team?.hubAdmins === undefined ? {} : { hubAdmins: team.hubAdmins }),
   };
 }

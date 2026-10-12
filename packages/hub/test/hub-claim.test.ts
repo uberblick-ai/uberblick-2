@@ -8,6 +8,7 @@ import { SetupReceipts } from "../src/admin-setup.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import { GithubSignIn, type SignInCollection } from "../src/github-sign-in.js";
 import { HubClaimState } from "../src/hub-claim.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
@@ -35,14 +36,15 @@ function rig(path = databasePath(), initialize = true) {
   const memberships = new MembershipRegistry(database);
   const credentials = new CredentialRegistry(database);
   const receipts = new SetupReceipts(database);
-  const claims = initialize ? new HubClaimState(database) : undefined;
-  return { database, principals, memberships, credentials, receipts, claims };
+  const hubAdmins = new HubAdminRegistry(database);
+  const claims = initialize ? new HubClaimState(database, hubAdmins) : undefined;
+  return { database, principals, memberships, credentials, receipts, claims, hubAdmins };
 }
 
 function rows(testRig: ReturnType<typeof rig>) {
   const db = testRig.database.connection;
   return Object.fromEntries([
-    "documents", "hub_principals", "hub_memberships", "hub_credentials", "hub_admin_setup_grants", "hub_claim_state",
+    "documents", "hub_principals", "hub_memberships", "hub_credentials", "hub_admin_setup_grants", "hub_claim_state", "hub_admins",
   ].map((table) => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
 }
 
@@ -146,7 +148,7 @@ describe("fresh deployed hub initialization", () => {
     finally { renamed.destroy(); }
   });
 
-  it.each(["documents", "principals", "credentials", "memberships", "receipts"])(
+  it.each(["documents", "principals", "credentials", "memberships", "receipts", "hub admins"])(
     "seals an existing installation with only %s, permanently even if those rows are removed", (family) => {
       const old = rig(undefined, false);
       if (family === "documents") old.database.connection.prepare("INSERT INTO documents(name, data) VALUES (?, ?)")
@@ -154,6 +156,7 @@ describe("fresh deployed hub initialization", () => {
       if (family === "principals") old.principals.identify("1234", "existing-identity");
       if (family === "credentials") old.credentials.issue({ principalId: "existing-principal", deviceId: "old-device", workspaces: [] });
       if (family === "memberships") old.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-principal", role: "member" });
+      if (family === "hub admins") old.hubAdmins.grant("existing-principal");
       if (family === "receipts") old.receipts.save({ status: "complete", setupId: crypto.randomUUID(), workspaceId: WORKSPACE,
         identity: { id: "old-principal", githubAccountId: "1234", githubUsername: "existing-identity" }, hadDocuments: false });
       const documents = old.database.connection.prepare("SELECT * FROM documents").all();
@@ -161,7 +164,7 @@ describe("fresh deployed hub initialization", () => {
       expect(claims.state(true)).toEqual({ unclaimed: false, canClaim: false });
       expect(old.database.connection.prepare("SELECT default_workspace_id FROM hub_claim_state").get()?.default_workspace_id).toBeNull();
       expect(old.database.connection.prepare("SELECT * FROM documents").all()).toEqual(documents);
-      for (const table of ["documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants"]) {
+      for (const table of ["documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins"]) {
         old.database.connection.exec(`DELETE FROM ${table}`);
       }
       const path = old.database.databasePath;
@@ -211,6 +214,7 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(claim.claimedWorkspaceId).toBe(workspaceId);
     expect(claim.credential.record.workspaces).toEqual([workspaceId]);
     expect(claim.credential.workspaceNames).toEqual({ [workspaceId]: "Default workspace" });
+    expect(rows(testRig).hub_admins).toEqual([{ principal_id: claim.identity.id }]);
     expect(rows(testRig).hub_memberships).toEqual([{ workspace_id: workspaceId, principal_id: claim.identity.id, role: "admin" }]);
     const membership = rows(testRig).hub_memberships;
     const again = await complete(flow, github);
@@ -218,6 +222,7 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(again.credential.record.workspaces).toEqual([workspaceId]);
     github.account = { id: 5678, login: "later-account" };
     const other = await complete(flow, github);
+    expect(rows(testRig).hub_admins).toEqual([{ principal_id: claim.identity.id }]);
     expect(other).not.toHaveProperty("claimedWorkspaceId");
     expect(other.credential.record.workspaces).toEqual([]);
     expect(rows(testRig).hub_memberships).toEqual(membership);
@@ -305,6 +310,7 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(result.credential.record.workspaces).toEqual([workspaceId]);
     expect(restarted.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
     expect(rows(restarted).hub_memberships).toHaveLength(1);
+    expect(restarted.hubAdmins.isAdmin(result.identity.id)).toBe(true);
   });
 });
 
@@ -346,5 +352,6 @@ describe("credential-free claim-state report", () => {
     expect(result).not.toHaveProperty("claimedWorkspaceId");
     expect(result.credential.record.workspaces).toEqual([]);
     expect(inspect.database.connection.prepare("SELECT * FROM hub_memberships").all()).toEqual([]);
+    expect(inspect.database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
   });
 });
