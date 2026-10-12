@@ -176,7 +176,7 @@ describe("decision authority through MCP", () => {
       expect(refused).toMatchObject({
         message: "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only; create a superseding record.",
         recoveryClass: "manual",
-        recovery: "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only. Create an open superseding record " +
+        recovery: "A decided record's title, answer blocks, legacy TL;DR, structured data and discussion reference are read-only. Create an open superseding record " +
           "for any content change, then record a person's answer to decide it. Comments stay open.",
       });
     }
