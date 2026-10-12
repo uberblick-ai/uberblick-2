@@ -32,6 +32,7 @@ import {
   AUTH_STATUS_HELP,
 } from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
+import { DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "../src/data.js";
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
@@ -160,6 +161,9 @@ const PATHS: Path[] = [
   { argv: ["open"], help: OPEN_HELP, options: OPEN_OPTIONS },
   { argv: ["status"], help: STATUS_HELP, options: STATUS_OPTIONS },
   { argv: ["doctor"], help: DOCTOR_HELP, options: DOCTOR_OPTIONS },
+  { argv: ["data"], help: DATA_HELP, options: {}, children: ["get", "update"] },
+  { argv: ["data", "get"], help: DATA_HELP, options: DATA_GET_OPTIONS },
+  { argv: ["data", "update"], help: DATA_HELP, options: DATA_UPDATE_OPTIONS },
   {
     argv: ["workspace"],
     help: WORKSPACE_HELP,
@@ -513,6 +517,7 @@ describe("help before the work", () => {
   // other half of the proof, since every one of these announces its warnings
   // and its failures there.
   const inert: string[][] = [
+    ["data", "update", "--file", "missing.json", "--dry-run", "--help"],
     ["open", "--port", "0", "-h"],
     ["workspace", "use", "ws://example.invalid:1234", "-h"],
     ["auth", "login", "--help"],

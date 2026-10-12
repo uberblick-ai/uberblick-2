@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDocData, canonicalJson, DATA_KEY, DATA_LIMITS, DataError,
   decisionApprovalFingerprint, getAnnotationsMap, getBlocksFragment, getMetaMap, initDoc, readDocData,
-  setKind, setStatus, tombstoneDirectoryEntry, upsertDirectoryEntry,
+  prepareDocData, setKind, setStatus, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "../src/index.js";
 import type { CollectionSchema, DataOperation, JSONObject } from "../src/index.js";
 import { syncDocs } from "./helpers.js";
@@ -66,6 +66,97 @@ describe("document-owned data", () => {
     expect(updates).toBe(2);
     expect(sizes[1]).toBeLessThan(250);
     expect(sizes[1]!).toBeLessThan(sizes[0]! / 100);
+  });
+
+  it("previews final changed-key counts without writing and commits the same batch once", () => {
+    const { doc, directory, apply } = rig();
+    apply([
+      { collection: "runs", schema: SCHEMA, upsert: [
+        { id: "keep", value: {} }, { id: "changed", value: { hours: 1 } }, { id: "removed", value: {} },
+      ] },
+      { collection: "deleted", schema: SCHEMA, upsert: [{ id: "old", value: {} }] },
+      { collection: "schema", schema: SCHEMA },
+      { collection: "untouched", schema: SCHEMA, upsert: [{ id: "human", value: { disposition: "keep" } }] },
+    ]);
+    const before = Y.encodeStateAsUpdate(doc);
+    const directoryBefore = Y.encodeStateAsUpdate(directory);
+    let updates = 0;
+    let directoryUpdates = 0;
+    doc.on("update", () => { updates++; });
+    directory.on("update", () => { directoryUpdates++; });
+    const plan = prepareDocData(doc, directory, [
+      { collection: "schema", schema: { version: 1, schema: { type: "object", properties: { hours: { type: "number" } } } } },
+      { collection: "runs", replaceRecords: [{ id: "keep", value: {} }, { id: "changed", value: { hours: 2 } }],
+        deleteRecords: ["keep", "missing"], upsert: [{ id: "keep", value: {} }, { id: "new", value: {} }] },
+      { collection: "deleted", deleteCollection: true },
+      { collection: "empty", schema: SCHEMA },
+    ]);
+    expect(plan.changed).toBe(true);
+    expect(plan.collections).toEqual([
+      { name: "schema", recordCount: 0, deleted: false, upserted: 0, removed: 0, schemaChanged: true },
+      { name: "runs", recordCount: 3, deleted: false, upserted: 2, removed: 1, schemaChanged: false },
+      { name: "deleted", recordCount: 0, deleted: true, upserted: 0, removed: 1, schemaChanged: true },
+      { name: "empty", recordCount: 0, deleted: false, upserted: 0, removed: 0, schemaChanged: true },
+    ]);
+    expect(Buffer.from(Y.encodeStateAsUpdate(doc)).equals(Buffer.from(before))).toBe(true);
+    expect(Buffer.from(Y.encodeStateAsUpdate(directory)).equals(Buffer.from(directoryBefore))).toBe(true);
+    expect(updates).toBe(0);
+    expect(directoryUpdates).toBe(0);
+    expect(plan.commit()).toEqual({ changed: true });
+    expect(updates).toBe(1);
+    expect(directoryUpdates).toBe(0);
+    expect(readDocData(doc)!.collections.find(c => c.name === "runs")!.records).toEqual([
+      { id: "changed", value: { hours: 2 } }, { id: "keep", value: {} }, { id: "new", value: {} },
+    ]);
+    expect(readDocData(doc)!.collections.find(c => c.name === "untouched")!.records).toEqual([
+      { id: "human", value: { disposition: "keep" } },
+    ]);
+    plan.commit();
+    expect(updates).toBe(1);
+  });
+
+  it("previews identical refreshes and absent deletions as no change", () => {
+    const { doc, directory, apply } = rig();
+    const records = [{ id: "same", value: { a: 1, b: [true] } }];
+    apply([{ collection: "c", schema: SCHEMA, upsert: records }]);
+    let updates = 0;
+    doc.on("update", () => { updates++; });
+    const plan = prepareDocData(doc, directory, [
+      { collection: "c", schema: SCHEMA, replaceRecords: [{ id: "same", value: { b: [true], a: 1 } }], deleteRecords: ["absent"] },
+      { collection: "absent", deleteCollection: true },
+    ]);
+    expect(plan.changed).toBe(false);
+    expect(plan.collections).toEqual([
+      { name: "c", recordCount: 1, deleted: false, upserted: 0, removed: 0, schemaChanged: false },
+      { name: "absent", recordCount: 0, deleted: true, upserted: 0, removed: 0, schemaChanged: false },
+    ]);
+    expect(plan.commit()).toEqual({ changed: false });
+    expect(updates).toBe(0);
+    expect(prepareDocData(doc, directory, []).collections).toEqual([]);
+  });
+
+  it("preview refuses invalid batches and readonly documents without updating either root", () => {
+    const { doc, directory, apply } = rig();
+    apply([{ collection: "c", schema: { version: 1, schema: { type: "object", properties: { hours: { type: "number" } } } } }]);
+    const directoryBefore = Y.encodeStateAsUpdate(directory);
+    let updates = 0;
+    let directoryUpdates = 0;
+    doc.on("update", () => { updates++; });
+    directory.on("update", () => { directoryUpdates++; });
+    expect(failUnchanged(doc, () => prepareDocData(doc, directory, [
+      { collection: "new", schema: SCHEMA, upsert: [{ id: "okay", value: {} }] },
+      { collection: "c", upsert: [{ id: "bad", value: { hours: "wrong" } }] },
+    ]))).toMatchObject({ code: "data_record_invalid", details: { collection: "c", recordId: "bad", path: "/hours" } });
+    expect(Buffer.from(Y.encodeStateAsUpdate(directory)).equals(Buffer.from(directoryBefore))).toBe(true);
+    expect(updates).toBe(0);
+    expect(directoryUpdates).toBe(0);
+    tombstoneDirectoryEntry(directory, UUID);
+    expect(failUnchanged(doc, () => prepareDocData(doc, directory, [])).code).toBe("doc_archived");
+    const decision = rig();
+    setKind(decision.doc, "decision");
+    expect(failUnchanged(decision.doc, () => prepareDocData(decision.doc, decision.directory, [])).code).toBe("decision_data_unsupported");
+    setStatus(decision.doc, "decided");
+    expect(failUnchanged(decision.doc, () => prepareDocData(decision.doc, decision.directory, [])).code).toBe("decision_read_only");
   });
 
   it.each([
@@ -263,13 +354,15 @@ describe("document-owned data", () => {
   });
 
   it("counts only changed schema/record values toward the operation budget", () => {
-    const { doc, apply } = rig();
+    const { doc, directory, apply } = rig();
     apply([{ collection: "c", schema: SCHEMA }]);
     const sixteen = Array.from({ length: 16 }, (_, i) => ({ id: String(i), value: recordAtLimit() }));
     apply([{ collection: "c", upsert: sixteen }]);
     expect(apply([{ collection: "c", schema: SCHEMA, replaceRecords: sixteen }])).toEqual({ changed: false });
     const seventeen = Array.from({ length: 17 }, (_, i) => ({ id: `changed-${i}`, value: recordAtLimit() }));
     expect(failUnchanged(doc, () => apply([{ collection: "c", upsert: seventeen }]))).toMatchObject({ code: "data_limit_exceeded", details: { limit: "operation", value: 1048576, attempted: 1114112 } });
+    expect(failUnchanged(doc, () => prepareDocData(doc, directory, [{ collection: "c", upsert: seventeen }]))).toMatchObject({ code: "data_limit_exceeded", details: { limit: "operation", value: 1048576, attempted: 1114112 } });
+    expect(prepareDocData(doc, directory, [{ collection: "c", replaceRecords: sixteen }])).toMatchObject({ changed: false });
   });
 
   it("reads over-depth and oversized merged values without repair and permits their deletion", () => {

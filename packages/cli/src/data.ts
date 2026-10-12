@@ -1,0 +1,167 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { parseArgs } from "node:util";
+import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData } from "@uberblick/mcp-server";
+import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
+import type { DataCollectionChange, DocData } from "@uberblick/schema";
+import { resolveMcpConfig } from "./budget.js";
+import { resolveConfig } from "./config.js";
+import type { Io } from "./io.js";
+import { processIo } from "./io.js";
+import { NO_BINDING } from "./project-binding.js";
+
+export const DATA_GET_OPTIONS = { out: { type: "string" } } as const;
+export const DATA_UPDATE_OPTIONS = {
+  file: { type: "string" },
+  "dry-run": { type: "boolean" },
+} as const;
+
+export const DATA_HELP = `usage: ub data [command]
+
+commands:
+  get <doc> [<collection>]       # Print the data summary, or one collection as JSON
+  update <doc> --file <path|->   # Apply update_data operations from a file, or - for stdin
+
+options:
+  --out <file>                   # get: write the collection to this file instead of stdout
+  --dry-run                      # update: validate and report, write nothing
+  -h, --help                     # show this help
+
+update is not briefed: it skips the workspace guidance reads that MCP writes require.
+`;
+
+type DataCommand =
+  | { command: "get"; doc: string; collection?: string; out?: string }
+  | { command: "update"; doc: string; file: string; dryRun: boolean };
+
+function parseCommand(argv: string[]): DataCommand {
+  const [command, ...args] = argv;
+  if (command === "get") {
+    const { positionals, values } = parseArgs({ args, options: DATA_GET_OPTIONS, allowPositionals: true });
+    const [doc, collection] = positionals;
+    if (doc === undefined || positionals.length > 2) throw new Error("expected a document and an optional collection");
+    if (values.out !== undefined && (values.out === "" || collection === undefined)) {
+      throw new Error("--out needs a file and a collection");
+    }
+    return { command, doc, ...(collection === undefined ? {} : { collection }),
+      ...(values.out === undefined ? {} : { out: values.out }) };
+  }
+  if (command === "update") {
+    const { positionals, values } = parseArgs({ args, options: DATA_UPDATE_OPTIONS, allowPositionals: true });
+    const [doc] = positionals;
+    if (doc === undefined || positionals.length !== 1 || values.file === undefined || values.file === "") {
+      throw new Error("expected one document and --file <path|->");
+    }
+    return { command, doc, file: values.file, dryRun: values["dry-run"] === true };
+  }
+  throw new Error(`unknown command ${JSON.stringify(command)}`);
+}
+
+/** URL parsing never follows a link; the bound workspace supplies all access. */
+function documentUuid(value: string, workspace: string): string {
+  const bare = canonicalDocumentUuid(value);
+  if (bare !== null) return bare;
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new Error("expected a document UUID or document link"); }
+  if (!["http:", "https:"].includes(url.protocol) || url.username !== "" || url.password !== "") {
+    throw new Error("expected an HTTP(S) document link");
+  }
+  const segments = url.pathname.replace(/\/$/, "").split("/").slice(1).map(decodeURIComponent);
+  if (segments.length !== 2) throw new Error("expected a document link with workspace and document UUID");
+  const linkedWorkspace = parseWorkspaceId(segments[0] ?? "", "document link workspace").uuid;
+  if (linkedWorkspace !== workspace) throw new Error("document link belongs to another workspace");
+  const uuid = canonicalDocumentUuid(segments[1]);
+  if (uuid === null) throw new Error("document link has no document UUID");
+  return uuid;
+}
+
+function number(value: number): string { return value.toLocaleString("en-US"); }
+function records(value: number): string { return `${number(value)} record${value === 1 ? "" : "s"}`; }
+function width(names: string[]): number { return Math.max(11, ...names.map(name => name.length + 3)); }
+
+function renderSummary(data: DocData | null): string {
+  if (data === null) return "no data\n";
+  const padding = width(data.collections.map(collection => collection.name));
+  const lines = data.collections.map(collection =>
+    `${collection.name.padEnd(padding)}${records(collection.records.length)}  ${collection.valid ? "valid" : "invalid"}\n`,
+  ).join("");
+  return `${lines}${number(data.bytes)} bytes\n`;
+}
+
+function renderChanges(collections: DataCollectionChange[], dryRun: boolean): string {
+  const padding = width(collections.map(collection => collection.name));
+  return collections.map(collection => {
+    const changes = [
+      ...(collection.upserted === 0 ? [] : [`${number(collection.upserted)} upserted`]),
+      ...(collection.removed === 0 ? [] : [`${number(collection.removed)} deleted`]),
+      ...(collection.deleted ? ["collection deleted"] : collection.schemaChanged ? ["schema changed"] : []),
+    ];
+    return `${collection.name.padEnd(padding)}${dryRun ? "would be " : ""}${records(collection.recordCount)} (${changes.length === 0 ? "no change" : changes.join(", ")})\n`;
+  }).join("");
+}
+
+function readOperations(file: string): unknown {
+  const input = readFileSync(file === "-" ? 0 : file);
+  let value: unknown;
+  try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(input)); }
+  catch { throw new Error("input must be a UTF-8 JSON array of update_data operations"); }
+  return value;
+}
+
+function reason(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const details = "details" in error ? error.details as Record<string, unknown> : undefined;
+  const location = typeof details?.collection === "string"
+    ? `${details.collection}${typeof details.recordId === "string" ? `/${details.recordId}` : ""}: ` : "";
+  return `${location}${error.message}`;
+}
+
+export async function dataCommand(argv: string[], io: Io = processIo): Promise<number> {
+  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
+    io.out(DATA_HELP);
+    return 0;
+  }
+  let command: DataCommand;
+  try { command = parseCommand(argv); }
+  catch (error) {
+    io.err(`ub data: ${reason(error)}\n\n${DATA_HELP}`);
+    return 2;
+  }
+  try {
+    const resolved = resolveConfig();
+    if (resolved.binding === null) throw new Error(NO_BINDING);
+    const config = resolveMcpConfig(resolved.env);
+    const uuid = documentUuid(command.doc, config.workspaceId);
+    const operations = command.command === "update" ? readOperations(command.file) : undefined;
+    for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
+    const instance = openWorkspaceReplicas(config, { publishOwnPresence: false, hubFree: resolved.binding.hubUrl === null });
+    try {
+      if (command.command === "get") {
+        const data = await readWorkspaceData(instance.replicas, uuid);
+        if (command.collection === undefined) io.out(renderSummary(data));
+        else {
+          const collection = data?.collections.find(entry => entry.name === command.collection);
+          if (collection === undefined) throw new Error(`No collection ${command.collection} in document ${uuid}`);
+          const json = `${JSON.stringify({ schema: collection.schema, records: collection.records }, null, 2)}\n`;
+          if (command.out === undefined) io.out(json);
+          else {
+            writeFileSync(command.out, json, "utf8");
+            io.out(`wrote ${collection.name}: ${records(collection.records.length)}, ${number(Buffer.byteLength(json))} bytes → ${command.out}\n`);
+          }
+        }
+      } else {
+        const result = await updateWorkspaceData(instance.replicas, { uuid, operations }, command.dryRun);
+        if (!result.changed && !command.dryRun) io.out("no change\n");
+        else {
+          io.out(renderChanges(result.collections, command.dryRun));
+          io.out(command.dryRun ? "nothing written (dry run)\n" : result.synced
+            ? "saved; synced with hub\n" : "saved locally; not yet synced with hub\n");
+        }
+      }
+    } finally { await instance.close(); }
+    return 0;
+  } catch (error) {
+    io.err(`error: ${reason(error)}\n${command.command === "update" ? "nothing written\n" : ""}`);
+    return 1;
+  }
+}

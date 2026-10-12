@@ -1,5 +1,6 @@
 import { authCommand } from "./auth.js";
 import { doctorCommand } from "./doctor.js";
+import { dataCommand } from "./data.js";
 import { hubCommand } from "./hub.js";
 import { installCommand } from "./install.js";
 import type { Io } from "./io.js";
@@ -24,6 +25,7 @@ commands:
                          pending changes and problems
   doctor [--json]        check this project's Uberblick setup and name the fix
                          for each problem
+  data [command]         read and write a document's structured data through files
   workspace [command]    create, promote, join, list or select a workspace
   auth [command]         sign in to a remote hub and manage this machine's login
   hub [command]          set up, start, stop, check or upgrade a Docker hub on this host
@@ -70,6 +72,9 @@ export async function runCli(
   }
   if (command === "doctor") {
     return await doctorCommand(rest, io);
+  }
+  if (command === "data") {
+    return await dataCommand(rest, io);
   }
   if (command === "workspace") {
     return await workspaceCommand(rest, io);
