@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData } from "@uberblick/mcp-server";
+import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData, WorkspaceDataWriteError } from "@uberblick/mcp-server";
 import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
 import type { DataCollectionChange, DocData } from "@uberblick/schema";
 import { resolveMcpConfig } from "./budget.js";
@@ -67,10 +67,12 @@ function documentUuid(value: string, workspace: string): string {
     throw new Error("expected an HTTP(S) document link");
   }
   const segments = url.pathname.replace(/\/$/, "").split("/").slice(1).map(decodeURIComponent);
-  if (segments.length !== 2) throw new Error("expected a document link with workspace and document UUID");
+  const history = segments.length === 4 && segments[2]?.toLowerCase() === "record" &&
+    canonicalDocumentUuid(segments[1]) !== null;
+  if (segments.length !== 2 && !history) throw new Error("expected a document link with workspace and document UUID");
   const linkedWorkspace = parseWorkspaceId(segments[0] ?? "", "document link workspace").uuid;
   if (linkedWorkspace !== workspace) throw new Error("document link belongs to another workspace");
-  const uuid = canonicalDocumentUuid(segments[1]);
+  const uuid = canonicalDocumentUuid(segments[history ? 3 : 1]);
   if (uuid === null) throw new Error("document link has no document UUID");
   return uuid;
 }
@@ -116,6 +118,15 @@ function reason(error: unknown): string {
   return `${location}${error.message}`;
 }
 
+function failureOutcome(error: unknown, saved: "synced" | "local" | "unconfirmed" | undefined): string {
+  if (saved === "synced") return "saved; synced with hub\n";
+  if (saved === "local" || error instanceof WorkspaceDataWriteError && error.writeOutcome === "saved-locally") {
+    return "saved locally; not yet synced with hub\n";
+  }
+  return saved === "unconfirmed" || error instanceof WorkspaceDataWriteError
+    ? "write outcome unconfirmed; read the data before retrying\n" : "nothing written\n";
+}
+
 export async function dataCommand(argv: string[], io: Io = processIo): Promise<number> {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
     io.out(DATA_HELP);
@@ -127,6 +138,7 @@ export async function dataCommand(argv: string[], io: Io = processIo): Promise<n
     io.err(`ub data: ${reason(error)}\n\n${DATA_HELP}`);
     return 2;
   }
+  let saved: "synced" | "local" | "unconfirmed" | undefined;
   try {
     const resolved = resolveConfig();
     if (resolved.binding === null) throw new Error(NO_BINDING);
@@ -151,6 +163,7 @@ export async function dataCommand(argv: string[], io: Io = processIo): Promise<n
         }
       } else {
         const result = await updateWorkspaceData(instance.replicas, { uuid, operations }, command.dryRun);
+        if (result.changed && !command.dryRun) saved = result.synced ? "synced" : "local";
         if (!result.changed && !command.dryRun) io.out("no change\n");
         else {
           io.out(renderChanges(result.collections, command.dryRun));
@@ -158,10 +171,13 @@ export async function dataCommand(argv: string[], io: Io = processIo): Promise<n
             ? "saved; synced with hub\n" : "saved locally; not yet synced with hub\n");
         }
       }
+    } catch (error) {
+      if (error instanceof WorkspaceDataWriteError) saved = error.writeOutcome === "saved-locally" ? "local" : "unconfirmed";
+      throw error;
     } finally { await instance.close(); }
     return 0;
   } catch (error) {
-    io.err(`error: ${reason(error)}\n${command.command === "update" ? "nothing written\n" : ""}`);
+    io.err(`error: ${reason(error)}\n${command.command === "update" ? failureOutcome(error, saved) : ""}`);
     return 1;
   }
 }

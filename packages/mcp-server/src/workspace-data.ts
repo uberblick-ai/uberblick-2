@@ -6,6 +6,14 @@ import { createToolContext } from "./tools/context.js";
 import { uuidArg } from "./tools/schemas.js";
 import { inputSchema, prepareDataUpdate } from "./tools/update-data.js";
 
+/** An attempted commit can persist document data before a later append fails. */
+export class WorkspaceDataWriteError extends Error {
+  constructor(readonly writeOutcome: "unconfirmed" | "saved-locally", cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = "WorkspaceDataWriteError";
+  }
+}
+
 /** Observe a complete detached data area without paging across local states. */
 export async function readWorkspaceData(replicas: Replicas, uuid: string) {
   uuid = uuidArg.parse(uuid);
@@ -25,11 +33,19 @@ export async function updateWorkspaceData(replicas: Replicas, input: unknown, dr
     return { uuid: args.uuid, changed: update.changed, collections: update.collections, dryRun, synced: false };
   }
 
-  update.commit();
-  context.durability(replica);
   if (update.changed) {
-    await replicas.sync.waitForQuiet();
-    replicas.refresh();
+    let writeOutcome: "unconfirmed" | "saved-locally" = "unconfirmed";
+    try {
+      update.commit();
+      context.durability(replica);
+      writeOutcome = "saved-locally";
+      await replicas.sync.waitForQuiet();
+      replicas.refresh();
+      context.durability(replica);
+    } catch (error) {
+      throw new WorkspaceDataWriteError(writeOutcome, error);
+    }
+  } else {
     context.durability(replica);
   }
   return {

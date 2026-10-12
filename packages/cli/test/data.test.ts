@@ -3,13 +3,14 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openWorkspaceReplicas, resolveMcpConfig } from "@uberblick/mcp-server";
+import * as mcp from "@uberblick/mcp-server";
 import type { WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import {
   applyDocData, DATA_KEY, DATA_LIMITS, initDoc, readDocData,
   setKind, setStatus, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { CollectionSchema } from "@uberblick/schema";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
 import { DATA_HELP } from "../src/data.js";
 import { resolveConfig } from "../src/config.js";
 import { removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
@@ -116,6 +117,30 @@ it("previews the exact update counts without appending and emits no update for a
     .toBe("runs       0 records (1 deleted, collection deleted)\nsaved locally; not yet synced with hub\n");
 });
 
+it("never says nothing was written when acknowledgement or closure fails after the save", async () => {
+  for (const failure of ["acknowledgement", "closure", "acknowledgement and closure"]) {
+    const box = fixture();
+    const path = operations(box, [{ collection: "runs", schema, upsert: [{ id: "a", value: { text: "saved" } }] }]);
+    const open = mcp.openWorkspaceReplicas;
+    vi.spyOn(mcp, "openWorkspaceReplicas").mockImplementationOnce((...args) => {
+      const instance = open(...args);
+      if (failure.includes("acknowledgement")) vi.spyOn(instance.replicas.sync, "waitForQuiet").mockRejectedValue(new Error("acknowledgement failed"));
+      if (failure.includes("closure")) {
+        const close = instance.close;
+        instance.close = async () => { await close(); throw new Error("closure failed"); };
+      }
+      return instance;
+    });
+    try {
+      const run = await runInProcess(["data", "update", UUID, "--file", path], box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stderr).not.toContain("nothing written");
+      expect(run.stderr).toContain("saved locally; not yet synced with hub");
+    } finally { vi.restoreAllMocks(); }
+    expect(state(box).data?.collections[0]?.records).toEqual([{ id: "a", value: { text: "saved" } }]);
+  }
+});
+
 it("refuses malformed files, invalid batches and shared limits atomically in real and dry runs", async () => {
   const box = fixture();
   const valid = { collection: "runs", schema, upsert: [{ id: "a", value: { text: "valid" } }] };
@@ -194,6 +219,7 @@ it("uses nearest binding and environment overrides, rejecting foreign links befo
   const child = join(box.cwd, "nested");
   mkdirSync(child);
   expect((await runInProcess(["data", "get", `https://example.invalid/notes-${WORKSPACE}/${UUID.toUpperCase()}`], { ...box, cwd: child })).stdout).toBe("no data\n");
+  expect((await runInProcess(["data", "get", `https://example.invalid/${WORKSPACE}/b6a8ebf8-a5b7-4f31-839c-1a1c1e588460/record/${UUID}`], box)).stdout).toBe("no data\n");
   const foreign = "c872c59c-5e43-4556-8b75-cc0f81e9bb64";
   const before = state(box);
   const run = await runInProcess(["data", "get", `https://example.invalid/${foreign}/${UUID}`], box, { UBERBLICK_DB: join(box.cwd, "absent", "foreign.sqlite") });

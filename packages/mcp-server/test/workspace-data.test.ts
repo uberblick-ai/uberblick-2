@@ -6,7 +6,7 @@ import {
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { PersistenceError } from "../src/replica.js";
-import { readWorkspaceData, updateWorkspaceData } from "../src/workspace-data.js";
+import { readWorkspaceData, updateWorkspaceData, WorkspaceDataWriteError } from "../src/workspace-data.js";
 import {
   FailingStore, hubUrl, LIVE_HUB_SETTLE, removeTempDirs, startHub, startServer,
   TEST_SECRET, testConfig,
@@ -194,7 +194,58 @@ describe("workspace file data operations", () => {
     store.failing = true;
     await expect(updateWorkspaceData(rig.instance.replicas, { uuid, operations }, true)).resolves.toMatchObject({ changed: true });
     expect(store.logSize()).toBe(before);
-    await expect(updateWorkspaceData(rig.instance.replicas, { uuid, operations })).rejects.toBeInstanceOf(PersistenceError);
+    await expect(updateWorkspaceData(rig.instance.replicas, { uuid, operations })).rejects.toMatchObject({
+      writeOutcome: "unconfirmed", cause: expect.any(PersistenceError),
+    });
     expect(store.logSize()).toBe(before);
+  });
+
+  it("reports an unconfirmed outcome when document data persists before a directory append fails", async () => {
+    const config = testConfig({ updatedAtCoarsenessMs: 0 });
+    const store = new FailingStore(config.databasePath, config.workspaceId);
+    const rig = await startServer(config, store);
+    rigs.push(rig);
+    const { uuid } = await create(rig);
+    await readWorkspaceData(rig.instance.replicas, uuid);
+    const before = store.logSize();
+    store.failRoom = room => room === rig.instance.replicas.directory().room;
+    store.failing = true;
+    const error = await updateWorkspaceData(rig.instance.replicas, { uuid, operations }).catch(error => error);
+    expect(error).toBeInstanceOf(WorkspaceDataWriteError);
+    expect(error).toMatchObject({ writeOutcome: "unconfirmed", cause: expect.any(PersistenceError) });
+    expect(store.logSize()).toBeGreaterThan(before);
+
+    const persisted = new Y.Doc();
+    try {
+      const log = store.readSince(rig.instance.replicas.replica(uuid).room, 0);
+      if (log.snapshot !== null) Y.applyUpdate(persisted, log.snapshot.state);
+      for (const update of log.updates) Y.applyUpdate(persisted, update.payload);
+      expect(readDocData(persisted)?.collections[0]?.records).toEqual([{ id: "row-a", value: { text: "first" } }]);
+    } finally { persisted.destroy(); }
+  });
+
+  it("retains confirmed local save when another append fails during acknowledgement waiting", async () => {
+    const config = testConfig();
+    const store = new FailingStore(config.databasePath, config.workspaceId);
+    const rig = await startServer(config, store);
+    rigs.push(rig);
+    const target = await create(rig);
+    const other = await create(rig);
+    await readWorkspaceData(rig.instance.replicas, target.uuid);
+    const doc = rig.instance.replicas.replica(target.uuid).doc;
+    const otherDoc = rig.instance.replicas.replica(other.uuid).doc;
+    doc.once("update", () => queueMicrotask(() => {
+      store.failing = true;
+      otherDoc.getMap(DATA_KEY).set(JSON.stringify(["record", "other", "failure"]), {});
+    }));
+    await expect(updateWorkspaceData(rig.instance.replicas, { uuid: target.uuid, operations }))
+      .rejects.toMatchObject({ writeOutcome: "saved-locally", cause: expect.any(PersistenceError) });
+    const persisted = new Y.Doc();
+    try {
+      const log = store.readSince(rig.instance.replicas.replica(target.uuid).room, 0);
+      if (log.snapshot !== null) Y.applyUpdate(persisted, log.snapshot.state);
+      for (const update of log.updates) Y.applyUpdate(persisted, update.payload);
+      expect(readDocData(persisted)?.collections[0]?.records).toEqual([{ id: "row-a", value: { text: "first" } }]);
+    } finally { persisted.destroy(); }
   });
 });

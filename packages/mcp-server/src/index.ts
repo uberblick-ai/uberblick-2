@@ -12,7 +12,7 @@ export {
 export type { McpConfig } from "./config.js";
 export { openWorkspaceReplicas } from "./workspace-replicas.js";
 export type { WorkspaceReplicaOptions, WorkspaceReplicaSet } from "./workspace-replicas.js";
-export { readWorkspaceData, updateWorkspaceData } from "./workspace-data.js";
+export { readWorkspaceData, updateWorkspaceData, WorkspaceDataWriteError } from "./workspace-data.js";
 export { createMcpEngine } from "./engine.js";
 export type {
   EngineHealth,
