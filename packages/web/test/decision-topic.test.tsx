@@ -238,18 +238,18 @@ describe("decision topic navigation and history", () => {
     pinDoc(sidebar, group, pinnedRecord);
     pinDoc(sidebar, group, RELATED_CURRENT);
     const host = (await open(path)).container;
-    const pinnedRow = within(host).getByRole("button", { name: pinnedRecord === FIRST ? "Original title" : "Current topic title", exact: true });
+    const pinnedRow = within(host).getByRole("button", { name: pinnedRecord === FIRST ? "Original title" : "Current topic title" });
     expect(pinnedRow.getAttribute("aria-current")).toBe("page");
     await act(async () => within(host).getByRole("button", { name: "Document actions" })
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    expect(screen.queryByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeNull();
-    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar", exact: true }).click());
+    expect(screen.queryByRole("menuitem", { name: "Pin to sidebar" })).toBeNull();
+    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar" }).click());
     expect(readSidebar(sidebar)[0]?.docs).toEqual([RELATED_CURRENT]);
     await act(async () => within(host).getByRole("button", { name: "Document actions" })
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    await act(async () => screen.getByRole("menuitem", { name: "Pin to sidebar", exact: true }).click());
+    await act(async () => screen.getByRole("menuitem", { name: "Pin to sidebar" }).click());
     expect(readSidebar(sidebar)[0]?.docs).toEqual([RELATED_CURRENT, FIRST]);
-    expect(within(host).getByRole("button", { name: "Original title", exact: true }).getAttribute("aria-current")).toBe("page");
+    expect(within(host).getByRole("button", { name: "Original title" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("unpins every stored topic pin without unpinning another document", async () => {
@@ -262,7 +262,7 @@ describe("decision topic navigation and history", () => {
     const host = (await open(decisionRecordPath(WORKSPACE, FIRST, REJECTED))).container;
     await act(async () => within(host).getByRole("button", { name: "Document actions" })
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar", exact: true }).click());
+    await act(async () => screen.getByRole("menuitem", { name: "Unpin from sidebar" }).click());
     expect(readSidebar(sidebar).flatMap((entry) => entry.docs)).toEqual([RELATED_CURRENT]);
   });
 
