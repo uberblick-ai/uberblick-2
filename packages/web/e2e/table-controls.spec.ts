@@ -23,9 +23,9 @@ async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
   await placeCaretIn(cell, { touch: info.project.use.hasTouch === true });
 }
 
-async function touchPage(browser: Browser, info: TestInfo): Promise<Page> {
+async function touchPage(browser: Browser, info: TestInfo, width = 390): Promise<Page> {
   const context = trackContext(await browser.newContext(info.project.name === "chromium"
-    ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+    ? { hasTouch: true, viewport: { width, height: 844 } }
     : {}));
   return context.newPage();
 }
@@ -106,6 +106,23 @@ async function revealedRows(table: Locator, rows: number[]): Promise<void> {
     ...rows.map((row) => `Insert row after ${row}`),
     ...rows.map((row) => `Row ${row} actions`),
   ]);
+}
+
+async function revealedColumns(table: Locator, columns: number[]): Promise<void> {
+  const overlay = await tableControls(table);
+  await expect.poll(() => overlay.getByRole("button", { name: /^Column \d+ actions$/ }).evaluateAll((elements) =>
+    elements.filter((element) => getComputedStyle(element).opacity !== "0").map((element) => element.getAttribute("aria-label"))))
+    .toEqual(columns.map((column) => `Column ${column} actions`));
+}
+
+async function columnMenuBorder(table: Locator, column: number): Promise<void> {
+  const target = button(table.page(), `Column ${column} actions`);
+  await expect.poll(async () => {
+    const bounds = await target.boundingBox();
+    const cell = await table.locator("th").nth(column - 1).boundingBox();
+    return bounds === null || cell === null ? Number.POSITIVE_INFINITY :
+      Math.max(Math.abs(bounds.x + bounds.width / 2 - cell.x - cell.width / 2), Math.abs(bounds.y + bounds.height / 2 - cell.y));
+  }).toBeLessThanOrEqual(1);
 }
 
 async function compactTable(table: Locator): Promise<void> {
@@ -316,6 +333,136 @@ test(`hover reveals quiet controls without moving the table and the pointer reac
 });
 }
 
+for (const colorScheme of ["light", "dark"] as const) {
+test(`column hover reaches its top menu and caret, focus and open menus keep it revealed — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
+  await page.emulateMedia({ colorScheme });
+  const table = await openTable(page);
+  await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
+  await page.mouse.move(0, 0);
+  await revealedColumns(table, [1]);
+  await table.locator("tr").last().locator("td").nth(1).hover();
+  await revealedColumns(table, [1, 2]);
+  await caretIn(editor(page).locator(":scope > p").first(), info);
+  await page.mouse.move(0, 0);
+  await expect(controls(page)).toHaveCount(0);
+  const before = await table.locator("th, td").evaluateAll((cells) => cells.map((cell) => {
+    const box = cell.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }));
+  await table.locator("tr").nth(1).locator("td").nth(1).hover();
+  await revealedColumns(table, [2]);
+  await columnMenuBorder(table, 2);
+  await columnBorders(table);
+  await controlsDoNotOverlap(table);
+  expect(await table.locator("th, td").evaluateAll((cells) => cells.map((cell) => {
+    const box = cell.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }))).toEqual(before);
+  const trigger = button(page, "Column 2 actions");
+  const bounds = await trigger.boundingBox();
+  if (bounds === null) throw new Error("e2e: column menu has no geometry");
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, { steps: 30 });
+  await revealedColumns(table, [2]);
+  await hitTarget(trigger);
+  await trigger.click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Delete column"]);
+  await page.getByRole("menu").hover();
+  await page.mouse.move(0, 0);
+  await revealedColumns(table, [2]);
+  await capture(page, info, "table-column-menu", colorScheme);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await revealedColumns(table, [2]);
+  await expect(table.locator("th")).toHaveCount(3);
+  await pageFits(page);
+});
+}
+
+test("keyboard reaches every column menu while the native strip reveals off-screen columns", { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Touch Safari reaches column menus by touch instead of native button Tab");
+  const table = await openTable(page, true);
+  const wrapper = table.locator("..");
+  await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await caretIn(table.locator("th").first(), info);
+  await page.mouse.move(0, 0);
+  await page.keyboard.press("Control+Alt+t");
+  await expect(button(page, "Insert column before 1")).toBeFocused();
+  for (let column = 1; column <= 8; column += 1) {
+    await tabTo(page, `Column ${column} actions`);
+    const trigger = button(page, `Column ${column} actions`);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveCSS("opacity", "1");
+    await columnMenuBorder(table, column);
+    await expect.poll(() => trigger.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      const strip = element.closest(".ub-table-column-controls");
+      return JSON.stringify({
+        focused: element === document.activeElement,
+        focusedName: document.activeElement?.getAttribute("aria-label"),
+        reachable: element.contains(hit),
+        hit: hit?.outerHTML.slice(0, 160),
+        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+        scrollLeft: strip?.scrollLeft,
+      });
+    })).toContain('"reachable":true');
+  }
+  await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await page.keyboard.press("Enter");
+  const deletion = page.getByRole("menuitem", { name: "Delete column", exact: true });
+  await expect(deletion).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(button(page, "Column 8 actions")).toBeFocused();
+  await page.keyboard.press(`Shift+${nextControlKey(page)}`);
+  await expect(button(page, "Column 7 actions")).toBeFocused();
+  await expect(table.locator("th")).toHaveText(["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Last"]);
+  await pageFits(page);
+});
+
+for (const colorScheme of ["light", "dark"] as const) {
+test(`touch reveals column menus without moving cells and reaches both wide-table edges — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info, 820);
+  await page.emulateMedia({ colorScheme });
+  const table = await openTable(page, true);
+  await activateControl(editor(page).locator(":scope > p").first(), { touch: true });
+  const before = await table.locator("th").evaluateAll((cells) => cells.map((cell) => {
+    const box = cell.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }));
+  await activateControl(table.locator("th").first(), { touch: true });
+  await revealedColumns(table, [1]);
+  await minimumTargets(button(page, "Column 1 actions"));
+  await columnMenuBorder(table, 1);
+  await controlsDoNotOverlap(table);
+  await fullyTappable(button(page, "Column 1 actions"));
+  expect(await table.locator("th").evaluateAll((cells) => cells.map((cell) => {
+    const box = cell.getBoundingClientRect();
+    return { x: box.x, y: box.y, width: box.width, height: box.height };
+  }))).toEqual(before);
+  await button(page, "Column 1 actions").tap();
+  await minimumTargets(page.getByRole("menuitem"));
+  await expect(page.getByRole("menuitem")).toHaveText(["Delete column"]);
+  await page.keyboard.press("Escape");
+  const wrapper = table.locator("..");
+  await wrapper.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  await activateControl(table.locator("th").last(), { touch: true });
+  await revealedColumns(table, [8]);
+  await columnMenuBorder(table, 8);
+  await controlsDoNotOverlap(table);
+  await fullyTappable(button(page, "Column 8 actions"));
+  await capture(page, info, "table-column-touch", colorScheme);
+  await button(page, "Column 8 actions").tap();
+  await page.getByRole("menuitem", { name: "Delete column", exact: true }).tap();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(table.locator("th")).toHaveText(["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh"]);
+  await expect(table.locator("td")).toHaveCount(0);
+  await pageFits(page);
+});
+}
+
 test("caret and pointer reveal their own rows while hidden controls pass input to cells", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   const table = await openTable(page);
@@ -480,6 +627,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await expect(button(page, "Insert column before 1")).toBeFocused();
   if (info.project.name !== "webkit-iphone") {
     const order = ["Insert column before 1", "Insert column after 1", "Insert column after 2", "Insert column after 3",
+      "Column 1 actions", "Column 2 actions", "Column 3 actions",
       "Insert row after 1", "Insert row after 2", "Insert row after 3", "Row 1 actions", "Row 2 actions", "Row 3 actions"];
     for (const [index, name] of order.entries()) {
       const control = button(page, name);
@@ -656,7 +804,8 @@ test("touch exposes 44px controls for the caret table and row without hover", { 
   await minimumTargets(page.getByRole("menuitem"));
   await deletion.tap();
   await expect(table.locator("tr")).toHaveCount(3);
-  await table.locator("th").first().tap();
+  // The 44px top-border target covers the centre of a short touch header.
+  await table.locator("th").first().tap({ position: { x: 30, y: 30 } });
   await revealedRows(table, [1]);
   await controlsDoNotOverlap(table);
   await button(page, "Insert column after 1").tap();
@@ -701,6 +850,8 @@ test("archiving hides structural controls and keyboard and right-click paths can
   await page.keyboard.press("Control+Alt+t");
   await table.locator("td").first().click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toHaveCount(0);
+  await expect(button(page, "Column 1 actions")).toHaveCount(0);
   await expect(controls(page)).toHaveCount(0);
   await expect(table.locator("tr")).toHaveCount(3);
   await expect(table.locator("th")).toHaveCount(3);

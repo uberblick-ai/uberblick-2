@@ -20,6 +20,18 @@ export interface ResolvedTableRow {
   rowPos: number;
 }
 
+export interface TableColumnTarget {
+  tableId: string;
+  table: Y.XmlElement;
+  cell: Y.XmlElement;
+}
+
+export interface ResolvedTableColumn {
+  node: ProseMirrorNode;
+  pos: number;
+  columnIndex: number;
+}
+
 export type TableAction = "row-before" | "row-after" | "row-delete" | "column-before" | "column-after";
 
 function sharedTable(editor: Editor, tableId: string): Y.XmlElement | null {
@@ -28,6 +40,54 @@ function sharedTable(editor: Editor, tableId: string): Y.XmlElement | null {
     element instanceof Y.XmlElement && element.getAttribute("id") === tableId,
   );
   return table instanceof Y.XmlElement && table.nodeName === "table" ? table : null;
+}
+
+/** Shared and rendered rows must agree before an exact shared-cell edit. */
+function columnTable(editor: Editor, tableId: string): { table: Y.XmlElement; node: ProseMirrorNode; pos: number } | null {
+  if (!editor.isEditable) return null;
+  const table = sharedTable(editor, tableId);
+  const found = findBlockById(editor.state.doc, tableId);
+  if (table === null || found === null || !isOrdinaryTable(found.node) || table.length !== found.node.childCount) return null;
+  const width = found.node.child(0).childCount;
+  const rows = table.toArray();
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!(row instanceof Y.XmlElement) || row.nodeName !== "tableRow" || row.length !== width) return null;
+    for (const cell of row.toArray()) {
+      if (!(cell instanceof Y.XmlElement) || cell.nodeName !== (index === 0 ? "tableHeader" : "tableCell")) return null;
+    }
+  }
+  return { ...found, table };
+}
+
+/** A column follows its original shared header cell through other edits. */
+export function tableColumnTargets(editor: Editor, tableId: string): TableColumnTarget[] | null {
+  const live = columnTable(editor, tableId);
+  if (live === null) return null;
+  const header = live.table.get(0) as Y.XmlElement;
+  return header.toArray().map((cell) => ({ tableId, table: live.table, cell: cell as Y.XmlElement }));
+}
+
+/** Re-resolve the header identity rather than the position that replaced it. */
+export function resolveTableColumn(editor: Editor, target: TableColumnTarget): ResolvedTableColumn | null {
+  const live = columnTable(editor, target.tableId);
+  if (live === null || live.table !== target.table) return null;
+  const header = live.table.get(0) as Y.XmlElement;
+  const columnIndex = header.toArray().indexOf(target.cell);
+  return columnIndex < 0 ? null : { node: live.node, pos: live.pos, columnIndex };
+}
+
+/** Preserve surviving cell identities even when neighbouring content is equal. */
+export function deleteTableColumn(editor: Editor, target: TableColumnTarget): boolean {
+  const live = resolveTableColumn(editor, target);
+  const doc = target.table.doc;
+  if (live === null || live.node.child(0).childCount === 1 || doc === null) return false;
+  endUndoCapture(editor.state);
+  doc.transact(() => {
+    for (const row of target.table.toArray()) (row as Y.XmlElement).delete(live.columnIndex, 1);
+  }, ySyncPluginKey);
+  endUndoCapture(editor.state);
+  return true;
 }
 
 /** Keep the Yjs type itself: remote transactions can replace every PM node. */
