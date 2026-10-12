@@ -94,6 +94,19 @@ function sortValue(column: TableColumnMapping, record: DataRecord): string | num
   }
 }
 
+/** Order a detached row window without changing its membership or stored values. */
+export function sortTableRows(rows: readonly DataRecord[], column: TableColumnMapping, direction: "asc" | "desc"): DataRecord[] {
+  const values = new Map(rows.map(record => [record, sortValue(column, record)]));
+  const sign = direction === "desc" ? -1 : 1;
+  return [...rows].sort((a, b) => {
+    const av = values.get(a) ?? null;
+    const bv = values.get(b) ?? null;
+    if (av === null || bv === null) return (av === null ? 1 : 0) - (bv === null ? 1 : 0) || compareCodePoints(a.id, b.id);
+    const order = typeof av === "number" && typeof bv === "number" ? av - bv : compareCodePoints(String(av), String(bv));
+    return sign * order || compareCodePoints(a.id, b.id);
+  });
+}
+
 export function projectTable(config: TableConfig, data: DocData | null): TableProjection {
   const binding = bindCollection(data, config.collection, "Table");
   if (binding.status !== "ready") return binding;
@@ -101,7 +114,7 @@ export function projectTable(config: TableConfig, data: DocData | null): TablePr
   const badField = config.columns.find((entry) => incompatible(schema, entry.field, entry.format))?.field;
   if (badField !== undefined) return { status: "mapping-incompatible", message: `Table mapping is incompatible with the schema: field “${badField}” is missing or has an incompatible type.` };
   const invalid = new Set(collection.invalidRecordIds);
-  const rows: DataRecord[] = [];
+  let rows: DataRecord[] = [];
   let invalidSchema = 0;
   for (const record of collection.records) {
     if (invalid.has(record.id) || !object(record.value)) { invalidSchema += 1; continue; }
@@ -111,17 +124,7 @@ export function projectTable(config: TableConfig, data: DocData | null): TablePr
   // If a field appears twice, its first displayed column defines its sort format.
   const sortColumn = sort === undefined ? undefined : config.columns.find((entry) => entry.field === sort.field);
   if (sortColumn === undefined) rows.sort((a, b) => compareCodePoints(a.id, b.id));
-  else {
-    const values = new Map(rows.map((record) => [record, sortValue(sortColumn, record)]));
-    const direction = sort?.direction === "desc" ? -1 : 1;
-    rows.sort((a, b) => {
-      const av = values.get(a) ?? null;
-      const bv = values.get(b) ?? null;
-      if (av === null || bv === null) return (av === null ? 1 : 0) - (bv === null ? 1 : 0) || compareCodePoints(a.id, b.id);
-      const order = typeof av === "number" && typeof bv === "number" ? av - bv : compareCodePoints(String(av), String(bv));
-      return direction * order || compareCodePoints(a.id, b.id);
-    });
-  }
+  else rows = sortTableRows(rows, sortColumn, sort?.direction ?? "asc");
   if (rows.length === 0) return { status: "no-records", message: "No records to show in this table collection.", invalidSchema };
   if (config.limit !== undefined && rows.length > config.limit) return {
     status: "ready", config, rows: rows.slice(0, config.limit), recordCount: collection.records.length, invalidSchema,

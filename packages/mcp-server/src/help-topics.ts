@@ -139,19 +139,22 @@ Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \
 
 ## Cards
 
-A card holds prose in four parts: optional label, required title, optional body and optional footer. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal mermaid, terminal and chart source fences.
+A card holds prose in four parts: optional label, required title, optional body and optional footer, plus one optional link button. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal mermaid, terminal and chart source fences.
 
-The header uses lowercase \`label:\`, \`title:\` and \`footer:\` keys, each at most once, in any input order. A value is the rest of its line after the colon and one optional space. It is inline Markdown, not YAML: quotes remain literal. The first blank line ends the header; everything after it is one prose body. All parts support the same inline marks as table cells. For example:
+The header uses lowercase \`label:\`, \`title:\`, \`footer:\` and \`button:\` keys, each at most once, in any input order. A value is the rest of its line after the colon and one optional space. Prose values are inline Markdown, not YAML: quotes remain literal. The first blank line ends the header; everything after it is one prose body. All four prose parts support the same inline marks as table cells. For example:
 
     :::card
     label: Recommendation
     title: Keep **one** item together
     footer: [Details](https://example.com)
+    button: [Discuss in Codex](codex://new?prompt=Review%20this%20recommendation)
 
     The body supports prose and inline code.
     :::
 
-Export orders label, title, footer, omits empty keys and folds header-value newlines to spaces. It escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, unknown key, duplicate key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
+The optional \`button: [Text](destination)\` value must be exactly one link with nonempty plain text: no formatting, document links or comments in its text. Its destination is an \`https://\` URL or exactly \`claude://code/new\`, \`claude-cli://open\` or \`codex://new\`, alone or followed by \`?\` and an opaque query. Other destinations, including other routes of those app schemes, are invalid. Ordinary inline links still accept only http(s). The footer button shows its author's text as written. An https button opens a new tab without opener or referrer; an app button opens its route without leaving the document or opening a blank tab.
+
+Export and get_doc order label, title, footer, button, omit empty prose keys and fold prose header-value newlines to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 
 The document model is flat: one list item is one block, nested to at most four levels (indent 0–3). Markdown import does not read continuation lines or nested block content inside a list item. Consecutive quote lines form one quote block. HTML comments are skipped on import. Frontmatter can carry document identity and metadata; without a frontmatter title, a leading level-1 heading becomes the title.
 
@@ -161,7 +164,7 @@ For ordinary blocks, \`text\` is plain text: inserting Markdown punctuation does
 
 Table structural and multi-cell edits require \`table_mapping\` rows and columns; see \`edit_block\` for the full mapping contract. For prose carrying formatting, text splices can re-anchor a mark when a changed range touches its edge. See \`edit_block\` before changing a marked span and verify the result with \`export_markdown\`.
 
-Card edits splice only changed parts and characters, preserving unchanged marks and comment anchors. Card links count toward backlinks. Open card comments in the web editor: MCP \`annotate\` refuses new card anchors but accepts replies, resolution and reopening by thread_id. \`link_range\` refuses cards; write links as inline Markdown in their text. Returned annotation ranges name the card part.
+Card edits splice only changed parts and characters, preserving an unchanged button, marks and comment anchors. Remove the button header line to remove its button. Prose card links count toward backlinks. Open card comments in the web editor: MCP \`annotate\` refuses new card anchors but accepts replies, resolution and reopening by thread_id. \`link_range\` refuses cards; write prose links as inline Markdown in their text. Returned annotation ranges name the card part.
 
 ## Export
 

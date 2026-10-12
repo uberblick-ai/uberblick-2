@@ -2,18 +2,64 @@ import * as Y from "yjs";
 import { InvalidCardError } from "./errors.js";
 import { spliceInlineText } from "./inline-edit.js";
 import { applyInlineRuns, assertInlineWritable, inlinePlainText, readInlineRuns, readsAsMark } from "./marks.js";
-import { parseInline, renderInline } from "./markdown.js";
+import { parseInline, parseSingleMarkdownLink, renderInline, renderMarkdownLink } from "./markdown.js";
 import { plainXmlText, TABLE_CELL_MARKS } from "./table.js";
 import type { InlineRun } from "./types.js";
 
 export const CARD_PARTS = ["label", "title", "body", "footer"] as const;
 export type CardPart = (typeof CARD_PARTS)[number];
-export type CardText = Record<CardPart, string>;
+export interface CardButton { text: string; href: string }
+export type CardText = Record<CardPart, string> & { button?: CardButton };
 export type CardInline = Record<CardPart, InlineRun[]>;
 
 export const CARD_NODE_NAMES: Record<CardPart, string> = {
   label: "cardLabel", title: "cardTitle", body: "cardBody", footer: "cardFooter",
 };
+
+const CARD_APP_ROUTES = ["claude://code/new", "claude-cli://open", "codex://new"] as const;
+
+/** Queries are opaque; only the app route itself is allowed to select an action. */
+export function isCardButtonHref(href: unknown): href is string {
+  if (typeof href !== "string" || /[\r\n]/.test(href) || href.includes("\u0000")) return false;
+  if (CARD_APP_ROUTES.some((route) => href === route || href.startsWith(`${route}?`))) return true;
+  if (!href.startsWith("https://")) return false;
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" && url.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+export function parseCardButton(source: string): CardButton {
+  const link = parseSingleMarkdownLink(source);
+  if (link === null || !isCardButtonHref(link.href)) {
+    throw new InvalidCardError("The button must be exactly one link to https://, claude://code/new, claude-cli://open or codex://new");
+  }
+  const runs = parseInline(link.label);
+  const text = inlinePlainText(runs);
+  if (text.trim() === "" || /[\r\n]/.test(text) || runs.some((run) => Object.keys(run.marks).length !== 0)) {
+    throw new InvalidCardError("The button text must be nonempty plain text, without formatting or document links");
+  }
+  return { text, href: link.href };
+}
+
+export function writeCardButton(button: Readonly<CardButton>): string {
+  const source = renderMarkdownLink(button.text, button.href);
+  parseCardButton(source);
+  return source;
+}
+
+/** Invalid foreign attributes are never usable destinations. */
+export function cardButton(element: Y.XmlElement): CardButton | undefined {
+  const source = element.getAttribute("button");
+  if (typeof source !== "string") return undefined;
+  try {
+    return parseCardButton(source);
+  } catch {
+    return undefined;
+  }
+}
 
 /** The container header is inline Markdown, never a YAML mapping. */
 export function parseCardInput(source: string, requireTitle = true): CardText {
@@ -26,12 +72,13 @@ export function parseCardInput(source: string, requireTitle = true): CardText {
       bodyStart = index + 1;
       break;
     }
-    const match = /^(label|title|footer): ?(.*)$/.exec(line);
-    if (match === null) throw new InvalidCardError("Header lines must use label:, title: or footer:");
-    const key = match[1] as "label" | "title" | "footer";
+    const match = /^(label|title|footer|button): ?(.*)$/.exec(line);
+    if (match === null) throw new InvalidCardError("Header lines must use label:, title:, footer: or button:");
+    const key = match[1] as "label" | "title" | "footer" | "button";
     if (seen.has(key)) throw new InvalidCardError(`Duplicate header key: ${key}`);
     seen.add(key);
-    result[key] = match[2] ?? "";
+    if (key === "button") result.button = parseCardButton(match[2] ?? "");
+    else result[key] = match[2] ?? "";
   }
   if (requireTitle && (!seen.has("title") || inlinePlainText(parseInline(result.title)).trim() === "")) throw new InvalidCardError();
   result.body = lines.slice(bodyStart).join("\n");
@@ -49,6 +96,7 @@ export function writeCardText(parts: Readonly<CardText>): string {
     const value = parts[part].replace(/[\r\n]/g, " ");
     return value === "" ? [] : [`${part}: ${value}`];
   });
+  if (parts.button !== undefined) header.push(`button: ${writeCardButton(parts.button)}`);
   return `${header.join("\n")}\n\n${escapeContainerLines(parts.body)}`;
 }
 
@@ -74,15 +122,19 @@ export function cardText(element: Y.XmlElement): string {
 
 export function cardTextParts(element: Y.XmlElement): CardText {
   const inline = cardInline(element);
-  return Object.fromEntries(CARD_PARTS.map((part) => [part,
+  const parts: CardText = Object.fromEntries(CARD_PARTS.map((part) => [part,
     renderInline(inline[part].map((run) => ({ ...run, text: part === "body" ? run.text : run.text.replace(/[\r\n]/g, " ") }))),
-  ])) as CardText;
+  ])) as Record<CardPart, string>;
+  const button = cardButton(element);
+  if (button !== undefined) parts.button = button;
+  return parts;
 }
 
 /** Reject unknown structure before editor binding or an MCP rewrite. */
 export function isSupportedCard(element: Y.XmlElement): boolean {
   if (element.nodeName !== "card" || element.length !== CARD_PARTS.length ||
-    Object.keys(element.getAttributes()).some((key) => key !== "id")) return false;
+    Object.keys(element.getAttributes()).some((key) => key !== "id" && key !== "button") ||
+    (element.getAttribute("button") !== undefined && cardButton(element) === undefined)) return false;
   return element.toArray().every((node, index) => {
     const part = CARD_PARTS[index];
     if (part === undefined || !(node instanceof Y.XmlElement) || node.nodeName !== CARD_NODE_NAMES[part] ||
@@ -115,6 +167,7 @@ export function buildCardElement(id: string): Y.XmlElement {
 }
 
 export function writeCardInline(element: Y.XmlElement, parts: Readonly<CardText>): void {
+  if (parts.button !== undefined) element.setAttribute("button", writeCardButton(parts.button));
   for (const part of CARD_PARTS) {
     const text = cardPartTexts(element, part)[0];
     if (text !== undefined) applyInlineRuns(text, parseInline(parts[part]));
@@ -138,6 +191,7 @@ export function seedNewCardParts(transaction: Y.Transaction): void {
 
 export function editCard(element: Y.XmlElement, before: Readonly<CardText>, after: Readonly<CardText>): void {
   if (!isSupportedCard(element)) throw new InvalidCardError("Stored card shape is unsupported; it cannot be rewritten");
+  const button = after.button === undefined ? undefined : writeCardButton(after.button);
   const edits = CARD_PARTS.filter((part) => before[part] !== after[part]).map((part) => {
     const text = cardPartTexts(element, part)[0];
     const oldRuns = parseInline(before[part]);
@@ -159,5 +213,9 @@ export function editCard(element: Y.XmlElement, before: Readonly<CardText>, afte
       paragraph.insert(0, [text]);
     }
     spliceInlineText(text, edit.oldRuns, edit.newRuns, edit.offset);
+  }
+  if (before.button?.text !== after.button?.text || before.button?.href !== after.button?.href) {
+    if (button === undefined) element.removeAttribute("button");
+    else element.setAttribute("button", button);
   }
 }

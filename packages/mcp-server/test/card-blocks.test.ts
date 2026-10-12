@@ -104,6 +104,99 @@ describe("cards through MCP", () => {
   });
 
   it.each([
+    "https://example.com/recommendation?prompt=Review%20this%20change",
+    "claude://code/new",
+    "claude://code/new?q=Review%20this%20change&folder=%2Fexample%2Fproject",
+    "claude-cli://open",
+    "claude-cli://open?q=Review%20this%20change&repo=example%2Fproject",
+    "codex://new",
+    "codex://new?prompt=Review%20this%20change&path=%2Fexample%2Fproject",
+  ])("round-trips one button with its author text and preserves it during prose edits: %s", async (href) => {
+    const rig = await localRig();
+    const button = `button: [Discuss this recommendation](${href})`;
+    const source = `${button}\nfooter: Evidence\ntitle: Keep the title\nlabel: Review\n\nKeep the body.`;
+    const canonical = `label: Review\ntitle: Keep the title\nfooter: Evidence\n${button}\n\nKeep the body.`;
+    const created = await rig.ok("create_doc", { title: "Card button", description: "A single author-named card action.",
+      blocks: [{ type: "card", text: source }] });
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "card", text: source });
+    expect(created.blocks[0].text).toBe(canonical);
+    expect(inserted.block.text).toBe(canonical);
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual([canonical, canonical]);
+    expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
+      .toBe(`:::card\n${canonical}\n:::\n\n:::card\n${canonical}\n:::\n`);
+    const changed = canonical.replace("Keep the body.", "Changed body.");
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: inserted.block.id,
+      old_text: canonical, new_text: changed, rev: inserted.block.rev });
+    expect(edited.block.text).toBe(changed);
+    const noButton = changed.replace(`${button}\n`, "");
+    const removed = await rig.ok("edit_block", { uuid: created.uuid, block_id: inserted.block.id,
+      old_text: changed, new_text: noButton, rev: edited.block.rev });
+    expect(removed.block.text).toBe(noButton);
+  });
+
+  it("refuses malformed or disallowed buttons before any create, insert or edit write", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Card button refusals", description: "Invalid card actions cannot make a partial write.",
+      blocks: [{ type: "card", text: SOURCE }] });
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const before = Y.encodeStateAsUpdate(doc);
+    const writes = rig.instance.store.logSize();
+    const listed = await rig.ok("list_docs");
+    const invalidButtons = [
+      "[Discuss](http://example.com)", "[Discuss](javascript:alert%281%29)",
+      "[Discuss](data:text/plain,hello)", "[Discuss](file:///example)",
+      "[Discuss](vbscript:example)", "[Discuss](mailto:reader@example.com)",
+      "[Discuss](/relative)", "[Discuss](codex://settings)",
+      "[Discuss](codex://new/other)", "[Discuss](codex://new#fragment)",
+      "[Discuss](claude://code/other)", "[Discuss](claude-cli://other)",
+      "[](https://example.com)", "[   ](https://example.com)",
+      "[**Discuss**](https://example.com)", "Discuss",
+      "[Discuss](https://example.com) trailing", "[Discuss](https://example.com) [Again](https://example.com)",
+      "[Discuss](https://example.com)\nbutton: [Again](https://example.com)",
+    ];
+    for (const button of invalidButtons) {
+      const invalid = `title: Keep the title\nbutton: ${button}\n\nKeep the body.`;
+      for (const [name, args] of [
+        ["create_doc", { title: "No partial button", description: "All seeds validate before creation.",
+          blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "card", text: invalid }] }],
+        ["insert_block", { uuid: created.uuid, type: "card", text: invalid }],
+        ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id, old_text: SOURCE,
+          new_text: invalid, rev: created.blocks[0].rev }],
+      ] as const) {
+        const refused = await rig.call(name, args);
+        expect(refused, `${name}: ${button}`).toMatchObject({ isError: true, payload: {
+          error: "invalid_card", recoveryClass: "manual", applied: false, partial: false, synced: false,
+        } });
+        expect(refused.payload.recovery).toContain("button");
+      }
+    }
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(rig.instance.store.logSize()).toBe(writes);
+    expect(await rig.ok("list_docs")).toEqual(listed);
+  });
+
+  it("adds and changes a button through an edit without changing its prose parts", async () => {
+    const rig = await localRig();
+    const created = await rig.ok("create_doc", { title: "Card button editing", description: "MCP can replace a card action independently.",
+      blocks: [{ type: "card", text: SOURCE }] });
+    const withButton = SOURCE.replace("footer: Evidence\n", "footer: Evidence\nbutton: [Review in Claude](claude://code/new?q=Review)\n");
+    const added = await rig.ok("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
+      old_text: SOURCE, new_text: withButton, rev: created.blocks[0].rev });
+    expect(added.block.text).toBe(withButton);
+    const changedButton = withButton.replace("[Review in Claude](claude://code/new?q=Review)",
+      "[Discuss in Codex](codex://new?prompt=Discuss%20the%20recommendation)");
+    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: created.blocks[0].id,
+      old_text: withButton, new_text: changedButton, rev: added.block.rev });
+    expect(changed.block.text).toBe(changedButton);
+    const doc = rig.instance.replicas.replica(created.uuid).doc;
+    const expectedParts = { label: "Review", title: "Keep the title", footer: "Evidence", body: "Keep the body." };
+    for (const part of PARTS) {
+      expect(partRuns(doc, created.blocks[0].id, part)).toEqual([{ text: expectedParts[part], marks: {} }]);
+    }
+  });
+
+  it.each([
     "label: Missing title\n\nBody",
     "title: \n\nBody",
     "title: Title\nunknown: Value\n\nBody",

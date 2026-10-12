@@ -6,6 +6,7 @@ import {
 } from "@uberblick/schema";
 import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
+import { prepareTable } from "../src/editor/table-data.js";
 import type { ChartConfiguration } from "chart.js";
 
 type RecordedChart = typeof charts.instances[number];
@@ -23,6 +24,10 @@ const charts = vi.hoisted(() => ({ instances: [] as Array<{ canvas: unknown; dat
 vi.mock("@uberblick/schema", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/schema")>();
   return { ...actual, readDocData: vi.fn(actual.readDocData) };
+});
+vi.mock("../src/editor/table-data.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/editor/table-data.js")>();
+  return { ...actual, prepareTable: vi.fn(actual.prepareTable) };
 });
 vi.mock("chart.js", () => {
   class Chart {
@@ -98,10 +103,61 @@ beforeEach(() => {
   } as CanvasRenderingContext2D);
     charts.instances = [];
     vi.mocked(readDocData).mockClear();
+    vi.mocked(prepareTable).mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("the chart's derived lifecycle", () => {
+  it("sorts only a mounted table's cached window without reads, projection, selection or writes", () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(tableMapping), limit: 2, sort: { field: "day", direction: "desc" } });
+    editBlock(doc, id, mapping, source);
+    appendBlock(doc, { type: "chart", text: source });
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [
+      { id: "b", value: { day: 2, value: 4 } }, { id: "c", value: { day: 3, value: 5 } },
+    ] }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const tables = [...editor.view.dom.querySelectorAll<HTMLTableElement>(".ub-data-table")];
+    const first = tables[0]!;
+    const button = first.querySelectorAll<HTMLButtonElement>("th button")[1]!;
+    const order = (table: HTMLTableElement) => [...table.querySelectorAll("tbody tr")].map(row => row.textContent);
+    const selection = editor.state.selection;
+    const before = Y.encodeStateAsUpdate(doc);
+    let updates = 0;
+    doc.on("update", () => { updates += 1; });
+    button.click();
+    flush();
+    expect(order(first)).toEqual(["24", "35"]);
+    expect(order(tables[1]!)).toEqual(["35", "24"]);
+    expect(first.querySelector('th[aria-sort="ascending"]')?.textContent).toBe("Delivery↑");
+    expect(document.activeElement).toBe(button);
+    expect(editor.state.selection.eq(selection)).toBe(true);
+    expect(first.closest(".ub-chart")?.classList.contains("ub-chart-editing")).toBe(false);
+    expect(readDocData).toHaveBeenCalledTimes(1);
+    expect(prepareTable).toHaveBeenCalledTimes(2);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(updates).toBe(0);
+
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "d", value: { day: 4, value: 1 } }] }]);
+    flush();
+    expect(order(first)).toEqual(["41", "35"]);
+    expect(order(tables[1]!)).toEqual(["41", "35"]);
+    expect(first.querySelector('th[aria-sort="ascending"]')?.textContent).toBe("Delivery↑");
+    expect(document.activeElement).toBe(button);
+    expect(readDocData).toHaveBeenCalledTimes(2);
+    expect(prepareTable).toHaveBeenCalledTimes(4);
+    editBlock(doc, id, source, `${source} `);
+    flush();
+    expect(first.querySelector('th[aria-sort="descending"]')?.textContent).toBe("day↓");
+    expect(readDocData).toHaveBeenCalledTimes(2);
+    editor.destroy();
+    const remounted = mountEditor(doc);
+    flush();
+    expect(remounted.editor.view.dom.querySelector('th[aria-sort="descending"]')?.textContent).toBe("day↓");
+    remounted.editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("switches table and line presentation with the source while preserving annotation and source access", async () => {
     const { doc, directory, id } = fixture();
     editBlock(doc, id, mapping, tableMapping);
@@ -497,6 +553,12 @@ describe("the chart's derived lifecycle", () => {
     expect(element.querySelector(".ub-chart-notice")?.textContent).toBe("Generated from document data · read-only");
     expect(element.querySelector(".ub-chart-notice")?.hasAttribute("aria-live")).toBe(false);
     expect(element.querySelector(".ub-chart")?.getAttribute("data-view")).toBe("table");
+    const dayHeader = element.querySelector<HTMLButtonElement>("th button")!;
+    dayHeader.click();
+    dayHeader.click();
+    expect([...element.querySelectorAll("tbody tr")].map(row => row.firstElementChild?.textContent)).toEqual(["2", "1"]);
+    expect(element.querySelector('th[aria-sort="descending"]')?.textContent).toBe("day↓");
+    expect(local).toBe(0);
     applyDocData(peer, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 2, value: 9 } }] }]);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();

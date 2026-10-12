@@ -135,7 +135,7 @@ export const inlineArg = z
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
-    "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer keys at most once, a required nonempty title, then a blank line and optional prose body. Header values are one-line inline Markdown, not YAML; quotes stay literal. Unknown, duplicate or non-key header lines refuse with invalid_card. All four parts support code, bold, italic, strike, external and document links. Export orders label, title, footer and omits empty keys, folds header newlines to spaces, and escapes prose lines starting :::.",
+    "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title, footer and optional button keys at most once, a required nonempty title, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. A button is exactly [Text](destination): nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Invalid buttons, unknown, duplicate or non-key headers refuse with invalid_card. All four prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, button and omits empty prose keys, folds header newlines to spaces, and escapes prose lines starting :::.",
   ),
   level: z
     .number()

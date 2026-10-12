@@ -226,6 +226,30 @@ describe("read-only decision records", () => {
     peer.destroy();
   });
 
+  it("keeps card links active without author controls across every decision status", async () => {
+    const ydoc = stage("open");
+    appendBlock(ydoc, { type: "card", text: "title: Answer\nbutton: [Read details](https://example.invalid/answer)\n\nStored answer." });
+    appendBlock(ydoc, { type: "card", text: "title: Earlier answer\n\nStored history." });
+    const original = getBlocks(ydoc);
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    const host = await openApp();
+    const prose = editorElement(host);
+
+    for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
+      await act(async () => setStatus(ydoc, status));
+      expect(editorElement(host)).toBe(prose);
+      expect(prose.getAttribute("contenteditable")).toBe("false");
+      expect(screen.queryByRole("button", { name: "Add button", exact: true })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit button", exact: true })).toBeNull();
+      const before = Y.encodeStateVector(ydoc);
+      await act(async () => screen.getByRole<HTMLButtonElement>("button", { name: "Read details", exact: true }).click());
+      expect(opened).toHaveBeenLastCalledWith("https://example.invalid/answer", "_blank", "noopener,noreferrer");
+      expect(Y.encodeStateVector(ydoc)).toEqual(before);
+      expect(getBlocks(ydoc)).toEqual(original);
+    }
+    expect(opened).toHaveBeenCalledTimes(4);
+  });
+
   for (const status of ["open", "decided", "rejected", "withdrawn"] as const) it(`binds ${status} content read-only immediately and keeps tags, pin and archive available`, async () => {
     const ydoc = stage(status);
     const originalBind = guardedBinding.bindGuardedEditor;

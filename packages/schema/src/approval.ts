@@ -5,14 +5,15 @@ import { getBlocksWithInline } from "./blocks.js";
 import { inlinePlainText } from "./marks.js";
 import { writeGfmTable } from "./table.js";
 import { CARD_PARTS, writeCardText } from "./card.js";
-import type { CardText } from "./card.js";
+import type { CardInline, CardPart } from "./card.js";
 import { getMeta } from "./doc.js";
 import { getDocDataEntries } from "./data.js";
 import { blockRev } from "./rev.js";
 
 /**
  * Hash title, decision line, ordered block text and raw data with JSON boundaries.
- * Identities, attributes, marks, comments and approval bookkeeping are excluded.
+ * Identities, layout attributes, marks, comments, link targets and approval
+ * bookkeeping are excluded.
  * The browser-safe revision hash detects changes; it does not prove attribution.
  */
 export function decisionApprovalFingerprint(doc: Y.Doc): string {
@@ -20,9 +21,9 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
   // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
   // Use plain table text so formatting alone cannot invalidate approval.
-  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card }) =>
+  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButton }) =>
     card !== undefined
-      ? writeCardText(Object.fromEntries(CARD_PARTS.map((part) => [part, inlinePlainText(card[part])])) as CardText)
+      ? cardApprovalText(card, cardButton?.text)
       : table !== undefined && table.length > 0
       ? writeGfmTable(table.map((row) => row.map(inlinePlainText)))
       : block.text,
@@ -33,6 +34,11 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
     type: "paragraph",
     text: JSON.stringify(content),
   });
+}
+
+function cardApprovalText(card: CardInline, buttonText?: string): unknown {
+  const parts = writeCardText(Object.fromEntries(CARD_PARTS.map((part) => [part, inlinePlainText(card[part])])) as Record<CardPart, string>);
+  return buttonText === undefined ? parts : [parts, buttonText];
 }
 
 /** No recorded fingerprint means there is no approval to invalidate. */
