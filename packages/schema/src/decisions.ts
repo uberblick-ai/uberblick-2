@@ -84,11 +84,11 @@ export function resolveDecisionTopics(
   return out.sort((left, right) => compareAge(left.first ?? left.representative, right.first ?? right.representative));
 }
 
-/** Governing membership may be on any record; topics stay in oldest-first order. */
+/** Related-page membership may be on any record; topics stay oldest first. */
 export function readDecisions(doc: Y.Doc, directory?: Y.Doc): DecisionTopicResolution[] {
   if (directory === undefined) return [];
   const meta = getMeta(doc);
-  if (meta.kind !== "requirement") return [];
+  if (meta.kind === "decision") return [];
   return resolveDecisionTopics(directory).filter((topic) => !topic.archived && topic.records.some((record) => record.governs === meta.uuid));
 }
 

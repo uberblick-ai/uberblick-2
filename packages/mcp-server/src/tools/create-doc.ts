@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
+import { DECISION_STATUSES, InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, appendBlock, assignDocumentTags, canonicalDocumentUuid, decisionAnswerFailure, decisionAnswerShapeFailure, decisionDirectoryFields, getDirectoryEntry, getMeta, getMetaMap, initDoc, isDocumentStatusForKind, setKind, setStatus, setTldr, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import { resolveTagSelectors } from "../tag-catalog.js";
 import { roomStages, stoppedPartWay } from "./helpers.js";
 import { blockInputSchema, decisionAnswerArg, descriptionArg, documentKindArg, documentStatusArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { operation } from "./operation.js";
+import type { ToolContext } from "./context.js";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
@@ -20,12 +21,12 @@ const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
     title: "A requirement document (`kind: requirement`)",
     when: { field: "kind", is: "requirement" },
-    forbids: ["governs", "supersedes", "answer"],
+    forbids: ["related", "supersedes", "answer"],
   },
   {
     title: "An ordinary document",
     when: { field: "kind", present: false },
-    forbids: ["status", "governs", "supersedes", "answer"],
+    forbids: ["status", "related", "supersedes", "answer"],
   },
 ];
 
@@ -93,10 +94,10 @@ export const inputSchema = strictInput(
     tags: z.array(z.string().min(1)).optional(),
     kind: documentKindArg.optional(),
     status: documentStatusArg.optional(),
-    governs: uuidArg
+    related: uuidArg
       .optional()
       .describe(
-        "Requirement UUID this decision governs, stored on the decision. Accepted only with `kind: decision`.",
+        "Live, locally readable regular document UUID this decision relates to. Fixed at creation; omitted successors inherit their predecessor's page. Accepted only with `kind: decision`.",
       ),
     supersedes: uuidArg
       .optional()
@@ -112,6 +113,37 @@ export const inputSchema = strictInput(
   CREATE_DOC_LIFECYCLE_MODES,
 );
 
+function initialBlocks(
+  context: ToolContext,
+  { blocks, tldr, answer }: Pick<z.infer<typeof inputSchema>, "blocks" | "tldr" | "answer">,
+  lifecycle: { kind: DocumentKind; status: DocumentStatus } | null,
+  hasPredecessor: boolean,
+) {
+  if (lifecycle?.kind === "decision") {
+    if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
+    }
+    if (answer !== undefined && lifecycle.status !== "decided") {
+      throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
+    }
+    if (lifecycle.status === "decided" && hasPredecessor && answer === undefined) {
+      throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
+    }
+    if (tldr !== undefined && tldr !== null) {
+      throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", lifecycle);
+    }
+    const failure = decisionAnswerShapeFailure(blocks ?? []);
+    if (failure !== null) throw new ToolError(failure, "Decision answers use at most three paragraphs, code blocks, tables or lists.", lifecycle);
+  }
+  // Resolve all seed targets before creating a document.
+  const inputs = (blocks ?? []).map(context.blockInputFor);
+  if (lifecycle?.kind === "decision" && lifecycle.status === "decided") {
+    const failure = decisionAnswerFailure(inputs, tldr === undefined ? {} : { tldr });
+    if (failure !== null) throw new ToolError(failure, "A decided record needs a non-empty answer in one to three supported content blocks.", lifecycle);
+  }
+  return inputs;
+}
+
 export const createDocOperation = operation("create_doc", inputSchema, (context, {
       title,
       description,
@@ -120,12 +152,12 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       tags,
       kind,
       status,
-      governs,
+      related,
       supersedes,
       blocks,
       sidebar,
     }, _request) => {
-  const { replicas, requireWritableDoc, blockInputFor, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
+  const { replicas, requireWritableDoc, tagCatalog, recordAnswer, documentTags, decisionAuthorityJson, blocksJson, durabilityAcross, tldrReview } = context;
 
   const lifecycle =
     kind === undefined ? null : { kind, status: status ?? firstStatus(kind) };
@@ -147,15 +179,13 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     });
   }
 
-  const requirement =
-    governs === undefined ? null : requireWritableDoc(governs);
-  const requirementKind =
-    requirement === null ? null : (getMeta(requirement.doc).kind ?? null);
-  if (requirement !== null && requirementKind !== "requirement") {
+  const relatedPage =
+    related === undefined ? null : requireWritableDoc(related);
+  if (relatedPage !== null && getMeta(relatedPage.doc).kind === "decision") {
     throw new ToolError(
-      "governs_not_requirement",
-      `Document ${governs} is not a requirement, so this decision cannot govern it`,
-      { governs, kind: requirementKind },
+      "related_not_regular_document",
+      `Document ${related} is a decision record, so it cannot be the related page`,
+      { related, kind: "decision" },
     );
   }
 
@@ -184,20 +214,8 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       ? null
       : requireGroup(replicas, sidebar.group.id);
 
-  // Resolve all seed targets before creating a document.
-  const inputs = (blocks ?? []).map(blockInputFor);
-
-  if (lifecycle?.kind === "decision") {
-    if (lifecycle.status !== "open" && lifecycle.status !== "decided") {
-      throw new ToolError("decision_transition_invalid", "Create a decision as open or decided; reject or withdraw an existing proposal.", lifecycle);
-    }
-    if (answer !== undefined && lifecycle.status !== "decided") {
-      throw new ToolError("decision_transition_invalid", "An answer at creation approves a decided decision record.", lifecycle);
-    }
-    if (lifecycle.status === "decided" && superseded !== null && answer === undefined) {
-      throw new ToolError("decision_answer_required", "Deciding a successor requires recording a person's answer (who, when, where). Nothing was created.", lifecycle);
-    }
-  }
+  const inputs = initialBlocks(context, { blocks, tldr, answer }, lifecycle, superseded !== null);
+  const governs = relatedPage === null ? (superseded === null ? undefined : getMeta(superseded.doc).governs) : getMeta(relatedPage.doc).uuid;
 
   const uuid = randomUUID();
   const replica = replicas.replica(uuid);

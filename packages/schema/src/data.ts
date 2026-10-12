@@ -212,6 +212,9 @@ export function applyDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly 
   if (decisionContentLocked(meta)) {
     throw new DataError("decision_read_only", "Decided document content is read-only", { uuid: meta.uuid, kind: meta.kind, status: meta.status });
   }
+  if (meta.kind === "decision") {
+    throw new DataError("decision_data_unsupported", "Decision records cannot hold structured data", { uuid: meta.uuid, kind: meta.kind, status: meta.status });
+  }
   if (!Array.isArray(operations)) throw new DataError("data_invalid_input", "Operations must be an array");
   const before = new Map(getDocDataEntries(doc));
   const next = new Map(before);

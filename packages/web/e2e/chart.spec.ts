@@ -9,9 +9,11 @@ import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
+const peers: Array<{ close: () => void }> = [];
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -21,7 +23,10 @@ test.beforeAll(() => {
     statePrefix: `uberblick-e2e-chart-${process.env.UB_AGENTS_RUN ?? "local"}-`,
   });
 });
-test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterEach(async () => {
+  for (const peer of peers.splice(0)) peer.close();
+  await agent?.closeSessions();
+});
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
 function writer(): McpSession {
@@ -190,10 +195,9 @@ async function canvasEvidence(canvas: Locator, info: TestInfo, name: string): Pr
   await info.attach(name, { path: screenshot, contentType: "image/png" });
 }
 
-async function chartDoc(session: McpSession, title: string, mapping: unknown = MAPPING, decision = false): Promise<string> {
+async function chartDoc(session: McpSession, title: string, mapping: unknown = MAPPING): Promise<string> {
   const result = await session.call<{ uuid: string }>("create_doc", {
     title, description: "Live line-chart browser proof from document-owned measurements.",
-    ...(decision ? { kind: "decision", status: "open", tldr: "Keep these approved measurements visible." } : {}),
     blocks: [
       { type: "paragraph", text: "Read the live measurements below." },
       { type: "chart", text: JSON.stringify(mapping) },
@@ -1156,7 +1160,7 @@ test("panels compare units, retain empty series and switch layouts without rende
 
 test("problem states clear automatically and locked content still renders without changing stored source", async ({ browser }) => {
   const session = writer();
-  const uuid = await chartDoc(session, "Chart problems", MAPPING, true);
+  const uuid = await chartDoc(session, "Chart problems");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(page.locator(".ub-chart-message")).toContainText(/collection.*(?:absent|not found|missing)/i);
   await editMapping(session, uuid, "{invalid JSON");
@@ -1170,7 +1174,9 @@ test("problem states clear automatically and locked content still renders withou
   await expectReady(page);
   const data = await session.call("get_data", { uuid, collection: "measurements" });
   const stored = await session.call<DocPayload>("get_doc", { uuid });
-  await session.call("set_status", { uuid, status: "decided" });
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  peer.decide("decided");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expectReady(page);
   await expect(session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] })).rejects.toThrow(/decision_read_only/);

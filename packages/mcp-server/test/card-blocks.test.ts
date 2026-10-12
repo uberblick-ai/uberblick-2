@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   cardPartTexts,
   createAnnotation,
+  decisionApprovalFingerprint,
   findBlockElement,
   getBlocksWithInline,
   getMetaMap,
+  setKind,
+  setStatus,
 } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -296,13 +299,16 @@ describe("cards through MCP", () => {
     expect(after.annotations[0].comments).toHaveLength(3);
   });
 
-  it("keeps formatting-only card changes outside a decision's approved content", async () => {
+  it("keeps formatting-only legacy card changes outside a decision's approved content", async () => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Approved card", description: "Card approval projects plain part content.",
-      kind: "decision", blocks: [{ type: "card", text: SOURCE }] });
-    await rig.ok("set_status", { uuid: created.uuid, status: "decided",
-      answer: { who: "Owner", when: "2026-10-12", where: "https://example.com/answer" } });
+      blocks: [{ type: "card", text: SOURCE }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
+    doc.transact(() => {
+      setKind(doc, "decision");
+      setStatus(doc, "decided");
+      getMetaMap(doc).set("approvalFingerprint", decisionApprovalFingerprint(doc));
+    });
     const approved = getMetaMap(doc).get("approvalFingerprint");
     for (const part of PARTS) {
       const text = partText(doc, created.blocks[0].id, part);

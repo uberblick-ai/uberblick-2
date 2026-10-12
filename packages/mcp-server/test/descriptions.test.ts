@@ -383,7 +383,6 @@ describe("lifecycle metadata reaches discovery", () => {
       kind: "decision",
       status: "decided",
       blocks: [
-        { type: "heading", text: "Reconsidering", level: 2 },
         { type: "paragraph", text: "Revisit when billing changes." },
       ],
     });
@@ -527,7 +526,7 @@ describe("set_status", () => {
     });
   });
 
-  it("decides an initial stance without a Reconsidering section", async () => {
+  it("decides an initial stance with ordinary answer blocks", async () => {
     const rig = await localRig();
     const proposal = await lifecycleDoc(rig, "Topic and stance", {
       kind: "decision",
@@ -539,23 +538,21 @@ describe("set_status", () => {
       title: "First stance at creation",
       description: "A topic with its first recorded stance.",
       kind: "decision", status: "decided",
+      blocks: [{ type: "paragraph", text: "Use the smallest useful mechanism." }],
     })).toMatchObject({ status: "decided", agentStance: true });
   });
 });
 
 describe("decision log tools", () => {
-  it("raises a decision into its requirement and reads the ordered log", async () => {
+  it.each([undefined, "requirement"] as const)("relates a decision to a %s page and reads its ordered log", async kind => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Requirement", {
-      kind: "requirement",
-      status: "planned",
-    });
+    const requirement = await lifecycleDoc(rig, "Related page", kind === undefined ? {} : { kind, status: "planned" });
 
     const decision = await rig.ok("create_doc", {
       title: "Choose the durable path",
       description: "Records which path the requirement takes.",
       kind: "decision",
-      governs: requirement.uuid,
+      related: requirement.uuid,
     });
 
     expect(decision).toMatchObject({
@@ -572,7 +569,7 @@ describe("decision log tools", () => {
 
     const governed = await rig.ok("get_doc", { uuid: requirement.uuid });
     expect(governed.decisions).toMatchObject([
-      { uuid: decision.uuid, topic: decision.uuid, inForce: null, pending: [{ uuid: decision.uuid }] },
+      { uuid: decision.uuid, topic: decision.uuid, relation: "related", inForce: null, pending: [{ uuid: decision.uuid }] },
     ]);
     expect(governed.links).toEqual([]);
     expect((await rig.ok("get_doc", { uuid: decision.uuid })).links).toEqual([requirement.uuid]);
@@ -586,7 +583,6 @@ describe("decision log tools", () => {
       kind: "decision",
       status: "decided",
       blocks: [
-        { type: "heading", text: "Reconsidering", level: 2 },
         { type: "paragraph", text: "Revisit if the constraint changes." },
       ],
     });
@@ -658,13 +654,13 @@ describe("decision log tools", () => {
     const requirement = await lifecycleDoc(rig, "Requirement", { kind: "requirement" });
     const decision = await rig.ok("create_doc", {
       title: "Archived topic", description: "Archive is the topic's visibility switch.",
-      kind: "decision", governs: requirement.uuid,
+      kind: "decision", related: requirement.uuid,
     });
     await rig.ok("archive_doc", { uuid: decision.uuid });
     expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
   });
 
-  it("refuses every invalid governing target before creating a document", async () => {
+  it("refuses every invalid related page before creating a document", async () => {
     const rig = await localRig();
     const requirement = await lifecycleDoc(rig, "Requirement", {
       kind: "requirement",
@@ -677,6 +673,7 @@ describe("decision log tools", () => {
       const before = (await rig.ok("list_docs")).docs.map(
         (doc: any) => doc.uuid,
       );
+      const beforeLog = rig.instance.store.logSize();
       const refused = await rig.call("create_doc", {
         title: "Refused decision",
         description: "Must never reach a room.",
@@ -687,16 +684,17 @@ describe("decision log tools", () => {
       expect((await rig.ok("list_docs")).docs.map((doc: any) => doc.uuid)).toEqual(
         before,
       );
+      expect(rig.instance.store.logSize()).toBe(beforeLog);
       return refused;
     };
 
-    await refuseWithoutCreation({ governs: requirement.uuid });
+    await refuseWithoutCreation({ related: requirement.uuid });
     await refuseWithoutCreation({
       kind: "requirement",
-      governs: requirement.uuid,
+      related: requirement.uuid,
     });
     await refuseWithoutCreation(
-      { kind: "decision", governs: randomUUID() },
+      { kind: "decision", related: randomUUID() },
       "doc_not_found",
     );
 
@@ -708,7 +706,7 @@ describe("decision log tools", () => {
       status: "planned",
     });
     await refuseWithoutCreation(
-      { kind: "decision", governs: unhydrated },
+      { kind: "decision", related: unhydrated },
       "doc_not_hydrated",
     );
 
@@ -717,18 +715,18 @@ describe("decision log tools", () => {
     });
     await rig.ok("archive_doc", { uuid: archived.uuid });
     await refuseWithoutCreation(
-      { kind: "decision", governs: archived.uuid },
+      { kind: "decision", related: archived.uuid },
       "doc_archived",
     );
 
-    const ordinary = await lifecycleDoc(rig, "Ordinary target");
+    const decision = await lifecycleDoc(rig, "Decision target", { kind: "decision" });
     const wrongKind = await refuseWithoutCreation(
-      { kind: "decision", governs: ordinary.uuid },
-      "governs_not_requirement",
+      { kind: "decision", related: decision.uuid },
+      "related_not_regular_document",
     );
     expect(wrongKind.payload).toMatchObject({
-      governs: ordinary.uuid,
-      kind: null,
+      related: decision.uuid,
+      kind: "decision",
       applied: false,
       partial: false,
       synced: false,

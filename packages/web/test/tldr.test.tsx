@@ -16,6 +16,8 @@ import {
   getMeta,
   initDoc,
   MAX_TLDR_LENGTH,
+  setKind,
+  setStatus,
   setTldr,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -139,6 +141,41 @@ function press(field: HTMLTextAreaElement | null, key: string, init: KeyboardEve
 }
 
 describe("the document TL;DR", () => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("keeps a legacy %s decision summary readable without offering add or edit", async (status) => {
+    const ydoc = documentWith("The legacy summary.");
+    setKind(ydoc, "decision");
+    setStatus(ydoc, status);
+    const { host } = await mountPane(ydoc);
+    expect(within(host).getByText("The legacy summary.").textContent).toBe("The legacy summary.");
+    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    act(() => openActions(host));
+    expect(menuItem("Edit TL;DR")).toBeUndefined();
+    expect(menuItem("Add TL;DR")).toBeUndefined();
+    act(() => setTldr(ydoc, null));
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    expect(menuItem("Add TL;DR")).toBeUndefined();
+  });
+
+  it("discards an open summary form when a remote client adopts the decision kind, guarding the live write", async () => {
+    const ydoc = documentWith("The legacy summary.");
+    const { host } = await mountPane(ydoc);
+    await openInline(host);
+    act(() => typeInto(field(host), "An unsaved summary."));
+    const form = within(host).getByRole<HTMLFormElement>("form", { name: "Edit TL;DR" });
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    act(() => {
+      setKind(ydoc, "decision");
+      const updatesAfterAdoption = updates.mock.calls.length;
+      form.requestSubmit();
+      expect(updates).toHaveBeenCalledTimes(updatesAfterAdoption);
+    });
+    expect(getMeta(ydoc).tldr).toBe("The legacy summary.");
+    expect(field(host)).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(within(host).getByText("The legacy summary.").textContent).toBe("The legacy summary.");
+  });
+
   it("adds, validates, edits and clears through the shared schema boundary", async () => {
     const ydoc = documentWith(null);
     const { host } = await mountPane(ydoc);

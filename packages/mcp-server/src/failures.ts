@@ -307,7 +307,7 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "A decided record's title, decision line, blocks and structured data are read-only. Create an open superseding record " +
+      "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only. Create an open superseding record " +
       "for any content change, then record a person's answer to decide it. Comments stay open.",
   },
   decision_answer_required: {
@@ -327,11 +327,31 @@ const RECOVERIES: Record<string, Recovery> = {
       "proposal, an agent stance or a decided record in conflict and records a person's answer and reason. " +
       "Decided records cannot reopen or withdraw, and rejected and withdrawn records are final.",
   },
-  governs_not_requirement: {
+  related_not_regular_document: {
     recoveryClass: "reread",
     guidance:
-      "Choose a live requirement UUID from list_docs with `kind: requirement`, then call create_doc again. " +
+      "Choose a live regular document UUID from list_docs, then call create_doc again. " +
       "Nothing was created by this refused call.",
+  },
+  decision_answer_empty: {
+    recoveryClass: "manual",
+    guidance: "Add non-blank answer text in a paragraph, code block, table or list before deciding the record. Nothing was written.",
+  },
+  decision_tldr_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Put the answer in content blocks. Omit tldr at creation, or clear a legacy TL;DR with set_metadata and tldr: null before deciding. Nothing was written.",
+  },
+  decision_data_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Keep structured data on a regular document. Decision records accept answer blocks only; no data or lifecycle change was written.",
+  },
+  decision_block_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Use only paragraphs, code blocks, tables and lists for a decision answer. Put guidance on the related page and discussion in an RFC. Nothing was written.",
+  },
+  decision_answer_too_long: {
+    recoveryClass: "manual",
+    guidance: "Reduce the answer to at most three blocks; adjacent list items count as one list. Put guidance on the related page and discussion in an RFC. Nothing was written.",
   },
   invalid_tag_assignment: {
     recoveryClass: "manual",

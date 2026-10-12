@@ -20,7 +20,13 @@ export function registerUpdateData(server: ToolRegistrar, context: ToolContext):
       "dispositions in a separate collection keyed by the producer's record ids; refreshing producer records " +
       "leaves that collection unchanged. Split changes exceeding the 1 MiB operation budget (schemas plus " +
       "changed record values) across calls; those calls are not atomic together. No CAS, distributed lock or " +
-      "new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data." +
+      "new concurrency guarantee is introduced. Inspect with get_data; get_doc only summarizes data. " +
+      "Decision records refuse data through applyDocData with decision_data_unsupported; decided records " +
+      "keep decision_read_only, and legacy data stays readable. Decisions use one to three short answer " +
+      "blocks with a brief reason, guidance on the related regular page and discussion in an RFC. Their " +
+      "directory answerPreview is derived from legacy TL;DR or the first paragraph/list; get_doc page " +
+      "decisions are marked related or linked. Answer blocks differ from recorded answer attribution " +
+      "{who, when, where}." +
       helpPointer("update_data"),
     outputSchema: outputSchemas.update_data,
     inputSchema,

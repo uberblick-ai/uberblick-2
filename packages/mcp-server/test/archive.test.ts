@@ -137,7 +137,7 @@ describe("archive_doc", () => {
       description: "The first decision in the requirement's log.",
       kind: "decision",
       status: "decided",
-      governs: requirement.uuid,
+      related: requirement.uuid,
       blocks: [
         { type: "paragraph", text: "Use the append-only update log." },
       ],
@@ -146,7 +146,7 @@ describe("archive_doc", () => {
       title: "Choose the serving process",
       description: "The second decision in the requirement's log.",
       kind: "decision",
-      governs: requirement.uuid,
+      related: requirement.uuid,
       blocks: [{ type: "paragraph", text: "Use ub open." }],
     });
     const expectedLog = (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions;

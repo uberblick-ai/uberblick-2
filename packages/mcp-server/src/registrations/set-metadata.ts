@@ -18,8 +18,13 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
       "are active catalog ids or exact names from list_tags; already assigned retired or unresolved ids " +
       "can be preserved. Newly added link UUIDs must be known to this replica's directory; archived targets " +
       "are accepted, and existing curated targets may be passed back unchanged.\n\n" +
+      "An open decision refuses non-null tldr with decision_tldr_unsupported; null clears a legacy TL;DR. " +
       "A decided record refuses any call naming title or tldr, while description, tags and links remain " +
-      "writable. Archived documents refuse every metadata field; status changes use set_status." +
+      "writable. Decisions hold one to three short answer blocks with a brief reason; guidance belongs on " +
+      "the related regular page and discussion in an RFC. Their derived directory answerPreview uses legacy " +
+      "TL;DR or the first paragraph/list. Page get_doc reads mark topics related or linked; answer blocks " +
+      "differ from recorded answer attribution {who, when, where}. Archived documents refuse every metadata " +
+      "field; status changes use set_status." +
       helpPointer("set_metadata"),
     outputSchema: outputSchemas.set_metadata,
     inputSchema,

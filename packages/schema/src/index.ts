@@ -26,6 +26,10 @@ export type { DataCollection, DataIssue, DataOperation, DataRecord, DocData } fr
 export { DataError, canonicalJson, compareCodePoints, validateCollectionSchema, validateDataRecord } from "./data-schema.js";
 export type { CollectionSchema, DataSchema, JSONObject, JSONValue } from "./data-schema.js";
 export { decisionRelations, readDecisions, resolveDecisionTopics } from "./decisions.js";
+export {
+  decisionAnswerFailure, decisionAnswerShapeFailure, decisionDocAnswerFailure,
+} from "./decision-answer.js";
+export type { DecisionAnswerFailure, DecisionAnswerShapeFailure } from "./decision-answer.js";
 export { decisionApprovalChanged, decisionApprovalFingerprint } from "./approval.js";
 export { archiveDocument } from "./lifecycle.js";
 

@@ -254,7 +254,7 @@ export interface DecisionTopicResolution {
   archived: boolean;
 }
 
-/** One topic in a requirement's derived decision log. */
+/** One topic in a regular page's derived decision log. */
 export type DecisionReference = DecisionTopicResolution;
 
 export interface AnnotationComment {
@@ -337,6 +337,8 @@ export interface DirectoryEntry {
   topic?: string;
   supersedes?: string;
   tldr?: string;
+  /** Derived answer text; absence means an older client has not cached it. */
+  answerPreview?: string | null;
   agentStance?: boolean;
   decidedBy?: string;
   decidedAt?: string;

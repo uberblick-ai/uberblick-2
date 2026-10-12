@@ -233,7 +233,7 @@ describe("decided decision records", () => {
     expect(menuItem("Edit TL;DR")).toBeUndefined();
   });
 
-  it("follows live status without rebinding or losing scroll and protects an already open TL;DR form", async () => {
+  it("follows live status without rebinding or losing scroll while legacy TL;DR stays read-only", async () => {
     const ydoc = stage("open");
     const peer = new Y.Doc();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
@@ -243,10 +243,8 @@ describe("decided decision records", () => {
     const prose = editorElement(host);
     const pane = host.querySelector<HTMLElement>(".ub-document-pane")!;
     pane.scrollTop = 173;
-    act(() => screen.getByRole("button", { name: "Edit TL;DR" }).click());
-    const field = host.querySelector<HTMLTextAreaElement>("#ub-tldr-input")!;
-    expect(field.readOnly).toBe(false);
-    act(() => typeInto(field, "Uncommitted wording fix"));
+    expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
+    expect(host.querySelector(".ub-tldr-form")).toBeNull();
     const editor = binding.mock.results[0]?.value.editor;
     if (editor == null) throw new Error("fixture editor did not bind");
     act(() => editor.commands.setTextSelection({ from: 5, to: 16 }));
@@ -264,20 +262,13 @@ describe("decided decision records", () => {
     act(() => {
       setStatus(peer, "decided");
       updatesAtDecision = updates.mock.calls.length;
-      // Before React commits the read-only state, every write path must obey
-      // the decision metadata that is already in the shared document.
-      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      host.querySelector<HTMLFormElement>(".ub-tldr-form")?.requestSubmit();
-      button(host, "Clear").click();
     });
     expect(updates).toHaveBeenCalledTimes(updatesAtDecision);
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
     expect(pane.scrollTop).toBe(173);
     expect(prose.getAttribute("contenteditable")).toBe("false");
-    expect(field.readOnly).toBe(true);
-    expect(button(host, "Clear").disabled).toBe(true);
-    expect(button(host, "Save").disabled).toBe(true);
+    expect(host.querySelector(".ub-tldr-form")).toBeNull();
     const composer = document.querySelector<HTMLElement>('[data-slot="selection-composer"]')!;
     expect(composer).not.toBeNull();
     expect(composer.querySelector('[aria-label="External link URL"]')).toBeNull();
@@ -287,9 +278,6 @@ describe("decided decision records", () => {
     }
     expect(button(composer, "Comment")).toBeDefined();
     expect(textAt(ydoc).toDelta()).toEqual(beforeText);
-    act(() => typeInto(field, "Typed through the read-only field"));
-    act(() => field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    act(() => host.querySelector<HTMLFormElement>(".ub-tldr-form")?.requestSubmit());
     expect(getMeta(ydoc).tldr).toBe("Keep one shared protocol.");
     expect(updates).toHaveBeenCalledTimes(updatesAtDecision);
 
@@ -299,7 +287,8 @@ describe("decided decision records", () => {
       expect(editorElement(host)).toBe(prose);
       expect(pane.scrollTop).toBe(173);
       expect(prose.getAttribute("contenteditable")).toBe("true");
-      expect(field.readOnly).toBe(false);
+      expect(host.querySelector(".ub-tldr-form")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
       expect(host.querySelector('[aria-label="Insert block below"]')).not.toBeNull();
     }
     peer.destroy();

@@ -170,10 +170,15 @@ const EXPECTED: Record<
     recoveryClass: "manual",
     detail: ["uuid", "kind", "status"],
   },
-  governs_not_requirement: {
+  related_not_regular_document: {
     recoveryClass: "reread",
-    detail: ["governs", "kind"],
+    detail: ["related", "kind"],
   },
+  decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
+  decision_block_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
   invalid_tag_assignment: {
     recoveryClass: "manual",
     detail: ["unknown", "retired"],
@@ -403,6 +408,7 @@ describe("the failure contract", () => {
       description: "The topic's first stance.",
       kind: "decision",
       status: "decided",
+      blocks: [{ type: "paragraph", text: "Use the existing log." }],
     });
     const successorDecision = await rig.ok("create_doc", {
       title: "Successor proposal",
@@ -428,13 +434,20 @@ describe("the failure contract", () => {
     record(
       (
         await rig.call("create_doc", {
-          title: "Wrong governing kind",
-          description: "A decision cannot govern an ordinary document.",
+          title: "Wrong related kind",
+          description: "A decision cannot own another decision record.",
           kind: "decision",
-          governs: doc.uuid,
+          related: firstDecision.uuid,
         })
       ).payload,
     );
+    for (const fields of [
+      { status: "decided" },
+      { tldr: "No decision TL;DR." },
+      { blocks: [{ type: "heading", text: "No heading" }] },
+      { blocks: Array.from({ length: 4 }, () => ({ type: "paragraph", text: "An answer." })) },
+    ]) record((await rig.call("create_doc", { title: "Invalid answer", description: "Answer validation refuses before writing.", kind: "decision", ...fields })).payload);
+    record((await rig.call("update_data", { uuid: successorDecision.uuid, operations: [] })).payload);
     record(
       (
         await rig.call("create_doc", {

@@ -6,9 +6,11 @@ import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
+const peers: Array<{ close: () => void }> = [];
 test.beforeAll(() => {
   agent = new McpAgent({
     workspace: harness().workspace,
@@ -17,7 +19,10 @@ test.beforeAll(() => {
     statePrefix: `uberblick-e2e-data-table-${process.env.UB_AGENTS_RUN ?? "local"}-`,
   });
 });
-test.afterEach(async () => { await agent?.closeSessions(); });
+test.afterEach(async () => {
+  for (const peer of peers.splice(0)) peer.close();
+  await agent?.closeSessions();
+});
 test.afterAll(async () => { await agent?.close(); agent = null; });
 
 function writer(): McpSession {
@@ -49,10 +54,9 @@ const RECORDS = [
   { id: "f", value: { name: "Relative link", value: 0, day: "2026-01-03", url: "/relative" } },
 ];
 
-async function tableDoc(session: McpSession, title: string, mapping: unknown = MAPPING, decision = false): Promise<string> {
+async function tableDoc(session: McpSession, title: string, mapping: unknown = MAPPING): Promise<string> {
   const result = await session.call<{ uuid: string }>("create_doc", {
     title, description: "Read-only evidence projected from document-owned measurements.",
-    ...(decision ? { kind: "decision", status: "open", tldr: "Keep these observations visible." } : {}),
     blocks: [{ type: "paragraph", text: "Read the live evidence below." }, { type: "chart", text: JSON.stringify(mapping) }],
   });
   return result.uuid;
@@ -486,7 +490,7 @@ test("a record limit keeps the first sorted rows in one live table with a neutra
 
 test("problem states recover without editing stored values and decided or archived tables keep every row", async ({ browser }) => {
   const session = writer();
-  const uuid = await tableDoc(session, "Table states", MAPPING, true);
+  const uuid = await tableDoc(session, "Table states");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
   await editMapping(session, uuid, "{invalid JSON");
@@ -501,7 +505,9 @@ test("problem states recover without editing stored values and decided or archiv
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const stored = await session.call<DocPayload>("get_doc", { uuid });
   const data = await session.call("get_data", { uuid });
-  await session.call("set_status", { uuid, status: "decided" });
+  const peer = await legacyDecisionPeer(harness(), uuid);
+  peers.push(peer);
+  peer.decide("decided");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });

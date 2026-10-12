@@ -137,7 +137,7 @@ function TldrCallout({
   tldr,
   editing,
   archived,
-  decided,
+  decision,
   writable,
   onEditingChange,
 }: {
@@ -145,14 +145,14 @@ function TldrCallout({
   tldr: string | null;
   editing: boolean;
   archived: boolean;
-  decided: boolean;
+  decision: boolean;
   writable: boolean;
   onEditingChange: (editing: boolean) => void;
 }): ReactElement | null {
   const [draft, setDraft] = useState(tldr ?? "");
   const initialDraft = useRef(tldr ?? "");
   const input = useRef<HTMLTextAreaElement | null>(null);
-  const readOnly = archived || decided || !writable;
+  const readOnly = archived || decision || !writable;
   const value = draft.trim();
   const tooLong = value.length > MAX_TLDR_LENGTH;
   const error = tooLong
@@ -179,7 +179,7 @@ function TldrCallout({
   const write = (next: string | null): void => {
     // `readOnly` describes the committed render; the live connection and the
     // tombstone guard the write itself, as the title field does below.
-    if (archived || isDecided(connection) || !connection.status.writable) return;
+    if (archived || getMeta(connection.ydoc).kind === "decision" || !connection.status.writable) return;
     setTldr(connection.ydoc, next);
     onEditingChange(false);
   };
@@ -196,7 +196,7 @@ function TldrCallout({
         </div>
       </div>
       <div className="ub-tldr-body">
-        {editing ? (
+        {editing && !decision ? (
           <form
             className="ub-tldr-form"
             aria-label={`${tldr === null ? "Add" : "Edit"} TL;DR`}
@@ -251,7 +251,7 @@ function TldrCallout({
               </span>
               {readOnly && (
                 <span>
-                  {archived ? "Restore to edit." : decided ? "A change needs a new record." : "Editing unavailable."}
+                  {archived ? "Restore to edit." : "Editing unavailable."}
                 </span>
               )}
             </div>
@@ -295,7 +295,7 @@ function TldrCallout({
                 className="block w-full border-0 p-0 bg-transparent text-left [font:inherit] [color:inherit] cursor-text"
                 aria-label="Edit TL;DR"
                 onClick={() => {
-                  if (archived || isDecided(connection) || !connection.status.writable) return;
+                  if (archived || getMeta(connection.ydoc).kind === "decision" || !connection.status.writable) return;
                   onEditingChange(true);
                 }}
               >
@@ -911,7 +911,7 @@ export function EditorPane({
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const editingTldr = connection?.room === tldrEditorRoom;
+  const editingTldr = meta?.kind !== "decision" && connection?.room === tldrEditorRoom;
 
   if (connection === null) {
     return (
@@ -994,7 +994,7 @@ export function EditorPane({
           tldr={meta?.tldr ?? null}
           editing={editingTldr}
           archived={archived}
-          decided={decided}
+          decision={meta?.kind === "decision"}
           writable={writable}
           onEditingChange={(editing) =>
             setTldrEditorRoom(editing ? connection.room : null)

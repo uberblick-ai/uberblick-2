@@ -410,7 +410,7 @@ export function DocMetaLine({
               onArchive={onArchive}
               onConfirmationFocusChange={onArchiveConfirmationFocusChange}
               hasTldr={hasTldr}
-              contentReadOnly={contentReadOnly}
+              contentReadOnly={contentReadOnly || meta.kind === "decision"}
               onEditTldr={readOnly ? null : (onEditTldr ?? null)}
             />
           )}
