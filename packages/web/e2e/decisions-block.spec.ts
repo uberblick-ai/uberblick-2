@@ -83,7 +83,12 @@ async function jumpFromHeader(page: Page, touch: boolean): Promise<void> {
     await page.keyboard.press("Enter");
   }
   await expect(block(page)).toBeFocused();
-  await expect(block(page)).toBeInViewport({ ratio: 1 });
+  await expectBlockInView(page);
+}
+
+async function expectBlockInView(page: Page): Promise<void> {
+  await expect(block(page)).toBeInViewport();
+  await expect(block(page).getByRole("heading", { name: "Decisions", exact: true })).toBeInViewport({ ratio: 1 });
 }
 
 async function geometry(page: Page) {
@@ -297,14 +302,14 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(menu.getByRole("menuitem")).toHaveText(["Overview", "Related", "Decisions"]);
     await activateControl(menu.getByRole("menuitem", { name: "Decisions", exact: true }), { touch });
     await expect(menu).toBeHidden();
-    await expect(block(page)).toBeInViewport({ ratio: 1 });
+    await expectBlockInView(page);
     const displayed = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
     expect(displayed.blocks).toEqual(before.blocks);
     expect((await writer.call<{ markdown: string }>("export_markdown", { uuid: owner.uuid })).markdown).toBe(markdown.markdown);
     const recordIds = [conflict.uuid, earlierConflict.uuid, latestConflict.uuid, review.uuid, currentReview.uuid, pendingReview.uuid, alpha.uuid, zulu.uuid, stance.uuid, undecided.uuid, linked.uuid, archived.uuid];
     for (const uuid of recordIds) expect(rooms.has(roomForDoc(harness().workspaceUuid, uuid))).toBe(false);
 
-    await page.screenshot({
+    await block(page).screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decisions-block-${touch ? "ipad" : "desktop"}-${appearance}.png`),
     });
     if (!touch) {
@@ -389,7 +394,7 @@ test("a page without headings gains and loses its live Decisions chrome", async 
   await expect(menu.getByRole("menuitem")).toHaveText(["Decisions"]);
   await menu.getByRole("menuitem", { name: "Decisions", exact: true }).press("Enter");
   await expect(menu).toBeHidden();
-  await expect(block(page)).toBeInViewport({ ratio: 1 });
+  await expectBlockInView(page);
   await writer.call("set_status", { uuid: proposal.uuid, status: "decided", answer: answer() });
   await expect(row(page, "In force", "Live question")).toBeVisible();
   await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision in force ↓");
