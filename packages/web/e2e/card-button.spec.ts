@@ -2,6 +2,7 @@ import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { join } from "node:path";
 import { editor, setupHarness } from "./app-helpers.js";
+import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 
@@ -93,8 +94,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await writer.call("restore_doc", { uuid: created.uuid });
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
 
-    await card.locator(".ub-card-body p").click();
-    await page.keyboard.press("End");
+    await placeCaretIn(card.locator(".ub-card-body p"), { touch, edge: "end" });
     await page.keyboard.type(" More detail.");
     await expect(other.locator(".ub-card-body")).toContainText("Recommendation body. More detail.");
     await expect(other.getByRole("button", { name: "Discuss in Codex", exact: true })).toBeVisible();
