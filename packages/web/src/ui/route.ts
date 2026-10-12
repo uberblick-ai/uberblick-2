@@ -2,7 +2,8 @@
  * The URL is the only selection. A link's workspace wins over the configured
  * menu; configuration supplies only the / default. Preserve decorated
  * workspace spelling in links, but use the bare UUID in room keys and token
- * claims. Parse workspace, document, all-docs and settings addresses here.
+ * claims. Parse workspace, document, decision-history, all-docs and settings
+ * addresses here.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -33,6 +34,7 @@ export type Route =
   | { kind: "all"; workspace: Workspace }
   | { kind: "settings"; workspace: Workspace; page: SettingsPage }
   | { kind: "doc"; workspace: Workspace; uuid: string }
+  | { kind: "decision"; workspace: Workspace; topic: string; record: string }
   | { kind: "invalid"; reason: string; workspace: Workspace | null };
 
 /** Reserve all for the listing; document UUIDs cannot collide with this word. */
@@ -122,6 +124,18 @@ export function parseRoute(pathname: string, configured: string | null): Route {
       workspace,
     };
   }
+  if (segments.length === 4 && segments[2]?.toLowerCase() === "record") {
+    const topic = canonicalDocumentUuid(second);
+    const record = canonicalDocumentUuid(segments[3] ?? "");
+    if (topic === null || record === null) {
+      return {
+        kind: "invalid",
+        reason: "Its decision topic or record is not a document uuid.",
+        workspace,
+      };
+    }
+    return { kind: "decision", workspace, topic, record };
+  }
   if (segments.length > 2) {
     return {
       kind: "invalid",
@@ -175,6 +189,15 @@ export function docPath(segment: string, uuid: string): string {
   return `/${segment}/${uuid}`;
 }
 
+/** Explicit history selection keeps the first record's topic address stable. */
+export function decisionRecordPath(
+  segment: string,
+  topic: string,
+  record: string,
+): string {
+  return `${docPath(segment, topic)}/record/${record}`;
+}
+
 /** The workspace All docs listing path. */
 export function allPath(segment: string): string {
   return `/${segment}/${ALL_SEGMENT}`;
@@ -203,6 +226,8 @@ export function canonicalPath(route: Route): string | null {
       return settingsPath(route.workspace.segment, route.page);
     case "doc":
       return docPath(route.workspace.segment, route.uuid);
+    case "decision":
+      return decisionRecordPath(route.workspace.segment, route.topic, route.record);
     default:
       return null;
   }

@@ -5,9 +5,9 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
-  appendBlock, decisionDirectoryFields, deleteBlock, directoryRoom, editBlock,
-  getBlocks, getBlocksFragment, initDoc, roomForDoc, setKind, setStatus,
-  tableCellText, tableRows, upsertDirectoryEntry,
+  appendBlock, deleteBlock, directoryRoom, editBlock,
+  getBlocks, getBlocksFragment, initDoc, roomForDoc,
+  tableCellText, tableRows, tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { setupHarness } from "./app-helpers.js";
@@ -29,7 +29,7 @@ function makeRagged(doc: Y.Doc, id: string, source: string): void {
   } finally { other.destroy(); }
 }
 
-async function publishTable(options: { source?: string; ragged?: boolean; decision?: boolean } = {}): Promise<{
+async function publishTable(options: { source?: string; ragged?: boolean } = {}): Promise<{
   uuid: string;
   id: string;
   doc: Y.Doc;
@@ -42,10 +42,6 @@ async function publishTable(options: { source?: string; ragged?: boolean; decisi
   initDoc(doc, { uuid, title });
   const source = options.source ?? SOURCE;
   const id = appendBlock(doc, { type: "table", text: source });
-  if (options.decision) {
-    setKind(doc, "decision");
-    setStatus(doc, "open");
-  }
   if (options.ragged) makeRagged(doc, id, source);
   const peers: Array<{ provider: HocuspocusProvider; ydoc: Y.Doc }> = [];
   const close = (): void => {
@@ -67,10 +63,7 @@ async function publishTable(options: { source?: string; ragged?: boolean; decisi
       return ydoc;
     };
     const directory = await connect(directoryRoom(harness().workspaceUuid));
-    upsertDirectoryEntry(directory, {
-      uuid, title,
-      ...(options.decision ? { kind: "decision", status: "open", ...decisionDirectoryFields(doc) } : {}),
-    });
+    upsertDirectoryEntry(directory, { uuid, title });
     await connect(roomForDoc(harness().workspaceUuid, uuid), doc);
     return { uuid, id, doc, directory, close };
   } catch (error) {
@@ -282,8 +275,8 @@ test("a ragged shared table offers no structural controls and retains editable c
 });
 
 for (const kind of ["row", "column"] as const) {
-test(`deciding a record closes its ${kind} menu and removes structural controls`, async ({ page }) => {
-  const fixture = await publishTable({ decision: true });
+test(`a received archive closes its ${kind} menu and removes structural controls`, async ({ page }) => {
+  const fixture = await publishTable();
   try {
     await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
     const table = page.locator(".ub-table");
@@ -292,11 +285,8 @@ test(`deciding a record closes its ${kind} menu and removes structural controls`
     await table.locator("td").first().click();
     await page.getByRole("button", { name: kind === "row" ? "Row 2 actions" : "Column 1 actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: `Delete ${kind}`, exact: true })).toBeVisible();
-    setStatus(fixture.doc, "decided");
-    upsertDirectoryEntry(fixture.directory, {
-      uuid: fixture.uuid, title: "Shared table controls", kind: "decision", status: "decided",
-      ...decisionDirectoryFields(fixture.doc),
-    });
+    tombstoneDirectoryEntry(fixture.directory, fixture.uuid);
+    await expect(page.locator(".ub-archived-banner")).toBeVisible();
     await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "false");
     await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(page.locator(".ub-table-controls")).toHaveCount(0);

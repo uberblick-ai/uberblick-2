@@ -41,6 +41,7 @@ import { notifyTransient } from "../src/notifications.js";
 import { useDocMeta } from "../src/ui/hooks.js";
 import {
   canonicalPath,
+  decisionRecordPath,
   docIsHydrated,
   docPath,
   parseRoute,
@@ -79,6 +80,40 @@ function route(pathname: string): Route {
 describe("an address names a document, a workspace mode, or neither", () => {
   it("reads /<workspace>/<uuid> as that document", () => {
     expect(route(`/${WS}/${UUID}`)).toEqual({ kind: "doc", workspace, uuid: UUID });
+  });
+
+  it("distinguishes an explicit history selection from an ordinary record link", () => {
+    const selected = decisionRecordPath(DECORATED, UUID, OTHER);
+    expect(route(selected)).toEqual({
+      kind: "decision",
+      workspace: { uuid: WS, segment: DECORATED },
+      topic: UUID,
+      record: OTHER,
+    });
+    expect(canonicalPath(route(selected))).toBe(selected);
+    expect(route(docPath(DECORATED, OTHER))).toEqual({
+      kind: "doc", workspace: { uuid: WS, segment: DECORATED }, uuid: OTHER,
+    });
+    expect(canonicalPath(route(docPath(DECORATED, OTHER)))).toBe(
+      docPath(DECORATED, OTHER),
+    );
+  });
+
+  it("normalizes explicit selection spelling while retaining both identities", () => {
+    const selected = `/${DECORATED}/${UUID.toUpperCase()}/RECORD/${OTHER.toUpperCase()}/`;
+    expect(canonicalPath(route(selected))).toBe(
+      decisionRecordPath(DECORATED, UUID, OTHER),
+    );
+    for (const invalid of [
+      `/${WS}/not-a-topic/record/${OTHER}`,
+      `/${WS}/${UUID}/record/not-a-record`,
+      `/${WS}/${UUID}/record`,
+      `/${WS}/${UUID}/record/${OTHER}/more`,
+      `/${WS}/${UUID}/records/${OTHER}`,
+    ]) {
+      expect(route(invalid).kind).toBe("invalid");
+      expect(canonicalPath(route(invalid))).toBeNull();
+    }
   });
 
   it("opens the same document whether or not the workspace carries a slug", () => {
@@ -300,6 +335,36 @@ describe("the URL and the app are two-way bound", () => {
       await waitForPop();
     });
     expect(shown()).toBe(`/${WS}/${OTHER}`);
+  });
+
+  it("restores explicit record selection from copied addresses and browser history", async () => {
+    const topicPath = docPath(DECORATED, UUID);
+    const selectedPath = decisionRecordPath(DECORATED, UUID, OTHER);
+    window.history.replaceState(null, "", topicPath);
+    const view = render(<Probe to={selectedPath} />);
+    const probe = (): HTMLButtonElement => within(view.container)
+      .getByRole<HTMLButtonElement>("button", { name: /^\// });
+    act(() => probe().click());
+    expect(probe().textContent).toBe(selectedPath);
+    expect(route(window.location.pathname)).toEqual({
+      kind: "decision", workspace: { uuid: WS, segment: DECORATED }, topic: UUID, record: OTHER,
+    });
+
+    await act(async () => {
+      window.history.back();
+      await waitForPop();
+    });
+    expect(probe().textContent).toBe(topicPath);
+    await act(async () => {
+      window.history.forward();
+      await waitForPop();
+    });
+    expect(probe().textContent).toBe(selectedPath);
+
+    view.unmount();
+    const reopened = render(<Probe to={topicPath} />);
+    expect(within(reopened.container).getByRole("button").textContent).toBe(selectedPath);
+    expect(route(selectedPath).kind).toBe("decision");
   });
 });
 

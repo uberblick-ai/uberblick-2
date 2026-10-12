@@ -296,16 +296,18 @@ export function CopyLink({
   room,
   segment,
   shortUuid,
+  copyPath,
 }: {
   room: string;
   segment: string;
   shortUuid?: string;
+  copyPath?: string | undefined;
 }): ReactElement {
   const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
   const identity = shortUuid !== undefined;
 
   // Derive the copied address and its accessible name from the same value.
-  const address = `${segment}/${parseRoom(room).uuid}`;
+  const address = copyPath?.replace(/^\//, "") ?? `${segment}/${parseRoom(room).uuid}`;
 
   const copy = async (): Promise<void> => {
     const ok = await writeToClipboard(shareUrl(address, window.location.origin));
@@ -345,6 +347,7 @@ export function DocMetaLine({
   connection,
   catalogConnection = null,
   segment,
+  copyPath,
   meta,
   archived,
   readOnly = false,
@@ -361,6 +364,7 @@ export function DocMetaLine({
   catalogConnection?: RoomConnection | null;
   /** The workspace as the address spells it — what a copied link carries. */
   segment: string;
+  copyPath?: string | undefined;
   meta: DocMeta | null;
   /** Whether the directory tombstones this document: no writes from here. */
   archived: boolean;
@@ -397,6 +401,7 @@ export function DocMetaLine({
             <CopyLink
               room={connection.room}
               segment={segment}
+              copyPath={copyPath}
               shortUuid={meta.uuid.slice(0, 8)}
             />
             <span className="ub-doc-rev"> · rev {rev ?? "········"}</span>

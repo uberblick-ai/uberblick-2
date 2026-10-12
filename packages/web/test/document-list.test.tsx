@@ -246,6 +246,22 @@ describe("the shared timestamp rule", () => {
     }
   });
 
+  it.each([
+    ["1 month ago", ago(30 * DAY)],
+    ["3 months ago", ago(90 * DAY)],
+    ["1 year ago", ago(365 * DAY)],
+    ["6 years ago", ago(6 * 365 * DAY)],
+  ])("keeps timeline dates relative as %s with exact hover", (label, iso) => {
+    expect(formatTimestamp(iso, NOW, true)).toEqual({
+      label,
+      dateTime: iso,
+      title: new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(Date.parse(iso)),
+    });
+  });
+
   it("keeps a recent absolute value on hover and refuses an unusable value", () => {
     const iso = ago(20 * 60_000);
     expect(formatTimestamp(iso, NOW)).toEqual({

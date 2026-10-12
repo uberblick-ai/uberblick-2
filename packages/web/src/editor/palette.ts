@@ -271,7 +271,7 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
  */
 export function describeForeignBlocks(
   foreign: ForeignBlock[],
-  options: { repairable?: boolean; decided?: boolean } = {},
+  options: { repairable?: boolean; decision?: boolean } = {},
 ): string {
   if (foreign.length === 0) return "";
   const blocks = (count: number): string =>
@@ -289,8 +289,8 @@ export function describeForeignBlocks(
   }
   if (conflicting.length > 0) {
     sentences.push(
-      options.decided
-        ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; a change to a decided record needs a new record.`
+      options.decision
+        ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; decision content is read-only in the web.`
         : options.repairable === false
         ? `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; restore this document to choose which link each range keeps.`
         : `${blocks(conflicting.length)} with conflicting external and document links on one range — both are retained; choose below which link each range keeps, and editing resumes.`,
