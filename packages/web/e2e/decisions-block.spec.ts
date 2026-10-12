@@ -179,7 +179,7 @@ async function expectHeaderContained(page: Page): Promise<void> {
       ink.left < bounds.left - 0.5 || ink.right > bounds.right + 0.5 ||
       ink.top < bounds.top - 0.5 || ink.bottom > bounds.bottom + 0.5,
     );
-    return { width: status.clientWidth, scrollWidth: status.scrollWidth, escapingInk: escapingInk.length };
+    return { width: link.clientWidth, scrollWidth: link.scrollWidth, escapingInk: escapingInk.length };
   });
   expect(header.scrollWidth).toBe(header.width);
   expect(header.escapingInk).toBe(0);
@@ -194,7 +194,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
         { type: "heading", level: 2, text: "Overview" },
         ...Array.from({ length: 16 }, (_, index) => ({ type: "paragraph", text: `Guidance paragraph ${index + 1} stays in the page's content.` })),
         { type: "heading", level: 2, text: "Related" },
-        { type: "paragraph", text: `[Supporting page](${related.uuid})` },
+        { type: "paragraph", inline: [{ text: "Supporting page", marks: { docLink: related.uuid } }] },
       ],
     });
     const other = await create(writer, "Another related page", "Other guidance.");
@@ -230,8 +230,13 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const undecided = await create(writer, "Unanswered question", "An open proposal has no answer preview in the block.", {
       kind: "decision", related: owner.uuid,
     });
-    const linked = await create(writer, "Linked-only question", `See [the page](${owner.uuid}); this link does not make it the related page.`, {
+    const linked = await create(writer, "Linked-only question", "", {
       kind: "decision", status: "decided", answer: answer(),
+      blocks: [{ type: "paragraph", inline: [
+        { text: "See ", marks: {} },
+        { text: "the page", marks: { docLink: owner.uuid } },
+        { text: "; this link does not make it the related page.", marks: {} },
+      ] }],
     });
     const archived = await create(writer, "Archived question", "Archived guidance stays out of the block.", {
       kind: "decision", status: "decided", related: owner.uuid, answer: answer(),
@@ -363,8 +368,13 @@ test("a page without headings gains and loses its live Decisions chrome", async 
   await expect(editor(page)).toHaveText(owner.blocks[0]?.text ?? "");
   await absent(page);
   await expect(page.locator(".ub-outline-trigger")).toHaveCount(0);
-  const linked = await create(writer, "A link alone", `See [this page](${owner.uuid}).`, {
+  const linked = await create(writer, "A link alone", "", {
     kind: "decision", status: "decided", answer: answer(),
+    blocks: [{ type: "paragraph", inline: [
+      { text: "See ", marks: {} },
+      { text: "this page", marks: { docLink: owner.uuid } },
+      { text: ".", marks: {} },
+    ] }],
   });
   await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid })).decisions?.find((topic) => topic.topic === linked.uuid)?.relation).toBe("linked");
   await absent(page);
