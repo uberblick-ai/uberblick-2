@@ -239,10 +239,10 @@ describe("read-only decision records", () => {
       await act(async () => setStatus(ydoc, status));
       expect(editorElement(host)).toBe(prose);
       expect(prose.getAttribute("contenteditable")).toBe("false");
-      expect(screen.queryByRole("button", { name: "Add button", exact: true })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Edit button", exact: true })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add button" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Edit button" })).toBeNull();
       const before = Y.encodeStateVector(ydoc);
-      await act(async () => screen.getByRole<HTMLButtonElement>("button", { name: "Read details", exact: true }).click());
+      await act(async () => screen.getByRole<HTMLButtonElement>("button", { name: "Read details" }).click());
       expect(opened).toHaveBeenLastCalledWith("https://example.invalid/answer", "_blank", "noopener,noreferrer");
       expect(Y.encodeStateVector(ydoc)).toEqual(before);
       expect(getBlocks(ydoc)).toEqual(original);
