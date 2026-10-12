@@ -374,6 +374,7 @@ export async function startHarness(options: {
   /** Offer a real on-machine replica backed by a separate authenticated hub. */
   multiWorkspace?: boolean;
 } = {}): Promise<Harness> {
+  const startupStarted = performance.now();
   const shared = sharedAppBundle();
   const runDir = mkdtempSync(join(tmpdir(), `uberblick-e2e-${process.env.UB_AGENTS_RUN ?? "local"}-`));
   const bundleDir = options.compiledFallback === true ? join(runDir, "bundle") : shared.directory;
@@ -522,6 +523,7 @@ export async function startHarness(options: {
     const serving = await startOpen(runDir, bundleDir);
     open = serving.child;
     const appUrl = serving.appUrl;
+    console.log(`e2e timing: harness startup ${Math.round(performance.now() - startupStarted)} ms`);
 
     const stopHub = async (): Promise<void> => {
       if (hub === null) return;

@@ -1,9 +1,13 @@
 # Manual device input checklist
 
-Use Safari on a real iPhone, iPad and 13-inch MacBook with a disposable document.
+Use Safari on a real iPad and 13-inch MacBook with a disposable document.
 Playwright's WebKit covers engine behavior and device-sized layouts; these
 checks cover native input it cannot reproduce. This checklist is not a delivery
 gate.
+
+Phone support is deferred future work. The iPhone portions below preserve
+future input checks and design intent; they do not describe a supported or
+tested target.
 
 | Device | Action | Expected result |
 | --- | --- | --- |

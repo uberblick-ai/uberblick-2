@@ -561,7 +561,7 @@ test("a record limit follows the latest x values with a neutral count and unchan
 });
 
 test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.skip(info.project.name === "webkit-iphone", "Explicit desktop and iPad contexts own this paired proof.");
+  test.skip(info.project.name === "webkit-ipad", "Explicit desktop and iPad contexts own this paired proof.");
   test.setTimeout(120_000);
   const session = writer();
   const uuid = await chartDoc(session, "Daily chart observations");
@@ -600,7 +600,7 @@ test("daily observation labels fit at desktop and iPad widths in both appearance
 });
 
 test("crowded daily endpoint labels stay inside the canvas after resizing", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.skip(info.project.name === "webkit-iphone", "Explicit canvas widths own this desktop resize proof.");
+  test.skip(info.project.name === "webkit-ipad", "Explicit canvas widths own this desktop resize proof.");
   const session = writer();
   const uuid = await chartDoc(session, "Daily endpoint padding", {
     ...MAPPING, y: [{ field: "latency", label: "Latency", unit: "ms" }],
@@ -905,7 +905,7 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
   }
 });
 
-test("a 360px three-series chart keeps compact ticks and a readable capped canvas", { tag: "@webkit-iphone" }, async ({ browser }, info) => {
+test("a 360px three-series chart keeps compact ticks and a readable capped canvas", async ({ browser }, info) => {
   const session = writer();
   const mapping = { ...MAPPING, title: "Delivery trend", y: [
     { field: "autonomous", label: "Autonomous deliveries", unit: "%" },
@@ -977,7 +977,7 @@ async function panelMeasurements(session: McpSession, uuid: string): Promise<voi
 
 for (const viewport of ["desktop", "phone"] as const) {
   test(`three-series panels at ${viewport} width share ranges and observation labels in both appearances`,
-    viewport === "phone" ? { tag: "@webkit-iphone" } : {}, async ({ browser }, info) => {
+    async ({ browser }, info) => {
       const session = writer();
       const uuid = await chartDoc(session, `Panel chart ${viewport}`, PANEL_MAPPING);
       await panelMeasurements(session, uuid);
@@ -1282,14 +1282,14 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   writeFileSync(evidence, `${JSON.stringify(record, null, 2)}\n`);
   await info.attach(`chart-timing-${label}`, { path: evidence, contentType: "application/json" });
   // Shared-host load is not a product failure. Keep measurements in the
-  // ordinary gate and reserve wall-clock budgets for an explicit benchmark.
+  // required workload gate and reserve wall-clock budgets for an explicit benchmark.
   if (process.env.UB_CHART_TIMING_BUDGETS !== "1") return;
   expect(result.first).toBeLessThanOrEqual(label === "representative" ? 500 : 1000);
   expect(median).toBeLessThanOrEqual(label === "representative" ? 250 : 1000);
   if (label.startsWith("bound")) expect(Math.max(...result.redraws)).toBeLessThanOrEqual(1000);
 }
 
-test("whole-area validation and Chart.js record representative and bounded Chromium redraw timings", async ({ browser }, info) => {
+test("whole-area validation and Chart.js record representative and bounded Chromium redraw timings", { tag: "@workload" }, async ({ browser }, info) => {
   test.setTimeout(120_000);
   const session = writer();
   for (const { bounded, layout } of [

@@ -11,13 +11,13 @@
  *   release-runtime, shared-controls and the compiled-loopback proof build separately.
  * - **No retries.** A real-browser test that only passes on the second attempt
  *   is not evidence of anything; a flake here should be visible, not absorbed.
- * - **Bounded WebKit set.** @webkit runs on iPhone and MacBook;
- *   @webkit-touch runs only on iPhone; @webkit-iphone adds the phone's
- *   short visual viewport. Chromium still runs every test, including its
+ * - **Bounded WebKit set.** @webkit runs on iPad and MacBook;
+ *   @webkit-touch runs only on iPad. Chromium still runs every test, including its
  *   forced-width and forced-touch cases. Tagged WebKit tests inherit their
  *   project's viewport and input rather than resizing or enabling touch.
- * - **Workload isolation.** The 400,000-cell timing fixture runs after all
- *   interactive projects, so layout/GC cannot compete with their input.
+ * - **Workload isolation.** Timing probes run after all interactive projects
+ *   locally. CI selects them without dependencies on a separate runner, so
+ *   layout/GC cannot compete with interactive input on the same host.
  */
 
 import { defineConfig, devices } from "@playwright/test";
@@ -29,7 +29,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: process.env.CI !== undefined,
-  reporter: [["list"]],
+  reporter: [["list"], ["./e2e/timing-reporter.ts"]],
   // Generous per test, not per run: the whole file is meant to finish in well
   // under 90s, and a stuck test should fail rather than hang the suite.
   timeout: 60_000,
@@ -42,9 +42,9 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
-      name: "webkit-iphone",
-      grep: /@webkit(?:-touch|-iphone)?(?:\s|$)/,
-      use: { ...devices["iPhone 13"] },
+      name: "webkit-ipad",
+      grep: /@webkit(?:-touch)?(?:\s|$)/,
+      use: { ...devices["iPad (gen 11)"] },
     },
     {
       name: "webkit-macbook",
@@ -55,7 +55,7 @@ export default defineConfig({
       name: "chromium-workload",
       // Focused workload probes use --project=chromium-workload --no-deps.
       grep: /@workload(?:\s|$)/,
-      dependencies: ["chromium", "webkit-iphone", "webkit-macbook"],
+      dependencies: ["chromium", "webkit-ipad", "webkit-macbook"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

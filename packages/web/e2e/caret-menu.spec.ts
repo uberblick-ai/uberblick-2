@@ -186,7 +186,7 @@ test("the slash, gutter and @ cards fit the supported device pane", { tag: "@web
   await paneCards(page, browserName);
 });
 
-test("a short pane bounds all three cards and scrolls their lists internally", { tag: "@webkit-iphone" }, async ({ page, browserName }) => {
+test("a short pane bounds all three cards and scrolls their lists internally", { tag: "@webkit-touch" }, async ({ page, browserName }) => {
   await openDoc(page, browserName);
   for (let index = 0; index < 8; index += 1) {
     await createDoc(page, `height-target1067 ${index}`);
@@ -370,10 +370,10 @@ test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh t
  * iOS lets Return mutate the DOM, then ProseMirror replays it through its keys.
  * Dispatch that observed input sequence explicitly: hardware Enter alone also
  * takes a 200ms fallback and would miss a stray paragraph left by the mutation.
- * A real iPhone's keyboard remains a separate manual device check.
+ * A real iPad's keyboard remains a separate manual device check.
  */
 test("iOS Return replays through the slash and @ handlers without a stray paragraph", { tag: "@webkit-touch" }, async ({ page, browserName }) => {
-  test.skip(browserName !== "webkit", "the iPhone WebKit project supplies ProseMirror's iOS platform");
+  test.skip(browserName !== "webkit", "the iPad WebKit project supplies ProseMirror's iOS platform");
   await openDoc(page, browserName);
   await createDoc(page, "iOS-target1067");
   await createDoc(page, "iOS writing");

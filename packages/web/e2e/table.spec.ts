@@ -180,8 +180,8 @@ test("a document link typed in a table cell opens its target and Back restores t
 for (const colorScheme of ["light", "dark"] as const) {
   test(`the cell @ picker takes keyboard and pointer or iPad touch picks through scrolling and sync — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser, browserName }) => {
     const touch = browserName === "webkit";
-    // The supported touch proof needs an iPad cell surface, independent of the
-    // phone project used for the rest of the tagged browser suite.
+    // This cell-picker proof uses an explicit iPad surface and a separate
+    // desktop author to prove synchronization across input modes.
     const page = await openApp(browser, "/", {
       contextOptions: {
         ...(browserName === "webkit" ? devices["iPad Pro 11"] : devices["Desktop Chrome"]),

@@ -386,7 +386,7 @@ test("warning banners use the product warning colours in both appearances", { ta
   }
 });
 
-test("a phone keeps very wide wireframe content scrolling inside the block", { tag: "@webkit-iphone" }, async ({ browser }, info) => {
+test("a phone keeps very wide wireframe content scrolling inside the block", async ({ browser }, info) => {
   const uuid = await wireframeDoc(writer(), "Phone wireframe", wideSource(12));
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
