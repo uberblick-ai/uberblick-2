@@ -14,6 +14,7 @@ export function mermaidBlockView(): NodeViewRenderer {
     let revision = 0;
     let destroyed = false;
     const dom = mermaidChrome.root();
+    dom.dataset.state = "loading";
     const header = document.createElement("div");
     header.className = "ub-mermaid-header";
     header.contentEditable = "false";
@@ -32,6 +33,7 @@ export function mermaidBlockView(): NodeViewRenderer {
     const panel = document.createElement("div");
     panel.className = "ub-mermaid-panel";
     panel.contentEditable = "false";
+    panel.hidden = true;
     panel.tabIndex = 0;
     panel.setAttribute("role", "region");
     panel.setAttribute("aria-label", "Mermaid diagram");
@@ -73,6 +75,7 @@ export function mermaidBlockView(): NodeViewRenderer {
         diagram.style.height = "auto";
         diagram.style.display = "block";
         panel.hidden = false;
+        error.hidden = true;
         dom.dataset.state = "ready";
       } catch (cause) {
         if (destroyed || requested !== revision) return;
@@ -89,10 +92,6 @@ export function mermaidBlockView(): NodeViewRenderer {
       if (destroyed) return;
       const requested = ++revision;
       if (pending !== null) clearTimeout(pending);
-      drawing.replaceChildren();
-      panel.hidden = true;
-      error.hidden = true;
-      dom.dataset.state = "loading";
       pending = setTimeout(() => { void draw(requested); }, 200);
     };
     const open = (event: Event): void => {

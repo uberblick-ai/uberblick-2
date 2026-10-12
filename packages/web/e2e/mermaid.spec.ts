@@ -145,6 +145,78 @@ async function expectReady(page: Page, label = "Finish", index = 0): Promise<voi
   expect(geometry?.height).toBeGreaterThan(0);
 }
 
+interface LayoutSample { sourceOffset: number; sourceVisible: boolean; errorVisible: boolean }
+interface LayoutProbe { running: boolean; samples: LayoutSample[] }
+
+async function observeLayout(target: Locator): Promise<() => Promise<LayoutSample[]>> {
+  await target.evaluate((element) => {
+    const root = element.closest(".ub-mermaid");
+    const error = root?.querySelector(".ub-mermaid-error");
+    if (root === null || error === null || error === undefined) throw new Error("e2e: Mermaid layout probe is missing chrome");
+    const probe: LayoutProbe = { running: true, samples: [] };
+    (element as HTMLElement & { mermaidLayoutProbe: LayoutProbe }).mermaidLayoutProbe = probe;
+    const sample = () => {
+      if (!probe.running) return;
+      probe.samples.push({
+        sourceOffset: element.getBoundingClientRect().top - root.getBoundingClientRect().top,
+        sourceVisible: element.getClientRects().length > 0,
+        errorVisible: error.getClientRects().length > 0,
+      });
+      requestAnimationFrame(sample);
+    };
+    sample();
+  });
+  return () => target.evaluate((element) => {
+    const probe = (element as HTMLElement & { mermaidLayoutProbe: LayoutProbe }).mermaidLayoutProbe;
+    probe.running = false;
+    return probe.samples;
+  });
+}
+
+test("pending redraws keep tall diagrams and readable failure states in place", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const tall = "flowchart TD\n  N0[Start] --> N1[One] --> N2[Two] --> N3[Three] --> N4[Four] --> N5[Five] --> N6[Finish]\n%% Stable drawing ";
+  const uuid = await mermaidDoc(session, "Mermaid stable redraw layout", [tall]);
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await expectReady(page);
+  expect((await drawing(page).boundingBox())?.height).toBeGreaterThan(400);
+  expect(await drawing(page).locator(".nodeLabel").first().evaluate((element) => getComputedStyle(element).fontFamily)).toContain("Geist");
+  await activateControl(openSource(page));
+  await caretEnd(source(page));
+  const previous = await drawing(page).elementHandle();
+  if (previous === null) throw new Error("e2e: initial tall Mermaid diagram is missing");
+  const finishLayout = await observeLayout(source(page));
+  await page.keyboard.type("keeps source in place while typing", { delay: 25 });
+  await expect.poll(() => authoredText(source(page))).toBe(`${tall}keeps source in place while typing`);
+  await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
+  await expectReady(page);
+  const samples = await finishLayout();
+  expect(samples.length).toBeGreaterThan(5);
+  const baseline = samples[0]?.sourceOffset;
+  if (baseline === undefined) throw new Error("e2e: Mermaid layout baseline is missing");
+  // Comment edits preserve diagram geometry; only native viewport scrolling may move the block.
+  expect(Math.max(...samples.map((sample) => Math.abs(sample.sourceOffset - baseline)))).toBeLessThanOrEqual(1);
+  expect(samples.every((sample) => sample.sourceVisible)).toBe(true);
+
+  await activateControl(neighbor(page));
+  const invalid = "flowchart TD\n  N0 -->";
+  await editSource(session, uuid, invalid);
+  await expect(block(page)).toHaveAttribute("data-state", "error");
+  const error = block(page).locator(".ub-mermaid-error");
+  await expect(error).toBeVisible();
+  await expect(source(page)).toBeVisible();
+  const previousError = await error.evaluateHandle((element) => element.firstChild);
+  const finishFailureLayout = await observeLayout(source(page));
+  await editSource(session, uuid, `${invalid} `);
+  await expect.poll(() => authoredText(source(page))).toBe(`${invalid} `);
+  await expect.poll(() => previousError.evaluate((node) => node?.isConnected ?? false)).toBe(false);
+  await expect(block(page)).toHaveAttribute("data-state", "error");
+  const failures = await finishFailureLayout();
+  expect(failures.length).toBeGreaterThan(1);
+  expect(failures.every((sample) => sample.sourceVisible && sample.errorVisible)).toBe(true);
+  await expect(drawing(page)).toHaveCount(0);
+});
+
 test("typing, collaborator edits and MCP edits redraw while preserving source and comment anchors", { tag: "@webkit" }, async ({ browser }) => {
   const session = writer();
   const uuid = await mermaidDoc(session, "Mermaid live source");
@@ -206,9 +278,11 @@ test("invalid and unsupported source clears only its diagram and recovers withou
     ["unknownDiagram\n  unreadable?", /diagram|unknown|unsupported/i],
     [`${SOURCE}\n%%${"x".repeat(60_000)}`, /maximum|size|limit|exceed/i],
   ] as const) {
+    const previousError = await block(page).locator(".ub-mermaid-error").evaluateHandle((element) => element.firstChild);
     await editSource(session, uuid, text);
     await expect.poll(() => authoredText(source(page))).toBe(text);
     await expect(block(page)).toHaveAttribute("data-state", "error");
+    await expect.poll(() => previousError.evaluate((node) => node?.isConnected ?? false)).toBe(false);
     await expect(block(page).locator(".ub-mermaid-error")).toContainText(message);
     await expect(source(page)).toBeVisible();
     expect(await authoredText(source(page))).toBe(text);
@@ -269,8 +343,10 @@ test("renderer download and unsupported-runtime failures keep readable source an
       expect(await copySource(page, index)).toBe(index === 0 ? SOURCE : SOURCE.replaceAll("Finish", "Other"));
     }
     if (failure === "download") expect(requested.length).toBeGreaterThan(0);
+    const previousError = await block(page).locator(".ub-mermaid-error").evaluateHandle((element) => element.firstChild);
     await appendStatement(page, "Finish --> Editable[Still editable]");
     await expect.poll(async () => (await storedBlock(session, uuid)).text).toContain("Still editable");
+    await expect.poll(() => previousError.evaluate((node) => node?.isConnected ?? false)).toBe(false);
     await expect(block(page)).toHaveAttribute("data-state", "error");
     await expect(neighbor(page)).toHaveText("Neighbor prose.");
     await editSource(session, uuid, SOURCE);
@@ -348,8 +424,11 @@ test("strict rendering prevents source callbacks, script execution and styles ou
     `${SOURCE}\n  classDef outside fill:red,stroke:red} .ub-paragraph {color:red!important\n  class Finish outside`,
   ];
   for (const hostile of hostileSources) {
+    const previousDrawing = await drawing(page).elementHandle();
+    if (previousDrawing === null) throw new Error("e2e: previous hostile-source diagram is missing");
     await editSource(session, uuid, hostile);
     await expect.poll(() => authoredText(source(page))).toBe(hostile);
+    await expect.poll(() => previousDrawing.evaluate((element) => element.isConnected)).toBe(false);
     if (hostile === hostileSources[2]) {
       await expect(block(page)).toHaveAttribute("data-state", "error");
       await expect(block(page).locator(".ub-mermaid-error")).toContainText(/parse|syntax|expecting|lexical/i);

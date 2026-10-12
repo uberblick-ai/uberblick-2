@@ -15,7 +15,7 @@ export function renderMermaid(text: string, dark: boolean): Promise<string> {
       suppressErrorRendering: true,
       maxTextSize: 50_000,
       theme: dark ? "dark" : "default",
-      fontFamily: "Inter, sans-serif",
+      fontFamily: '"Geist", system-ui, -apple-system, sans-serif',
       secure: [
         "secure", "securityLevel", "startOnLoad", "maxTextSize", "maxEdges",
         "suppressErrorRendering", "dompurifyConfig", "themeCSS", "theme",

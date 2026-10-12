@@ -130,6 +130,8 @@ describe("Mermaid source and derived diagrams", () => {
     typeText(fix.editor, " --> C");
     await draw(199);
     expect(renderMermaid).not.toHaveBeenCalled();
+    expect(drawing(block).textContent).toBe(SOURCE);
+    expect(block.querySelector<HTMLElement>(".ub-mermaid-panel")?.hidden).toBe(false);
     typeText(fix.editor, " --> D");
     await draw(199);
     expect(renderMermaid).not.toHaveBeenCalled();
@@ -150,6 +152,8 @@ describe("Mermaid source and derived diagrams", () => {
       editBlock(peer, fix.id, previous, text);
       Y.applyUpdate(fix.doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(fix.doc)));
       await draw(100);
+      expect(drawing(block).textContent).toBe(`${SOURCE} --> C --> D`);
+      expect(block.querySelector<HTMLElement>(".ub-mermaid-panel")?.hidden).toBe(false);
     }
     expect(renderMermaid).toHaveBeenCalledTimes(1);
     await draw(100);
@@ -188,6 +192,8 @@ describe("Mermaid source and derived diagrams", () => {
     const blocks = [...fix.element.querySelectorAll<HTMLElement>(".ub-mermaid")];
     expect(blocks).toHaveLength(2);
     editBlock(fix.doc, fix.id, SOURCE, INVALID);
+    expect(drawing(blocks[0]!).textContent).toBe(SOURCE);
+    expect(blocks[0]?.querySelector<HTMLElement>(".ub-mermaid-panel")?.hidden).toBe(false);
     const before = snapshotFragment(fix.doc);
     await draw();
     expect(blocks[0]?.dataset.state).toBe("error");
@@ -198,8 +204,17 @@ describe("Mermaid source and derived diagrams", () => {
     expect(drawing(blocks[1]!).textContent).toBe(SOURCE);
     expect(getBlocks(fix.doc).find(block => block.id === other)?.text).toBe(SOURCE);
     expect(snapshotFragment(fix.doc)).toEqual(before);
+    const recovered = deferred();
+    vi.mocked(renderMermaid).mockImplementationOnce(() => recovered.promise);
     editBlock(fix.doc, fix.id, INVALID, SOURCE);
+    expect(blocks[0]?.dataset.state).toBe("error");
+    expect(blocks[0]?.querySelector<HTMLElement>(".ub-mermaid-error")?.hidden).toBe(false);
+    expect(drawing(blocks[0]!).querySelector("svg")).toBeNull();
     await draw();
+    expect(blocks[0]?.dataset.state).toBe("error");
+    expect(blocks[0]?.querySelector<HTMLElement>(".ub-mermaid-error")?.hidden).toBe(false);
+    recovered.resolve(svg(SOURCE));
+    await draw(0);
     expect(blocks[0]?.dataset.state).toBe("ready");
     expect(blocks[0]?.querySelector<HTMLElement>(".ub-mermaid-error")?.hidden).toBe(true);
     expect(drawing(blocks[0]!).textContent).toBe(SOURCE);
