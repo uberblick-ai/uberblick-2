@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { applyDocData, DATA_KEY, DATA_LIMITS, getDocDataEntries, initDoc, readDocData } from "@uberblick/schema";
 import type { CollectionSchema, DataRecord, DocData, JSONValue } from "@uberblick/schema";
 import { formatChartNumber, formatChartX, parseChartConfig } from "../src/editor/chart-data.js";
-import { formatTableCell, parseTableConfig, prepareTable, tableAccessibleName, tableCellFormatter, tableDiagnosticsText } from "../src/editor/table-data.js";
+import { formatTableCell, parseTableConfig, prepareTable, sortTableRows, tableAccessibleName, tableCellFormatter, tableDiagnosticsText } from "../src/editor/table-data.js";
 import type { TableColumnMapping, TableConfig, TableReady } from "../src/editor/table-data.js";
 
 const mapping: TableConfig = {
@@ -191,6 +191,7 @@ describe("table projection and ordering", () => {
     expect(table.rows.map(({ id }) => id)).toEqual(["a", "\ufffd", "😀"]);
     const sorted = ready(data, { ...mapping, columns: [{ field: "value", format: "number" }], sort: { field: "value", direction: "desc" } });
     expect(sorted.rows.map(({ id }) => id)).toEqual(["\ufffd", "😀", "a"]);
+    expect(sortTableRows(table.rows, { field: "value", format: "number" }, "desc").map(({ id }) => id)).toEqual(["\ufffd", "😀", "a"]);
     expect(sorted.rows[0]).toBe(data.collections[0]?.records[1]);
     expect(getDocDataEntries(doc)).toEqual(before);
     expect(updates).toEqual([]);
@@ -203,9 +204,11 @@ describe("table projection and ordering", () => {
       { id: "y-low", value: { value: -3 } }, { id: "t-tie", value: { value: 12 } },
     ]);
     const table = ready(data, { ...mapping, columns: [{ field: "value", format: "number" }], sort: { field: "value", direction } });
-    expect(table.rows.map(({ id }) => id)).toEqual(direction === "asc"
+    const expected = direction === "asc"
       ? ["y-low", "t-tie", "x-high", "a-absent", "b-null", "z-invalid"]
-      : ["t-tie", "x-high", "y-low", "a-absent", "b-null", "z-invalid"]);
+      : ["t-tie", "x-high", "y-low", "a-absent", "b-null", "z-invalid"];
+    expect(table.rows.map(({ id }) => id)).toEqual(expected);
+    expect(sortTableRows(ready(data).rows, { field: "value", format: "number" }, direction).map(({ id }) => id)).toEqual(expected);
     expect(table.invalidSchema).toBe(0);
   });
 
@@ -217,8 +220,11 @@ describe("table projection and ordering", () => {
       { id: "a-utc", value: { value: "2026-10-08T10:00:00Z" } },
     ]);
     const config = { ...mapping, columns: [{ field: "value", format: "date" as const }], sort: { field: "value", direction: "asc" as const } };
-    expect(ready(data, config).rows.map(({ id }) => id)).toEqual(["a-utc", "b-offset", "c-later", "d-invalid"]);
-    expect(ready(data, { ...config, sort: { field: "value", direction: "desc" } }).rows.map(({ id }) => id)).toEqual(["c-later", "a-utc", "b-offset", "d-invalid"]);
+    for (const direction of ["asc", "desc"] as const) {
+      const expected = direction === "asc" ? ["a-utc", "b-offset", "c-later", "d-invalid"] : ["c-later", "a-utc", "b-offset", "d-invalid"];
+      expect(ready(data, { ...config, sort: { field: "value", direction } }).rows.map(({ id }) => id)).toEqual(expected);
+      expect(sortTableRows(ready(data).rows, { field: "value", format: "date" }, direction).map(({ id }) => id)).toEqual(expected);
+    }
   });
 
   it("sorts text by its literal displayed value's code points without locale collation", () => {
@@ -229,6 +235,8 @@ describe("table projection and ordering", () => {
     ]);
     const table = ready(data, { ...mapping, sort: { field: "value", direction: "asc" } });
     expect(table.rows.map(({ id }) => id)).toEqual(["number", "upper", "lower", "object", "bmp", "emoji"]);
+    expect(sortTableRows(ready(data).rows, { field: "value", format: "text" }, "asc").map(({ id }) => id)).toEqual(["number", "upper", "lower", "object", "bmp", "emoji"]);
+    expect(sortTableRows(ready(data).rows, { field: "value", format: "text" }, "desc").map(({ id }) => id)).toEqual(["emoji", "bmp", "object", "lower", "upper", "number"]);
   });
 
   it("sorts external links by raw URL and puts refused links last in either direction", () => {
@@ -237,8 +245,37 @@ describe("table projection and ordering", () => {
       { id: "a", value: { value: "http://a.test" } }, { id: "a-missing", value: {} },
     ]);
     const config = { ...mapping, columns: [{ field: "value", format: "link" as const }] };
-    expect(ready(data, { ...config, sort: { field: "value", direction: "asc" } }).rows.map(({ id }) => id)).toEqual(["a", "b", "a-missing", "z-bad"]);
-    expect(ready(data, { ...config, sort: { field: "value", direction: "desc" } }).rows.map(({ id }) => id)).toEqual(["b", "a", "a-missing", "z-bad"]);
+    for (const direction of ["asc", "desc"] as const) {
+      const expected = direction === "asc" ? ["a", "b", "a-missing", "z-bad"] : ["b", "a", "a-missing", "z-bad"];
+      expect(ready(data, { ...config, sort: { field: "value", direction } }).rows.map(({ id }) => id)).toEqual(expected);
+      expect(sortTableRows(ready(data).rows, { field: "value", format: "link" }, direction).map(({ id }) => id)).toEqual(expected);
+    }
+  });
+
+  it("reorders only a frozen mapping window by the chosen repeated field's own format", () => {
+    const config: TableConfig = { ...mapping, limit: 2, sort: { field: "value", direction: "asc" }, columns: [
+      { field: "value", format: "text" }, { field: "value", format: "number" },
+    ] };
+    const source = JSON.stringify(config);
+    const { doc, data } = fixture([
+      { id: "hidden", value: { value: 3 } }, { id: "ten", value: { value: 10 } }, { id: "two", value: { value: 2 } },
+    ]);
+    const before = getDocDataEntries(doc);
+    const updates: Uint8Array[] = [];
+    doc.on("update", (update: Uint8Array) => updates.push(update));
+    const table = frozen(ready(frozen(data), config));
+    const numberColumn: TableColumnMapping = { field: "value", format: "number" };
+    const ascending = sortTableRows(table.rows, numberColumn, "asc");
+    expect(ascending.map(({ id }) => id)).toEqual(["two", "ten"]);
+    expect(sortTableRows(table.rows, numberColumn, "desc").map(({ id }) => id)).toEqual(["ten", "two"]);
+    expect(ascending[0]).toBe(table.rows[1]);
+    expect(table.rows.map(({ id }) => id)).toEqual(["ten", "two"]);
+    expect(table.notice).toBe("Showing 2 of 3 records");
+    expect(table.recordCount).toBe(3);
+    expect(table.invalidSchema).toBe(0);
+    expect(getDocDataEntries(doc)).toEqual(before);
+    expect(updates).toEqual([]);
+    expect(source).toBe(JSON.stringify(config));
   });
 
   it("omits and counts records invalid under a concurrently changed schema", () => {
