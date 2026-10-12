@@ -93,6 +93,34 @@ process.send("ready");
 }
 
 describe("stored device login renewal", () => {
+  it("renews once after suspension and polls for restore without replacing the credential again", async () => {
+    const test = await setup();
+    test.hub.grant(WORKSPACE);
+    test.hub.grant(OTHER_WORKSPACE);
+    const before = test.hub.issue({ workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    await writeHubLogin(test.hub.origin, before, test.env);
+    test.hub.setWorkspaceStatus(WORKSPACE, "suspended");
+    expect((await ensureDeviceLogin(test.hub.url, WORKSPACE, {
+      env: test.env, rejected: before, renewalCooldownMs: 0,
+    })).status).toBe("no-access");
+    const after = readHubLogins(test.env).logins[test.hub.origin]!;
+    expect(after.credential.record.id).not.toBe(before.credential.record.id);
+    expect(after.credential.record.workspaces).toEqual([OTHER_WORKSPACE]);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect((await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, renewalCooldownMs: 0 })).status).toBe("no-access");
+      expect(readHubLogins(test.env).logins[test.hub.origin]).toEqual(after);
+      expect((await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env })).status).toBe("ready");
+    }
+    expect(test.hub.renewalCount).toBe(4);
+    test.hub.setWorkspaceStatus(WORKSPACE, "active");
+    const restored = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, renewalCooldownMs: 0 });
+    expect(restored.status).toBe("ready");
+    if (restored.status !== "ready") throw new Error("restore did not rediscover workspace access");
+    expect(restored.login.identity).toEqual(before.identity);
+    expect(restored.login.credential.record.deviceId).toBe(before.credential.record.deviceId);
+    expect(restored.login.credential.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
+  });
+
   it("replaces names with each stored credential, including an older hub's unnamed reply", async () => {
     const test = await setup();
     const before = test.hub.issue({ workspaces: [WORKSPACE] });

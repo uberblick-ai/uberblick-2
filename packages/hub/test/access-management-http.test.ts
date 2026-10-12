@@ -741,7 +741,8 @@ describe("hub administration", () => {
     const outsider = person(hub, "3456", "signed-in");
     hub.hubAdmins!.grant(admin.principal.id);
     const actions: Action[] = [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
-      { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: admin.principal.id }];
+      { operation: "list-hub-workspaces" }, { operation: "remove-hub-admin", principalId: admin.principal.id },
+      { operation: "suspend-workspace", workspaceId: WORKSPACE }, { operation: "restore-workspace", workspaceId: WORKSPACE }];
     for (const actor of [workspaceAdmin, member, outsider]) {
       for (const action of actions) {
         expect(await manage(hub, actor.issued, action)).toEqual({ code: 403, result: { status: "forbidden" } });
@@ -753,13 +754,80 @@ describe("hub administration", () => {
       result: { status: "ok", admins: [{ principalId: admin.principal.id, githubAccountId: "1234", githubUsername: "hub-admin",
         workspaces: 0, lastSignedInAt: admin.issued.record.issuedAt, current: true }], nextCursor: null } });
     expect(await manage(hub, admin.issued, { operation: "list-hub-workspaces" })).toEqual({ code: 200,
-      result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["workspace-admin"] }], nextCursor: null } });
+      result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, status: "active", members: 2, admins: ["workspace-admin"] }], nextCursor: null } });
     expect(hub.memberships!.workspacesFor(admin.principal.id)).toEqual([]);
     expect(admin.issued.record.workspaces).toEqual([]);
     const refused = connect(hub, testRoom(), await roomToken(admin.issued));
     expect(await refused.denied).toBe("device-credential-refused");
     expect(await manage(hub, admin.issued, { operation: "own-role", workspaceId: WORKSPACE }))
       .toEqual({ code: 403, result: { status: "forbidden" } });
+  });
+
+  it("suspends and restores another workspace with an account-scoped credential while retaining memberships and sign-ins", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "hub-admin");
+    const member = person(hub, "5678", "workspace-admin", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    expect(owner.issued.record.workspaces).toEqual([]);
+    for (const [operation, workspaceStatus] of [["suspend-workspace", "suspended"], ["restore-workspace", "active"]] as const) {
+      expect(await manage(hub, owner.issued, { operation, workspaceId: WORKSPACE })).toEqual({ code: 200,
+        result: { status: "ok", workspaceId: WORKSPACE, workspaceStatus } });
+      expect(await manage(hub, owner.issued, { operation: "list-hub-workspaces" })).toEqual({ code: 200,
+        result: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, status: workspaceStatus,
+          members: 1, admins: ["workspace-admin"] }], nextCursor: null } });
+      expect(hub.memberships!.roleFor(WORKSPACE, member.principal.id)).toBe("admin");
+      expect(hub.credentials!.get(member.issued.record.id)).toEqual(member.issued.record);
+      expect(hub.credentials!.get(owner.issued.record.id)).toEqual(owner.issued.record);
+      expect(await manage(hub, owner.issued, { operation: "own-hub-role" })).toEqual({ code: 200,
+        result: { status: "ok", role: "admin" } });
+      expect(await manage(hub, member.issued, { operation: "own-role", workspaceId: WORKSPACE })).toEqual(
+        workspaceStatus === "suspended" ? { code: 403, result: { status: "forbidden" } }
+          : { code: 200, result: { status: "ok", role: "admin" } });
+    }
+    expect(await manage(hub, owner.issued, { operation: "suspend-workspace", workspaceId: randomUUID() }))
+      .toEqual({ code: 404, result: { status: "workspace-not-found" } });
+  });
+
+  it.each(["suspend-workspace", "restore-workspace"] as const)("binds %s to its target and rechecks hub authority after verification", async operation => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
+    const backup = person(hub, "5678", "backup", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    hub.hubAdmins!.grant(backup.principal.id);
+    hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, WORKSPACE, "suspended");
+    const action = { operation, workspaceId: WORKSPACE };
+    const signed = await proof(owner.issued, action);
+    for (const changed of [{ ...action, workspaceId: OTHER_WORKSPACE },
+      { ...action, operation: operation === "suspend-workspace" ? "restore-workspace" : "suspend-workspace" } as const]) {
+      expect(await post(hub, envelope(signed, changed)))
+        .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    }
+    const original = hub.credentials!.verifyRequest.bind(hub.credentials!);
+    vi.spyOn(hub.credentials!, "verifyRequest").mockImplementationOnce(async (...args) => {
+      const result = await original(...args);
+      hub.hubAdmins!.remove(backup.principal.id, owner.principal.id);
+      return result;
+    });
+    expect(await post(hub, envelope(signed, action))).toEqual({ code: 403, result: { status: "forbidden" } });
+    expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
+  });
+
+  it("reports committed suspension when a closure listener fails and repairs closure on retry", async () => {
+    const { hub, logs } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const removeListener = hub.hubAdmins!.onSuspend(() => { throw new Error("closure fixture"); });
+    const applied: string[] = [];
+    hub.hubAdmins!.onSuspend(id => { applied.push(id); });
+    const action = { operation: "suspend-workspace", workspaceId: WORKSPACE } as const;
+    expect(await manage(hub, owner.issued, action)).toEqual({ code: 500, result: { status: "closure-failed", applied: true } });
+    expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
+    expect(applied).toEqual([WORKSPACE]);
+    expect(logs).toContainEqual({ event: "hub.access.management.failed", applied: true });
+    removeListener();
+    expect(await manage(hub, owner.issued, action)).toEqual({ code: 200,
+      result: { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" } });
+    expect(applied).toEqual([WORKSPACE, WORKSPACE]);
   });
 
   it("binds page cursors and checks current hub authority for every continuation", async () => {
@@ -866,6 +934,28 @@ describe("hub administration", () => {
 });
 
 describe("workspace promotion authority", () => {
+  it("refuses a suspended reservation or resume until restore and preserves the committed attempt", async () => {
+    const { hub } = await rig();
+    const actor = person(hub, "1201", "promoter");
+    const owner = person(hub, "1202", "hub-admin");
+    hub.hubAdmins!.grant(actor.principal.id);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const action = { operation: "promote-workspace", workspaceId: randomUUID(), attemptId: randomUUID() } as const;
+    expect(await manage(hub, actor.issued, action)).toMatchObject({ code: 200, result: { status: "created" } });
+    expect(await manage(hub, owner.issued, { operation: "suspend-workspace", workspaceId: action.workspaceId }))
+      .toMatchObject({ code: 200, result: { workspaceStatus: "suspended" } });
+    hub.hubAdmins!.remove(owner.principal.id, actor.principal.id);
+    for (const attemptId of [action.attemptId, randomUUID()]) {
+      expect(await manage(hub, actor.issued, { ...action, attemptId })).toEqual({ code: 409,
+        result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId } });
+    }
+    expect(hub.memberships!.roleFor(action.workspaceId, actor.principal.id)).toBe("admin");
+    expect(await manage(hub, owner.issued, { operation: "restore-workspace", workspaceId: action.workspaceId }))
+      .toMatchObject({ code: 200, result: { workspaceStatus: "active" } });
+    expect(await manage(hub, actor.issued, action)).toEqual({ code: 200,
+      result: { status: "resumed", workspaceId: action.workspaceId, attemptId: action.attemptId } });
+  });
+
   it("creates only for a current hub admin without needing membership, and resumes only the same principal and attempt", async () => {
     const { hub } = await rig();
     const actor = person(hub, "1201", "promoter");

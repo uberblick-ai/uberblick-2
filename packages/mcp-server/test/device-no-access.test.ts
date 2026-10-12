@@ -20,7 +20,7 @@ async function caughtUp(rig: Rig, timeoutMs = 20_000): Promise<void> {
   }, timeoutMs);
 }
 
-it("keeps a shared credential stable while polling denied access and resumes after a later grant", async () => {
+it.each(["missing membership", "suspended workspace"] as const)("keeps a shared credential stable while polling %s and resumes when access returns", async kind => {
   const directory = mkdtempSync(join(tmpdir(), `device-no-access-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   const fixture = await startDeviceSyncHub({ directory });
   const clients: Rig[] = [];
@@ -39,12 +39,21 @@ it("keeps a shared credential stable while polling denied access and resumes aft
 
   try {
     fixture.grant(firstWorkspace);
-    await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [firstWorkspace] }), env);
+    if (kind === "suspended workspace") fixture.grant(secondWorkspace);
+    await writeHubLogin(fixture.origin, fixture.issue({ workspaces: kind === "suspended workspace"
+      ? [firstWorkspace, secondWorkspace] : [firstWorkspace] }), env);
     const first = await startServer(config(firstWorkspace, "first.sqlite"));
     clients.push(first);
     await caughtUp(first);
     const second = await startServer(config(secondWorkspace, "second.sqlite"));
     clients.push(second);
+    let downloaded: string | undefined;
+    if (kind === "suspended workspace") {
+      const existing = await second.ok("create_doc", { title: "Downloaded before suspension", description: "Kept through suspension." });
+      downloaded = existing.uuid;
+      await caughtUp(second);
+      fixture.setWorkspaceStatus(secondWorkspace, "suspended");
+    }
     await waitUntil("renewal to confirm the second workspace needs access", () =>
       second.instance.replicas.sync.state().authRecovery === "no-workspace-access");
     await caughtUp(first);
@@ -73,12 +82,16 @@ it("keeps a shared credential stable while polling denied access and resumes aft
       status: "auth-failed", authRecovery: "no-workspace-access", recoveryClass: "manual",
     });
     expect((await second.ok("get_doc", { uuid: local.uuid })).title).toBe("Waiting for workspace access");
+    if (downloaded !== undefined) {
+      expect((await second.ok("get_doc", { uuid: downloaded })).title).toBe("Downloaded before suspension");
+    }
     expect((await second.ok("sync_status")).pendingRooms.length).toBeGreaterThan(0);
     expect(fixture.readRoom(roomForDoc(secondWorkspace, local.uuid))).toBeUndefined();
 
     await second.instance.replicas.sync.waitForDeviceWork();
     const checksBeforeGrant = fixture.renewalCount;
-    fixture.grant(secondWorkspace);
+    if (kind === "suspended workspace") fixture.setWorkspaceStatus(secondWorkspace, "active");
+    else fixture.grant(secondWorkspace);
     await caughtUp(second);
     await caughtUp(first);
     const replacement = readHubLogins(env).logins[fixture.origin]!;

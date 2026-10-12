@@ -33,6 +33,8 @@ const ACTIONS: RequestAction[] = [
   { operation: "list-hub-admins", cursor: "WzFd" },
   { operation: "list-hub-workspaces" },
   { operation: "list-hub-workspaces", cursor: "WzEsMl0" },
+  { operation: "suspend-workspace", workspaceId: WORKSPACE },
+  { operation: "restore-workspace", workspaceId: WORKSPACE },
   { operation: "remove-hub-admin", principalId: "principal" },
   { operation: "revoke-device", deviceId: "device" },
   { operation: "own-role", workspaceId: WORKSPACE },

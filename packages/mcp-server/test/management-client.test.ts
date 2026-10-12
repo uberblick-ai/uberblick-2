@@ -20,7 +20,7 @@ const member = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername
 const device = { deviceId: DEVICE, signedInAt: Date.now(), current: true };
 const admin = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername: "octocat",
   workspaces: 0, lastSignedInAt: Date.now(), current: true };
-const workspace = { workspaceId: WORKSPACE, name: "Example project", members: 2, admins: ["octocat"] };
+const workspace = { workspaceId: WORKSPACE, status: "active", name: "Example project", members: 2, admins: ["octocat"] };
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -104,6 +104,8 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-hub-admins" }, { status: "ok", admins: [admin], nextCursor: null }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace], nextCursor: null }],
     [{ operation: "remove-hub-admin", principalId: PRINCIPAL }, { status: "ok" }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" }],
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "admin" }],
     [{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, { status: "ok", githubAccountId: "1234", githubUsername: "octocat" }],
     [{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, { status: "already-member", member }],
@@ -170,6 +172,12 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace, workspace] }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, members: 1.5 }] }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, admins: ["private/token"] }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, status: undefined }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, status: "private-provider-text" }] }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: PRINCIPAL, workspaceStatus: "suspended" }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, current: false }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, signedInAt: "private" }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [device, device] }],
@@ -187,7 +195,7 @@ describe("management replies exposed to a browser", () => {
     for (const name of [undefined, 7, "", " name ", "line\nname", login.credential.key]) {
       expect(sanitizeManagementReply({ operation: "list-hub-workspaces" }, { status: 200,
         body: { status: "ok", workspaces: [{ ...workspace, name }], nextCursor: null } }, login)).toEqual({ status: 200,
-        body: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["octocat"] }], nextCursor: null } });
+        body: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, status: "active", members: 2, admins: ["octocat"] }], nextCursor: null } });
     }
   });
 
@@ -200,5 +208,23 @@ describe("management replies exposed to a browser", () => {
     expect(sanitizeManagementReply({ operation: "list-hub-admins" }, { status: 200,
       body: { status: "ok", admins: [{ ...admin, lastSignedInAt: null }], nextCursor: null } }, login).body.admins)
       .toEqual([{ ...admin, lastSignedInAt: null }]);
+  });
+
+  it("keeps suspension results and fixed failures distinct from arbitrary upstream text", () => {
+    for (const operation of ["suspend-workspace", "restore-workspace"] as const) {
+      const action = { operation, workspaceId: WORKSPACE };
+      expect(sanitizeManagementReply(action, { status: 404,
+        body: { status: "workspace-not-found", message: "private", key: login.credential.key } }))
+        .toEqual({ status: 404, body: { status: "workspace-not-found" } });
+    }
+    expect(sanitizeManagementReply({ operation: "list-hub-workspaces" }, { status: 200,
+      body: { status: "ok", workspaces: [{ ...workspace, status: "suspended" }], nextCursor: null } }, login).body.workspaces)
+      .toEqual([{ ...workspace, status: "suspended" }]);
+    const action = { operation: "suspend-workspace", workspaceId: WORKSPACE } as const;
+    expect(sanitizeManagementReply(action, { status: 500,
+      body: { status: "closure-failed", applied: true, message: "private" } }))
+      .toEqual({ status: 500, body: { status: "closure-failed", applied: true } });
+    expect(() => sanitizeManagementReply(action, { status: 500,
+      body: { status: "closure-failed", applied: false } })).toThrow(ManagementResponseError);
   });
 });

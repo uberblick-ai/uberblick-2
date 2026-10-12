@@ -3,6 +3,7 @@ import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { HubDatabase } from "./persistence.js";
 import type { MembershipRegistry } from "./memberships.js";
+import { HubAdminRegistry } from "./hub-admins.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import {
   type ClampFailure,
@@ -127,7 +128,7 @@ export class CredentialRegistry {
   private readonly markDeviceRevoked: StatementSync;
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
-  constructor(database: HubDatabase) {
+  constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database)) {
     const db = database.connection;
     this.db = db;
     db.exec(SCHEMA);
@@ -204,7 +205,7 @@ export class CredentialRegistry {
       id: globalThis.crypto.randomUUID(),
       principalId: request.principalId,
       deviceId: request.deviceId,
-      workspaces: [...new Set(request.workspaces)].sort(),
+      workspaces: this.hubAdmins.availableWorkspaces([...new Set(request.workspaces)]).sort(),
       issuedAt: Date.now(),
       revokedAt: null,
       replacedAt: null,
@@ -321,7 +322,7 @@ export class CredentialRegistry {
         this.db.exec("ROLLBACK");
         return { status: "already-replaced" };
       }
-      const workspaces = memberships.workspacesFor(current.principalId).sort();
+      const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
       if (options.ifWorkspacesChanged === true &&
         workspaces.length === current.workspaces.length &&
         workspaces.every((workspace, index) => workspace === current.workspaces[index])) {
