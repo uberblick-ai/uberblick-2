@@ -8,6 +8,7 @@ import type { ReactElement } from "react";
 import type * as Y from "yjs";
 import {
   assignDocumentTags,
+  decisionTopicArchived,
   getMeta,
   getTagCatalogEntry,
   parseRoom,
@@ -323,6 +324,7 @@ export function CopyLink({
 export function DocMetaLine({
   connection,
   catalogConnection = null,
+  directoryConnection = null,
   segment,
   copyPath,
   meta,
@@ -339,6 +341,7 @@ export function DocMetaLine({
   connection: RoomConnection;
   /** The workspace settings room that owns the curated tag catalog. */
   catalogConnection?: RoomConnection | null;
+  directoryConnection?: RoomConnection | null;
   /** The workspace as the address spells it — what a copied link carries. */
   segment: string;
   copyPath?: string | undefined;
@@ -372,7 +375,7 @@ export function DocMetaLine({
             tags={meta.tags}
             catalogConnection={catalogConnection}
             readOnly={archived || readOnly}
-            canWrite={() => connection.status.writable}
+            canWrite={() => connection.status.writable && directoryConnection?.status.writable === true && directoryConnection.status.synced && !decisionTopicArchived(directoryConnection.ydoc, getMeta(connection.ydoc).uuid)}
           />
           <span className="ub-doc-ids">
             <CopyLink

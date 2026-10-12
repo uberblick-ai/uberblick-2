@@ -104,7 +104,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   );
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+    page.getByRole("region", { name: "Existing tags" }).getByRole("listitem"),
   ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
@@ -2332,7 +2332,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   );
   await page.getByLabel("Create a tag").fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByRole("button", { name: `Retire ${longest}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: `Delete ${longest}` })).toBeVisible();
   // On its own, because one name is the case: with the seeded short ones beside
   // it the oversized pill is carried onto a line of its own below the machine
   // facts, and misses them without being any better contained.
@@ -2380,11 +2380,12 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
   );
   for (const name of ["design", "hub", "release", "schema", "storage", longest]) {
-    await page.getByRole("button", { name: `Retire ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
+    await page.getByRole("button", { name: `Delete ${name}` }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toHaveCount(0);
   }
   await expect(
-    page.getByRole("region", { name: "Active" }).getByRole("listitem"),
+    page.getByRole("region", { name: "Existing tags" }).getByRole("listitem"),
   ).toHaveCount(EXAMPLE_TAGS.length);
 });
 
@@ -2435,7 +2436,7 @@ for (const scheme of ["light"] as const) {
     readings.push(...await surface(page, "[data-settings-page]"));
     await field.fill(name);
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
+    await expect(page.getByRole("button", { name: `Delete ${name}` })).toBeVisible();
     readings.push(...await surface(page, "[data-settings-page]"));
 
     // The field's value, both action variants on their hover grounds, and the

@@ -335,6 +335,18 @@ describe("the document tag picker", () => {
     fix.document.status.writable = false;
     click(option("auth"));
     expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    fix.document.status.writable = true;
+    fix.directory.status.synced = false;
+    click(option("auth"));
+    expect(getMeta(fix.document.ydoc).tags).toEqual(before);
+    fix.directory.status.synced = true;
+    const staleAuth = option("auth");
+    act(() => {
+      setTags(documentPeer, [...before, TAGS.legacy]);
+      tombstoneDirectoryEntry(fix.directory.ydoc, UUID);
+      staleAuth?.click();
+    });
+    expect(getMeta(fix.document.ydoc).tags).toEqual([...before, TAGS.legacy].sort());
   });
 
   it("is operable from the keyboard with no field to enter the list through", async () => {

@@ -982,6 +982,7 @@ export function EditorPane({
         <DocMetaLine
           connection={connection}
           catalogConnection={catalogConnection}
+          directoryConnection={directoryConnection}
           segment={segment}
           meta={meta}
           archived={archived}
