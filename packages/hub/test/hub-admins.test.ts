@@ -56,17 +56,84 @@ it("lists every inventory source without exposing document content, and tolerate
     const inventory = hubAdmins.listWorkspaces(owner.id);
     expect(inventory).toHaveLength(7);
     expect(inventory).toEqual(expect.arrayContaining([
-      { workspaceId: defaultId, name: "Default workspace", members: 0, admins: [] },
-      { workspaceId: memberOnly, members: 1, admins: ["workspace-admin"] },
-      { workspaceId: receiptOnly, members: 0, admins: [] },
-      { workspaceId: promoted, members: 0, admins: [] },
-      { workspaceId: docOnly, name: "Stored project", members: 0, admins: [] },
-      { workspaceId: invalidName, members: 0, admins: [] },
-      { workspaceId: unreadable, members: 0, admins: [] },
+      { workspaceId: defaultId, status: "active", name: "Default workspace", members: 0, admins: [] },
+      { workspaceId: memberOnly, status: "active", members: 1, admins: ["workspace-admin"] },
+      { workspaceId: receiptOnly, status: "active", members: 0, admins: [] },
+      { workspaceId: promoted, status: "active", members: 0, admins: [] },
+      { workspaceId: docOnly, status: "active", name: "Stored project", members: 0, admins: [] },
+      { workspaceId: invalidName, status: "active", members: 0, admins: [] },
+      { workspaceId: unreadable, status: "active", members: 0, admins: [] },
     ]));
     expect(JSON.stringify(inventory)).not.toContain("document content must stay private");
     expect(() => hubAdmins.listWorkspaces(workspaceAdmin.id)).toThrow("hub-admin-required");
     expect(claims.state(true)).toEqual({ unclaimed: true, canClaim: true });
+  } finally { database.close(); }
+});
+
+it("persists suspension through restart, preserves workspace data and commits before every closure listener", () => {
+  const path = tempDatabasePath();
+  const database = new HubDatabase(path, error => { throw error; });
+  database.open();
+  const memberships = new MembershipRegistry(database);
+  const principals = new PrincipalRegistry(database);
+  const credentials = new CredentialRegistry(database);
+  const registry = new HubAdminRegistry(database);
+  const owner = principals.identify("1234", "owner");
+  registry.grant(owner.id);
+  const workspaceId = randomUUID();
+  memberships.grant({ workspaceId, principalId: owner.id, role: "admin" });
+  const issued = credentials.issue({ principalId: owner.id, deviceId: randomUUID(), workspaces: [workspaceId] });
+  database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(`${workspaceId}/_directory`, new Uint8Array([0]));
+  const before = {
+    documents: database.connection.prepare("SELECT * FROM documents").all(),
+    members: database.connection.prepare("SELECT * FROM hub_memberships").all(),
+    credentials: database.connection.prepare("SELECT * FROM hub_credentials").all(),
+  };
+  const calls: string[] = [];
+  const unsubscribe = registry.onSuspend(id => {
+    expect(registry.isSuspended(id)).toBe(true);
+    calls.push("first");
+    throw new Error("closure fixture");
+  });
+  registry.onSuspend(() => { calls.push("second"); });
+  expect(() => registry.setWorkspaceStatus(owner.id, workspaceId, "suspended")).toThrow(AggregateError);
+  expect(calls).toEqual(["first", "second"]);
+  expect(registry.availableWorkspaces([workspaceId])).toEqual([]);
+  unsubscribe();
+  registry.setWorkspaceStatus(owner.id, workspaceId, "suspended");
+  expect(calls).toEqual(["first", "second", "second"]);
+  expect(credentials.get(issued.record.id)).toEqual(issued.record);
+  expect(registry.listWorkspaces(owner.id)).toEqual([{ workspaceId, status: "suspended", members: 1, admins: ["owner"] }]);
+  database.close();
+  const reopened = new HubDatabase(path, error => { throw error; });
+  reopened.open();
+  try {
+    const restored = new HubAdminRegistry(reopened);
+    expect(restored.isSuspended(workspaceId)).toBe(true);
+    expect(reopened.connection.prepare("SELECT * FROM documents").all()).toEqual(before.documents);
+    expect(reopened.connection.prepare("SELECT * FROM hub_memberships").all()).toEqual(before.members);
+    expect(reopened.connection.prepare("SELECT * FROM hub_credentials").all()).toEqual(before.credentials);
+    restored.setWorkspaceStatus(owner.id, workspaceId, "active");
+    expect(restored.availableWorkspaces([workspaceId])).toEqual([workspaceId]);
+    expect(restored.listWorkspaces(owner.id)).toEqual([{ workspaceId, status: "active", members: 1, admins: ["owner"] }]);
+  } finally { reopened.close(); }
+});
+
+it("storage failure applies no suspension and notifies no closure listener", () => {
+  const database = new HubDatabase(tempDatabasePath(), error => { throw error; });
+  database.open();
+  try {
+    const memberships = new MembershipRegistry(database);
+    const registry = new HubAdminRegistry(database);
+    registry.grant("owner");
+    const workspaceId = randomUUID();
+    memberships.grant({ workspaceId, principalId: "owner", role: "admin" });
+    const calls: string[] = [];
+    registry.onSuspend(id => { calls.push(id); });
+    database.connection.exec("CREATE TRIGGER refuse_suspension BEFORE INSERT ON hub_workspace_suspensions BEGIN SELECT RAISE(ABORT, 'fixture'); END");
+    expect(() => registry.setWorkspaceStatus("owner", workspaceId, "suspended")).toThrow("fixture");
+    expect(registry.isSuspended(workspaceId)).toBe(false);
+    expect(calls).toEqual([]);
   } finally { database.close(); }
 });
 

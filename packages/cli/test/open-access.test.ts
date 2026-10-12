@@ -68,7 +68,7 @@ describe("ub open: live Access bridge", () => {
         { principalId: login.identity.id, current: true, workspaces: 0 },
       ] });
       expect((await post({ operation: "list-hub-workspaces" })).body).toMatchObject({ status: "ok", workspaces:
-        expect.arrayContaining([{ workspaceId: WORKSPACE, members: 1, admins: ["other-admin"] }]) });
+        expect.arrayContaining([{ workspaceId: WORKSPACE, status: "active", members: 1, admins: ["other-admin"] }]) });
       expect((await post({ operation: "remove-hub-admin", principalId: login.identity.id })).body.status).toBe("self-admin");
       hub.hubAdmins!.remove(other.identity.id, login.identity.id);
       for (const action of [{ operation: "own-hub-role" }, { operation: "list-hub-admins" },
@@ -77,6 +77,48 @@ describe("ub open: live Access bridge", () => {
       }
       expect((await post({ operation: "list-devices" })).body.status).toBe("ok");
       expect(hub.memberships!.roleFor(WORKSPACE, other.identity.id)).toBe("admin");
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("suspends another workspace and restores its own suspended workspace through only the bound hub", async () => {
+    const { app, post, hub, login, other, origin, box } = await rig(null, []);
+    hub.hubAdmins!.grant(login.identity.id);
+    hub.memberships!.grant({ workspaceId: REBOUND_WORKSPACE, principalId: other.identity.id, role: "admin" });
+    const verify = vi.spyOn(hub.credentials!, "verifyRequest");
+    const renew = vi.spyOn(hub.credentials!, "renew");
+    try {
+      expect(await post({ operation: "suspend-workspace", workspaceId: REBOUND_WORKSPACE })).toEqual({ code: 200,
+        body: { status: "ok", workspaceId: REBOUND_WORKSPACE, workspaceStatus: "suspended", hub: origin } });
+      expect(hub.hubAdmins!.isSuspended(REBOUND_WORKSPACE)).toBe(true);
+      verify.mockClear();
+      expect((await post({ operation: "list-members", workspaceId: REBOUND_WORKSPACE })).body.status).toBe("workspace-mismatch");
+      expect(verify).not.toHaveBeenCalled();
+      expect((await post({ operation: "restore-workspace", workspaceId: REBOUND_WORKSPACE })).body.workspaceStatus).toBe("active");
+      expect((await post({ operation: "suspend-workspace", workspaceId: WORKSPACE })).body.workspaceStatus).toBe("suspended");
+      expect((await post({ operation: "own-hub-role" })).body.role).toBe("admin");
+      writeBinding(box, "wss://another-hub.example/ws", REBOUND_WORKSPACE);
+      expect(await post({ operation: "restore-workspace", workspaceId: WORKSPACE })).toEqual({ code: 200,
+        body: { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active", hub: origin } });
+      expect(renew).not.toHaveBeenCalled();
+      expect(hub.credentials!.get(login.credential.record.id)?.revokedAt).toBeNull();
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it("refuses workspace administrators and accounts after hub administration is removed without renewing account authority", async () => {
+    const { app, post, hub, login, other, origin } = await rig();
+    const renew = vi.spyOn(hub.credentials!, "renew");
+    try {
+      for (const operation of ["suspend-workspace", "restore-workspace"]) {
+        expect(await post({ operation, workspaceId: WORKSPACE })).toEqual({ code: 403, body: { status: "forbidden", hub: origin } });
+      }
+      hub.hubAdmins!.grant(login.identity.id);
+      hub.hubAdmins!.grant(other.identity.id);
+      expect((await post({ operation: "suspend-workspace", workspaceId: WORKSPACE })).body.workspaceStatus).toBe("suspended");
+      hub.hubAdmins!.remove(other.identity.id, login.identity.id);
+      expect(await post({ operation: "restore-workspace", workspaceId: WORKSPACE })).toEqual({ code: 403,
+        body: { status: "forbidden", hub: origin } });
+      expect(hub.hubAdmins!.isSuspended(WORKSPACE)).toBe(true);
+      expect(renew).not.toHaveBeenCalled();
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 

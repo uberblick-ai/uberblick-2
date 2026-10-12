@@ -85,6 +85,7 @@ async function reserve(origin: string, workspaceId: string, attemptId: string, l
     "hub-admin-required": "only a current hub administrator can add a workspace to this hub; ask a hub administrator. Nothing was uploaded",
     "admin-required": "your GitHub account must already administer a workspace on this hub; ask a workspace administrator for access or choose another hub",
     "workspace-conflict": "the hub already holds this workspace UUID, or it belongs to a different promotion attempt; resume from the original machine and receipt, or create a different local workspace",
+    "workspace-suspended": "the workspace is suspended on this hub; ask a hub administrator to restore it before resuming promotion",
     "protocol-mismatch": "hub and client sync versions differ; update them together",
     "not-configured": "this hub does not support authenticated workspace promotion; configure GitHub sign-in and update the hub",
   };

@@ -83,7 +83,9 @@ export async function handleAccessManagement(
         reply(401, { status: "sign-in-required" });
         return null;
       }
-      if (action.operation !== "promote-workspace" && "workspaceId" in action && !current.workspaces.includes(action.workspaceId)) {
+      const hubWorkspaceAction = action.operation === "suspend-workspace" || action.operation === "restore-workspace";
+      if (action.operation !== "promote-workspace" && !hubWorkspaceAction && "workspaceId" in action &&
+        (!current.workspaces.includes(action.workspaceId) || hubAdmins?.isSuspended(action.workspaceId))) {
         reply(403, { status: "forbidden" });
         return null;
       }
@@ -130,13 +132,15 @@ export async function handleAccessManagement(
           break;
         }
         const status = promotions.reserve(action.workspaceId, action.attemptId, current.principalId);
-        reply(status === "hub-admin-required" ? 403 : status === "workspace-conflict" ? 409 : 200,
+        reply(status === "hub-admin-required" ? 403 : status === "workspace-conflict" || status === "workspace-suspended" ? 409 : 200,
           { status, workspaceId: action.workspaceId, attemptId: action.attemptId });
         break;
       }
       case "own-hub-role":
       case "list-hub-admins":
       case "remove-hub-admin":
+      case "suspend-workspace":
+      case "restore-workspace":
       case "list-hub-workspaces": {
         if (hubAdmins === undefined) {
           reply(503, { status: "not-configured" });
@@ -146,6 +150,12 @@ export async function handleAccessManagement(
         if (action.operation === "own-hub-role") reply(200, { status: "ok", role: "admin" });
         else if (action.operation === "list-hub-admins") reply(200, { status: "ok", ...hubAdmins.pageAdmins(current.principalId, action.cursor) });
         else if (action.operation === "list-hub-workspaces") reply(200, { status: "ok", ...hubAdmins.pageWorkspaces(current.principalId, action.cursor) });
+        else if (action.operation === "suspend-workspace" || action.operation === "restore-workspace") {
+          closesAccess = action.operation === "suspend-workspace";
+          const workspaceStatus = action.operation === "suspend-workspace" ? "suspended" : "active";
+          hubAdmins.setWorkspaceStatus(current.principalId, action.workspaceId, workspaceStatus);
+          reply(200, { status: "ok", workspaceId: action.workspaceId, workspaceStatus });
+        }
         else {
           hubAdmins.remove(current.principalId, action.principalId);
           reply(200, { status: "ok" });
@@ -188,7 +198,8 @@ export async function handleAccessManagement(
     }
   } catch (error) {
     if (error instanceof HubAdminRefusal) {
-      const statuses = { "hub-admin-required": 403, "self-admin": 409, "last-admin": 409, "admin-not-found": 404, "invalid-request": 400 };
+      const statuses = { "hub-admin-required": 403, "self-admin": 409, "last-admin": 409, "admin-not-found": 404,
+        "workspace-not-found": 404, "invalid-request": 400 };
       reply(statuses[error.code], { status: error.code === "hub-admin-required" ? "forbidden" : error.code });
     } else if (error instanceof MembershipRefusal) {
       const statuses = { "admin-required": 403, "member-required": 403, "member-not-found": 404, "last-admin": 409 };

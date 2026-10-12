@@ -28,6 +28,7 @@ export interface HubAdmin {
 }
 export interface HubWorkspace {
   workspaceId: string;
+  status: "active" | "suspended";
   name?: string;
   members: number;
   admins: string[];
@@ -44,6 +45,8 @@ export interface AccessAnswer {
   devices?: AccessDevice[];
   admins?: HubAdmin[];
   workspaces?: HubWorkspace[];
+  workspaceId?: string;
+  workspaceStatus?: HubWorkspace["status"];
   nextCursor?: string | null;
 }
 
@@ -83,6 +86,7 @@ function hubAdmin(value: unknown): HubAdmin {
 function hubWorkspace(value: unknown): HubWorkspace {
   const item = object(value);
   if (item === null || typeof item.workspaceId !== "string" || !count(item.members) ||
+    (item.status !== "active" && item.status !== "suspended") ||
     !Array.isArray(item.admins) || !item.admins.every((admin) => typeof admin === "string")) {
     throw new Error("Invalid access answer");
   }
@@ -91,7 +95,7 @@ function hubWorkspace(value: unknown): HubWorkspace {
     if (typeof item.name !== "string") throw new Error("Invalid access answer");
     name = validateWorkspaceName(item.name);
   }
-  return { workspaceId: item.workspaceId, ...(name === undefined ? {} : { name }),
+  return { workspaceId: item.workspaceId, status: item.status, ...(name === undefined ? {} : { name }),
     members: item.members, admins: item.admins };
 }
 
@@ -122,6 +126,15 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
       if (!Array.isArray(body.workspaces)) throw new Error("Invalid access answer");
       parsed.workspaces = body.workspaces.map(hubWorkspace);
       parsed.nextCursor = cursor(body.nextCursor);
+      break;
+    case "suspend-workspace":
+    case "restore-workspace":
+      if (body.workspaceId !== action.workspaceId ||
+        body.workspaceStatus !== (action.operation === "suspend-workspace" ? "suspended" : "active")) {
+        throw new Error("Invalid access answer");
+      }
+      parsed.workspaceId = action.workspaceId;
+      parsed.workspaceStatus = action.operation === "suspend-workspace" ? "suspended" : "active";
       break;
     case "resolve-account":
       if (typeof body.githubAccountId !== "string" || typeof body.githubUsername !== "string") {

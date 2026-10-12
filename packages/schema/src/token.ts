@@ -73,6 +73,8 @@ export type RequestAction =
   | { operation: "own-hub-role" }
   | { operation: "list-hub-admins"; cursor?: string }
   | { operation: "list-hub-workspaces"; cursor?: string }
+  | { operation: "suspend-workspace"; workspaceId: string }
+  | { operation: "restore-workspace"; workspaceId: string }
   | { operation: "remove-hub-admin"; principalId: string }
   | { operation: "revoke-device"; deviceId: string }
   | { operation: "own-role"; workspaceId: string }
@@ -375,6 +377,8 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
       break;
     case "own-role":
     case "list-members":
+    case "suspend-workspace":
+    case "restore-workspace":
       if (!isWorkspace(workspaceId)) return null;
       action = { operation, workspaceId };
       break;

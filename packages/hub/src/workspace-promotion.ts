@@ -3,7 +3,7 @@ import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import { HubAdminRegistry } from "./hub-admins.js";
 
-export type PromotionResult = "created" | "resumed" | "hub-admin-required" | "workspace-conflict";
+export type PromotionResult = "created" | "resumed" | "hub-admin-required" | "workspace-conflict" | "workspace-suspended";
 
 export class WorkspacePromotions {
   constructor(
@@ -23,6 +23,10 @@ export class WorkspacePromotions {
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
+      if (this.admins.isSuspended(workspaceId)) {
+        db.exec("ROLLBACK");
+        return "workspace-suspended";
+      }
       const receipt = db.prepare("SELECT * FROM hub_workspace_promotions WHERE attempt_id = ?").get(attemptId);
       if (receipt !== undefined) {
         const own = receipt.workspace_id === workspaceId && receipt.principal_id === principalId &&

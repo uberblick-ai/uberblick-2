@@ -11,6 +11,7 @@ import { parseRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
+import type { HubAdminRegistry } from "./hub-admins.js";
 import { protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { resolvePeer, TOKEN_QUERY_PARAMS } from "./server.js";
 
@@ -41,6 +42,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     private readonly registry: CredentialRegistry,
     private readonly memberships: MembershipRegistry,
     private readonly options: { protocolVersion: number; log: HubLogger },
+    private readonly hubAdmins?: HubAdminRegistry,
   ) {
     const unsubscribeRevoke = registry.onRevoke((id) => {
       this.closeWhere((context) => context.credentialId === id);
@@ -49,9 +51,13 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.closeWhere((context) =>
         context.workspace === workspace && context.principalId === principalId);
     });
+    const unsubscribeSuspend = hubAdmins?.onSuspend(workspace => {
+      this.closeWhere(context => context.workspace === workspace);
+    });
     this.unsubscribe = () => {
       unsubscribeRevoke();
       unsubscribeRemove();
+      unsubscribeSuspend?.();
     };
   }
 
@@ -104,6 +110,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     if (this.memberships.roleFor(workspace, record.principalId) === null) {
       return refuse("missing-membership");
     }
+    if (this.hubAdmins?.isSuspended(workspace)) return refuse("workspace-suspended");
     const context: CredentialContext = {
       credentialId: record.id,
       principalId: record.principalId,
@@ -191,6 +198,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
           ? "workspace-mismatch"
           : this.memberships.roleFor(workspace, record.principalId) === null
             ? "missing-membership"
+            : this.hubAdmins?.isSuspended(workspace)
+              ? "workspace-suspended"
             : !context.authorization.active
               ? "access-ended"
               : null;
