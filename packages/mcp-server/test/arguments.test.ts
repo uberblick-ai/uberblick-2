@@ -132,7 +132,7 @@ describe("unknown fields", () => {
 });
 
 describe("create_doc lifecycle arguments", () => {
-  it("refuses a status without a kind and a cross-kind pair before creation", async () => {
+  it("refuses a status without a kind before creation", async () => {
     const rig = await localRig();
 
     expect((await inputSchema(rig, "create_doc")).oneOf).toEqual([
@@ -140,17 +140,6 @@ describe("create_doc lifecycle arguments", () => {
         title: "A decision document (`kind: decision`)",
         required: ["kind"],
         properties: { kind: { const: "decision" } },
-      },
-      {
-        title: "A requirement document (`kind: requirement`)",
-        required: ["kind"],
-        properties: {
-          kind: { const: "requirement" },
-          related: false,
-          supersedes: false,
-          answer: false,
-          discussion: false,
-        },
       },
       {
         title: "An ordinary document",
@@ -168,25 +157,36 @@ describe("create_doc lifecycle arguments", () => {
     const withoutKind = await rig.call("create_doc", {
       title: "No kind",
       description: "A request that must not create a document.",
-      status: "planned",
+      status: "open",
     });
     expect(withoutKind.payload.error).toBe("schema_validation");
 
-    const mismatched = await rig.call("create_doc", {
-      title: "Bad pair",
-      description: "A request that must not create a document.",
-      kind: "requirement",
-      status: "open",
-    });
-    expect(mismatched.payload).toMatchObject({
-      error: "invalid_document_lifecycle",
-      kind: "requirement",
-      status: "open",
-      applied: false,
-      partial: false,
-    });
-    expect(mismatched.payload.recovery).toContain("Nothing was created");
     expect((await rig.ok("list_docs")).docs).toEqual([]);
+  });
+
+  it("refuses the removed kind and every removed state before handlers write", async () => {
+    const rig = await localRig();
+    const doc = await seeded(rig);
+    const logged = rig.instance.store.logSize();
+    const calls: [string, Record<string, unknown>][] = [
+      ["create_doc", { title: "Removed kind", description: "Must not allocate a document.", kind: "requirement" }],
+      ["list_docs", { kind: "requirement" }],
+      ["set_status", { uuid: doc.uuid, kind: "requirement", status: "open" }],
+    ];
+    for (const status of ["draft", "planned", "implementing", "done"]) {
+      calls.push(
+        ["create_doc", { title: "Removed state", description: "Must not allocate a document.", kind: "decision", status }],
+        ["list_docs", { status }],
+        ["set_status", { uuid: doc.uuid, status }],
+      );
+    }
+    for (const [tool, args] of calls) {
+      const refused = await rig.call(tool, args);
+      expect(refused.payload.error, `${tool}: ${JSON.stringify(args)}`).toBe("schema_validation");
+      expect(rig.instance.store.logSize()).toBe(logged);
+    }
+    expect((await rig.ok("list_docs")).docs.map((entry: any) => entry.uuid)).toEqual([doc.uuid]);
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).not.toHaveProperty("kind");
   });
 
   it("accepts supersedes only on a decision shape", async () => {

@@ -7,9 +7,12 @@ import {
   META_KEY,
   BlockNotFoundError,
   InvalidDocumentLifecycleError,
+  addComment,
   appendBlock,
+  applyDocData,
   blockRev,
   decisionContentLocked,
+  createAnnotation,
   deleteBlock,
   getBlock,
   getBlockText,
@@ -18,6 +21,8 @@ import {
   getMetaMap,
   initDoc,
   insertBlock,
+  listAnnotations,
+  readDocData,
   setBlockLanguage,
   setBlockLevel,
   setDescription,
@@ -27,6 +32,7 @@ import {
   setTags,
   setTldr,
   setTitle,
+  upsertDirectoryEntry,
 } from "../src/index.js";
 import { syncDocs } from "./helpers.js";
 
@@ -187,17 +193,11 @@ describe("document round-trip", () => {
   it("locks only decided-record content", () => {
     for (const [meta, locked] of [
       [{}, false],
-      [{ kind: "requirement" }, false],
       [{ kind: "decision" }, false],
-      [{ kind: "requirement", status: "draft" }, false],
-      [{ kind: "requirement", status: "planned" }, false],
-      [{ kind: "requirement", status: "implementing" }, false],
-      [{ kind: "requirement", status: "done" }, false],
       [{ kind: "decision", status: "open" }, false],
       [{ kind: "decision", status: "decided" }, true],
       [{ kind: "decision", status: "rejected" }, false],
       [{ kind: "decision", status: "withdrawn" }, false],
-      [{ kind: "requirement", status: "decided" }, false],
     ] as const) {
       expect(decisionContentLocked(meta), JSON.stringify(meta)).toBe(locked);
     }
@@ -205,10 +205,6 @@ describe("document round-trip", () => {
 
   it("writes every legal kind/status pair and refuses every illegal one", () => {
     const legal = [
-      ["requirement", "draft"],
-      ["requirement", "planned"],
-      ["requirement", "implementing"],
-      ["requirement", "done"],
       ["decision", "open"],
       ["decision", "decided"],
       ["decision", "rejected"],
@@ -223,19 +219,21 @@ describe("document round-trip", () => {
 
     const noKind = seeded();
     const noKindBefore = getMetaMap(noKind).toJSON();
-    expect(() => setStatus(noKind, "draft")).toThrow(
+    expect(() => setStatus(noKind, "open")).toThrow(
       InvalidDocumentLifecycleError,
     );
     expect(getMetaMap(noKind).toJSON()).toEqual(noKindBefore);
 
-    for (const [kind, status] of [
-      ["requirement", "open"],
-      ["decision", "implementing"],
-    ] as const) {
+    for (const status of ["draft", "planned", "implementing", "done"]) {
       const doc = seeded();
-      setKind(doc, kind);
+      const ordinaryBefore = Y.encodeStateAsUpdate(doc);
+      expect(() => setKind(doc, "requirement" as never)).toThrow(
+        InvalidDocumentLifecycleError,
+      );
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(ordinaryBefore);
+      setKind(doc, "decision");
       const before = getMetaMap(doc).toJSON();
-      expect(() => setStatus(doc, status)).toThrow(
+      expect(() => setStatus(doc, status as never)).toThrow(
         InvalidDocumentLifecycleError,
       );
       expect(getMetaMap(doc).toJSON()).toEqual(before);
@@ -245,7 +243,7 @@ describe("document round-trip", () => {
     expect(() => setKind(outside, "note" as never)).toThrow(
       InvalidDocumentLifecycleError,
     );
-    setKind(outside, "requirement");
+    setKind(outside, "decision");
     const outsideBefore = getMetaMap(outside).toJSON();
     expect(() => setStatus(outside, "reviewing" as never)).toThrow(
       InvalidDocumentLifecycleError,
@@ -254,8 +252,8 @@ describe("document round-trip", () => {
   });
 
   it.each([
-    ["status", (doc: Y.Doc) => setKind(doc, "requirement")],
-    ["kind", (doc: Y.Doc) => setStatus(doc, "draft")],
+    ["status", (doc: Y.Doc) => setKind(doc, "decision")],
+    ["kind", (doc: Y.Doc) => setStatus(doc, "open")],
   ] as const)(
     "refuses a foreign BigInt %s with the named error and no write",
     (key, write) => {
@@ -272,8 +270,8 @@ describe("document round-trip", () => {
 
   it("re-kinds only when the stored status is legal for the new kind", () => {
     const doc = seeded();
-    setKind(doc, "requirement");
-    setStatus(doc, "implementing");
+    getMetaMap(doc).set("kind", "requirement");
+    getMetaMap(doc).set("status", "implementing");
     const before = getMetaMap(doc).toJSON();
 
     expect(() => setKind(doc, "decision")).toThrow(
@@ -286,26 +284,26 @@ describe("document round-trip", () => {
     expect(getMeta(doc)).toMatchObject({ kind: "decision" });
     expect(getMeta(doc)).not.toHaveProperty("status");
 
-    // A valid kind write repairs a mismatched pair left by a merge: the raw
-    // status was always legal for a requirement and becomes readable again.
-    getMetaMap(doc).set("status", "implementing");
-    setKind(doc, "requirement");
+    // A valid kind write repairs a hidden pair whose status is already legal.
+    getMetaMap(doc).set("kind", "requirement");
+    getMetaMap(doc).set("status", "open");
+    setKind(doc, "decision");
     expect(getMeta(doc)).toMatchObject({
-      kind: "requirement",
-      status: "implementing",
+      kind: "decision",
+      status: "open",
     });
   });
 
   it("clears status alone, or kind and status together", () => {
     const doc = seeded();
-    setKind(doc, "requirement");
-    setStatus(doc, "planned");
+    setKind(doc, "decision");
+    setStatus(doc, "open");
 
     setStatus(doc, "");
-    expect(getMeta(doc)).toMatchObject({ kind: "requirement" });
+    expect(getMeta(doc)).toMatchObject({ kind: "decision" });
     expect(getMeta(doc)).not.toHaveProperty("status");
 
-    setStatus(doc, "planned");
+    setStatus(doc, "open");
     setKind(doc, "");
     expect(getMeta(doc)).not.toHaveProperty("kind");
     expect(getMeta(doc)).not.toHaveProperty("status");
@@ -319,17 +317,17 @@ describe("document round-trip", () => {
     expect(getMeta(malformedKind)).not.toHaveProperty("status");
 
     const malformedStatus = seeded();
-    getMetaMap(malformedStatus).set("kind", "requirement");
+    getMetaMap(malformedStatus).set("kind", "decision");
     getMetaMap(malformedStatus).set("status", 42);
-    expect(getMeta(malformedStatus)).toMatchObject({ kind: "requirement" });
+    expect(getMeta(malformedStatus)).toMatchObject({ kind: "decision" });
     expect(getMeta(malformedStatus)).not.toHaveProperty("status");
 
     const a = seeded();
-    setKind(a, "requirement");
+    getMetaMap(a).set("kind", "requirement");
     const b = new Y.Doc();
     Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
     setKind(a, "decision");
-    setStatus(b, "implementing");
+    getMetaMap(b).set("status", "implementing");
     const updateA = Y.encodeStateAsUpdate(a);
     const updateB = Y.encodeStateAsUpdate(b);
     Y.applyUpdate(a, updateB);
@@ -344,6 +342,62 @@ describe("document round-trip", () => {
       expect(getMeta(replica)).not.toHaveProperty("status");
     }
   });
+
+  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+    "reads a stored requirement with status %j as regular without rewriting its room",
+    (status) => {
+      const doc = seeded();
+      const directory = new Y.Doc();
+      upsertDirectoryEntry(directory, { uuid: UUID, title: "Block model" });
+      setDescription(doc, "Preserved description.");
+      setTldr(doc, "Preserved summary.");
+      setLinks(doc, ["22222222-2222-4222-8222-222222222222"]);
+      const blockId = appendBlock(doc, { type: "paragraph", text: "Preserved content." });
+      const annotation = createAnnotation(doc, blockId, 0, 9, "reviewer", "Preserved comment.");
+      applyDocData(doc, directory, [{
+        collection: "findings",
+        schema: { version: 1, schema: { type: "object" } },
+        upsert: [{ id: "one", value: { result: "Preserved data." } }],
+      }]);
+      const expected = {
+        meta: getMeta(doc), blocks: getBlocks(doc),
+        data: readDocData(doc), annotations: listAnnotations(doc),
+      };
+      const stored = getMetaMap(doc);
+      stored.set("kind", "requirement");
+      if (status !== undefined) stored.set("status", status);
+      const before = Y.encodeStateAsUpdate(doc);
+      expect(getMeta(doc)).toEqual(expected.meta);
+      expect(decisionContentLocked(getMeta(doc))).toBe(false);
+      expect(getBlocks(doc)).toEqual(expected.blocks);
+      expect(readDocData(doc)).toEqual(expected.data);
+      expect(listAnnotations(doc)).toEqual(expected.annotations);
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+
+      const replica = new Y.Doc();
+      Y.applyUpdate(replica, before);
+      initDoc(doc, { uuid: UUID, title: "Revised", tags: ["rfc"] });
+      setDescription(doc, "Revised description.");
+      setTldr(doc, "Revised summary.");
+      setLinks(doc, []);
+      appendBlock(replica, { type: "paragraph", text: "New content." });
+      addComment(replica, annotation.id, "author", "New comment.");
+      applyDocData(replica, directory, [{ collection: "findings", upsert: [{ id: "two", value: {} }] }]);
+      syncDocs(doc, replica);
+      for (const current of [doc, replica]) {
+        expect(getMeta(current)).not.toHaveProperty("kind");
+        expect(getMeta(current)).not.toHaveProperty("status");
+        expect(getMetaMap(current).get("kind")).toBe("requirement");
+        expect(getMetaMap(current).get("status")).toBe(status);
+        expect(getMeta(current).title).toBe("Revised");
+        expect(getBlocks(current)).toHaveLength(2);
+        expect(listAnnotations(current)[0]?.comments).toHaveLength(2);
+        expect(readDocData(current)?.collections[0]?.records).toHaveLength(2);
+        current.destroy();
+      }
+      directory.destroy();
+    },
+  );
 
   it("defaults tags and links to empty arrays and keeps links across re-init", () => {
     const doc = new Y.Doc();

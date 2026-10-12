@@ -2,7 +2,6 @@ import type { ReactElement } from "react";
 import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
 
 const KIND_LABELS: Record<DocumentKind, string> = {
-  requirement: "Product",
   decision: "Decision",
 };
 

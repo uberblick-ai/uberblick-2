@@ -137,11 +137,11 @@ describe("the document identity line keeps its local controls", () => {
     }
 
     const mismatched = fixture();
-    getMetaMap(mismatched.ydoc).set("kind", "requirement");
-    getMetaMap(mismatched.ydoc).set("status", "open");
+    getMetaMap(mismatched.ydoc).set("kind", "decision");
+    getMetaMap(mismatched.ydoc).set("status", "planned");
     const mountedMismatch = mount(mismatched);
     try {
-      expect(within(mountedMismatch.host).getByText("Product").textContent).toBe("Product");
+      expect(within(mountedMismatch.host).getByText("Decision").textContent).toBe("Decision");
     } finally {
       mountedMismatch.view.unmount();
     }
@@ -151,6 +151,20 @@ describe("the document identity line keeps its local controls", () => {
       expect(within(ordinary.host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
     } finally {
       ordinary.view.unmount();
+    }
+  });
+
+  it.each([undefined, "planned", "open"])("shows a stored requirement with status %s as ordinary without rewriting its room", (status) => {
+    const legacy = fixture();
+    getMetaMap(legacy.ydoc).set("kind", "requirement");
+    if (status !== undefined) getMetaMap(legacy.ydoc).set("status", status);
+    const mountedLegacy = mount(legacy);
+    try {
+      expect(within(mountedLegacy.host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
+      expect(getMetaMap(legacy.ydoc).get("kind")).toBe("requirement");
+      expect(getMetaMap(legacy.ydoc).get("status")).toBe(status);
+    } finally {
+      mountedLegacy.view.unmount();
     }
   });
 

@@ -1,17 +1,10 @@
-import { InvalidDocumentLifecycleError, REQUIREMENT_STATUSES, decisionDocAnswerFailure, decisionRelations, getMeta, getMetaMap, isDocumentStatusForKind, setKind, setStatus } from "@uberblick/schema";
-import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
+import { InvalidDocumentLifecycleError, decisionDocAnswerFailure, decisionRelations, getMeta, getMetaMap, isDocumentStatusForKind, setKind, setStatus } from "@uberblick/schema";
 import { z } from "zod";
 import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { decisionAnswerArg, documentStatusArg, uuidArg } from "./schemas.js";
 import { documentOperation } from "./operation.js";
 import { roomStages } from "./helpers.js";
-
-function kindForStatus(status: DocumentStatus): DocumentKind {
-  return REQUIREMENT_STATUSES.some((candidate) => candidate === status)
-    ? "requirement"
-    : "decision";
-}
 
 export const inputSchema = strictInput({
   uuid: uuidArg, status: documentStatusArg,
@@ -24,14 +17,11 @@ export const setStatusOperation = documentOperation("set_status", inputSchema, (
   const { replicas, recordAnswer, decisionAuthorityJson } = context;
 
   const stored = getMeta(replica.doc);
-  const kind = stored.kind ?? kindForStatus(status);
+  const kind = stored.kind ?? "decision";
 
   // Validate every authority/lifecycle door before adopting a kind or writing metadata.
   if (!isDocumentStatusForKind(kind, status)) {
     throw new InvalidDocumentLifecycleError(kind, status);
-  }
-  if (kind !== "decision" && (answer !== undefined || reason !== undefined)) {
-    throw new ToolError("decision_transition_invalid", "Only decisions accept a recorded answer or rejection reason.", { uuid, kind, status });
   }
   if (kind === "decision") {
     const invalid = (message: string): never => {

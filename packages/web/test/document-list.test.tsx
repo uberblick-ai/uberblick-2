@@ -46,7 +46,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import { DocumentList, sortDirectory } from "../src/shell/DocumentList.js";
+import { DocumentList, INITIAL_DOCUMENT_LIST_STATE, sortDirectory } from "../src/shell/DocumentList.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { formatTimestamp } from "../src/ui/timestamps.js";
 
@@ -998,11 +998,41 @@ describe("decision topics in the list", () => {
 });
 
 describe("the filter", () => {
+  it("restores the removed Product history mode as Working, preserving the visit's filter and sort", async () => {
+    const directory = directoryDoc();
+    upsertDirectoryEntry(directory, { uuid: ONE, title: "Roadmap" });
+    upsertDirectoryEntry(directory, { uuid: TWO, title: "Other note" });
+    const target = room(roomForDoc(WORKSPACE, ONE)).ydoc;
+    initDoc(target, { uuid: ONE, title: "Roadmap" });
+    appendBlock(target, { type: "paragraph", text: "A regular page." });
+    window.history.replaceState({
+      ...INITIAL_DOCUMENT_LIST_STATE,
+      mode: "requirement",
+      query: "Roadmap",
+      sort: { order: "title", direction: "descending" },
+    }, "", allPath(WORKSPACE));
+    const host = await mount(<App />);
+    const assertRestored = (): void => {
+      expect(within(within(host).getByRole("group", { name: "Document type" }))
+        .getByRole("button", { name: "Working" }).getAttribute("aria-pressed")).toBe("true");
+      expect(filter(host).value).toBe("Roadmap");
+      expect(rowTitles(host)).toEqual(["Roadmap"]);
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("descending");
+      expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
+    };
+    assertRestored();
+    await act(async () => openButtons(host)[0]?.click());
+    await traverseHistory("back");
+    assertRestored();
+    await act(async () => typeInto(filter(host), ""));
+    expect(window.history.state.mode).toBe("working");
+  });
+
   it("opens on Working and keeps each type mode to its own rows", async () => {
     const peer = peerOf(directoryDoc());
-    upsertDirectoryEntry(peer, {
-      uuid: ONE,
+    getDirectoryMap(peer).set(ONE, {
       title: "Roadmap",
+      tags: [],
       kind: "requirement",
       status: "planned",
     });
@@ -1013,13 +1043,17 @@ describe("the filter", () => {
       status: "open",
     });
     upsertDirectoryEntry(peer, { uuid: THREE, title: "Working note" });
-    // The kind remains readable when a merged status belongs to the other
-    // lifecycle; only the mismatched status is dropped.
-    upsertDirectoryEntry(peer, {
-      uuid: FOUR,
+    // Stored requirements with mismatched or missing states project to regular pages too.
+    getDirectoryMap(peer).set(FOUR, {
       title: "Status drift",
+      tags: [],
       kind: "requirement",
       status: "open",
+    });
+    getDirectoryMap(peer).set("ad1f5bae-e772-4cb7-8a1a-a51b37a1ca19", {
+      title: "Legacy without state",
+      tags: [],
+      kind: "requirement",
     });
     // A foreign kind is unreadable at the schema boundary and therefore joins
     // ordinary working documents instead of disappearing from every mode.
@@ -1035,19 +1069,14 @@ describe("the filter", () => {
       within(within(host).getByRole("group", { name: "Document type" }))
         .getByRole<HTMLButtonElement>("button", { name });
     expect(mode("Working")?.getAttribute("aria-pressed")).toBe("true");
-    expect(rowTitles(host)).toEqual(["Foreign shape", "Working note"]);
+    expect(rowTitles(host)).toEqual(["Foreign shape", "Legacy without state", "Roadmap", "Status drift", "Working note"]);
     expect(lifecycleBadges(host)).toHaveLength(0);
+    expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
+    expect(getDirectoryMap(peer).get(ONE)).toMatchObject({ kind: "requirement", status: "planned" });
     expect([...rooms.keys()].sort()).toEqual(
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
 
-    await act(async () => mode("Product")?.click());
-    expect(rowTitles(host)).toEqual(["Roadmap", "Status drift"]);
-    expect(
-      lifecycleBadges(host).map(
-        (badge) => badge.textContent,
-      ),
-    ).toEqual(["Product · planned", "Product"]);
     await act(async () => mode("Decisions")?.click());
     expect(rowTitles(host)).toEqual(["Cache choice"]);
     expect(documentTable(host).textContent).toContain("Not yet decided");
@@ -1152,9 +1181,9 @@ describe("the filter", () => {
           entry({ uuid: ONE, title: "Search plan" }),
           entry({
             uuid: TWO,
-            title: "Search requirement",
-            kind: "requirement",
-            status: "planned",
+            title: "Search decision",
+            kind: "decision",
+            status: "open",
           }),
           entry({ uuid: THREE, title: "Roadmap" }),
         ]}
@@ -1168,12 +1197,12 @@ describe("the filter", () => {
         .getByRole<HTMLButtonElement>("button", { name });
 
     await act(async () => typeInto(filter(host), "search"));
-    // The requirement matches the text too, and still does not appear here.
+    // The decision matches the text too, and still does not appear here.
     expect(rowTitles(host)).toEqual(["Search plan"]);
 
-    await act(async () => mode("Product")?.click());
+    await act(async () => mode("Decisions")?.click());
     expect(filter(host).value).toBe("search");
-    expect(rowTitles(host)).toEqual(["Search requirement"]);
+    expect(rowTitles(host)).toEqual(["Search decision"]);
   });
 
   it("asks nobody anything, whatever is typed", async () => {

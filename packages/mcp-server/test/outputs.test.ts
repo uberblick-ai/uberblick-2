@@ -91,7 +91,7 @@ describe("successful MCP output contracts", () => {
       tldr: "All advertised tool answers are checked.",
       tags: tags.tags.slice(0, 1).map((tag: { id: string }) => tag.id), links: [target.uuid],
     });
-    await success("set_status", { uuid, status: "draft" });
+    await success("set_status", { uuid: target.uuid, status: "open" });
     const edited = await success("edit_block", {
       uuid, block_id: created.blocks[0].id, old_text: "first paragraph", new_text: "edited paragraph",
       rev: created.blocks[0].rev,

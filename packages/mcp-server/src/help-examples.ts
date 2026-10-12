@@ -61,7 +61,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
   },
   list_docs: {
     details: toolHelpDetails.list_docs,
-    example: { kind: "requirement", status: "planned" },
+    example: { kind: "decision", status: "open" },
     related: documentContracts,
   },
   search: {
@@ -116,7 +116,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     related: documentContracts,
   },
   set_status: {
-    example: { uuid, status: "planned" },
+    example: { uuid, status: "open" },
     related: documentContracts,
   },
   archive_doc: {

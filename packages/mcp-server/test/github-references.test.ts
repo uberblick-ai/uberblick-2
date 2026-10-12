@@ -155,14 +155,11 @@ describe("decision records linking GitHub work", () => {
         source.format(0, source.length, { link: { href: source.toString() } });
       }
     });
-    for (const kind of [undefined, "requirement"]) {
-      await rig.ok("create_doc", {
-        title: `Non-decision ${kind ?? "ordinary"}`,
-        description: "Links outside decision records do not count.",
-        ...(kind === undefined ? {} : { kind }),
-        blocks: [{ type: "paragraph", text: "", inline: [{ text: "Work", marks: { link: "https://github.com/owner/repo/issues/81" } }] }],
-      });
-    }
+    await rig.ok("create_doc", {
+      title: "Non-decision page",
+      description: "Links outside decision records do not count.",
+      blocks: [{ type: "paragraph", text: "", inline: [{ text: "Work", marks: { link: "https://github.com/owner/repo/issues/81" } }] }],
+    });
 
     expect((await lookup(rig)).decisions).toEqual([
       { uuid: record.uuid, title: "Href owns identity", status: "open" },

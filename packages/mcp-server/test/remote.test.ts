@@ -240,15 +240,15 @@ describe("docFingerprint", () => {
   it("changes when only the kind changes", () => {
     const doc = source();
     const copy = replicate(doc);
-    setKind(doc, "requirement");
+    setKind(doc, "decision");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
   it("changes when only the status changes", () => {
     const doc = source();
-    setKind(doc, "requirement");
+    setKind(doc, "decision");
     const copy = replicate(doc);
-    setStatus(doc, "planned");
+    setStatus(doc, "open");
     expect(docFingerprint(copy)).not.toBe(docFingerprint(doc));
   });
 
@@ -259,8 +259,8 @@ describe("docFingerprint", () => {
   it("is unmoved by a cleared kind and status the other side never set", () => {
     const doc = source();
     const copy = replicate(doc);
-    setKind(doc, "requirement");
-    setStatus(doc, "planned");
+    setKind(doc, "decision");
+    setStatus(doc, "open");
     setStatus(doc, "");
     setKind(doc, "");
 

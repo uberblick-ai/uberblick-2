@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, setTags, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -398,19 +398,10 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
-    const requirement = await rig.ok("create_doc", {
-      title: "Fixed kind",
-      description: "A requirement with a schema-owned lifecycle.",
-      kind: "requirement",
+    const regular = await rig.ok("create_doc", {
+      title: "Regular page",
+      description: "A page without a specialized lifecycle.",
     });
-    record(
-      (
-        await rig.call("set_status", {
-          uuid: requirement.uuid,
-          status: "open",
-        })
-      ).payload,
-    );
     const firstDecision = await rig.ok("create_doc", {
       title: "First decision",
       description: "The topic's first stance.",
@@ -439,7 +430,7 @@ describe("the failure contract", () => {
     })).payload);
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
     record((await rig.call("set_metadata", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
-    record((await rig.call("set_metadata", { uuid: requirement.uuid, discussion: null })).payload);
+    record((await rig.call("set_metadata", { uuid: regular.uuid, discussion: null })).payload);
     record((await rig.call("create_doc", {
       title: "Wrong discussion kind",
       description: "Discussion belongs on a regular document.",
@@ -563,6 +554,10 @@ describe("the failure contract", () => {
 
     // Admission refusals use the same failure floor as every other tool error.
     record(toFailure("set_metadata", new ServerShuttingDownError()).payload);
+
+    // Valid MCP inputs cannot cross decision kinds; retain the defensive
+    // mapper for shared-model lifecycle errors from an internal caller.
+    record(toFailure("set_status", new InvalidDocumentLifecycleError("decision", "planned")).payload);
 
     // Every code the code itself knows about was triggered above.
     expect([...failures.keys()].sort()).toEqual([...FAILURE_CODES].sort());

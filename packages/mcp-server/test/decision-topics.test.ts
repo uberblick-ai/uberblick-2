@@ -21,28 +21,28 @@ function rawDeleted(rig: Rig, uuid: string, deleted: boolean) {
 }
 
 describe("decision topics through directory stubs", () => {
-  it("copies write-once topic identity and stores governing links without writing the requirement", async () => {
+  it("copies write-once topic identity and stores governing links without writing the page", async () => {
     const rig = await localRig();
-    const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
-    const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(requirement.uuid).doc);
-    const first = await decision(rig, { related: requirement.uuid });
+    const page = await rig.ok("create_doc", { title: "Product", description: "Product direction." });
+    const before = Y.encodeStateAsUpdate(rig.instance.replicas.replica(page.uuid).doc);
+    const first = await decision(rig, { related: page.uuid });
     const next = await decision(rig, { supersedes: first.uuid });
     const otherPage = await rig.ok("create_doc", { title: "Other page", description: "A regular owning page." });
     const redirected = await decision(rig, { supersedes: next.uuid, related: otherPage.uuid });
     const inherited = await decision(rig, { supersedes: redirected.uuid });
     expect(first.topic).toBe(first.uuid);
     expect(next.topic).toBe(first.uuid);
-    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(requirement.uuid).doc)).toEqual(before);
-    expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("governs")).toBe(requirement.uuid);
+    expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(page.uuid).doc)).toEqual(before);
+    expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("governs")).toBe(page.uuid);
     for (const record of [redirected, inherited]) {
       expect(record.topic).toBe(first.uuid);
       expect(getMetaMap(rig.instance.replicas.replica(record.uuid).doc).get("governs")).toBe(otherPage.uuid);
     }
-    for (const page of [requirement, otherPage]) {
-      expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: first.uuid, relation: "related" }]);
+    for (const relatedPage of [page, otherPage]) {
+      expect((await rig.ok("get_doc", { uuid: relatedPage.uuid })).decisions).toMatchObject([{ topic: first.uuid, relation: "related" }]);
     }
     const stored = Y.encodeStateAsUpdate(rig.instance.replicas.replica(inherited.uuid).doc);
-    expect((await rig.call("set_metadata", { uuid: inherited.uuid, related: requirement.uuid })).payload.error).toBe("schema_validation");
+    expect((await rig.call("set_metadata", { uuid: inherited.uuid, related: page.uuid })).payload.error).toBe("schema_validation");
     expect(Y.encodeStateAsUpdate(rig.instance.replicas.replica(inherited.uuid).doc)).toEqual(stored);
     expect((await rig.call("create_doc", { title: "Invalid", description: "Caller topic is forbidden.", kind: "decision", topic: first.uuid })).isError).toBe(true);
     const adopted = await rig.ok("create_doc", { title: "Adopted", description: "Becomes a decision through status." });
@@ -52,8 +52,8 @@ describe("decision topics through directory stubs", () => {
 
   it("resolves the full fork with rejected intermediates and never hydrates the other decision rooms", async () => {
     const rig = await localRig();
-    const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
-    const a = await decision(rig, { status: "decided", related: requirement.uuid });
+    const page = await rig.ok("create_doc", { title: "Product", description: "Product direction." });
+    const a = await decision(rig, { status: "decided", related: page.uuid });
     const [b, c, d, e, f] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()] as const;
     const directory = rig.instance.replicas.directory().doc;
     for (const entry of [
@@ -62,7 +62,7 @@ describe("decision topics through directory stubs", () => {
       { uuid: d, status: "decided", supersedes: b, tags: ["00000000-0000-4000-8000-000000000005"] },
       { uuid: e, status: "open", supersedes: d },
       { uuid: f, status: "open", supersedes: e },
-    ] as const) upsertDirectoryEntry(directory, { title: "Foreign record", kind: "decision", topic: a.uuid, governs: requirement.uuid, createdAt: 1, ...entry, tags: [...(entry.tags ?? [])] });
+    ] as const) upsertDirectoryEntry(directory, { title: "Foreign record", kind: "decision", topic: a.uuid, governs: page.uuid, createdAt: 1, ...entry, tags: [...(entry.tags ?? [])] });
     rawDeleted(rig, d, true);
     const rows = (await rig.ok("list_docs", { kind: "decision", tag: "sync" })).docs;
     expect(rows).toHaveLength(1);
@@ -77,8 +77,8 @@ describe("decision topics through directory stubs", () => {
     expect(read.successors.map((record: any) => [record.uuid, record.status]).sort()).toEqual([[b, "rejected"], [c, "decided"]].sort());
     expect(read.resolution.inForce).toBeNull();
     expect(read.resolution.conflicts.map((record: any) => record.uuid).sort()).toEqual([c, d].sort());
-    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toMatchObject([{ topic: a.uuid, inForce: null }]);
-    const exported = (await rig.ok("export_markdown", { uuid: requirement.uuid })).markdown;
+    expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toMatchObject([{ topic: a.uuid, inForce: null }]);
+    const exported = (await rig.ok("export_markdown", { uuid: page.uuid })).markdown;
     expect(exported).toContain(c);
     expect(exported).toContain(d);
     expect(exported).toContain("nothing in force");
@@ -119,8 +119,8 @@ describe("decision topics through directory stubs", () => {
 
   it("uses only the first tombstone for listing, read-only refusal and derived log; archive and restore affect all records", async () => {
     const rig = await localRig();
-    const requirement = await rig.ok("create_doc", { title: "Product", description: "Product direction.", kind: "requirement" });
-    const a = await decision(rig, { status: "decided", related: requirement.uuid });
+    const page = await rig.ok("create_doc", { title: "Product", description: "Product direction." });
+    const a = await decision(rig, { status: "decided", related: page.uuid });
     const b = await decision(rig, { status: "decided", supersedes: a.uuid, answer });
     setTldr(rig.instance.replicas.replica(b.uuid).doc, "The answer.");
     await rig.ok("pin_doc", { uuid: a.uuid, group: "Reading" });
@@ -141,7 +141,7 @@ describe("decision topics through directory stubs", () => {
       { uuid: b.uuid, title: "Topic", status: "archived" },
     ]);
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toEqual([]);
-    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
+    expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toEqual([]);
     expect((await rig.ok("search", { query: "constraints" })).hits).toEqual([]);
     expect((await rig.call("set_metadata", { uuid: b.uuid, title: "Refused" })).payload.error).toBe("doc_archived");
     expect((await rig.ok("get_doc", { uuid: b.uuid })).resolution).toMatchObject({ inForce: { uuid: b.uuid }, archived: true });

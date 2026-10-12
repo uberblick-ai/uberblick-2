@@ -15,10 +15,11 @@ async function localRig() {
   return rig;
 }
 
-function stub(rig: Rig, fields: Partial<DirectoryEntry>): DirectoryEntry {
+function stub(rig: Rig, fields: Partial<DirectoryEntry>, regular = false): DirectoryEntry {
   const entry: DirectoryEntry = {
     uuid: randomUUID(), title: "Cached record", kind: "decision", status: "open", tags: [], ...fields,
   };
+  if (regular) { delete entry.kind; delete entry.status; }
   upsertDirectoryEntry(rig.instance.replicas.directory().doc, entry);
   if (entry.deleted) tombstoneDirectoryEntry(rig.instance.replicas.directory().doc, entry.uuid);
   return entry;
@@ -31,9 +32,9 @@ function indexLink(rig: Rig, source: DirectoryEntry, target: string) {
 }
 
 describe("decision context on page reads", () => {
-  it.each([undefined, "requirement"] as const)("reads related before linked topics on a %s page from directory and index alone", async kind => {
+  it("reads related before linked topics on a regular page from directory and index alone", async () => {
     const rig = await localRig();
-    const page = await rig.ok("create_doc", { title: "Owning page", description: "Page context.", ...(kind === undefined ? {} : { kind }) });
+    const page = await rig.ok("create_doc", { title: "Owning page", description: "Page context." });
     const other = await rig.ok("create_doc", { title: "Other page", description: "Another context." });
 
     const relatedOld = stub(rig, { createdAt: 30, status: "decided", governs: other.uuid, answerPreview: "Old related answer" });
@@ -48,7 +49,7 @@ describe("decision context on page reads", () => {
     const linkedNew = stub(rig, { createdAt: 20, status: "withdrawn" });
     const linkedPending = stub(rig, { createdAt: 21, topic: linkedNew.uuid, supersedes: linkedNew.uuid, answerPreview: "Pending linked answer" });
     const archived = stub(rig, { createdAt: 1, deleted: true, governs: page.uuid });
-    const regularBacklink = stub(rig, { kind: "requirement", status: "draft" });
+    const regularBacklink = stub(rig, {}, true);
     for (const source of [linkedRejected, linkedNew, relatedMiddle, archived, regularBacklink]) indexLink(rig, source, page.uuid);
 
     const read = await rig.ok("get_doc", { uuid: page.uuid });

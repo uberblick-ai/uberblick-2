@@ -330,25 +330,25 @@ describe("lifecycle metadata reaches discovery", () => {
   it("creates a default status in one document update and omits an ordinary pair", async () => {
     const rig = await localRig();
     const created = await lifecycleDoc(rig, "Roadmap", {
-      kind: "requirement",
+      kind: "decision",
     });
 
-    expect(created).toMatchObject({ kind: "requirement", status: "draft" });
+    expect(created).toMatchObject({ kind: "decision", status: "open" });
     expect(
       rig.instance.replicas.store.updateCount(
         `${WORKSPACE}/${created.uuid}`,
       ),
     ).toBe(1);
     expect(await rig.ok("get_doc", { uuid: created.uuid })).toMatchObject({
-      kind: "requirement",
-      status: "draft",
+      kind: "decision",
+      status: "open",
     });
     expect(stub(rig, created.uuid)).toMatchObject({
-      kind: "requirement",
-      status: "draft",
+      kind: "decision",
+      status: "open",
     });
-    expect((await rig.ok("list_docs", { kind: "requirement" })).docs).toMatchObject([
-      { uuid: created.uuid, kind: "requirement", status: "draft" },
+    expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([
+      { uuid: created.uuid, kind: "decision", status: "open" },
     ]);
 
     const ordinary = await lifecycleDoc(rig, "Working notes");
@@ -362,14 +362,12 @@ describe("lifecycle metadata reaches discovery", () => {
 
   it("omits decisions by default and includes them under exact predicates", async () => {
     const rig = await localRig();
-    const planned = await rig.ok("create_doc", {
-      title: "Planned",
-      description: "A planned tagged requirement.",
+    const tagged = await rig.ok("create_doc", {
+      title: "Tagged page",
+      description: "A tagged regular page.",
       tags: ["sync"],
-      kind: "requirement",
-      status: "planned",
     });
-    const draft = await lifecycleDoc(rig, "Draft", { kind: "requirement" });
+    const notes = await lifecycleDoc(rig, "Notes");
     const decision = await rig.ok("create_doc", {
       title: "Decision",
       description: "An open tagged decision.",
@@ -393,9 +391,9 @@ describe("lifecycle metadata reaches discovery", () => {
         .map((doc: any) => doc.uuid)
         .sort();
 
-    expect(await listedUuids()).toEqual([planned.uuid, draft.uuid].sort());
+    expect(await listedUuids()).toEqual([tagged.uuid, notes.uuid].sort());
     expect(await listedUuids({ include_deleted: true })).toEqual(
-      [planned.uuid, draft.uuid].sort(),
+      [tagged.uuid, notes.uuid].sort(),
     );
     expect(await listedUuids({ kind: "decision" })).toEqual([decision.uuid]);
     expect(await listedUuids({ kind: "decision", status: "open" })).toEqual([
@@ -403,16 +401,16 @@ describe("lifecycle metadata reaches discovery", () => {
     ]);
     expect(await listedUuids({ status: "open" })).toEqual([decision.uuid]);
     expect(await listedUuids({ tag: "sync" })).toEqual(
-      [planned.uuid, decision.uuid].sort(),
+      [tagged.uuid, decision.uuid].sort(),
     );
 
     expect(
       await listedUuids({
         tag: "sync",
-        kind: "requirement",
-        status: "planned",
+        kind: "decision",
+        status: "open",
       }),
-    ).toEqual([planned.uuid]);
+    ).toEqual([decision.uuid]);
     expect(
       await listedUuids({ include_deleted: true, kind: "decision" }),
     ).toEqual([archivedDecision.uuid, decision.uuid].sort());
@@ -420,28 +418,28 @@ describe("lifecycle metadata reaches discovery", () => {
 
   it("repairs a stale lifecycle in either direction on the next document write", async () => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Authoritative", {
-      kind: "requirement",
-      status: "planned",
+    const record = await lifecycleDoc(rig, "Authoritative", {
+      kind: "decision",
+      status: "open",
     });
     const ordinary = await lifecycleDoc(rig, "Ordinary");
     const directory = rig.instance.replicas.directory().doc;
 
     upsertDirectoryEntry(directory, {
-      uuid: requirement.uuid,
-      title: requirement.title,
-      kind: "decision",
-      status: "open",
+      uuid: record.uuid,
+      title: record.title,
+      kind: "",
+      status: "",
     });
     upsertDirectoryEntry(directory, {
       uuid: ordinary.uuid,
       title: ordinary.title,
-      kind: "requirement",
-      status: "done",
+      kind: "decision",
+      status: "open",
     });
 
     await rig.ok("set_metadata", {
-      uuid: requirement.uuid,
+      uuid: record.uuid,
       description: "The document repairs its lifecycle cache.",
     });
     await rig.ok("set_metadata", {
@@ -449,9 +447,9 @@ describe("lifecycle metadata reaches discovery", () => {
       description: "The document clears a lifecycle it does not carry.",
     });
 
-    expect(stub(rig, requirement.uuid)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+    expect(stub(rig, record.uuid)).toMatchObject({
+      kind: "decision",
+      status: "open",
     });
     expect(stub(rig, ordinary.uuid)).not.toHaveProperty("kind");
     expect(stub(rig, ordinary.uuid)).not.toHaveProperty("status");
@@ -469,7 +467,7 @@ describe("set_status", () => {
     // no lifecycle, while a raw status incompatible with the future kind
     // remains. Adoption replaces both in one update, with no durable prefix.
     replica.doc.transact(() => {
-      meta.set("kind", "");
+      meta.set("kind", "requirement");
       meta.set("status", "done");
     });
     expect(getMeta(replica.doc)).not.toHaveProperty("kind");
@@ -493,39 +491,6 @@ describe("set_status", () => {
     });
   });
 
-  it("moves within a kind and gives fixed-kind recovery for the other kind", async () => {
-    const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Requirement", {
-      kind: "requirement",
-      status: "planned",
-    });
-
-    expect(
-      await rig.ok("set_status", {
-        uuid: requirement.uuid,
-        status: "implementing",
-      }),
-    ).toMatchObject({ kind: "requirement", status: "implementing" });
-
-    const refused = await rig.call("set_status", {
-      uuid: requirement.uuid,
-      status: "open",
-    });
-    expect(refused.payload).toMatchObject({
-      error: "invalid_document_lifecycle",
-      kind: "requirement",
-      status: "open",
-      applied: false,
-      partial: false,
-      recoveryClass: "manual",
-    });
-    expect(refused.payload.recovery).toContain("stored kind is fixed");
-    expect(await rig.ok("get_doc", { uuid: requirement.uuid })).toMatchObject({
-      kind: "requirement",
-      status: "implementing",
-    });
-  });
-
   it("decides an initial stance with ordinary answer blocks", async () => {
     const rig = await localRig();
     const proposal = await lifecycleDoc(rig, "Topic and stance", {
@@ -544,21 +509,21 @@ describe("set_status", () => {
 });
 
 describe("decision log tools", () => {
-  it.each([undefined, "requirement"] as const)("relates a decision to a %s page and reads its ordered log", async kind => {
+  it("relates a decision to a regular page and reads its ordered log", async () => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Related page", kind === undefined ? {} : { kind, status: "planned" });
+    const page = await lifecycleDoc(rig, "Related page");
 
     const decision = await rig.ok("create_doc", {
       title: "Choose the durable path",
-      description: "Records which path the requirement takes.",
+      description: "Records which path the page takes.",
       kind: "decision",
-      related: requirement.uuid,
+      related: page.uuid,
     });
 
     expect(decision).toMatchObject({
       kind: "decision",
       status: "open",
-      governs: requirement.uuid,
+      governs: page.uuid,
     });
     expect(decision.rooms.map((room: any) => room.purpose)).toEqual([
       "document",
@@ -567,13 +532,13 @@ describe("decision log tools", () => {
     expect(decision.rooms.every((room: any) => room.applied)).toBe(true);
     expect(decision.rooms.every((room: any) => room.synced === false)).toBe(true);
 
-    const governed = await rig.ok("get_doc", { uuid: requirement.uuid });
+    const governed = await rig.ok("get_doc", { uuid: page.uuid });
     expect(governed.decisions).toMatchObject([
       { uuid: decision.uuid, topic: decision.uuid, relation: "related", inForce: null, pending: [{ uuid: decision.uuid }] },
     ]);
     expect(governed.links).toEqual([]);
-    expect((await rig.ok("get_doc", { uuid: decision.uuid })).links).toEqual([requirement.uuid]);
-    expect((await rig.ok("backlinks", { uuid: requirement.uuid })).backlinks).toMatchObject([{ uuid: decision.uuid }]);
+    expect((await rig.ok("get_doc", { uuid: decision.uuid })).links).toEqual([page.uuid]);
+    expect((await rig.ok("backlinks", { uuid: page.uuid })).backlinks).toMatchObject([{ uuid: decision.uuid }]);
     expect((await rig.ok("get_doc", { uuid: decision.uuid })).decisions).toEqual([]);
   });
 
@@ -649,22 +614,20 @@ describe("decision log tools", () => {
     expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).toEqual(before);
   });
 
-  it("omits archived topics from the derived requirement log", async () => {
+  it("omits archived topics from the derived page log", async () => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Requirement", { kind: "requirement" });
+    const page = await lifecycleDoc(rig, "Page");
     const decision = await rig.ok("create_doc", {
       title: "Archived topic", description: "Archive is the topic's visibility switch.",
-      kind: "decision", related: requirement.uuid,
+      kind: "decision", related: page.uuid,
     });
     await rig.ok("archive_doc", { uuid: decision.uuid });
-    expect((await rig.ok("get_doc", { uuid: requirement.uuid })).decisions).toEqual([]);
+    expect((await rig.ok("get_doc", { uuid: page.uuid })).decisions).toEqual([]);
   });
 
   it("refuses every invalid related page before creating a document", async () => {
     const rig = await localRig();
-    const requirement = await lifecycleDoc(rig, "Requirement", {
-      kind: "requirement",
-    });
+    const page = await lifecycleDoc(rig, "Related page");
 
     const refuseWithoutCreation = async (
       args: Record<string, unknown>,
@@ -688,10 +651,10 @@ describe("decision log tools", () => {
       return refused;
     };
 
-    await refuseWithoutCreation({ related: requirement.uuid });
+    await refuseWithoutCreation({ related: page.uuid });
     await refuseWithoutCreation({
       kind: "requirement",
-      related: requirement.uuid,
+      related: page.uuid,
     });
     await refuseWithoutCreation(
       { kind: "decision", related: randomUUID() },
@@ -702,17 +665,13 @@ describe("decision log tools", () => {
     upsertDirectoryEntry(rig.instance.replicas.directory().doc, {
       uuid: unhydrated,
       title: "Known elsewhere",
-      kind: "requirement",
-      status: "planned",
     });
     await refuseWithoutCreation(
       { kind: "decision", related: unhydrated },
       "doc_not_hydrated",
     );
 
-    const archived = await lifecycleDoc(rig, "Archived requirement", {
-      kind: "requirement",
-    });
+    const archived = await lifecycleDoc(rig, "Archived page");
     await rig.ok("archive_doc", { uuid: archived.uuid });
     await refuseWithoutCreation(
       { kind: "decision", related: archived.uuid },

@@ -187,7 +187,6 @@
         "kind": {
           "type": "string",
           "enum": [
-            "requirement",
             "decision"
           ],
           "description": "The document's record kind. Omit it for an ordinary working document."
@@ -195,10 +194,6 @@
         "status": {
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",
@@ -357,21 +352,6 @@
             "kind": {
               "const": "decision"
             }
-          }
-        },
-        {
-          "title": "A requirement document (`kind: requirement`)",
-          "required": [
-            "kind"
-          ],
-          "properties": {
-            "kind": {
-              "const": "requirement"
-            },
-            "related": false,
-            "supersedes": false,
-            "answer": false,
-            "discussion": false
           }
         },
         {
@@ -574,17 +554,12 @@
         "kind": {
           "type": "string",
           "enum": [
-            "requirement",
             "decision"
           ]
         },
         "status": {
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",
@@ -1072,17 +1047,12 @@
         "kind": {
           "type": "string",
           "enum": [
-            "requirement",
             "decision"
           ]
         },
         "status": {
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",
@@ -1223,17 +1193,12 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "requirement",
                   "decision"
                 ]
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "draft",
-                  "planned",
-                  "implementing",
-                  "done",
                   "open",
                   "decided",
                   "rejected",
@@ -1382,17 +1347,12 @@
                       "kind": {
                         "type": "string",
                         "enum": [
-                          "requirement",
                           "decision"
                         ]
                       },
                       "status": {
                         "type": "string",
                         "enum": [
-                          "draft",
-                          "planned",
-                          "implementing",
-                          "done",
                           "open",
                           "decided",
                           "rejected",
@@ -1555,17 +1515,12 @@
                     "kind": {
                       "type": "string",
                       "enum": [
-                        "requirement",
                         "decision"
                       ]
                     },
                     "status": {
                       "type": "string",
                       "enum": [
-                        "draft",
-                        "planned",
-                        "implementing",
-                        "done",
                         "open",
                         "decided",
                         "rejected",
@@ -1723,17 +1678,12 @@
                     "kind": {
                       "type": "string",
                       "enum": [
-                        "requirement",
                         "decision"
                       ]
                     },
                     "status": {
                       "type": "string",
                       "enum": [
-                        "draft",
-                        "planned",
-                        "implementing",
-                        "done",
                         "open",
                         "decided",
                         "rejected",
@@ -1918,17 +1868,12 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "requirement",
                   "decision"
                 ]
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "draft",
-                  "planned",
-                  "implementing",
-                  "done",
                   "open",
                   "decided",
                   "rejected",
@@ -2086,17 +2031,12 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "requirement",
                   "decision"
                 ]
               },
               "status": {
                 "type": "string",
                 "enum": [
-                  "draft",
-                  "planned",
-                  "implementing",
-                  "done",
                   "open",
                   "decided",
                   "rejected",
@@ -2254,17 +2194,12 @@
                 "kind": {
                   "type": "string",
                   "enum": [
-                    "requirement",
                     "decision"
                   ]
                 },
                 "status": {
                   "type": "string",
                   "enum": [
-                    "draft",
-                    "planned",
-                    "implementing",
-                    "done",
                     "open",
                     "decided",
                     "rejected",
@@ -2413,17 +2348,12 @@
                         "kind": {
                           "type": "string",
                           "enum": [
-                            "requirement",
                             "decision"
                           ]
                         },
                         "status": {
                           "type": "string",
                           "enum": [
-                            "draft",
-                            "planned",
-                            "implementing",
-                            "done",
                             "open",
                             "decided",
                             "rejected",
@@ -2586,17 +2516,12 @@
                       "kind": {
                         "type": "string",
                         "enum": [
-                          "requirement",
                           "decision"
                         ]
                       },
                       "status": {
                         "type": "string",
                         "enum": [
-                          "draft",
-                          "planned",
-                          "implementing",
-                          "done",
                           "open",
                           "decided",
                           "rejected",
@@ -2754,17 +2679,12 @@
                       "kind": {
                         "type": "string",
                         "enum": [
-                          "requirement",
                           "decision"
                         ]
                       },
                       "status": {
                         "type": "string",
                         "enum": [
-                          "draft",
-                          "planned",
-                          "implementing",
-                          "done",
                           "open",
                           "decided",
                           "rejected",
@@ -3821,7 +3741,6 @@
           "description": "Only documents of this kind.",
           "type": "string",
           "enum": [
-            "requirement",
             "decision"
           ]
         },
@@ -3829,10 +3748,6 @@
           "description": "Only documents at this lifecycle state.",
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",
@@ -3948,17 +3863,12 @@
                   "kind": {
                     "type": "string",
                     "enum": [
-                      "requirement",
                       "decision"
                     ]
                   },
                   "status": {
                     "type": "string",
                     "enum": [
-                      "draft",
-                      "planned",
-                      "implementing",
-                      "done",
                       "open",
                       "decided",
                       "rejected",
@@ -4117,17 +4027,12 @@
                   "kind": {
                     "type": "string",
                     "enum": [
-                      "requirement",
                       "decision"
                     ]
                   },
                   "status": {
                     "type": "string",
                     "enum": [
-                      "draft",
-                      "planned",
-                      "implementing",
-                      "done",
                       "open",
                       "decided",
                       "rejected",
@@ -4276,17 +4181,12 @@
                           "kind": {
                             "type": "string",
                             "enum": [
-                              "requirement",
                               "decision"
                             ]
                           },
                           "status": {
                             "type": "string",
                             "enum": [
-                              "draft",
-                              "planned",
-                              "implementing",
-                              "done",
                               "open",
                               "decided",
                               "rejected",
@@ -4449,17 +4349,12 @@
                         "kind": {
                           "type": "string",
                           "enum": [
-                            "requirement",
                             "decision"
                           ]
                         },
                         "status": {
                           "type": "string",
                           "enum": [
-                            "draft",
-                            "planned",
-                            "implementing",
-                            "done",
                             "open",
                             "decided",
                             "rejected",
@@ -4617,17 +4512,12 @@
                         "kind": {
                           "type": "string",
                           "enum": [
-                            "requirement",
                             "decision"
                           ]
                         },
                         "status": {
                           "type": "string",
                           "enum": [
-                            "draft",
-                            "planned",
-                            "implementing",
-                            "done",
                             "open",
                             "decided",
                             "rejected",
@@ -5059,10 +4949,6 @@
                   {
                     "type": "string",
                     "enum": [
-                      "draft",
-                      "planned",
-                      "implementing",
-                      "done",
                       "open",
                       "decided",
                       "rejected",
@@ -6361,10 +6247,6 @@
         "status": {
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",
@@ -6421,17 +6303,12 @@
         "kind": {
           "type": "string",
           "enum": [
-            "requirement",
             "decision"
           ]
         },
         "status": {
           "type": "string",
           "enum": [
-            "draft",
-            "planned",
-            "implementing",
-            "done",
             "open",
             "decided",
             "rejected",

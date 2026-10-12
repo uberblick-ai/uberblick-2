@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, DOCUMENT_KINDS, REQUIREMENT_STATUSES } from "@uberblick/schema";
+import { DECISION_STATUSES, DOCUMENT_KINDS } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
 
@@ -7,7 +7,7 @@ const uuid = z.string().describe("Document identity; a UUID, never a title or pa
 const description = z.string().nullable().describe("Agent-facing document description; null when unwritten.");
 const tldr = z.string().nullable().describe("Person-facing document summary; legacy decision summaries remain readable. Null when unwritten.");
 const discussion = z.string().nullable().describe("Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer.");
-const status = z.enum([...REQUIREMENT_STATUSES, ...DECISION_STATUSES]);
+const status = z.enum(DECISION_STATUSES);
 const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
   status: status.optional(),

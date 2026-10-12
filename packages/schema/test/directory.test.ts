@@ -460,37 +460,37 @@ describe("directory doc", () => {
     upsertDirectoryEntry(dir, {
       uuid: ALPHA,
       title: "Alpha",
-      tags: ["requirement"],
-      kind: "requirement",
-      status: "planned",
+      tags: ["reference"],
+      kind: "decision",
+      status: "open",
     });
 
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha, renamed" });
     expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
     });
 
     upsertDirectoryEntry(dir, {
       uuid: ALPHA,
       title: "Alpha, renamed",
-      tags: ["requirement", "schema"],
+      tags: ["reference", "schema"],
     });
     expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
     });
 
     tombstoneDirectoryEntry(dir, ALPHA);
     expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
       deleted: true,
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
     });
     restoreDirectoryEntry(dir, ALPHA);
     expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
-      kind: "requirement",
-      status: "planned",
+      kind: "decision",
+      status: "open",
     });
   });
 
@@ -499,24 +499,24 @@ describe("directory doc", () => {
     upsertDirectoryEntry(dir, {
       uuid: ALPHA,
       title: "Alpha",
-      kind: "requirement",
-      status: "implementing",
+      kind: "decision",
+      status: "decided",
     });
 
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha" });
     expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({
-      kind: "requirement",
-      status: "implementing",
+      kind: "decision",
+      status: "decided",
     });
 
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", status: "" });
-    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({ kind: "requirement" });
+    expect(getDirectoryEntry(dir, ALPHA)).toMatchObject({ kind: "decision" });
     expect(getDirectoryEntry(dir, ALPHA)).not.toHaveProperty("status");
 
     upsertDirectoryEntry(dir, {
       uuid: ALPHA,
       title: "Alpha",
-      status: "planned",
+      status: "open",
     });
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", kind: "" });
     expect(getDirectoryEntry(dir, ALPHA)).not.toHaveProperty("kind");
@@ -550,6 +550,44 @@ describe("directory doc", () => {
       tags: [],
     });
   });
+
+  it.each([undefined, "draft", "planned", "implementing", "done", "decided", 42])(
+    "projects stored requirement stubs with status %j without writing on read",
+    (status) => {
+      const dir = new Y.Doc();
+      const stored = {
+        title: "Stored proposal", tags: ["rfc"], description: "Preserved purpose.",
+        createdAt: 10, updatedAt: 20, kind: "requirement",
+        ...(status === undefined ? {} : { status }),
+      };
+      getDirectoryMap(dir).set(ALPHA, stored);
+      getDirectoryMap(dir).set(BETA, { ...stored, deleted: true });
+      const before = Y.encodeStateAsUpdate(dir);
+      const regular = {
+        uuid: ALPHA, title: stored.title, tags: stored.tags,
+        description: stored.description, createdAt: 10, updatedAt: 20,
+      };
+      expect(getDirectoryEntry(dir, ALPHA)).toEqual(regular);
+      expect(listDirectory(dir)).toEqual([regular]);
+      expect(listDirectory(dir, { includeDeleted: true })).toEqual([
+        regular, { ...regular, uuid: BETA, deleted: true },
+      ]);
+      expect(Y.encodeStateAsUpdate(dir)).toEqual(before);
+      expect(getDirectoryMap(dir).get(ALPHA)).toEqual(stored);
+
+      // A cache rewrite can discard the obsolete pair while retaining the row.
+      upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Renamed", tags: stored.tags });
+      expect(getDirectoryEntry(dir, ALPHA)).toEqual({ ...regular, title: "Renamed" });
+      expect(getDirectoryMap(dir).get(ALPHA)).not.toHaveProperty("kind");
+      expect(getDirectoryMap(dir).get(ALPHA)).not.toHaveProperty("status");
+      tombstoneDirectoryEntry(dir, ALPHA);
+      expect(listDirectory(dir)).toEqual([]);
+      expect(getDirectoryEntry(dir, ALPHA)).toEqual({ ...regular, title: "Renamed", deleted: true });
+      restoreDirectoryEntry(dir, ALPHA);
+      expect(listDirectory(dir)).toEqual([{ ...regular, title: "Renamed" }]);
+      dir.destroy();
+    },
+  );
 
   it("converges last-write-wins when two replicas describe the same document", () => {
     const [a, b] = replicaPair((dir) => {
@@ -616,14 +654,12 @@ describe("directory stub metadata divergence", () => {
     title: "Alpha",
     tags: ["draft", "schema"],
     description: "What Alpha is for.",
-    kind: "requirement",
     links: [],
   };
   const undescribedStub: DirectoryEntry = {
     uuid: ALPHA,
     title: meta.title,
     tags: meta.tags,
-    kind: "requirement",
   };
   const stub: DirectoryEntry = {
     ...undescribedStub,
@@ -637,7 +673,7 @@ describe("directory stub metadata divergence", () => {
       ["tag set", { tags: ["draft", "reference"] }],
       ["description", { description: "A new purpose." }],
       ["kind", { kind: "decision" }],
-      ["status", { status: "planned" }],
+      ["status", { status: "open" }],
     ] satisfies Array<[string, Partial<DirectoryEntry>]>) {
       expect(directoryStubDiffers({ ...stub, ...change }, meta), field).toBe(true);
     }

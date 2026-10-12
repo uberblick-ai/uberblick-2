@@ -810,8 +810,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
 /**
  * The fixed navigation section. Everything here asks one question: is it
  * chrome? Curation moves, is stored in `_sidebar` and can be dropped into;
- * chrome is in the same place on every page, and the two destinations that do
- * not exist yet are shown as absent affordances rather than as broken links.
+ * chrome is in the same place on every page, and the destination that does
+ * not exist yet is shown as an absent affordance rather than a broken link.
  */
 describe("the sidebar's fixed navigation", () => {
   it("stands above the curation, pinned or not, and is not a drop target", async () => {
@@ -828,7 +828,6 @@ describe("the sidebar's fixed navigation", () => {
     expect(navRows(host).map((row) => row.textContent)).toEqual([
       "All docs",
       "Dashboard Coming soon",
-      "Product requirements Coming soon",
     ]);
 
     // A pin arrives and the groups appear under it; the section has not moved,
@@ -857,7 +856,7 @@ describe("the sidebar's fixed navigation", () => {
     expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
   });
 
-  it("shows the two destinations it does not have as unavailable, not as links", async () => {
+  it("shows Dashboard as unavailable, not as a link", async () => {
     seedDirectory();
     const doc = room(roomForDoc(WORKSPACE, THREE)).ydoc;
     initDoc(doc, { uuid: THREE, title: "Sync" });
@@ -867,11 +866,9 @@ describe("the sidebar's fixed navigation", () => {
     const [, ...soon] = navRows(host);
     expect(soon.map((row) => row.getAttribute("aria-disabled"))).toEqual([
       "true",
-      "true",
     ]);
     expect(soon.map((row) => row.textContent)).toEqual([
       "Dashboard Coming soon",
-      "Product requirements Coming soon",
     ]);
 
     for (const row of soon) {

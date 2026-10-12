@@ -54,18 +54,16 @@ const INITIAL_DIRECTION: Record<Order, Direction> = {
   title: "ascending",
 };
 
-const MODES = ["working", "requirement", "decision"] as const;
+const MODES = ["working", "decision"] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_LABELS: Record<Mode, string> = {
   working: "Working",
-  requirement: "Product",
   decision: "Decisions",
 };
 
 const MODE_EMPTY_LABELS: Record<Mode, string> = {
   working: "working documents",
-  requirement: "product documents",
   decision: "decision topics",
 };
 
@@ -203,9 +201,11 @@ export function DocumentList({
   const pinUnavailableId = useId();
   const [localState, setLocalState] = useState(INITIAL_DOCUMENT_LIST_STATE);
   const listState = state ?? localState;
-  const { query, mode, stateFilter, sort } = listState;
+  const { query, stateFilter, sort } = listState;
+  // Browser history may contain a type removed by a newer client.
+  const mode: Mode = listState.mode === "decision" ? "decision" : "working";
   const updateState = (patch: Partial<DocumentListState>): void => {
-    const next = { ...listState, ...patch };
+    const next = { ...listState, mode, ...patch };
     setLocalState(next);
     onStateChange?.(next);
   };

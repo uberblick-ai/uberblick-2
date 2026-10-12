@@ -124,32 +124,30 @@ afterAll(() => {
 });
 
 describe("archive_doc", () => {
-  it("leaves a requirement and its derived decision topics independent", async () => {
+  it("leaves a page and its derived decision topics independent", async () => {
     const rig = await localRig();
-    const requirement = await rig.ok("create_doc", {
+    const page = await rig.ok("create_doc", {
       title: "Choose the delivery path",
-      description: "A requirement with two decisions in its log.",
-      kind: "requirement",
-      status: "planned",
+      description: "A page with two decisions in its log.",
     });
     const first = await rig.ok("create_doc", {
       title: "Choose the store",
-      description: "The first decision in the requirement's log.",
+      description: "The first decision in the page's log.",
       kind: "decision",
       status: "decided",
-      related: requirement.uuid,
+      related: page.uuid,
       blocks: [
         { type: "paragraph", text: "Use the append-only update log." },
       ],
     });
     const second = await rig.ok("create_doc", {
       title: "Choose the serving process",
-      description: "The second decision in the requirement's log.",
+      description: "The second decision in the page's log.",
       kind: "decision",
-      related: requirement.uuid,
+      related: page.uuid,
       blocks: [{ type: "paragraph", text: "Use ub open." }],
     });
-    const expectedLog = (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions;
+    const expectedLog = (await rig.ok("get_doc", { uuid: page.uuid })).decisions;
     expect(expectedLog).toMatchObject([
       { topic: first.uuid, inForce: { uuid: first.uuid }, pending: [] },
       { topic: second.uuid, inForce: null, pending: [{ uuid: second.uuid }] },
@@ -159,22 +157,12 @@ describe("archive_doc", () => {
     );
 
     expect(
-      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+      (await rig.ok("get_doc", { uuid: page.uuid })).decisions,
     ).toEqual(expectedLog);
 
-    await rig.ok("archive_doc", { uuid: requirement.uuid });
+    await rig.ok("archive_doc", { uuid: page.uuid });
     expect(
-      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
-    ).toEqual(expectedLog);
-    expect(
-      await Promise.all(
-        [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
-      ),
-    ).toEqual(decisionsBefore);
-
-    await rig.ok("restore_doc", { uuid: requirement.uuid });
-    expect(
-      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+      (await rig.ok("get_doc", { uuid: page.uuid })).decisions,
     ).toEqual(expectedLog);
     expect(
       await Promise.all(
@@ -182,13 +170,23 @@ describe("archive_doc", () => {
       ),
     ).toEqual(decisionsBefore);
 
-    // Requirement restore remains independent in the other direction too: a decision
-    // archived deliberately stays archived when its requirement cycles.
+    await rig.ok("restore_doc", { uuid: page.uuid });
+    expect(
+      (await rig.ok("get_doc", { uuid: page.uuid })).decisions,
+    ).toEqual(expectedLog);
+    expect(
+      await Promise.all(
+        [first.uuid, second.uuid].map((uuid) => rig.ok("get_doc", { uuid })),
+      ),
+    ).toEqual(decisionsBefore);
+
+    // Page restore remains independent in the other direction too: a decision
+    // archived deliberately stays archived when its page cycles.
     await rig.ok("archive_doc", { uuid: first.uuid });
-    await rig.ok("archive_doc", { uuid: requirement.uuid });
-    await rig.ok("restore_doc", { uuid: requirement.uuid });
+    await rig.ok("archive_doc", { uuid: page.uuid });
+    await rig.ok("restore_doc", { uuid: page.uuid });
     expect(
-      (await rig.ok("get_doc", { uuid: requirement.uuid })).decisions,
+      (await rig.ok("get_doc", { uuid: page.uuid })).decisions,
     ).toEqual([expectedLog[1]]);
   });
 

@@ -19,9 +19,9 @@ export const toolHelpDetails = {
     "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
     "nothing. A title cannot be empty or whitespace: an untitled document cannot be picked out of a listing, " +
     "and set_metadata with `title` is the repair for the untitled ones the web UI creates.\n\n" +
-    "Pass `kind` to create a lifecycle document. Its `status` defaults to that kind's first state; `status` " +
-    "without `kind`, or a status owned by the other kind, is refused before a document is created. A decision " +
-    "may pass `related`, the UUID of one live, locally readable regular page, including a requirement. " +
+    "Pass `kind: decision` to create a decision record. Its `status` defaults to `open`; `status` " +
+    "without `kind` is refused before a document is created. A decision " +
+    "may pass `related`, the UUID of one live, locally readable regular page. " +
     "A decision target refuses with related_not_regular_document. The page is fixed at creation, stored as " +
     "`governs` for compatibility; existing governs values stay related pages without migration. Any other " +
     "use of `related` is refused before a UUID is allocated or a room is written. A decision may also pass " +
@@ -34,8 +34,8 @@ export const toolHelpDetails = {
     "`doc_archived` before a UUID is allocated or a room is written; restore the topic before reconsidering " +
     "it. Decisions are created only `open` or `decided`; rejected and withdrawn records must first exist as " +
     "proposals. A decided successor without an answer is refused before allocating a UUID or writing any " +
-    "room. Optional `discussion` names a live, locally readable non-decision document, including a " +
-    "requirement, for this record's RFC. Create or reuse it first as an ordinary regular document. New " +
+    "room. Optional `discussion` names a live, locally readable regular document " +
+    "for this record's RFC. Create or reuse it first as an ordinary regular document. New " +
     "workspaces include an ordinary `rfc` tag to apply deliberately; connecting never requires or applies " +
     "that tag, creates an RFC or edits the RFC or related page. A decision target refuses with " +
     "`discussion_not_regular_document`; archived, unknown or unhydrated targets refuse with `doc_archived`, " +
@@ -322,8 +322,8 @@ export const toolHelpDetails = {
     "effective links back stores derived governs, supersedes and discussion UUIDs in the curated array too; " +
     "get_doc " +
     "deduplicates the resulting edges. Empty arrays clear tags or curated links.\n\n" +
-    "An open decision accepts `discussion` as a live, locally readable non-decision document UUID, including " +
-    "a requirement, or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
+    "An open decision accepts `discussion` as a live, locally readable regular document UUID, " +
+    "or null to clear it. Create or reuse the RFC first as an ordinary regular document. " +
     "A decision target refuses with `discussion_not_regular_document`; archived, unknown and unhydrated " +
     "targets refuse with `doc_archived`, `doc_not_found` and `doc_not_hydrated`, each naming field discussion. " +
     "Rejected or withdrawn records and non-decision documents refuse with `discussion_not_writable` and " +
