@@ -43,7 +43,7 @@ Missing required guidance does not grant authority; stop the dependent decision.
 `create_doc` and `set_status` record a person's answer with
 `answer: {who, when, where}`; a first record decided without one is
 `agentStance`. Do not invent an answer or reject a stance without a person's
-recorded answer. A decided record's title, decision line and blocks refuse
+recorded answer. A decided record's title and answer blocks refuse
 writes with `decision_read_only`; a change needs a successor a person approves.
 
 Implementation and review corrections follow

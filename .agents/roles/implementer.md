@@ -87,19 +87,23 @@ stance or `open` with a recommendation on a topic reserved to a human. Read its
 live corpus sources rather than treating a pointer as the record.
 
 When code need not cite it, write a new `decided` implementation stance as a
-complete draft in this same PR's `Corpus update`, including its topic, decision
-line, enduring reasons,
-guidance, governing requirement when applicable, Links and intended creation
-status (`decided` stance). The integrator creates it through
+draft in this same PR's `Corpus update`: name its topic, intended creation status
+(`decided` stance), and one to three short answer blocks with a brief reason.
+Include `related` for the owning regular page and `discussion` for an existing
+RFC where applicable. The integrator creates it through
 `create_doc` after merge; name a new record as new rather than inventing its
-UUID. Decision-record Links may cite GitHub items; discover and follow any governing
-decision-authoring guidance through the live corpus.
+UUID. Do not put a TL;DR, separate decision line, headings or a Links section
+in the record. Put guidance on its related page through this PR's `Corpus update`;
+put detailed options, evidence and debate in a connected RFC or the linked GitHub
+item. This route grants no authority to create an RFC. Discover and follow any
+governing decision-authoring guidance through the live corpus.
 Keep the draft current through review; do not create an immutable decided
 stance before reviewers can correct it.
 
 When this PR's code must cite a new implementation stance, or the topic is
 reserved to a person, create the first record now through `create_doc` as
-`open`, with its recommendation and the same complete content. In this PR's
+`open`, with its recommendation and brief reason in the same short answer shape,
+and `related` and `discussion` where applicable. In this PR's
 `Corpus update`, cite its title, record UUID and topic UUID and state its
 post-merge disposition: initial agent stance to be decided, or boundary topic
 to remain open until a person answers. Code cites the topic UUID, the first
@@ -107,7 +111,7 @@ record's UUID retained by successors. While it remains open, keep the record
 current with corrections through review; if a person decides it first, use the
 [shared decided-record challenge procedure](../protocols/human-decisions.md#challenge-a-decided-record).
 Use its returned topic UUID in the built-on line and link the
-GitHub item in its Links under the procedure below, without a post-merge fix-up.
+GitHub item in its answer prose under the procedure below, without a post-merge fix-up.
 
 If the PR closes without merging, the maintainer closing it re-reads and
 withdraws any still-`open` record created solely for that PR through
@@ -125,9 +129,13 @@ issue or PR:
 Built on open decision: <topic>, <topic uuid>, recommended option: <option>
 ```
 
-Add that item to the open record's Links as `owner/repo#n`, linked to its
-`https://github.com/owner/repo/issues/n` or `/pull/n` URL. Use ordinary external
-link marks in the prose: plain reference text is invisible to `find_decisions`.
+Link that item as `owner/repo#n` in the open record's existing short answer prose,
+using its `https://github.com/owner/repo/issues/n` or `/pull/n` URL and ordinary
+external link marks: plain reference text is invisible to `find_decisions`.
+Keep one to three short answer blocks with a brief reason; add no TL;DR,
+separate decision line, heading or Links section. Guidance belongs on the related
+page through `Corpus update`; detailed options, evidence and debate belong in a
+connected RFC or the linked GitHub item.
 This is the record's rework list if a person later chooses differently; record
 the resulting rework under [run-operations.md's follow-up issue rule](../protocols/run-operations.md#follow-up-issues).
 

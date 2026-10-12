@@ -1,5 +1,13 @@
 # Decision editing in context (#844)
 
+> Historical investigation evidence. The prototype, findings and recommendation
+> below describe this investigation and do not define current direction. Current
+> product direction lives in the corpus pages on Decision records and the Domain
+> model, discovered through MCP, and is summarized in the
+> [decision-topic brief](../briefs/decision-log.md). Current agent rules live in
+> the [local protocols](../../.agents/protocols/issue-shaping.md), including
+> [RFC resumption](../../.agents/protocols/rfc-resumption.md).
+
 ## Verdict
 
 Use a modal for the first production container. The existing Radix-backed
