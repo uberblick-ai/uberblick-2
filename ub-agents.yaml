@@ -23,6 +23,8 @@ checkout-setup:
 
 agents:
   issue-preparer:
+    # All launcher hosts need ub-agents 0.2.0 or later for health-check.
+    health-check: &corpus-health [python3, scripts/check-corpus.py]
     retrospectives: 1014
     runtime: "claude:claude-opus-5-5:xhigh"
     kind: issue
@@ -79,6 +81,7 @@ agents:
       - "Bash(env *)"
 
   issue-reviewer:
+    health-check: *corpus-health
     retrospectives: 1016
     runtime: "codex:gpt-6.1-sol:xhigh"
     kind: issue
@@ -100,6 +103,7 @@ agents:
       - 'mcp_servers.uberblick.default_tools_approval_mode="approve"'
 
   implementer:
+    health-check: *corpus-health
     retrospectives: 1015
     runtime: "codex:gpt-6.1-sol:ultra"
     trigger: [needs-changes, ready]
@@ -114,6 +118,7 @@ agents:
     runtime-args: *codex-scoped
 
   pr-reviewer:
+    health-check: *corpus-health
     retrospectives: 1016
     runtime: ["codex:gpt-6.1-sol:xhigh", "claude:claude-opus-5-5:xhigh"]
     kind: pr
