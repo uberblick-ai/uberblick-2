@@ -19,7 +19,7 @@ import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 
-const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
 let mcpAgent: McpAgent | null = null;
 
@@ -482,6 +482,68 @@ test("a tag filter retains a matching document beyond the first 100 shared searc
   await expect(page.locator(".ub-docs-row")).toHaveCount(150);
   await pickTags(page, ["auth"], false);
   await expect(listedTitles(page)).toHaveText([tailTitle]);
+});
+
+test("tag overflow recalculates when the bundled UI font loads @webkit", async ({ browser }) => {
+  const title = docTitle("tagfontload");
+  const writer = agent().open({ name: "tag-font-load-e2e" });
+  const created = await writer.call<{ tags: Array<{ name: string }> }>("create_doc", {
+    title, description: "A row measured before its bundled UI font arrives.",
+    blocks: [{ type: "paragraph", text: "The stored tag prefix stays within its column." }],
+    tags: ["billing", "permissions", "auth", "mcp", "rfc", "sync"],
+  });
+  let releaseFont = (): void => {};
+  const fontGate = new Promise<void>((resolve) => { releaseFont = resolve; });
+  let fontRequested = false;
+  const context = trackContext(await browser.newContext({ viewport: { width: 1280, height: 800 } }));
+  const page = await context.newPage();
+  try {
+    await page.route(/\/Geist-Variable[^/]*\.woff2(?:\?|$)/, async (route) => {
+      fontRequested = true;
+      await fontGate;
+      await route.continue();
+    });
+    // WebKit's load event waits for fonts, so inspect its fallback first paint.
+    await page.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href, { waitUntil: "domcontentloaded" });
+    await expect(page.locator(".ub-docs-heading")).toBeVisible();
+    await expect.poll(() => fontRequested).toBe(true);
+    await page.getByRole("searchbox", { name: "Search" }).fill(title);
+    const row = page.locator(".ub-docs-row", { hasText: title });
+    await expect(row).toHaveCount(1);
+    // Place the column just above the fallback font's three-chip boundary.
+    // The font swap then changes chip widths without changing that column.
+    const columnWidth = await row.locator(".ub-docs-tags-cell").evaluate((cell) => {
+      const tags = cell.querySelector<HTMLElement>(".ub-docs-tags");
+      const probe = cell.querySelector<HTMLElement>(".ub-docs-tag-measure");
+      if (tags === null || probe === null) throw new Error("The tag row is missing.");
+      const chips = Array.from(probe.children, (chip) => chip.getBoundingClientRect().width);
+      const gap = Number.parseFloat(getComputedStyle(tags).columnGap);
+      const padding = getComputedStyle(cell);
+      return chips.slice(0, 3).reduce((sum, width) => sum + width, 0)
+        + (chips.at(-1) ?? 0) + 3 * gap + 1
+        + Number.parseFloat(padding.paddingLeft) + Number.parseFloat(padding.paddingRight);
+    });
+    await page.locator(".ub-docs-tags-column").evaluate((column, width) => {
+      (column as HTMLElement).style.width = `${width}px`;
+    }, columnWidth);
+    const controls = row.locator(".ub-docs-tags > button");
+    await expect(controls).toHaveText([...created.tags.slice(0, 3).map((tag) => tag.name), "+3"]);
+    const before = await row.locator(".ub-docs-tags").boundingBox();
+    releaseFont();
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => Array.from(document.fonts).find((font) => font.family === "Geist")?.status)).toBe("loaded");
+    await expect(controls).toHaveText([...created.tags.slice(0, 2).map((tag) => tag.name), "+4"]);
+    const after = await row.locator(".ub-docs-tags").boundingBox();
+    expect(after?.width).toBe(before?.width);
+    expect(after?.height).toBe(before?.height);
+    expect(await row.locator(".ub-docs-tags").evaluate((tags) => {
+      const edge = tags.getBoundingClientRect().right;
+      return Array.from(tags.querySelectorAll(":scope > button"), (chip) => chip.getBoundingClientRect().right <= edge);
+    })).toEqual([true, true, true]);
+  } finally {
+    releaseFont();
+    await page.unrouteAll({ behavior: "wait" });
+  }
 });
 
 for (const touch of [false, true]) test(`tag measurement does not widen the document pane and overflow stays accessible on ${touch ? "iPad touch" : "desktop keyboard"} @webkit`, async ({ browser }) => {
