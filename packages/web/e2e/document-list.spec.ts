@@ -507,11 +507,17 @@ test("tag overflow recalculates when the bundled UI font loads @webkit", async (
     await page.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href, { waitUntil: "domcontentloaded" });
     await expect(page.locator(".ub-docs-heading")).toBeVisible();
     await expect.poll(() => fontRequested).toBe(true);
+    // Both faces are bundled, so the fallback boundary is independent of host fonts.
+    await page.evaluate(async () => {
+      await document.fonts.load('400 12px "Geist Mono"');
+      document.documentElement.style.setProperty("--font-sans", '"Geist", "Geist Mono", monospace');
+    });
+    expect(await page.evaluate(() => Array.from(document.fonts).find((font) => font.family === "Geist Mono")?.status)).toBe("loaded");
     await page.getByRole("searchbox", { name: "Search" }).fill(title);
     const row = page.locator(".ub-docs-row", { hasText: title });
     await expect(row).toHaveCount(1);
-    // Place the column just above the fallback font's three-chip boundary.
-    // The font swap then changes chip widths without changing that column.
+    // Place the column just below the bundled fallback's three-chip boundary.
+    // Loading the narrower UI face changes chips without resizing that column.
     const columnWidth = await row.locator(".ub-docs-tags-cell").evaluate((cell) => {
       const tags = cell.querySelector<HTMLElement>(".ub-docs-tags");
       const probe = cell.querySelector<HTMLElement>(".ub-docs-tag-measure");
@@ -520,26 +526,32 @@ test("tag overflow recalculates when the bundled UI font loads @webkit", async (
       const gap = Number.parseFloat(getComputedStyle(tags).columnGap);
       const padding = getComputedStyle(cell);
       return chips.slice(0, 3).reduce((sum, width) => sum + width, 0)
-        + (chips.at(-1) ?? 0) + 3 * gap + 1
+        + (chips.at(-1) ?? 0) + 3 * gap - 1
         + Number.parseFloat(padding.paddingLeft) + Number.parseFloat(padding.paddingRight);
     });
     await page.locator(".ub-docs-tags-column").evaluate((column, width) => {
       (column as HTMLElement).style.width = `${width}px`;
     }, columnWidth);
     const controls = row.locator(".ub-docs-tags > button");
-    await expect(controls).toHaveText([...created.tags.slice(0, 3).map((tag) => tag.name), "+3"]);
+    await expect(controls).toHaveText([...created.tags.slice(0, 2).map((tag) => tag.name), "+4"]);
     const before = await row.locator(".ub-docs-tags").boundingBox();
     releaseFont();
     await page.evaluate(() => document.fonts.ready);
     expect(await page.evaluate(() => Array.from(document.fonts).find((font) => font.family === "Geist")?.status)).toBe("loaded");
-    await expect(controls).toHaveText([...created.tags.slice(0, 2).map((tag) => tag.name), "+4"]);
+    const loadedPrefixWidth = await row.locator(".ub-docs-tag-measure").evaluate((probe) => {
+      const chips = Array.from(probe.children, (chip) => chip.getBoundingClientRect().width);
+      return chips.slice(0, 3).reduce((sum, width) => sum + width, 0)
+        + (chips.at(-1) ?? 0) + 3 * Number.parseFloat(getComputedStyle(probe).columnGap);
+    });
+    expect(loadedPrefixWidth).toBeLessThan(before?.width ?? 0);
+    await expect(controls).toHaveText([...created.tags.slice(0, 3).map((tag) => tag.name), "+3"]);
     const after = await row.locator(".ub-docs-tags").boundingBox();
     expect(after?.width).toBe(before?.width);
     expect(after?.height).toBe(before?.height);
     expect(await row.locator(".ub-docs-tags").evaluate((tags) => {
       const edge = tags.getBoundingClientRect().right;
       return Array.from(tags.querySelectorAll(":scope > button"), (chip) => chip.getBoundingClientRect().right <= edge);
-    })).toEqual([true, true, true]);
+    })).toEqual([true, true, true, true]);
   } finally {
     releaseFont();
     await page.unrouteAll({ behavior: "wait" });
