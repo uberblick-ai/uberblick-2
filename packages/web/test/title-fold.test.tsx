@@ -1,13 +1,5 @@
 /**
- * One fold for one title, wherever the title is typed at.
- *
- * The claim under test is an *equivalence*, so it is asserted against both real
- * matchers rather than against the helper they share: every case below runs the
- * same query through the Documents page filter — the mounted `DocumentList`,
- * driven by a keystroke into its field — and through the `@` picker's
- * `filterMentions` over candidates carrying the same titles, and both sides
- * have to answer with the same documents. A regression that repaired only one
- * surface would still pass a test of the helper; it cannot pass this one.
+ * Mention completion folds cached titles before matching a substring.
  *
  * The corpus is chosen so that each row is the *reason* for a rule: `École` and
  * `İSTANBUL` exercise removable marks, `किताब` is the
@@ -17,10 +9,6 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { within } from "@testing-library/react";
-import { act, renderSettled } from "./react-render.js";
-import type { DirectoryEntry } from "@uberblick/schema";
-import { DocumentList } from "../src/shell/DocumentList.js";
 import { filterMentions } from "../src/editor/mention-menu.js";
 import type { DocLinkCandidate } from "../src/editor/doc-links.js";
 import { foldForTitleMatch } from "../src/title-fold.js";
@@ -36,48 +24,12 @@ const CORPUS: readonly (readonly [string, string])[] = [
   ["5e1a9f04-3c68-4b27-8d95-16f2b70c4a83", "Roadmap"],
 ];
 
-const ENTRIES: DirectoryEntry[] = CORPUS.map(([uuid, title]) => ({
-  uuid,
-  title,
-  tags: [],
-}));
-
 const CANDIDATES: DocLinkCandidate[] = CORPUS.map(([docId, label]) => ({
   docId,
   label,
 }));
 
 const EVERY_TITLE = CORPUS.map(([, title]) => title);
-
-/** Change a controlled input through the native setter, like a keystroke. */
-function typeInto(input: HTMLInputElement, value: string): void {
-  const native = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  )?.set;
-  native?.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-/** The titles the Documents page keeps for `query`, in a comparable order. */
-async function listAnswer(query: string): Promise<string[]> {
-  const { container: host } = await renderSettled(
-    <DocumentList
-      connection={null}
-      entries={ENTRIES}
-      groups={[]}
-      onSelect={() => {}}
-      onTogglePin={null}
-    />,
-  );
-  const field = within(host).getByRole<HTMLInputElement>("searchbox", {
-    name: "Filter this list by title",
-  });
-  await act(async () => typeInto(field, query));
-  return within(within(host).getByRole("table", { hidden: true })).queryAllByRole("rowheader", { hidden: true })
-    .map((header) => within(header).getByRole("button", { hidden: true }).textContent ?? "")
-    .sort();
-}
 
 /** The titles the `@` picker offers for `query`, in a comparable order. */
 function pickerAnswer(query: string): string[] {
@@ -86,13 +38,7 @@ function pickerAnswer(query: string): string[] {
     .sort();
 }
 
-describe("the Documents filter and the @ picker match one title one way", () => {
-  /**
-   * Every case is checked against the picker, which is pure and costs nothing;
-   * the rendered list, which costs a render per query, takes the cases that
-   * differ in kind. Both surfaces fold through one function (below), so a case
-   * the picker answers is the list's answer too.
-   */
+describe("the @ picker matches folded title substrings", () => {
   const cases: Array<[string, string[]]> = [
     // The two removable-mark matches, and the direction the store's index
     // folds: a non-spacing mark is not part of what was typed.
@@ -115,18 +61,9 @@ describe("the Documents filter and the @ picker match one title one way", () => 
     ["ısparta", []],
     ["isparta", ["ISPARTA"]],
     ["I", ["ISPARTA", "İSTANBUL", "İstanbul harbour"]],
-    // An empty field lists everything, on both surfaces.
+    // An empty field offers every candidate.
     ["", EVERY_TITLE],
   ];
-
-  it.each(cases.filter(([query]) => ["ecole", "istanbul", "कतब", ""].includes(query)))(
-    "answers %j with the same documents on both surfaces",
-    async (query, expected) => {
-      const wanted = [...expected].sort();
-      expect(await listAnswer(query)).toEqual(wanted);
-      expect(pickerAnswer(query)).toEqual(wanted);
-    },
-  );
 
   it("answers every case the same way in the @ picker", () => {
     for (const [query, expected] of cases) {

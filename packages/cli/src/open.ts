@@ -460,7 +460,6 @@ const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
-const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -650,11 +649,9 @@ async function serveApiRequest(
   }
 
   try {
-    const matches = engine.store.search(query, SEARCH_LIMIT + 1);
     apiResponse(request, response, 200, {
-      hits: matches.slice(0, SEARCH_LIMIT).map(({ uuid }) => ({ uuid })),
-      limit: SEARCH_LIMIT,
-      capped: matches.length > SEARCH_LIMIT,
+      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
+      capped: false,
     });
   } catch {
     apiResponse(request, response, 500, { error: "search_failed" });

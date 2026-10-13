@@ -122,7 +122,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
 
   await showSidebar(page, touch);
   await activate(page.getByRole("button", { name: "All docs", exact: true }), touch);
-  await page.getByRole("searchbox", { name: "Filter this list by title", exact: true }).fill(prefix);
+  await page.getByRole("searchbox", { name: "Search", exact: true }).fill(`${prefix}*`);
   await expect(page.locator(".ub-docs-title")).toHaveCount(2);
   const rowHeights = await page.locator(".ub-docs-row").evaluateAll((rows) =>
     rows.map((row) => row.getBoundingClientRect().height));
@@ -130,7 +130,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
     // The base's single-line rows are 33.78px, plus a collapsed header border.
     for (const height of rowHeights) expect(height, "compact desktop document row").toBeLessThanOrEqual(35);
   }
-  for (const [name, initial] of [["Title", "ascending"], ["Last changed", "descending"]] as const) {
+  for (const [name, initial] of [["Title", "ascending"], ["Changed", "descending"]] as const) {
     const heading = page.getByRole("columnheader", { name: new RegExp(`^${name}`) });
     const sort = heading.getByRole("button", { name, exact: true });
     await expectFloor(sort, floor);

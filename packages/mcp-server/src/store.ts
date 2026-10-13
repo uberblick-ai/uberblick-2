@@ -156,6 +156,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
 );
 `;
 
+const SEARCH_RELEVANCE = "bm25(docs_fts, 0, 2, 1, 1, 1)";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -407,6 +409,7 @@ export class MirrorStore {
     putFts: Prepared<[string, string, string, string, string]>;
     markSearch: Prepared<[number | bigint, string]>;
     search: Prepared<[string, string, string | null, string | null, number]>;
+    searchUuids: Prepared<[string]>;
     backlinks: Prepared<[string]>;
     decisionsForGithub: Prepared<[string]>;
   };
@@ -575,9 +578,13 @@ export class MirrorStore {
           "WHERE docs_fts MATCH ? AND (NOT EXISTS (SELECT 1 FROM requested_tags) OR EXISTS " +
           "(SELECT 1 FROM doc_tags t JOIN requested_tags r ON r.tag = t.tag WHERE t.uuid = f.uuid)) " +
           "AND (? IS NULL OR d.kind = ?) " +
-          "ORDER BY bm25(docs_fts, 0, 2, 1, 1, 1) * (1 + 0.1 * " +
+          `ORDER BY ${SEARCH_RELEVANCE} * (1 + 0.1 * ` +
           "(SELECT COUNT(*) FROM doc_tags t JOIN requested_tags r ON r.tag = t.tag WHERE t.uuid = f.uuid)), " +
           "f.uuid LIMIT ?",
+      ),
+      searchUuids: prepare(
+        "SELECT f.uuid AS uuid FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
+          `WHERE docs_fts MATCH ? ORDER BY ${SEARCH_RELEVANCE}, f.uuid`,
       ),
       backlinks: prepare(
         "SELECT l.source AS uuid, COALESCE(d.title, '') AS title, " +
@@ -930,6 +937,14 @@ export class MirrorStore {
       description: row.description === "" ? null : row.description,
       snippet: row.snippet === "" ? row.title : row.snippet,
     }));
+  }
+
+  /** Complete relevance order for callers that filter using directory metadata. */
+  searchUuids(query: string): string[] {
+    const match = ftsQuery(query);
+    if (match === null) return [];
+    const rows = this.statements.searchUuids.all(match) as { uuid: string }[];
+    return rows.map(({ uuid }) => uuid);
   }
 
   /** Documents whose `links` name `uuid`. */

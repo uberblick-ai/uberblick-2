@@ -1,4 +1,4 @@
-/** The browser-side client for `ub open`'s read-only status endpoint. */
+/** The browser-side client for `ub open`'s local search and status endpoints. */
 
 import { mintHubAuthMessage } from "../collab/rooms.js";
 
@@ -31,6 +31,7 @@ function isNotSharedReason(value: unknown): value is NotSharedReason {
 
 export interface DocumentSearchClient {
   status(signal: AbortSignal): Promise<DocumentSearchStatus>;
+  search(query: string, signal: AbortSignal): Promise<string[]>;
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -78,6 +79,21 @@ function searchStatus(body: Record<string, unknown>): DocumentSearchStatus {
   };
 }
 
+function searchHits(body: Record<string, unknown>): string[] {
+  // Filtering happens after this read; a truncated answer cannot establish
+  // that a matching document is absent.
+  if (!Array.isArray(body.hits) || body.capped !== false) {
+    throw new Error("ub open returned an incomplete search answer");
+  }
+  return body.hits.map((value: unknown) => {
+    const hit = object(value);
+    if (hit === null || typeof hit.uuid !== "string" || hit.uuid === "") {
+      throw new Error("ub open returned a malformed search answer");
+    }
+    return hit.uuid;
+  });
+}
+
 /**
  * One client for one rendered workspace.
  *
@@ -104,5 +120,6 @@ export function createDocumentSearchClient(
 
   return {
     status: async (signal) => searchStatus(await get("/api/status", signal)),
+    search: async (query, signal) => searchHits(await get(`/api/search?q=${encodeURIComponent(query)}`, signal)),
   };
 }

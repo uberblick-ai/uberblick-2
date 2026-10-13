@@ -1,30 +1,19 @@
-/**
- * Workspace and /all routes list directory stubs without opening document rooms;
- * sidebar groups supply pin labels. Kind modes and title filtering use cached
- * data only, equally for local and direct serving. Working includes unknown kinds.
- * Before directory sync, empty/filter messages describe only what has arrived.
- * Sort starts last-changed first; browser history restores that visit's filters
- * and sorting on Back/Forward. A new list visit starts at the defaults.
- * Stamps are greatest-authored cache hints, not history;
- * a future-skewed clock can pin one. Missing stamps sort last only by changed.
- * Ages turn absolute at 30 days and refresh at most a minute late. dateTime
- * stays exact; relative ages expose exact time on hover.
- */
+/** Directory stubs supply rows; search supplies record UUIDs without opening rooms. */
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { decisionCurrentRecord, decisionTopicState, resolveDecisionTopics } from "@uberblick/schema";
-import type { DecisionTopicState, DirectoryEntry, SidebarGroup } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
 import { LifecycleBadge } from "../ui/LifecycleBadge.js";
 import { TOPIC_STATES } from "../ui/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
-import { foldForTitleMatch } from "../title-fold.js";
-
-/** Accessible name and disappearing hint must both promise title-only filtering. */
-const FILTER_LABEL = "Filter this list by title";
-const FILTER_HINT = "Filter by title";
+import { PickerList } from "../ui/PickerList.js";
+import { useTagCatalog } from "../ui/tags.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/shadcn/popover.js";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/shadcn/tooltip.js";
+import type { DocumentSearchClient } from "./document-search.js";
 
 /** Invalid Date ranges read as absent: a dash, last by changed, ordinary title order. */
 function usableStamp(at: number | undefined): number | undefined {
@@ -45,7 +34,7 @@ type Order = (typeof ORDERS)[number];
 type Direction = "ascending" | "descending";
 
 const ORDER_LABELS: Record<Order, string> = {
-  changed: "Last changed",
+  changed: "Changed",
   title: "Title",
 };
 
@@ -58,13 +47,13 @@ const MODES = ["working", "decision"] as const;
 type Mode = (typeof MODES)[number];
 
 const MODE_LABELS: Record<Mode, string> = {
-  working: "Working",
+  working: "Documents",
   decision: "Decisions",
 };
 
 const MODE_EMPTY_LABELS: Record<Mode, string> = {
-  working: "working documents",
-  decision: "decision topics",
+  working: "documents",
+  decision: "decisions",
 };
 
 const STATE_FILTERS = ["all", "not-yet-decided", "under-review", "agent-stance", "conflict", "changed-after-approval"] as const;
@@ -82,6 +71,8 @@ export interface DocumentListState {
   query: string;
   mode: Mode;
   stateFilter: StateFilter;
+  selectedTags: string[];
+  relevance: boolean;
   sort: { order: Order; direction: Direction };
 }
 
@@ -89,22 +80,15 @@ export const INITIAL_DOCUMENT_LIST_STATE: DocumentListState = {
   query: "",
   mode: "working",
   stateFilter: "all",
+  selectedTags: [],
+  relevance: false,
   sort: { order: "changed", direction: INITIAL_DIRECTION.changed },
 };
 
-type ListRow = DirectoryEntry & { topicState?: DecisionTopicState; pinned: boolean; groupName: string | undefined };
+type ListRow = DirectoryEntry & { topicState?: DecisionTopicState; pinned: boolean; groupName: string | undefined; recordIds: readonly string[] };
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
   return mode === "working" ? entry.kind === undefined : entry.kind === mode;
-}
-
-/**
- * Match only cached titles, using the same fold as mentions on query and title.
- * Never match the display fallback Untitled for an empty title. Empty query
- * matches all. This fold is neither locale collation nor tag-name lowercase.
- */
-function titleMatches(entry: DirectoryEntry, needle: string): boolean {
-  return foldForTitleMatch(entry.title).includes(needle);
 }
 
 /**
@@ -176,10 +160,136 @@ function PinIcon({ active }: { active: boolean }): ReactElement {
   );
 }
 
+function namedTag(tag: TagAssignment): tag is TagCatalogEntry {
+  return tag.name !== null;
+}
+
+function tagLabel(tag: TagCatalogEntry): string {
+  return tag.state === "retired" ? `${tag.name} (retired)` : tag.name;
+}
+
+function TagFilter({
+  options,
+  selected,
+  labels,
+  onChange,
+}: {
+  options: readonly TagCatalogEntry[];
+  selected: readonly string[];
+  labels: readonly string[];
+  onChange: (tags: string[]) => void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const listId = useId();
+  const showSearch = options.length >= 10;
+  const needle = showSearch ? query.trim().toLowerCase() : "";
+  return (
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
+      <PopoverTrigger asChild>
+        <button type="button" className="ub-docs-tag-filter ub-docs-filter-control" aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
+          {labels.length === 0 ? "Any tag" : labels.join(", ")} <span aria-hidden="true">▾</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="ub-docs-tag-picker p-0">
+        {showSearch && <label className="block border-b border-border p-2">
+          <span className="ub-sr-only">Find tags</span>
+          <input type="search" className="w-full rounded-(--radius-sm) border border-border bg-transparent px-2 py-1 [font:inherit]" placeholder="Find tags" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
+        </label>}
+        <PickerList id={listId} label="Tags" multiple options={options.filter((tag) => needle === "" || tag.name.toLowerCase().includes(needle)).map((tag) => ({ id: tag.id, label: tag.name, selected: selected.includes(tag.id) }))} onPick={(id) => onChange(selected.includes(id) ? selected.filter((tag) => tag !== id) : [...selected, id])} empty={needle === "" ? "No active tags." : "No tags match."} />
+        <button type="button" className="ub-docs-clear-tags" disabled={selected.length === 0} onClick={() => onChange([])}>Clear tags</button>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Layout measures the stored-order prefix; Radix owns overflow interaction. */
+function RowTags({ tags, title, onPick }: { tags: readonly TagCatalogEntry[]; title: string; onPick: (id: string) => void }): ReactElement {
+  const container = useRef<HTMLDivElement | null>(null);
+  const measure = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(tags.length);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const wrapper = container.current;
+    const probe = measure.current;
+    if (wrapper === null || probe === null) return;
+    const measurePrefix = (): void => {
+      const width = wrapper.getBoundingClientRect().width;
+      if (width === 0) return;
+      const chips = Array.from(probe.children, (chip) => chip.getBoundingClientRect().width);
+      const moreWidth = chips.pop() ?? 0;
+      const gap = Number.parseFloat(getComputedStyle(wrapper).columnGap) || 0;
+      let used = 0;
+      let count = 0;
+      for (const chip of chips) {
+        const next = used + (count === 0 ? 0 : gap) + chip;
+        const rest = count + 1 < tags.length ? gap + moreWidth : 0;
+        if (next + rest > width) break;
+        used = next;
+        count += 1;
+      }
+      setVisible(count);
+    };
+    measurePrefix();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measurePrefix);
+    observer.observe(wrapper);
+    observer.observe(probe);
+    return () => observer.disconnect();
+  }, [tags]);
+  const shown = Math.min(visible, tags.length);
+  return (
+    <div ref={container} className="ub-docs-tags">
+      <div ref={measure} aria-hidden="true" className="ub-docs-tag-measure">
+        {tags.map((tag) => <span key={tag.id} className="ub-docs-tag-chip">{tagLabel(tag)}</span>)}
+        <span className="ub-docs-tag-chip">+{tags.length}</span>
+      </div>
+      {tags.slice(0, shown).map((tag) => <button key={tag.id} type="button" className="ub-docs-tag-chip" onClick={() => onPick(tag.id)}>{tagLabel(tag)}</button>)}
+      {shown < tags.length && <Popover open={open} onOpenChange={setOpen}>
+        <TooltipProvider><Tooltip>
+          <TooltipTrigger asChild><PopoverTrigger asChild>
+            <button type="button" className="ub-docs-tag-chip" aria-label={`Show all tags for ${title === "" ? "Untitled" : title}`}>+{tags.length - shown}</button>
+          </PopoverTrigger></TooltipTrigger>
+          {!open && <TooltipContent>{tags.map(tagLabel).join(", ")}</TooltipContent>}
+        </Tooltip></TooltipProvider>
+        <PopoverContent align="start" className="flex flex-wrap gap-1" aria-label={`All tags for ${title === "" ? "Untitled" : title}`}>
+          {tags.map((tag) => <button key={tag.id} type="button" className="ub-docs-tag-chip" onClick={() => { onPick(tag.id); setOpen(false); }}>{tagLabel(tag)}</button>)}
+        </PopoverContent>
+      </Popover>}
+    </div>
+  );
+}
+
+type ListSearchClient = Pick<DocumentSearchClient, "search"> | null;
+
+function useListSearch(query: string, client: ListSearchClient, entries: readonly DirectoryEntry[]): { hits: readonly string[]; unavailable: boolean; pending: boolean } {
+  const [result, setResult] = useState<{ query: string; client: ListSearchClient; entries: readonly DirectoryEntry[]; hits: string[]; unavailable: boolean } | null>(null);
+  useEffect(() => {
+    if (query === "" || client === null) return;
+    const request = new AbortController();
+    void client.search(query, request.signal).then(
+      (hits) => { if (!request.signal.aborted) setResult({ query, client, entries, hits, unavailable: false }); },
+      () => { if (!request.signal.aborted) setResult({ query, client, entries, hits: [], unavailable: true }); },
+    );
+    return () => request.abort();
+  }, [query, client, entries]);
+  const current = result?.query === query && result.client === client && result.entries === entries ? result : null;
+  const unavailable = query !== "" && (client === null || current?.unavailable === true);
+  return { hits: current?.hits ?? [], unavailable, pending: query !== "" && !unavailable && current === null };
+}
+
+function noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced, hasFilters, hasDocuments }: { mode: Mode; stateFilter: StateFilter; selectedLabels: readonly string[]; query: string; synced: boolean; hasFilters: boolean; hasDocuments: boolean }): string {
+  if (hasFilters) return `No ${MODE_EMPTY_LABELS[mode]}${synced ? "" : " synced so far"}${mode === "decision" && stateFilter !== "all" ? ` with state "${STATE_LABELS[stateFilter]}"` : ""}${selectedLabels.length === 0 ? "" : ` tagged ${selectedLabels.map((label) => `"${label}"`).join(" or ")}`}${query.trim() === "" ? "." : ` match "${query}".`}`;
+  if (hasDocuments) return synced ? "No documents in this workspace." : "No documents among the documents synced so far.";
+  return synced ? "No documents in this workspace yet." : "Nothing here yet — the directory has not synced on this client.";
+}
+
 export function DocumentList({
   connection,
   entries,
   groups,
+  catalog: catalogConnection = null,
+  searchClient = null,
   onSelect,
   onTogglePin,
   state,
@@ -191,6 +301,8 @@ export function DocumentList({
   entries: readonly DirectoryEntry[];
   /** The sidebar as it stands: which group, if any, a row is pinned in. */
   groups: readonly SidebarGroup[];
+  catalog?: RoomConnection | null;
+  searchClient?: ListSearchClient;
   onSelect: (uuid: string) => void;
   /** Pin or unpin a row, or null until the sidebar is writable and synced. */
   onTogglePin: ((uuid: string) => void) | null;
@@ -202,10 +314,20 @@ export function DocumentList({
   const [localState, setLocalState] = useState(INITIAL_DOCUMENT_LIST_STATE);
   const listState = state ?? localState;
   const { query, stateFilter, sort } = listState;
+  const selectedTags = listState.selectedTags ?? [];
+  const relevance = listState.relevance ?? query.trim() !== "";
+  const catalog = useTagCatalog(catalogConnection);
+  const selectedAssignments = catalog === null
+    ? selectedTags.map((id) => ({ id, name: null, state: "unresolved" as const }))
+    : readDirectoryTags({ tags: selectedTags }, catalog.connection.ydoc);
+  const selectedIds = selectedAssignments.map((tag) => tag.id);
+  const selectedLabels = selectedAssignments.map((tag) => tag.name ?? "Unknown tag");
+  const searchText = query.trim();
+  const { hits, unavailable: searchUnavailable, pending: searchPending } = useListSearch(searchText, searchClient, entries);
   // Browser history may contain a type removed by a newer client.
   const mode: Mode = listState.mode === "decision" ? "decision" : "working";
   const updateState = (patch: Partial<DocumentListState>): void => {
-    const next = { ...listState, mode, ...patch };
+    const next = { ...listState, mode, selectedTags, relevance, ...patch };
     setLocalState(next);
     onStateChange?.(next);
   };
@@ -220,7 +342,7 @@ export function DocumentList({
   }, [groups]);
   const modeRows = useMemo<ListRow[]>(() => {
     if (mode !== "decision") return entries.filter((entry) => !entry.deleted && inMode(entry, mode))
-      .map((entry) => ({ ...entry, pinned: groupOf.has(entry.uuid), groupName: groupOf.get(entry.uuid) }));
+      .map((entry) => ({ ...entry, pinned: groupOf.has(entry.uuid), groupName: groupOf.get(entry.uuid), recordIds: [entry.uuid] }));
     return resolveDecisionTopics(entries).filter((topic) => !topic.archived).flatMap((topic) => {
       const current = decisionCurrentRecord(topic);
       if (current === null) return [];
@@ -242,26 +364,44 @@ export function DocumentList({
         ...(stamps.length === 0 ? {} : { updatedAt: Math.max(...stamps) }),
         pinned: pinnedRecord !== undefined,
         groupName: pinnedRecord === undefined ? undefined : groupOf.get(pinnedRecord.uuid),
+        recordIds: topic.records.map((record) => record.uuid),
       }];
     });
   }, [entries, mode, groupOf]);
-  const needle = foldForTitleMatch(query.trim());
+  const rowTags = useMemo(() => new Map(modeRows.map((entry) => [entry.uuid, catalog === null ? [] : readDirectoryTags(entry, catalog.connection.ydoc)])), [modeRows, catalog]);
+  const ranks = useMemo(() => new Map(hits.map((uuid, rank) => [uuid, rank])), [hits]);
   const rows = useMemo(
-    () =>
-      sortDirectory(
-        modeRows.filter((entry) => titleMatches(entry, needle) && (mode !== "decision" || stateFilter === "all"
-          || (stateFilter === "changed-after-approval" ? entry.approvalChanged : entry.topicState === stateFilter))),
-        sort.order,
-        sort.direction,
-      ),
-    [modeRows, mode, needle, stateFilter, sort],
+    () => {
+      const filtered = modeRows.filter((entry) => (selectedIds.length === 0 || (rowTags.get(entry.uuid) ?? []).some((tag) => selectedIds.includes(tag.id))) && (mode !== "decision" || stateFilter === "all"
+        || (stateFilter === "changed-after-approval" ? entry.approvalChanged : entry.topicState === stateFilter)));
+      if (searchText === "") return sortDirectory(filtered, sort.order, sort.direction);
+      if (searchUnavailable || searchPending) return [];
+      const ranked = filtered.flatMap((entry) => {
+        const recordRanks = entry.recordIds.flatMap((uuid) => { const rank = ranks.get(uuid); return rank === undefined ? [] : [rank]; });
+        return recordRanks.length === 0 ? [] : [{ entry, rank: Math.min(...recordRanks) }];
+      }).sort((left, right) => left.rank - right.rank).map(({ entry }) => entry);
+      return relevance ? ranked : sortDirectory(ranked, sort.order, sort.direction);
+    },
+    [modeRows, mode, searchText, searchUnavailable, searchPending, ranks, selectedIds, rowTags, stateFilter, sort, relevance],
   );
+  const hasFilters = searchText !== "" || mode === "decision" || selectedTags.length > 0 || stateFilter !== "all";
+  const emptyMessage = noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced: status.synced, hasFilters, hasDocuments: entries.some((entry) => !entry.deleted) });
 
   return (
     <section className="ub-pane">
       <div className="ub-column ub-docs">
         <h1 className="ub-docs-heading">Documents</h1>
-        <div className="flex flex-wrap items-center gap-2">
+        <label className="ub-docs-search-label">
+          <span className="ub-sr-only">Search</span>
+          <input
+            type="search"
+            className="ub-docs-search"
+            placeholder="Search"
+            value={query}
+            onChange={(event) => updateState({ query: event.currentTarget.value, relevance: true })}
+          />
+        </label>
+        <div className="ub-docs-filters flex flex-wrap items-center gap-2">
         <fieldset className="ub-docs-mode-fieldset">
           <legend className="ub-sr-only">Document type</legend>
           <div className="ub-docs-modes">
@@ -269,7 +409,7 @@ export function DocumentList({
               <button
                 key={option}
                 type="button"
-                className="ub-docs-mode cursor-pointer border border-r-0 border-(--border) bg-transparent px-[0.55rem] py-[0.3rem] [font:inherit] text-(--muted-foreground) first:rounded-[var(--radius-sm)_0_0_var(--radius-sm)] last:rounded-[0_var(--radius-sm)_var(--radius-sm)_0] last:border-r hover:bg-(--accent) hover:text-(--accent-foreground) aria-pressed:bg-(--brand-subtle) aria-pressed:text-(--brand-ink)"
+                className="ub-docs-mode ub-docs-filter-control cursor-pointer border-0 bg-transparent text-(--muted-foreground) hover:bg-(--accent) hover:text-(--accent-foreground) aria-pressed:bg-(--brand-subtle) aria-pressed:text-(--brand-ink)"
                 aria-pressed={option === mode}
                 onClick={() => updateState({ mode: option })}
               >
@@ -278,6 +418,7 @@ export function DocumentList({
             ))}
           </div>
         </fieldset>
+        <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
         {mode === "decision" && <label className="flex items-center gap-2 text-sm text-(--muted-foreground)">
           State
           <select
@@ -293,19 +434,7 @@ export function DocumentList({
           </select>
         </label>}
         </div>
-        {/* Enabled from first paint, whatever this page is connected to: the
-            rows it narrows are already here, so there is nothing to wait for
-            and no state in which it is unavailable. */}
-        <label className="ub-docs-search-label">
-          <span className="ub-sr-only">{FILTER_LABEL}</span>
-          <input
-            type="search"
-            className="ub-docs-search"
-            placeholder={FILTER_HINT}
-            value={query}
-            onChange={(event) => updateState({ query: event.currentTarget.value })}
-          />
-        </label>
+        {searchClient === null && searchText === "" && <p className="ub-docs-search-status ub-muted">Search is unavailable. Open this workspace with ub open to use local search.</p>}
         {onTogglePin === null && rows.length > 0 && (
           <p id={pinUnavailableId} className="ub-docs-pin-unavailable mb-2 mt-0 text-xs text-(--muted-foreground)">
             Pin changes unavailable while the sidebar is not ready to write.
@@ -314,24 +443,28 @@ export function DocumentList({
         <table className="ub-docs-table">
           <colgroup>
             <col />
+            <col className="ub-docs-group-column" />
+            <col className="ub-docs-tags-column" />
             <col className="ub-docs-age-column" />
             <col className="ub-docs-pin-column" />
           </colgroup>
           <thead>
             <tr>
-              {ORDERS.map((option) => (
+              {(["title", "group", "tags", "changed"] as const).map((option) => option === "group" || option === "tags" ? (
+                <th key={option} scope="col" className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}>{option === "group" ? "Group" : "Tags"}</th>
+              ) : (
                 <th
                   key={option}
                   scope="col"
                   className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}
-                  aria-sort={option === sort.order ? sort.direction : undefined}
+                  aria-sort={!(searchText !== "" && relevance) && option === sort.order ? sort.direction : undefined}
                 >
                   <button
                     type="button"
                     className={`ub-docs-sort flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 w-full cursor-pointer items-center gap-[0.3rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 [font:inherit] text-inherit hover:bg-(--accent) hover:text-(--accent-foreground) ${option === "changed" ? "justify-end" : ""}`}
                     onClick={() =>
-                      updateState({ sort:
-                        sort.order === option
+                      updateState({ relevance: false, sort:
+                        sort.order === option && !(searchText !== "" && relevance)
                           ? {
                               order: option,
                               direction:
@@ -344,7 +477,7 @@ export function DocumentList({
                     }
                   >
                     {ORDER_LABELS[option]}
-                    {option === sort.order && (
+                    {!(searchText !== "" && relevance) && option === sort.order && (
                       <span className="ub-docs-sort-arrow" aria-hidden="true">
                         {sort.direction === "ascending" ? "↑" : "↓"}
                       </span>
@@ -360,22 +493,11 @@ export function DocumentList({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={3} className="ub-docs-empty-cell">
-                  <p className="ub-muted ub-docs-empty">
-                    {mode === "decision" && stateFilter !== "all"
-                      ? `No decision topics${status.synced ? "" : " synced so far"} match state “${STATE_LABELS[stateFilter]}”${needle === "" ? "." : " and the title filter."}`
-                      : needle !== ""
-                      ? status.synced
-                        ? `No ${MODE_EMPTY_LABELS[mode]} have a matching title.`
-                        : `No ${MODE_EMPTY_LABELS[mode]} synced so far have a matching title.`
-                      : entries.some((entry) => !entry.deleted)
-                        ? status.synced
-                          ? `No ${MODE_EMPTY_LABELS[mode]} in this workspace.`
-                          : `No ${MODE_EMPTY_LABELS[mode]} among the documents synced so far.`
-                      : status.synced
-                        ? "No documents in this workspace yet."
-                        : "Nothing here yet — the directory has not synced on this client."}
+                <td colSpan={5} className="ub-docs-empty-cell">
+                  <p className="ub-muted ub-docs-empty" role={searchUnavailable || searchPending ? "status" : undefined}>
+                    {searchUnavailable ? `Search is unavailable.${status.synced ? "" : " The directory covers only documents synced so far."}` : searchPending ? "Searching…" : emptyMessage}
                   </p>
+                  {hasFilters && !searchPending && <button type="button" className="ub-docs-clear-filters" onClick={() => updateState({ query: "", selectedTags: [], mode: "working", stateFilter: "all", relevance: false })}>Clear filters</button>}
                 </td>
               </tr>
             ) : (
@@ -400,11 +522,6 @@ export function DocumentList({
                       {entry.topicState !== undefined && entry.approvalChanged && (
                         <span className="text-sm text-(--muted-foreground)">Changed after approval</span>
                       )}
-                      {/* Where the sidebar carries this document, when it does.
-                          Blank is the honest answer for the long tail. */}
-                      {entry.groupName !== undefined && (
-                        <span className="ub-docs-group">{entry.groupName}</span>
-                      )}
                     </button>
                     {entry.topicState !== undefined && <div className="ub-docs-topic-detail">
                       {entry.topicState === "conflict" ? <span>Nothing is in force.</span>
@@ -412,6 +529,8 @@ export function DocumentList({
                       {entry.commentCount !== undefined && <span>{entry.commentCount} {entry.commentCount === 1 ? "comment" : "comments"}</span>}
                     </div>}
                   </th>
+                  <td className="ub-docs-group-cell"><span className="ub-docs-group">{entry.groupName}</span></td>
+                  <td className="ub-docs-tags-cell"><RowTags tags={(rowTags.get(entry.uuid) ?? []).filter(namedTag)} title={entry.title} onPick={(id) => updateState({ selectedTags: [id] })} /></td>
                   <td className="ub-docs-age-cell">
                     <ChangedStamp at={entry.updatedAt} now={now} />
                   </td>
