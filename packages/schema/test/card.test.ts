@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_PARTS, CardAnnotationError, CardConversionError, InvalidCardError,
   InlineLinkRangeError, OldTextMismatchError, StaleBlockError,
-  appendBlock, buildCardElement, cardButton, cardInline, cardPartElement, cardPartTexts,
+  appendBlock, buildCardElement, cardButtons, cardInline, cardPartElement, cardPartTexts,
   createAnnotation, decisionApprovalFingerprint, deleteAnnotation, editBlock,
   exportMarkdown, findBlockElement, getBlock, getBlocks, getBlocksFragment,
   getBlockText, importMarkdown, initDoc, insertBlock, isCardButtonHref, isSupportedCard,
-  listAnnotationRanges, parseCardButton, parseCardInput, parseInline, resolveAnnotationRange,
-  setAnnotationResolved, setBlockType, setInlineLink, writeCardButton,
-  type CardPart,
+  listAnnotationRanges, parseCardButton, parseCardButtons, parseCardInput, parseInline, resolveAnnotationRange,
+  setAnnotationResolved, setBlockType, setInlineLink, writeCardButton, writeCardButtons,
+  type CardButton, type CardPart,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
 
@@ -217,6 +217,152 @@ describe("card block contract", () => {
 });
 
 describe("card link button", () => {
+  it("keeps the single default button's stored value, text, revision and approval fingerprint", () => {
+    const source = SOURCE.replace("footer: Metadata", "footer: Metadata\nbutton: [Discuss](codex://new)");
+    const { doc, id, card } = fixture(source);
+    expect(card.getAttribute("button")).toBe("[Discuss](codex://new)");
+    expect(getBlockText(doc, id)).toBe(source);
+    expect(getBlock(doc, id)!.rev).toBe("4cda8e09ed946563");
+    expect(decisionApprovalFingerprint(doc)).toBe("6bf5ef896d475499");
+    const canonicalRev = getBlock(doc, id)!.rev;
+    editBlock(doc, id, source, source.replace("(codex://new)", "(codex://new) neutral outline"));
+    expect(getBlockText(doc, id)).toBe(source);
+    expect(getBlock(doc, id)!.rev).toBe(canonicalRev);
+  });
+
+  it("canonicalizes every appearance and preserves authored order through Markdown", () => {
+    const values = [
+      "[First](https://example.test) neutral outline",
+      "[Second](codex://new) blue outline",
+      "[Third](claude://code/new) green outline",
+      "[Fourth](claude-cli://open) violet outline",
+      "[Fifth](https://example.test/5) neutral filled",
+      "[Sixth](https://example.test/6) blue filled",
+      "[Seventh](https://example.test/7) green filled",
+      "[Eighth](https://example.test/8) violet filled",
+    ];
+    const canonical = [
+      "[First](https://example.test)", "[Second](codex://new) blue",
+      "[Third](claude://code/new) green", "[Fourth](claude-cli://open) violet",
+      "[Fifth](https://example.test/5) filled", "[Sixth](https://example.test/6) filled blue",
+      "[Seventh](https://example.test/7) filled green", "[Eighth](https://example.test/8) filled violet",
+    ];
+    const { doc, id, card } = fixture(`title: Actions\n${values.map((value) => `button: ${value}`).join("\n")}\nfooter: Metadata\n\nBody`);
+    expect(card.getAttribute("button")).toBe(canonical.join("\n"));
+    expect(getBlockText(doc, id)).toBe(`title: Actions\nfooter: Metadata\n${canonical.map((value) => `button: ${value}`).join("\n")}\n\nBody`);
+    const copy = imported(exportMarkdown(doc, { frontmatter: false }));
+    expect(getBlocks(copy)[0]!.text).toBe(getBlockText(doc, id));
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(cardButtons(card));
+    expect(cardButtons(card)[0]).toEqual({ text: "First", href: "https://example.test" });
+  });
+
+  it("accepts lists beyond any fixed button count", () => {
+    const buttons = Array.from({ length: 50 }, (_, index) => ({ text: `Action ${index}`, href: `https://example.test/${index}` }));
+    const { doc, id, card } = fixture(`title: Many actions\n${buttons.map((button) => `button: ${writeCardButton(button)}`).join("\n")}\n\n`);
+    expect(cardButtons(card)).toEqual(buttons);
+    expect(getBlockText(doc, id).match(/^button:/gm)).toHaveLength(50);
+  });
+
+  it("refuses long malformed appearance suffixes without backtracking", () => {
+    const suffix = "\t".repeat(100_000);
+    for (const ending of ["\r", "\n"]) {
+      expect(() => parseCardButton(`[Action](codex://new)${suffix}${ending}`)).toThrow(InvalidCardError);
+    }
+  });
+
+  it("refuses unsupported whole-button appearance values before serializing them", () => {
+    for (const appearance of [{ style: "filled blue" }, { style: "" }, { color: "filled" }, { color: "amber" }]) {
+      expect(() => writeCardButton({ text: "Action", href: "codex://new", ...appearance } as CardButton)).toThrow(InvalidCardError);
+    }
+  });
+
+  it.each([
+    "[Bad](https://example.test) amber", "[Bad](https://example.test) filled outline",
+    "[Bad](https://example.test) filled filled", "[Bad](https://example.test) blue green",
+    "[Bad](https://example.test) neutral neutral", "[Bad](https://example.test) blue filled trailing",
+    "[Bad](https://example.test)filled", "[Bad](https://example.test) [Other](https://example.test)",
+    "[Bad](javascript:alert(1))", "[**Bad**](https://example.test)",
+  ])("refuses the complete write and preserves literal import when a later button is invalid: %s", (value) => {
+    const { doc, id } = fixture();
+    const source = `title: Actions\nbutton: [Good](codex://new) filled blue\nbutton: ${value}\n\nBody`;
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(() => appendBlock(doc, { type: "card", text: source })).toThrow(InvalidCardError);
+    expect(() => editBlock(doc, id, SOURCE, source)).toThrow(InvalidCardError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    const container = `:::card\n${source}\n:::`;
+    expect(importMarkdown(container).blocks).toEqual([{ type: "paragraph", text: container, inline: [{ text: container, marks: {} }] }]);
+  });
+
+  it.each(["label", "title", "footer"])("still refuses duplicate %s headers beside repeated buttons", (key) => {
+    const source = `title: Actions\nbutton: [First](codex://new)\n${key}: One\nbutton: [Second](claude-cli://open)\n${key}: Two\n\n`;
+    expect(() => parseCardInput(source)).toThrow(InvalidCardError);
+    const container = `:::card\n${source}\n:::`;
+    expect(importMarkdown(container).blocks[0]!.type).toBe("paragraph");
+  });
+
+  it.each(["", "\n[Good](codex://new)", "[Good](codex://new)\n", "[Good](codex://new)\n\n[Other](codex://new)", "[Good](codex://new)\ninvalid"])("never uses or rewrites malformed stored lists: %s", (source) => {
+    const { doc, id, card } = fixture();
+    card.setAttribute("button", source);
+    expect(() => parseCardButtons(source)).toThrow(InvalidCardError);
+    expect(isSupportedCard(card)).toBe(false);
+    expect(cardButtons(card)).toEqual([]);
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(() => editBlock(doc, id, getBlockText(doc, id), SOURCE)).toThrow(InvalidCardError);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+  });
+
+  it("includes each button property and position in rev, but only ordered text in approval", () => {
+    const source = `title: Actions\nbutton: [First](codex://new)\nbutton: [Second](claude-cli://open) filled blue\n\nBody`;
+    const { doc, id, card } = fixture(source);
+    const originalRev = getBlock(doc, id)!.rev;
+    const originalApproval = decisionApprovalFingerprint(doc);
+    for (const [changed, approvalChanges] of [
+      [source.replace("[First]", "[Renamed]"), true],
+      [source.replace("codex://new", "https://example.test"), false],
+      [source.replace("filled blue", "blue"), false],
+      [source.replace("filled blue", "filled green"), false],
+      [source.replace("button: [First](codex://new)\nbutton: [Second](claude-cli://open) filled blue", "button: [Second](claude-cli://open) filled blue\nbutton: [First](codex://new)"), true],
+    ] as const) {
+      editBlock(doc, id, source, changed);
+      expect(getBlock(doc, id)!.rev).not.toBe(originalRev);
+      expect(decisionApprovalFingerprint(doc) === originalApproval).toBe(!approvalChanges);
+      editBlock(doc, id, changed, source);
+    }
+    const buttons = cardButtons(card);
+    editBlock(doc, id, source, source.replace("Body", "Changed body"));
+    expect(cardButtons(card)).toEqual(buttons);
+    const before = getBlockText(doc, id);
+    editBlock(doc, id, before, before.replace("[First]", "[Updated first]"));
+    expect(cardButtons(card)[1]).toEqual(buttons[1]);
+  });
+
+  it("syncs one complete atomic button list while concurrent prose edits survive", () => {
+    let id = "";
+    const [a, b] = replicaPair((doc) => {
+      initDoc(doc, { uuid: UUID, title: "Cards" });
+      id = appendBlock(doc, { type: "card", text: SOURCE });
+    });
+    const lists: CardButton[][] = [
+      [{ text: "First A", href: "codex://new", style: "filled", color: "blue" }, { text: "Second A", href: "https://example.test/a", color: "green" }],
+      [{ text: "First B", href: "claude-cli://open", color: "violet" }, { text: "Second B", href: "https://example.test/b", style: "filled" }],
+    ];
+    for (const [index, doc] of [a, b].entries()) {
+      editBlock(doc, id, SOURCE, SOURCE.replace("footer: Metadata", `footer: Metadata\n${lists[index]!.map((button) => `button: ${writeCardButton(button)}`).join("\n")}`));
+    }
+    partText(findBlockElement(a, id)!, "title").insert(0, "Changed ");
+    partText(findBlockElement(b, id)!, "body").insert(0, "Concurrent ");
+    syncDocs(a, b);
+    expect(lists).toContainEqual(cardButtons(findBlockElement(a, id)!));
+    expect(cardButtons(findBlockElement(b, id)!)).toEqual(cardButtons(findBlockElement(a, id)!));
+    expect(cardInline(findBlockElement(a, id)!).title[0]!.text).toBe("Changed A useful title");
+    expect(cardInline(findBlockElement(a, id)!).body[0]!.text).toBe("Concurrent The body text.");
+    expect(writeCardButtons([])).toBe("");
+    const current = getBlockText(a, id);
+    editBlock(a, id, current, current.replace(/^button:.*\n/gm, ""));
+    syncDocs(a, b);
+    expect(findBlockElement(b, id)!.getAttribute("button")).toBeUndefined();
+  });
+
   it.each([
     "https://example.test/path?prompt=a%20b#details",
     "claude://code/new", "claude-cli://open", "codex://new",
@@ -232,7 +378,7 @@ describe("card link button", () => {
     expect(getBlockText(doc, id)).toBe(SOURCE.replace("footer: Metadata", `footer: Metadata\nbutton: ${source}`));
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
     expect(getBlocks(copy).map(({ text }) => text)).toEqual([getBlockText(doc, id)]);
-    expect(cardButton(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual({ text: "Author's text", href });
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([{ text: "Author's text", href }]);
   });
 
   it.each([
@@ -253,7 +399,7 @@ describe("card link button", () => {
     expect(importMarkdown(container).blocks).toEqual([{ type: "paragraph", text: container, inline: [{ text: container, marks: {} }] }]);
     card.setAttribute("button", `[Discuss](${href})`);
     expect(isSupportedCard(card)).toBe(false);
-    expect(cardButton(card)).toBeUndefined();
+    expect(cardButtons(card)).toEqual([]);
   });
 
   it.each([
@@ -262,7 +408,6 @@ describe("card link button", () => {
     "[`code`](https://example.test)", "[~~strike~~](https://example.test)",
     `[doc](${TARGET})`, "[A](https://example.test) trailing",
     "[A](https://example.test) [B](https://example.test)", "[A](https://example.test \"Title\")",
-    "[A](https://example.test)\nbutton: [B](codex://new)",
   ])("requires a single link with a plain nonempty label: %s", (value) => {
     expect(() => parseCardInput(`title: Action\nbutton: ${value}\n\nBody`)).toThrow(InvalidCardError);
     const container = `:::card\ntitle: Action\nbutton: ${value}\n\nBody\n:::`;
@@ -274,10 +419,10 @@ describe("card link button", () => {
     const href = "codex://new?prompt=space and (<opaque>)\\literal&encoded=%2F%25";
     const button = { text, href };
     const { doc, id, card } = fixture(`title: Action\nbutton: ${writeCardButton(button)}\n\nBody`);
-    expect(cardButton(card)).toEqual(button);
+    expect(cardButtons(card)).toEqual([button]);
     const copy = imported(exportMarkdown(doc, { frontmatter: false }));
     expect(getBlocks(copy)[0]!.text).toBe(getBlockText(doc, id));
-    expect(cardButton(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual(button);
+    expect(cardButtons(findBlockElement(copy, getBlocks(copy)[0]!.id)!)).toEqual([button]);
     for (const value of ["", " ", "line\nbreak", "line\rbreak"]) {
       expect(() => writeCardButton({ text: value, href })).toThrow(InvalidCardError);
     }
@@ -324,13 +469,13 @@ describe("card link button", () => {
     partText(findBlockElement(b, id)!, "body").insert(0, "Concurrent ");
     syncDocs(a, b);
     expect(getBlockText(a, id)).toBe(getBlockText(b, id));
-    const winner = cardButton(findBlockElement(a, id)!);
-    expect([{ text: "First", href: "codex://new" }, { text: "Second", href: "claude-cli://open?q=second" }]).toContainEqual(winner);
+    const winner = cardButtons(findBlockElement(a, id)!);
+    expect([[{ text: "First", href: "codex://new" }], [{ text: "Second", href: "claude-cli://open?q=second" }]]).toContainEqual(winner);
     expect(cardInline(findBlockElement(a, id)!).title).toEqual([{ text: "Changed A useful title", marks: {} }]);
     expect(cardInline(findBlockElement(a, id)!).body).toEqual([{ text: "Concurrent The body text.", marks: {} }]);
     const current = getBlockText(a, id);
     editBlock(a, id, current, current.replace(/^button:.*\n/m, ""));
     syncDocs(a, b);
-    expect(cardButton(findBlockElement(b, id)!)).toBeUndefined();
+    expect(cardButtons(findBlockElement(b, id)!)).toEqual([]);
   });
 });

@@ -50,8 +50,10 @@ describe("card editor", () => {
   });
 
   it("preserves the atomic button through binding and prose edits and refuses invalid local button changes", () => {
-    const button = "[Discuss in Codex](codex://new?prompt=Review%20this)";
-    const { ydoc, card } = cardDoc(`title: A title\nfooter: Metadata\nbutton: ${button}\n\nBody words`);
+    const first = "[Discuss in Codex](codex://new?prompt=Review%20this) filled blue";
+    const second = "[Read details](https://example.invalid/details) green";
+    const button = `${first}\n${second}`;
+    const { ydoc, card } = cardDoc(`title: A title\nfooter: Metadata\nbutton: ${first}\nbutton: ${second}\n\nBody words`);
     const before = Y.encodeStateAsUpdate(ydoc);
     const { editor } = mountEditor(ydoc);
     expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
