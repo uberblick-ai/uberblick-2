@@ -1,0 +1,206 @@
+import { Extension } from "@tiptap/core";
+import type { Mark, Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import type { EditorState } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { COMMENT_MARK, githubItemUrl } from "@uberblick/schema";
+import type { GitHubItem } from "@uberblick/schema";
+
+interface LinkRange {
+  from: number;
+  to: number;
+  text: string;
+  link: Mark;
+  comments: Mark[];
+}
+
+function linkRanges(doc: ProseMirrorNode): LinkRange[] {
+  const ranges: LinkRange[] = [];
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    let current: LinkRange | undefined;
+    node.forEach((child, offset) => {
+      const link = child.isText
+        ? child.marks.find((mark) => mark.type.name === "link")
+        : undefined;
+      if (link === undefined) {
+        current = undefined;
+        return;
+      }
+      const from = pos + 1 + offset;
+      if (current === undefined || !current.link.eq(link)) {
+        current = { from, to: from, text: "", link, comments: [] };
+        ranges.push(current);
+      }
+      current.to = from + child.nodeSize;
+      current.text += child.text;
+      // A comment on any part of the stored reference stays visible on its pill.
+      for (const mark of child.marks) {
+        if (
+          mark.type.name === COMMENT_MARK &&
+          !current.comments.some((comment) => comment.eq(mark))
+        ) current.comments.push(mark);
+      }
+    });
+    return false;
+  });
+  return ranges;
+}
+
+function namesItem(text: string, href: string, item: GitHubItem): boolean {
+  if (text === href) return true;
+  const match = /^(?:(?:([^/\s#]+)\/)?([^/\s#]+))?#([0-9]+)$/.exec(text);
+  if (match === null) return false;
+  const [, owner, repo, number] = match;
+  return (
+    number?.replace(/^0+(?=\d)/, "") === item.number &&
+    (owner === undefined || owner.toLowerCase() === item.owner.toLowerCase()) &&
+    (repo === undefined || repo.toLowerCase() === item.repo.toLowerCase())
+  );
+}
+
+function pill(item: GitHubItem): HTMLElement {
+  const dom = document.createElement("span");
+  dom.className = "ub-github-pill";
+  const label = `${item.kind === "issue" ? "Issue" : "Pull request"} ${item.owner}/${item.repo}#${item.numberText}`;
+  // The mark view gives the native anchor this label, including through comments.
+  dom.setAttribute("aria-hidden", "true");
+  dom.title = label;
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 16 16");
+  icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("fill", "none");
+  icon.setAttribute("stroke", "currentColor");
+  icon.setAttribute("stroke-width", "1.5");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", item.kind === "issue"
+    ? "M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M8 4.5v4M8 10.5v1"
+    : "M4 5v6M4 2a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M4 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11V6a3 3 0 0 0-3-3H8M10 1L8 3l2 2");
+  icon.append(path);
+  const repo = document.createElement("span");
+  repo.className = "ub-github-pill-repo";
+  repo.textContent = item.repo;
+  repo.setAttribute("aria-hidden", "true");
+  const number = document.createElement("span");
+  number.className = "ub-github-pill-number";
+  number.textContent = `#${item.numberText}`;
+  number.setAttribute("aria-hidden", "true");
+  dom.append(icon, repo, number);
+  return dom;
+}
+
+function decorations(state: EditorState, focused: boolean): DecorationSet {
+  const result: Decoration[] = [];
+  const selection = state.selection;
+  for (const range of linkRanges(state.doc)) {
+    const href: unknown = range.link.attrs.href;
+    if (typeof href !== "string") continue;
+    const item = githubItemUrl(href);
+    if (item === null || !namesItem(range.text, href, item)) continue;
+    const editing = selection.empty
+      ? range.from < selection.from && selection.from < range.to
+      : selection.from < range.to && range.from < selection.to;
+    if (focused && editing) continue;
+    result.push(
+      Decoration.inline(range.from, range.to, {
+        class: "ub-github-link-text",
+        "aria-hidden": "true",
+      }),
+      Decoration.widget(range.to, () => pill(item), {
+        // Explicit marks keep activation and comment presentation on their usual paths.
+        marks: [range.link, ...range.comments],
+        side: -1,
+        key: JSON.stringify([range.to, href, range.text, range.comments.map((mark) => mark.attrs)]),
+      }),
+    );
+  }
+  return DecorationSet.create(state.doc, result);
+}
+
+const githubLinksKey = new PluginKey<DecorationSet>("uberblickGithubLinks");
+
+/** Presentation only: clipboard serialization and Yjs see the original link. */
+export const GitHubLinks = Extension.create({
+  name: "uberblickGithubLinks",
+  // The lone-URL shortcut runs before the table's plain-text paste normalization.
+  priority: 1200,
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    const anchors = new Set<HTMLAnchorElement>();
+    const repaint = (): void => {
+      for (const anchor of anchors) {
+        const label = anchor.querySelector(".ub-github-pill")?.getAttribute("title");
+        if (label) {
+          anchor.setAttribute("aria-label", label);
+          anchor.title = label;
+          anchor.removeAttribute("tabindex");
+          anchor.removeAttribute("aria-hidden");
+        } else {
+          anchor.removeAttribute("aria-label");
+          anchor.removeAttribute("title");
+          // Partial formatting can split the source into additional anchors.
+          const hidden = anchor.querySelector(".ub-github-link-text") !== null;
+          if (hidden) {
+            anchor.tabIndex = -1;
+            anchor.setAttribute("aria-hidden", "true");
+          } else {
+            anchor.removeAttribute("tabindex");
+            anchor.removeAttribute("aria-hidden");
+          }
+        }
+      }
+    };
+    return [new Plugin({
+      key: githubLinksKey,
+      state: {
+        init: (_config, state) => decorations(state, editor.isFocused),
+        apply: (tr, previous, _oldState, state) =>
+          tr.docChanged || tr.selectionSet || tr.getMeta("focus") || tr.getMeta("blur")
+            ? decorations(state, editor.isFocused) : previous,
+      },
+      props: {
+        markViews: {
+          link: (mark) => {
+            const dom = document.createElement("a");
+            dom.className = "ub-link";
+            if (typeof mark.attrs.href === "string") dom.setAttribute("href", mark.attrs.href);
+            dom.target = "_blank";
+            dom.rel = "noopener noreferrer nofollow";
+            anchors.add(dom);
+            return {
+              dom,
+              // The accessible label is derived from decorations, never stored.
+              ignoreMutation: (mutation) => mutation.type === "attributes",
+              destroy: () => { anchors.delete(dom); },
+            };
+          },
+        },
+        decorations: (state) => githubLinksKey.getState(state),
+        handlePaste: (view, event) => {
+          const text = event.clipboardData?.getData("text/plain") ?? "";
+          if (
+            !view.editable || event.clipboardData?.getData("text/html") ||
+            /\s/.test(text) || view.state.selection.$from.parent.type.spec.code
+          ) return false;
+          const item = githubItemUrl(text);
+          const link = view.state.schema.marks.link;
+          if (item === null || link === undefined) return false;
+          const { $from, $to } = view.state.selection;
+          if (!$from.parent.type.allowsMarkType(link) || !$to.parent.type.allowsMarkType(link)) return false;
+          view.dispatch(view.state.tr.replaceSelectionWith(
+            view.state.schema.text(
+              `${item.owner}/${item.repo}#${item.numberText}`,
+              link.create({ href: text }).addToSet(view.state.storedMarks ?? $from.marks()),
+            ),
+            false,
+          ).scrollIntoView());
+          return true;
+        },
+      },
+      view: () => {
+        repaint();
+        return { update: repaint };
+      },
+    })];
+  },
+});
