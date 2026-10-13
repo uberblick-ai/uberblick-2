@@ -555,7 +555,7 @@ describe("ub open: sharing through the upstream hub", () => {
     }
   });
 
-  it("searches the shared store while the hub is unreachable and discloses its cap", async () => {
+  it("searches the shared store while the hub is unreachable and returns every ranked UUID", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     const app = await open(box, ["--port", String(await freePort())], env);
@@ -597,7 +597,6 @@ describe("ub open: sharing through the upstream hub", () => {
       };
       const servedSearch = async (query: string): Promise<{
         hits: { uuid: string }[];
-        limit: number;
         capped: boolean;
       }> => {
         const response = await fetch(`${app.url}api/search?q=${encodeURIComponent(query)}`, {
@@ -606,7 +605,6 @@ describe("ub open: sharing through the upstream hub", () => {
         expect(response.status).toBe(200);
         return await response.json() as {
           hits: { uuid: string }[];
-          limit: number;
           capped: boolean;
         };
       };
@@ -619,7 +617,6 @@ describe("ub open: sharing through the upstream hub", () => {
       expect(found.headers.get("access-control-allow-origin")).toBeNull();
       expect(await found.json()).toEqual({
         hits: [{ uuid: created.uuid }],
-        limit: 100,
         capped: false,
       });
 
@@ -642,7 +639,7 @@ describe("ub open: sharing through the upstream hub", () => {
       for (const query of ["launch neverindexedword", "launched", "mcp", "ecole", "work*", "badg*"]) {
         const served = await servedSearch(query);
         expect(served.hits.map(({ uuid }) => uuid)).toEqual(await mcpUuids(query, 100));
-        expect(served).toMatchObject({ limit: 100, capped: false });
+        expect(served).toMatchObject({ capped: false });
         expect(served.hits.length).toBeGreaterThan(0);
       }
       const launchUuids = (await servedSearch("launch neverindexedword")).hits.map(({ uuid }) => uuid);
@@ -651,11 +648,11 @@ describe("ub open: sharing through the upstream hub", () => {
       expect(new Set(launchUuids)).toEqual(new Set(fixtureUuids.slice(0, 3)));
       expect((await servedSearch("mcp")).hits).toEqual([{ uuid: fixtureUuids[3] }]);
 
-      for (let index = 0; index <= 100; index += 1) {
+      for (let index = 0; index < 150; index += 1) {
         instance.store.indexDoc(
           {
             uuid: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
-            title: `Capacity ${index}`,
+            title: "Capacity",
             description: "",
             tags: [],
             links: [],
@@ -664,29 +661,27 @@ describe("ub open: sharing through the upstream hub", () => {
           1,
         );
       }
-      const capped = await fetch(`${app.url}api/search?q=capacityneedle`, {
+      const complete = await fetch(`${app.url}api/search?q=capacityneedle`, {
         headers: bearer(auth),
       });
-      const cappedBody = (await capped.json()) as {
+      expect(complete.status).toBe(200);
+      const completeBody = (await complete.json()) as {
         hits: { uuid: string }[];
-        limit: number;
         capped: boolean;
       };
-      expect(cappedBody).toMatchObject({
-        limit: 100,
-        capped: true,
-      });
-      expect(cappedBody.hits).toHaveLength(100);
-      expect(cappedBody.hits.map(({ uuid }) => uuid)).toEqual(await mcpUuids("capacityneedle", 100));
+      expect(completeBody.capped).toBe(false);
+      expect(completeBody.hits).toHaveLength(150);
+      expect(completeBody.hits.slice(0, 100).map(({ uuid }) => uuid)).toEqual(await mcpUuids("capacityneedle", 100));
+      expect(completeBody.hits[149]).toEqual({ uuid: "10000000-0000-4000-8000-000000000149" });
       expect(await mcpUuids("capacityneedle")).toHaveLength(20);
-      expect(cappedBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
+      expect(completeBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
         .toBe(true);
 
       const empty = await fetch(`${app.url}api/search?q=%F0%9F%8C%BF`, {
         headers: bearer(auth),
       });
       expect(empty.status).toBe(200);
-      expect(await empty.json()).toEqual({ hits: [], limit: 100, capped: false });
+      expect(await empty.json()).toEqual({ hits: [], capped: false });
 
       const missing = await fetch(`${app.url}api/search`, {
         headers: bearer(auth),

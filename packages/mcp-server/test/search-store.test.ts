@@ -96,6 +96,41 @@ describe("title-weighted search relevance", () => {
   });
 });
 
+describe("complete UUID search", () => {
+  it("keeps full-hit matching and relevance without limiting matches or reading their metadata", () => {
+    const store = open();
+    [
+      row("title", "Launching guide", { body: "Background details." }),
+      row("description", "Delivery guide", { description: "Launched changes." }),
+      row("body", "Delivery overview", { body: "Launch details." }),
+      row("tags", "Interface notes", { tagNames: ["protocol"], body: "École worktree workspace" }),
+      row("decision", "What is the launch plan?", { kind: "decision" }),
+    ].forEach((doc) => { store.indexDoc(doc, 1); });
+    for (let n = 0; n < 150; n++) {
+      store.indexDoc(row(`sync-${String(n).padStart(3, "0")}`, "Sync", { body: "Sync" }), 1);
+    }
+    for (const query of ["launch neverindexedword", "launched", "protocol", "ecole", "work*", "sync"]) {
+      expect(store.searchUuids(query)).toEqual(store.search(query, 1_000).map(({ uuid }) => uuid));
+    }
+    expect(store.searchUuids("sync")).toHaveLength(150);
+    expect(store.searchUuids("sync")[149]).toBe("sync-149");
+    expect(store.searchUuids("launch")).toContain("decision");
+    expect(store.searchUuids("🌿")).toEqual([]);
+    expect(store.searchUuids("missingword")).toEqual([]);
+  });
+
+  it("drops unindexed documents and finds updated fields", () => {
+    const store = open();
+    store.indexDoc(row("live", "Old title", { body: "launching" }), 1);
+    store.indexDoc(row("archived", "Launching"), 1);
+    store.unindexDoc("archived");
+    expect(store.searchUuids("launch")).toEqual(["live"]);
+    store.indexDoc(row("live", "Changed title", { tagNames: ["renamed"] }), 2);
+    expect(store.searchUuids("launch")).toEqual([]);
+    expect(store.searchUuids("renamed")).toEqual(["live"]);
+  });
+});
+
 function downgrade(path: string): void {
   const db = new DatabaseSync(path);
   db.exec(

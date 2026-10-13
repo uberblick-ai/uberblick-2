@@ -2366,6 +2366,24 @@ h3.ub-heading {
 
 .ub-docs-mode-fieldset {
   max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ub-docs-filter-control {
+  min-height: 2rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font: 400 0.875rem/1.25rem var(--font-sans);
+}
+
+.ub-docs-tag-filter {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
 }
 
 /* The search-label wrapper keeps a full-width box for its input. */
@@ -2378,6 +2396,36 @@ h3.ub-heading {
   width: 100%;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
+  background: transparent;
+  font: 400 0.875rem/1.25rem var(--font-sans);
+}
+
+.ub-docs-search-status {
+  margin: 0;
+  font: 400 0.8125rem/1.125rem var(--font-sans);
+}
+
+.ub-docs-clear-tags,
+.ub-docs-clear-filters {
+  min-height: 2rem;
+  padding: 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: 400 0.875rem/1.25rem var(--font-sans);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.ub-docs-clear-tags {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+
+.ub-docs-clear-tags:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
 }
 
 .ub-docs-empty {
@@ -2395,6 +2443,14 @@ h3.ub-heading {
 }
 
 .ub-docs-age-column {
+  width: 8rem;
+}
+
+.ub-docs-group-column {
+  width: 7rem;
+}
+
+.ub-docs-tags-column {
   width: 10rem;
 }
 
@@ -2406,7 +2462,8 @@ h3.ub-heading {
   padding: 0 0 0.25rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
-  font-size: 0.8rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   font-weight: 500;
   text-align: left;
 }
@@ -2424,6 +2481,22 @@ h3.ub-heading {
   text-align: left;
 }
 
+.ub-docs-row {
+  border-bottom: 1px solid var(--border);
+}
+
+.ub-docs-heading-cell--group,
+.ub-docs-heading-cell--tags,
+.ub-docs-group-cell,
+.ub-docs-tags-cell {
+  padding: 0.4rem;
+  vertical-align: middle;
+}
+
+.ub-docs-tags-cell {
+  padding-block: 0.25rem;
+}
+
 .ub-docs-open {
   display: flex;
   align-items: baseline;
@@ -2433,6 +2506,7 @@ h3.ub-heading {
 
 .ub-docs-title {
   flex: 1 1 auto;
+  min-width: 0;
 }
 
 .ub-docs-open--topic {
@@ -2455,17 +2529,79 @@ h3.ub-heading {
 
 .ub-docs-group,
 .ub-docs-age {
-  font-size: 0.78rem;
+  font-size: 0.8125rem;
+  line-height: 1.125rem;
   color: var(--muted-foreground);
 }
 
 .ub-docs-group {
-  flex: none;
+  overflow-wrap: anywhere;
 }
 
-/* Document ages use the mono face for machine facts. */
 .ub-docs-age {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.ub-docs-tags,
+.ub-docs-tag-measure {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.ub-docs-tags {
+  position: relative;
+  min-width: 0;
+}
+
+.ub-docs-tag-measure {
+  position: absolute;
+  visibility: hidden;
+  /* Clip the measuring strip while leaving visible chip focus rings intact. */
+  width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ub-docs-tag-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+  padding: 0.125rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: 400 0.75rem/1rem var(--font-sans);
+  white-space: nowrap;
+}
+
+button.ub-docs-tag-chip {
+  cursor: pointer;
+}
+
+button.ub-docs-tag-chip:hover {
+  color: var(--foreground);
+}
+
+@media (any-pointer: coarse) {
+  .ub-docs-filter-control,
+  .ub-docs-clear-tags,
+  .ub-docs-clear-filters,
+  .ub-docs-tag-chip {
+    min-height: 2.75rem;
+  }
+}
+
+@media (max-width: 850px) {
+  .ub-docs-tags-column,
+  .ub-docs-heading-cell--tags,
+  .ub-docs-tags-cell {
+    display: none;
+  }
 }
 
 .ub-docs-age-cell {
