@@ -13,6 +13,7 @@ import {
   MAX_TLDR_LENGTH,
   parseRoom,
   setTldr,
+  setTldrOptOut,
   setTitle,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -944,7 +945,11 @@ export function EditorPane({
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const editingTldr = meta?.kind !== "decision" && connection?.room === tldrEditorRoom;
+  const editingTldr = meta?.kind !== "decision" && meta?.tldrOptOut !== true && connection?.room === tldrEditorRoom;
+
+  useEffect(() => {
+    if (meta?.tldrOptOut === true) setTldrEditorRoom(null);
+  }, [meta?.tldrOptOut]);
 
   if (connection === null) {
     return (
@@ -992,7 +997,16 @@ export function EditorPane({
           onArchive={onArchive}
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
-          onEditTldr={() => setTldrEditorRoom(connection.room)}
+          onEditTldr={() => {
+            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            if (getMeta(connection.ydoc).tldrOptOut === true) setTldrOptOut(connection.ydoc, false);
+            setTldrEditorRoom(connection.room);
+          }}
+          onRemoveTldr={() => {
+            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            setTldrOptOut(connection.ydoc, true);
+            setTldrEditorRoom(null);
+          }}
         />
         {header ?? <input
           className="ub-title"

@@ -67,7 +67,11 @@ export const toolHelpDetails = {
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
     "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one — its blocks and its annotation threads. Lifecycle documents include `kind` and their " +
+    "has written one — its blocks and its annotation threads. A regular page with a deliberate TL;DR removal " +
+    "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
+    "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
+    "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
+    "decision records omit `tldrOptOut`. Lifecycle documents include `kind` and their " +
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
@@ -352,7 +356,14 @@ export const toolHelpDetails = {
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
     "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
     "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +
-    "overlong TL;DR values are refused; use null to clear it. On an open decision, non-null tldr refuses with " +
+    "overlong TL;DR values are refused; use null to clear it. A person can deliberately remove a regular " +
+    "page's TL;DR through the web menu; MCP cannot set that mark. On a marked page, non-null `tldr` " +
+    "without `tldr_opt_in: true` refuses with `tldr_opted_out` and `field: \"tldr\"`, writing nothing. " +
+    "Pass `tldr_opt_in: true` with a non-null `tldr` to write the summary and lift the mark. The flag " +
+    "requires a non-null `tldr` in the same call, even when false; on an unmarked page it adds no effect. " +
+    "`tldr: null` alone preserves the mark. Summary text takes precedence over the mark, including " +
+    "concurrent and older-client writes. Only get_doc reports the mark as `tldrOptOut: true`. " +
+    "On an open decision, non-null tldr refuses with " +
     "decision_tldr_unsupported; null clears a legacy value. Decisions hold one to three short answer blocks " +
     "with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Their " +
     "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
@@ -378,7 +389,7 @@ export const toolHelpDetails = {
     "or approvalChanged. It is distinct from curated links and recorded answer attribution.\n\n" +
     "A decided record refuses title, tldr or discussion with `decision_read_only` and the refused field, " +
     "but accepts description, tags and links. An archived document refuses every metadata field. A success " +
-    "returns uuid and the metadata fields as get_doc would read them, including unchanged values and " +
+    "returns uuid and the descriptive metadata fields, including unchanged values and " +
     "discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:

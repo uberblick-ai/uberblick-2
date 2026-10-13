@@ -1,7 +1,7 @@
 /** The person-facing summary and the narrow reminder attached to content edits. */
 
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { MAX_TLDR_LENGTH, getMetaMap } from "@uberblick/schema";
+import { MAX_TLDR_LENGTH, getMetaMap, setTldrOptOut } from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -24,6 +24,86 @@ afterAll(() => {
 });
 
 describe("set_metadata", () => {
+  it("preserves deliberate removal when clearing and reports it only in get_doc", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Short reference", description: "A compact reference.",
+      blocks: [{ type: "paragraph", text: "One example." }],
+    });
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).not.toHaveProperty("tldrOptOut");
+    setTldrOptOut(rig.instance.replicas.replica(doc.uuid).doc, true);
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: null, tldrOptOut: true });
+    const cleared = await rig.ok("set_metadata", { uuid: doc.uuid, tldr: null });
+    expect(cleared).toMatchObject({ tldr: null, applied: true });
+    expect(cleared).not.toHaveProperty("tldrOptOut");
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: null, tldrOptOut: true });
+    for (const result of [
+      cleared,
+      ...(await rig.ok("list_docs")).docs,
+      ...(await rig.ok("search", { query: "reference" })).hits,
+      await rig.ok("export_markdown", { uuid: doc.uuid }),
+      await rig.ok("get_sidebar"),
+    ]) expect(result).not.toHaveProperty("tldrOptOut");
+    expect((await rig.ok("export_markdown", { uuid: doc.uuid })).markdown).not.toContain("tldrOptOut");
+  });
+
+  it("accepts opt-in on an unmarked page without affecting any other metadata", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", { title: "Unmarked", description: "Plain document." });
+    for (const tldr_opt_in of [true, false]) {
+      await rig.ok("set_metadata", { uuid: doc.uuid, tldr: "A summary.", tldr_opt_in });
+      const read = await rig.ok("get_doc", { uuid: doc.uuid });
+      expect(read).toMatchObject({ title: "Unmarked", description: "Plain document.", tldr: "A summary." });
+      expect(read).not.toHaveProperty("tldrOptOut");
+    }
+  });
+
+  it("ignores an older writer's retained mark when summary text is present", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Older writer", description: "A compatibility fixture.",
+      blocks: [{ type: "paragraph", text: "Before" }],
+    });
+    const replica = rig.instance.replicas.replica(doc.uuid);
+    setTldrOptOut(replica.doc, true);
+    getMetaMap(replica.doc).set("tldr", "Summary from an older client.");
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read.tldr).toBe("Summary from an older client.");
+    expect(read).not.toHaveProperty("tldrOptOut");
+    const edited = await rig.ok("edit_block", {
+      uuid: doc.uuid, block_id: read.blocks[0].id, old_text: read.blocks[0].text,
+      new_text: "After", rev: read.blocks[0].rev,
+    });
+    expect(edited.tldrHint).toContain("review its TL;DR");
+    await rig.ok("set_metadata", { uuid: doc.uuid, tldr: "Updated without opt-in." });
+    expect((await rig.ok("get_doc", { uuid: doc.uuid })).tldr).toBe("Updated without opt-in.");
+  });
+
+  it("keeps decision exclusions and TL;DR refusals even if raw metadata has a mark", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Open decision", description: "A decision fixture.", kind: "decision", status: "open",
+      blocks: [{ type: "paragraph", text: "A short answer." }],
+    });
+    const raw = getMetaMap(rig.instance.replicas.replica(doc.uuid).doc);
+    raw.set("tldrOptOut", true);
+    const read = await rig.ok("get_doc", { uuid: doc.uuid });
+    expect(read).not.toHaveProperty("tldrOptOut");
+    for (const optIn of [undefined, true]) {
+      const refused = await rig.call("set_metadata", {
+        uuid: doc.uuid, tldr: "Forbidden summary.",
+        ...(optIn === undefined ? {} : { tldr_opt_in: optIn }),
+      });
+      expect(refused).toMatchObject({ isError: true, payload: { error: "decision_tldr_unsupported", field: "tldr" } });
+    }
+    raw.set("tldr", "Legacy summary.");
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: "Legacy summary." });
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).not.toHaveProperty("tldrOptOut");
+    await rig.ok("set_metadata", { uuid: doc.uuid, tldr: null });
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: null });
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).not.toHaveProperty("tldrOptOut");
+  });
+
   it("sets, trims and explicitly clears the summary without touching description", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", {
@@ -95,6 +175,29 @@ describe("set_metadata", () => {
 });
 
 describe("the TL;DR review reminder", () => {
+  it("omits hints and missing-summary fields from all content writes on a marked page", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Examples only", description: "No summary needed.",
+      blocks: [{ type: "paragraph", text: "Before" }],
+    });
+    setTldrOptOut(rig.instance.replicas.replica(doc.uuid).doc, true);
+    const first = doc.blocks[0];
+    const edited = await rig.ok("edit_block", {
+      uuid: doc.uuid, block_id: first.id, old_text: first.text, new_text: "After", rev: first.rev,
+    });
+    const inserted = await rig.ok("insert_block", { uuid: doc.uuid, after_block_id: first.id, type: "paragraph", text: "Temporary" });
+    const deleted = await rig.ok("delete_block", { uuid: doc.uuid, block_id: inserted.block.id });
+    for (const result of [edited, inserted, deleted]) {
+      expect(result).not.toHaveProperty("tldrHint");
+      expect(result).not.toHaveProperty("tldr");
+      expect(result).not.toHaveProperty("tldrOptOut");
+    }
+    setTldrOptOut(rig.instance.replicas.replica(doc.uuid).doc, false);
+    const unmarked = await rig.ok("insert_block", { uuid: doc.uuid, type: "paragraph", text: "Now unmarked" });
+    expect(unmarked).toMatchObject({ tldr: null, tldrHint: expect.any(String) });
+  });
+
   it("follows only successful block-content mutations", async () => {
     const rig = await localRig();
     const metadataOnly = await rig.ok("create_doc", {

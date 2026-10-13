@@ -364,10 +364,12 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /** A non-blocking reminder returned only after document content changes. */
-  const tldrReview = (replica: Replica): Record<string, unknown> =>
-    getMeta(replica.doc).kind === "decision" ? {} : getMeta(replica.doc).tldr === null
+  const tldrReview = (replica: Replica): Record<string, unknown> => {
+    const meta = getMeta(replica.doc);
+    return meta.kind === "decision" || meta.tldrOptOut === true ? {} : meta.tldr === null
       ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
       : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };
+  };
 
   /**
    * Check health after the write: a refused append must not report applied.
