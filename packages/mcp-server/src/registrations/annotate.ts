@@ -17,7 +17,8 @@ export function registerAnnotate(server: ToolRegistrar, context: ToolContext): v
       "follow moved cells; orphaned ranges are null and orphaned threads still accept replies. Missing, invalid " +
       "or non-table coordinates refuse with annotation_cell; empty/overlapping ranges refuse with " +
       "annotation_range. Offsets are clamped to text. Opening a card thread refuses with annotation_card; " +
-      "open it in the web editor. Existing card threads accept replies, resolution and reopening." +
+      "open it in the web editor. Opening a Figma thread refuses with annotation_figma and no write. " +
+      "Existing card and Figma threads accept replies, resolution and reopening; Figma ranges name caption." +
       helpPointer("annotate"),
     outputSchema: outputSchemas.annotate,
     inputSchema,

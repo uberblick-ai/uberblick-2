@@ -167,7 +167,8 @@ async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" |
       const parent = container?.getBoundingClientRect();
       const previous = control.classList.contains("ub-group-act")
         ? control.previousElementSibling : container?.previousElementSibling;
-      const row = control.closest(".ub-docs-row")?.getBoundingClientRect();
+      const rowElement = control.closest(".ub-docs-row");
+      const row = rowElement?.getBoundingClientRect();
       return {
         name: control.getAttribute("aria-label"),
         pin: control.classList.contains("ub-docs-pin"),
@@ -180,6 +181,7 @@ async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" |
           && previous.getBoundingClientRect().right <= box.left + 0.5,
         parentWidth: parent?.width,
         rowHeight: row?.height,
+        rowRuleHeight: rowElement === null ? 0 : Number.parseFloat(getComputedStyle(rowElement).borderBottomWidth),
         openHeight: control.closest(".ub-docs-row")?.querySelector(".ub-docs-open")?.getBoundingClientRect().height,
         headerHeight: control.closest(".ub-group-head")?.getBoundingClientRect().height,
         toggleHeight: control.closest(".ub-group-head")?.querySelector(".ub-group-toggle")?.getBoundingClientRect().height,
@@ -198,9 +200,8 @@ async function expectTargetGeometry(page: Page, coarse: boolean, kind: "group" |
       expect(control.parentWidth).toBe(28);
     }
     if (control.pin && !coarse) {
-      // Existing inline-button baselines differ between engines on touch;
-      // desktop rows must still take their height from the document title.
-      expect(control.rowHeight).toBeLessThanOrEqual((control.openHeight ?? 0) + 0.5);
+      // The horizontal rule adds its width to the compact title row.
+      expect(control.rowHeight).toBeLessThanOrEqual((control.openHeight ?? 0) + control.rowRuleHeight + 0.5);
     }
     if (!control.pin) {
       expect(control.headerHeight).toBeLessThanOrEqual(Math.max(control.toggleHeight ?? 0, floor) + 0.5);

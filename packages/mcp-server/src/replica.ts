@@ -26,6 +26,8 @@ import {
   tableRows,
   cardPartTexts,
   cardPartElement,
+  figmaCaptionTexts,
+  figmaCaptionElement,
   CARD_PARTS,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -96,6 +98,7 @@ export function blockText(doc: Y.Doc, blockId: string): Y.XmlText | null {
       return cell === undefined ? null : tableCellText(cell);
     }
     if (child.nodeName === "card") return cardPartTexts(child, cardCursorPart(child))[0] ?? null;
+    if (child.nodeName === "figma") return figmaCaptionTexts(child)[0] ?? null;
     return child.firstChild instanceof Y.XmlText ? child.firstChild : null;
   }
   return null;
@@ -587,20 +590,21 @@ export class Replicas {
    */
   private indexRows(replica: Replica, meta: DocMeta): void {
     const blocks = getBlocksWithInline(replica.doc);
+    const tags = resolveTagAssignments(this.settings().doc, meta.tags);
     this.store.indexDoc(
       {
         uuid: meta.uuid,
         title: meta.title,
-        tags: resolveTagAssignments(this.settings().doc, meta.tags).map(
-          (entry) => entry.id,
-        ),
+        kind: meta.kind === "decision" ? "decision" : "regular",
+        tags: tags.map((entry) => entry.id),
+        tagNames: tags.flatMap((entry) => entry.name === null ? [] : [entry.name]),
         description: meta.description ?? "",
         links: [
           ...meta.links,
-          ...blocks.flatMap(({ block, inline, table, card }) =>
-            table === undefined && card === undefined
+          ...blocks.flatMap(({ block, inline, table, card, figma }) =>
+            table === undefined && card === undefined && figma === undefined
               ? docLinkRanges(block, inline).map((range) => range.docId)
-              : (table?.flat() ?? Object.values(card ?? {})).flatMap((cell) => cell.flatMap((run) =>
+              : (table?.flat() ?? Object.values(card ?? figma ?? {})).flatMap((cell: InlineRun[]) => cell.flatMap((run) =>
                 run.marks.docLink === undefined ? [] : [run.marks.docLink],
               )),
           ),
@@ -1025,6 +1029,8 @@ export class Replicas {
         ? tableRows(element).at(-1)?.at(-1)?.firstChild
         : element?.nodeName === "card"
         ? cardPartElement(element, cardCursorPart(element))?.firstChild
+        : element?.nodeName === "figma"
+        ? figmaCaptionElement(element)?.firstChild
         : null;
       if (paragraph instanceof Y.XmlElement) text = paragraph;
     }

@@ -7,6 +7,7 @@ import {
   InvalidDocumentLifecycleError,
   InvalidTableError,
   InvalidCardError,
+  InvalidFigmaError,
   InvalidTableMappingError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
@@ -190,11 +191,19 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   invalid_card: {
     recoveryClass: "manual",
-    guidance: "Supply card content without its :::card and ::: delimiter lines: label, title, footer and optional button keys at most once, a nonempty title, then a blank line and optional prose body. A button is exactly [Text](destination), with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. Remove unknown keys and non-key header lines. Nothing was written.",
+    guidance: "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",
   },
   annotation_card: {
     recoveryClass: "manual",
     guidance: "Open a card comment on selected text in the web editor, then use annotate with its thread_id to reply, resolve or reopen it. Nothing was written.",
+  },
+  invalid_figma: {
+    recoveryClass: "manual",
+    guidance: "Supply Figma content without its :::figma and ::: delimiter lines: required url, optional plain one-line title and optional whole-number height from 240 to 960, each at most once, then a blank line and optional prose caption. Use an https figma.com or www.figma.com design, file, proto, board, slides or community/file link. Remove unknown or duplicate keys and non-key header lines. Nothing was written.",
+  },
+  annotation_figma: {
+    recoveryClass: "manual",
+    guidance: "Use annotate with an existing Figma thread_id to reply, resolve or reopen it; MCP cannot open a new Figma caption thread. Nothing was written.",
   },
   table_mapping_required: {
     recoveryClass: "manual",
@@ -262,7 +271,7 @@ const RECOVERIES: Record<string, Recovery> = {
     guidance:
       "Call get_doc for the block's current text, its type and its `doc_links`, then link a range that fits — " +
       "`reason` says which of the three is in the way: `empty` (the range covers no characters), `not-prose` " +
-      "(code, mermaid, terminal and chart hold source text; table and card links belong to their parts and have no block-level ranges) or `overlap` (the range " +
+      "(code, mermaid, terminal and chart hold source text; table, card and Figma links belong to their parts and have no block-level ranges) or `overlap` (the range " +
       "is already an external link, and one range cannot be both).",
   },
   // Repeating a lookup cannot deliver a missing directory entry; hub sync may.
@@ -537,6 +546,9 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
   }
   if (error instanceof InvalidCardError) {
     return stamped(tool, { error: "invalid_card", message: error.message });
+  }
+  if (error instanceof InvalidFigmaError) {
+    return stamped(tool, { error: "invalid_figma", message: error.message });
   }
   if (error instanceof AnnotationCellError) {
     return stamped(tool, {

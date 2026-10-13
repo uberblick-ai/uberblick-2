@@ -9,20 +9,22 @@ export function registerEditBlock(server: ToolRegistrar, context: ToolContext): 
   server.registerTool("edit_block", {
     title: "Edit one block",
     description:
-      "Replace one block's text by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and " +
-      "preferably rev from get_doc. A stale rev returns stale_block; current rev with wrong text returns " +
-      "old_text_mismatch, while mismatch without rev is stale_block. Both carry currentText/currentRev to " +
-      "re-diff. Assertions are local, without distributed compare-and-swap. For prose, " +
-      "use plain text. Marks anchor to positions: edit only strictly inside unmarked text; for changed ranges " +
-      "touching formatting, use delete_block plus insert_block and verify with export_markdown. For tables, " +
-      "old/new text must each be one GFM table or invalid_table refuses. Only a no-op or one positional cell " +
-      "change at unchanged dimensions works without table_mapping; structural/multi-cell edits require it. " +
-      "Invalid mappings refuse with invalid_table_mapping; stale assertions take precedence. Newly added " +
-      "document targets must be known locally. Read help before editing tables. Cards take canonical content " +
-      "with inline Markdown and optional button: [Text](destination), ordered after footer. Button text must " +
-      "be nonempty plain text; destinations are https URLs or exact claude://code/new, claude-cli://open or " +
-      "codex://new routes, alone or with ?query. Invalid cards refuse with invalid_card. Edits preserve " +
-      "unchanged parts, buttons and comment anchors; rev includes formatting and the button." +
+      "Splice block text, preserving edits elsewhere. Assert old_text and preferably rev from get_doc; " +
+      "stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. " +
+      "Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block " +
+      "and verify export_markdown. Tables require GFM old/new text and table_mapping for " +
+      "structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: " +
+      "[Text](destination) lines after footer in authored order. New buttons need nonempty plain labels " +
+      "linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with " +
+      "?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; " +
+      "output writes style before color and omits defaults. invalid_card refuses bad input; unchanged " +
+      "parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and " +
+      "order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line " +
+      "and marked caption. Accepted Figma view URLs retain only the path and node-id, " +
+      "starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. " +
+      "Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes " +
+      "caption formatting. Card/Figma conversions and table_mapping are refused; new document targets " +
+      "must be known locally." +
       helpPointer("edit_block"),
     outputSchema: outputSchemas.edit_block,
     inputSchema,
