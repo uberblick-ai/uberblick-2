@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
@@ -407,6 +408,42 @@ describe("ub open", () => {
     expect(await deepLink.text()).toContain("<title>uberblick</title>");
 
     expect((await app.interrupt()).status).toBe(0);
+  });
+
+  it.each(["project", "environment"])("serves one report-only policy on HTML for a %s binding", async source => {
+    const box = source === "project"
+      ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } })
+      : unboundSandbox({ credentials: { signingSecret: SECRET } });
+    const env = {
+      UBERBLICK_WEB_DIST: fixtureBundle(box),
+      BROWSER: "none",
+      HUB_DB_PATH: join(box.cwd, "started-hub.sqlite"),
+      ...(source === "environment" ? {
+        UB_WORKSPACE_ID: `browser-${WORKSPACE}`, UB_HUB_URL: "local",
+      } : {}),
+    };
+    const app = await open(box, ["--port", String(await freePort())], env);
+    try {
+      for (const path of ["", "index.html", `${WORKSPACE}/6bd9d0b1-6d0e-4e5a-9c93-0a5c9f5a7e11`]) {
+        for (const method of ["GET", "HEAD"]) {
+          const page = await fetch(`${app.url}${path}`, { method });
+          expect(page.status).toBe(200);
+          expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+          expect(page.headers.get("content-security-policy-report-only")).toBe(WEB_CONTENT_SECURITY_POLICY);
+          expect(page.headers.get("content-security-policy")).toBeNull();
+          if (method === "GET") expect(await page.text()).toContain("<title>uberblick</title>");
+          else expect(await page.text()).toBe("");
+        }
+      }
+      for (const path of ["assets/app.js", "uberblick-config.json", "api/status"]) {
+        const response = await get(`${app.url}${path}`);
+        expect(response.status).toBe(path === "api/status" ? 401 : 200);
+        expect(response.headers.get("content-security-policy-report-only")).toBeNull();
+        expect(response.headers.get("content-security-policy")).toBeNull();
+      }
+    } finally {
+      expect((await app.interrupt()).status).toBe(0);
+    }
   });
 
   it("refuses every HTTP surface before routing when Host is not the served address", async () => {

@@ -36,6 +36,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { build } from "vite";
 
@@ -150,6 +151,12 @@ describe("the built web bundle", () => {
     expect(JSON.parse(readFileSync(join(outDir, "uberblick-build.json"), "utf8"))).toEqual({
       syncProtocolVersion: SYNC_PROTOCOL_VERSION,
     });
+  });
+
+  it("emits the provider-derived report-only policy the web image imports", () => {
+    expect(readFileSync(join(outDir, "uberblick-csp.caddy"), "utf8")).toBe(
+      `header Content-Security-Policy-Report-Only ${JSON.stringify(WEB_CONTENT_SECURITY_POLICY)}\n`,
+    );
   });
 
   it("ships the OFL text beside every vendored face", () => {

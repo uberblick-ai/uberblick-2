@@ -57,6 +57,7 @@ LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
     org.opencontainers.image.source="https://github.com/uberblick-ai/uberblick-2" \
     io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
 COPY Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy
 COPY --from=build /out/web /srv
 COPY --from=build /out/release/release.json /release/release.json
 COPY web-release-entrypoint.sh remote-settings.sh /usr/local/bin/
