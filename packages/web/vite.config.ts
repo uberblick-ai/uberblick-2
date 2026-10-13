@@ -14,6 +14,22 @@ import { fileURLToPath } from "node:url";
 /** Shared with ub open: this filename and syncProtocolVersion gate bundle compatibility. */
 const BUILD_STAMP = "uberblick-build.json";
 
+/** Resolve the retry URL through the bundler without preloading the renderer. */
+function wireframeRendererUrlPlugin(): Plugin {
+  const urlModule = fileURLToPath(new URL("./src/editor/wireframe-renderer-url.ts", import.meta.url));
+  return {
+    name: "uberblick:wireframe-renderer-url",
+    apply: "build",
+    async load(id) {
+      if (id !== urlModule) return;
+      const renderer = await this.resolve("@uberblick/wireframe", urlModule);
+      if (renderer === null) throw new Error("Cannot resolve the wireframe renderer");
+      const reference = this.emitFile({ type: "chunk", id: renderer.id, name: "wireframe-renderer", preserveSignature: "strict" });
+      return `export default import.meta.ROLLUP_FILE_URL_${reference};`;
+    },
+  };
+}
+
 /**
  * generateBundle covers package builds, releases and Vite's build API; a
  * postbuild script would miss callers. Import the client's protocol constant,
@@ -47,7 +63,7 @@ export default defineConfig(async (): Promise<UserConfig> => {
   return {
     // Omit Tailwind preflight to preserve editor and unmigrated control defaults.
     // Editor content remains plain CSS; see src/ui/tailwind.css.
-    plugins: [tailwindcss(), react(), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin()],
+    plugins: [tailwindcss(), react(), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(), wireframeRendererUrlPlugin()],
     define: {
       __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
       __HUB_URL__: JSON.stringify(config?.hubUrl ?? ""),

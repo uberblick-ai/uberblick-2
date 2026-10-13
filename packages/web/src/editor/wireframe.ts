@@ -6,6 +6,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
 import { codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import rendererUrl from "./wireframe-renderer-url.js";
 
 type WireframeRenderer = typeof import("@uberblick/wireframe");
 
@@ -13,11 +14,15 @@ type WireframeRenderer = typeof import("@uberblick/wireframe");
 // Load it when the first wireframe mounts; later drawings stay synchronous.
 let renderer: WireframeRenderer | null = null;
 let loading: Promise<WireframeRenderer> | null = null;
+let failures = 0;
 
 function loadRenderer(): Promise<WireframeRenderer> {
-  loading ??= import("@uberblick/wireframe").then(
+  // Browsers cache failed imports by URL; a later edit needs a fresh URL.
+  // rendererUrl is already bundled; Vite must leave the retry import intact.
+  loading ??= (failures === 0 ? import("@uberblick/wireframe") :
+    import(/* @vite-ignore */ `${rendererUrl}?retry=${failures}`) as Promise<WireframeRenderer>).then(
     module => (renderer = module),
-    (cause: unknown) => { loading = null; throw cause; },
+    (cause: unknown) => { failures += 1; loading = null; throw cause; },
   );
   return loading;
 }
