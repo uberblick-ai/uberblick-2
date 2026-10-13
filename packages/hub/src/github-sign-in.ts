@@ -1,4 +1,4 @@
-/** Public sign-in can claim a fresh deployed hub once, then only issues credentials. */
+/** Public sign-in can claim a fresh deployed hub once, then issues device credentials or browser sessions. */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import { GithubDeviceFlow, type DeviceFlowCollection, type GithubSignInConfig } from "./github-device-flow.js";
@@ -9,6 +9,7 @@ import type { HubClaimState } from "./hub-claim.js";
 import type { HubDatabase } from "./persistence.js";
 import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
+import { BrowserSessions, type BrowserSession } from "./browser-sessions.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
@@ -17,12 +18,18 @@ interface SignInResult {
   claimedWorkspaceId?: string;
 }
 export type SignInCollection = DeviceFlowCollection<SignInResult>;
+interface BrowserSignInResult {
+  session: BrowserSession & { token: string };
+  claimedWorkspaceId?: string;
+}
+export type BrowserSignInCollection = DeviceFlowCollection<BrowserSignInResult>;
 
-export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
+export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInResult, string> {
   constructor(config: GithubSignInConfig, database: HubDatabase, principals: PrincipalRegistry,
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
-    claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database)) {
-    super(config, ({ accountId, username }, deviceName) => {
+    claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database),
+    private readonly sessions = new BrowserSessions(database, config.now)) {
+    super(config, ({ accountId, username }, deviceName, browserOrigin) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
       const db = database.connection;
@@ -30,6 +37,11 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
       try {
         const identity = principals.identify(accountId, username);
         const claimedWorkspaceId = claims?.claim(identity.id, memberships);
+        if (browserOrigin !== undefined) {
+          const session = sessions.issue(identity.id, identity.githubUsername, browserOrigin);
+          db.exec("COMMIT");
+          return { session, ...(claimedWorkspaceId === undefined ? {} : { claimedWorkspaceId }) };
+        }
         const issued = credentials.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
           ...(deviceName === undefined ? {} : { deviceName }),
           workspaces: memberships.workspacesFor(identity.id) });
@@ -47,7 +59,30 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult> {
 
   override async collect(requestId: string, secret: string): Promise<SignInCollection> {
     const result = await super.collect(requestId, secret);
-    return result.status === "complete" ? addWorkspaceNames(result, this.workspaceNames, secret) : result;
+    if (result.status !== "complete") return result;
+    return "credential" in result ? addWorkspaceNames(result, this.workspaceNames, secret) : { status: "unknown-request" };
+  }
+
+  startBrowser(origin: string) {
+    return super.start(undefined, origin);
+  }
+
+  async collectBrowser(requestId: string, secret: string, origin: string): Promise<BrowserSignInCollection> {
+    const result = await super.collect(requestId, secret, origin);
+    if (result.status !== "complete") return result;
+    return "session" in result ? result : { status: "unknown-request" };
+  }
+
+  cancelBrowser(requestId: string, secret: string, origin: string) {
+    return super.cancel(requestId, secret, origin);
+  }
+
+  browserSession(token: string, origin: string): BrowserSession | null {
+    return this.sessions.get(token, origin);
+  }
+
+  signOutBrowser(token: string, origin: string): void {
+    this.sessions.revoke(token, origin);
   }
 }
 

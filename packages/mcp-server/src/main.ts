@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     }
     shuttingDown = true;
     log.info("shutting down", { signal });
-    void closeWithDeadline(() => instance.close()).then(
+    void closeWithDeadline((deadline) => instance.close(deadline)).then(
       () => process.exit(0),
       (error: unknown) => {
         log.error("shutdown failed", error);
