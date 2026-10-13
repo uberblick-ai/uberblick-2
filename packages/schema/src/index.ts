@@ -13,6 +13,7 @@ export {
   setDescription,
   setDiscussion,
   setTldr,
+  setTldrOptOut,
   setKind,
   setLinks,
   setStatus,

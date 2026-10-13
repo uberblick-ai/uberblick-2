@@ -362,6 +362,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance: "Put the answer in content blocks. Omit tldr at creation, or clear a legacy TL;DR with set_metadata and tldr: null before deciding. Nothing was written.",
   },
+  tldr_opted_out: {
+    recoveryClass: "manual",
+    guidance: "Keep this page without a TL;DR, or pass tldr_opt_in: true with a non-null tldr in set_metadata to opt back in. Nothing was written.",
+  },
   decision_data_unsupported: {
     recoveryClass: "manual",
     guidance: "Keep structured data on a regular document. Decision records accept answer blocks only; no data or lifecycle change was written.",

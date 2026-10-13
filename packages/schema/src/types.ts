@@ -204,6 +204,8 @@ export interface DocMeta {
    * Optional for additive consumers; getMeta normalizes unwritten values to null.
    */
   tldr?: string | null;
+  /** Present only for a regular document with no summary on purpose. */
+  tldrOptOut?: true;
   /** The record shape. Absent means an ordinary document. */
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */

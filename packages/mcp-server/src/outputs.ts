@@ -43,8 +43,8 @@ const documentDurability = {
   tagHint: z.string().optional().describe("Non-blocking request to assign tags from the active vocabulary."),
 };
 const contentReview = {
-  tldr: z.null().optional().describe("Present when changed document content has no TL;DR."),
-  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records."),
+  tldr: z.null().optional().describe("Present when changed regular document content has no TL;DR and the page has not opted out."),
+  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal."),
 };
 const touchedRoom = z.object({
   purpose: z.string().describe("The independently written room's purpose."),
@@ -264,6 +264,7 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
+    tldrOptOut: z.literal(true).optional().describe("Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records."),
     tags,
     links: z.array(z.string()),
     ...lifecycle,

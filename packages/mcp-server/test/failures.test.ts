@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -186,6 +186,7 @@ const EXPECTED: Record<
   },
   decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  tldr_opted_out: { recoveryClass: "manual", detail: ["uuid", "field"] },
   decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
   decision_block_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
@@ -475,6 +476,21 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+    const marked = await seeded(rig);
+    setTldrOptOut(rig.instance.replicas.replica(marked.uuid).doc, true);
+    const beforeMarked = await rig.ok("get_doc", { uuid: marked.uuid });
+    const beforeMarkedLog = rig.instance.store.logSize();
+    const optedOut = await rig.call("set_metadata", {
+      uuid: marked.uuid, title: "Must stay unchanged", tldr: "Refused summary.",
+    });
+    expect(optedOut).toMatchObject({ isError: true, payload: {
+      error: "tldr_opted_out", field: "tldr", applied: false, partial: false, synced: false,
+    } });
+    expect(optedOut.payload.recovery).toContain("tldr_opt_in: true");
+    expect(rig.instance.store.logSize()).toBe(beforeMarkedLog);
+    expect(await rig.ok("get_doc", { uuid: marked.uuid })).toEqual(beforeMarked);
+    record(optedOut.payload);
+
     const archived = await seeded(rig);
     await rig.ok("archive_doc", { uuid: archived.uuid });
     record(

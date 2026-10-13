@@ -194,7 +194,8 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const uuid = meta.get("uuid");
   const title = meta.get("title");
   const description = meta.get("description");
-  const tldr = meta.get("tldr");
+  const storedTldr = meta.get("tldr");
+  const tldr = typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   const lifecycle = readDocumentLifecycle(meta.get("kind"), meta.get("status"));
   const decision = lifecycle.kind === "decision";
   const supersedes = decision ? readSupersedes(meta, uuid) : undefined;
@@ -213,7 +214,9 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     tags: storedTags(meta),
     description:
       typeof description === "string" && description !== "" ? description : null,
-    tldr: typeof tldr === "string" && tldr !== "" ? tldr : null,
+    tldr,
+    // Summary text wins over a separately merged mark, including older writers.
+    ...(!decision && tldr === null && meta.get("tldrOptOut") === true ? { tldrOptOut: true as const } : {}),
     ...lifecycle,
     ...(supersedes === undefined ? {} : { supersedes }),
     ...(governs === null ? {} : { governs }),
@@ -270,6 +273,16 @@ export function setTldr(ydoc: Y.Doc, tldr: string | null): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
     meta.set("tldr", tldr);
+    if (tldr !== null) meta.set("tldrOptOut", false);
+  });
+}
+
+/** Marking clears the summary atomically; opting back in leaves it untouched. */
+export function setTldrOptOut(ydoc: Y.Doc, optOut: boolean): void {
+  const meta = getMetaMap(ydoc);
+  ydoc.transact(() => {
+    if (optOut) meta.set("tldr", null);
+    meta.set("tldrOptOut", optOut);
   });
 }
 
