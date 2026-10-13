@@ -90,6 +90,7 @@ describe("a database written by the better-sqlite3 build", () => {
       {
         uuid: LEGACY.uuid,
         title: LEGACY.title,
+        kind: "regular",
         tags: ["legacy"],
         // Migrating a fixture without the description column leaves its rows empty.
         description: null,
@@ -214,6 +215,7 @@ describe("a transaction body that throws", () => {
       {
         uuid: LEGACY.uuid,
         title: "before",
+        kind: "regular",
         tags: ["kept"],
         description: null,
         snippet: expect.stringContaining("indexed body"),

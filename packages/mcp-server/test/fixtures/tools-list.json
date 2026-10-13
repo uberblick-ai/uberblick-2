@@ -4821,17 +4821,38 @@
         "query": {
           "type": "string",
           "minLength": 1,
-          "description": "Words to match; every term must occur in one document, `list_docs` matches both `list_docs` and `list docs` but not `a list of docs`, and a trailing * makes its term a prefix match."
+          "description": "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches prefixes. Results use title-weighted bm25 relevance."
         },
         "limit": {
+          "description": "Maximum hits, from 1 to 100; defaults to 20 after filters.",
           "type": "integer",
           "minimum": 1,
           "maximum": 100
         },
         "tag": {
-          "description": "Only documents carrying this catalog tag id or exact name.",
+          "description": "One catalog tag id or exact name, or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ]
+        },
+        "kind": {
+          "description": "Only regular documents (including stored requirements) or decision records, including superseded, rejected and withdrawn records.",
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "regular",
+            "decision"
+          ]
         }
       },
       "required": [
@@ -4847,96 +4868,229 @@
           "type": "string"
         },
         "tag": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "regular",
+            "decision"
+          ]
         },
         "hits": {
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "uuid": {
-                "type": "string",
-                "description": "Document identity; a UUID, never a title or path."
-              },
-              "title": {
-                "type": "string"
-              },
-              "description": {
-                "anyOf": [
-                  {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "uuid": {
+                    "type": "string",
+                    "description": "Document identity; a UUID, never a title or path."
+                  },
+                  "title": {
                     "type": "string"
                   },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Agent-facing document description; null when unwritten."
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
                       },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Agent-facing document description; null when unwritten."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "retired"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "null"
+                            },
+                            "state": {
+                              "type": "string",
+                              "const": "unresolved"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
+                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                  },
+                  "snippet": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "regular",
+                    "description": "A regular document, including a stored requirement."
+                  }
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "required": [
+                  "uuid",
+                  "title",
+                  "description",
+                  "tags",
+                  "snippet",
+                  "kind"
+                ],
+                "additionalProperties": false
               },
-              "snippet": {
-                "type": "string"
+              {
+                "type": "object",
+                "properties": {
+                  "uuid": {
+                    "type": "string",
+                    "description": "Document identity; a UUID, never a title or path."
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Agent-facing document description; null when unwritten."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "retired"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "null"
+                            },
+                            "state": {
+                              "type": "string",
+                              "const": "unresolved"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                  },
+                  "snippet": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "decision",
+                    "description": "A decision record."
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "in-force",
+                      "superseded",
+                      "open",
+                      "rejected",
+                      "withdrawn",
+                      "conflict"
+                    ],
+                    "description": "Resolved from current topic records: in-force is the current answer; superseded is a replaced answer; conflict marks competing approved answers; open, rejected and withdrawn are proposal states."
+                  }
+                },
+                "required": [
+                  "uuid",
+                  "title",
+                  "description",
+                  "tags",
+                  "snippet",
+                  "kind",
+                  "state"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "uuid",
-              "title",
-              "description",
-              "tags",
-              "snippet"
-            ],
-            "additionalProperties": false
+            ]
           }
         }
       },
@@ -4947,7 +5101,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Search document titles, descriptions and block text in this replica's derived FTS5 index. Every searchable query term must occur in the same document. Punctuation or emoji alone matches nothing; underscore groups match adjacent words, case and accents fold, and words are not stemmed. A trailing * enables a prefix match. Hits include description and canonical tag assignments. Optional tag accepts a catalog id or exact current name; an unknown value refuses. No hits means no indexed document matches all terms, without proving the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
+    "description": "Find live documents containing any query word in titles, descriptions, content or assigned tag names. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or exact current name, or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
