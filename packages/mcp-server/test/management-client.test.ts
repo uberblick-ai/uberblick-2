@@ -51,16 +51,31 @@ describe("shared management transport", () => {
   });
 
   it.each([
-    ["over-limit", () => Response.json({ status: "ok", private: "x".repeat(256) }), 64],
-    ["non-object", () => Response.json([]), undefined],
-    ["non-JSON", () => new Response("private-provider-error"), undefined],
-    ["empty body", () => new Response(null), undefined],
-  ])("rejects %s replies with only a fixed error", async (_name, response, limit) => {
+    ["over-limit", () => Response.json({ status: "ok", private: "x".repeat(256) }), 64, false],
+    ["non-object", () => Response.json([]), undefined, false],
+    ["non-JSON", () => new Response("private-provider-error"), undefined, true],
+    ["empty body", () => new Response(null), undefined, true],
+  ])("rejects %s replies with only a fixed error and transport status", async (_name, response, limit, updateRequired) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response());
     const request = manageRequest("https://hub.example", { operation: "list-devices" }, login,
       limit === undefined ? {} : { maxResponseBytes: limit });
     await expect(request).rejects.toThrow(ManagementResponseError);
-    await expect(request).rejects.toThrow("hub returned an invalid management response");
+    await expect(request).rejects.toMatchObject({ message: "hub returned an invalid management response", status: 200, updateRequired });
+  });
+
+  it.each([404, 502, 503, 504])("retains HTTP %s on a non-JSON reply without exposing its body", async status => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private-provider-error", { status }));
+    const error: unknown = await manageRequest("https://hub.example", { operation: "own-hub-role" }, login)
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ManagementResponseError);
+    expect(error).toMatchObject({ message: "hub returned an invalid management response", updateRequired: true, status });
+    expect(JSON.stringify(error)).not.toContain("private-provider-error");
+  });
+
+  it("retains HTTP status on a missing response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
+    await expect(manageRequest("https://hub.example", { operation: "own-hub-role" }, login))
+      .rejects.toMatchObject({ updateRequired: true, status: 503 });
   });
 
   it("cancels an over-limit stream without reading the remainder", async () => {

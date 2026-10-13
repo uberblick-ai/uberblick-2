@@ -450,7 +450,8 @@ describe("the locally stored account in ub status", () => {
       expect(JSON.parse(json.stdout).account).toEqual({ login: username, provider: "github" });
       const text = await runInProcess(["status"], box);
       const auth = await runInProcess(["auth", "status"], box);
-      const displayed = row(auth.stdout, "signed in").replace(/^signed in\s+/, "");
+      expect(auth.status).toBe(1);
+      const displayed = row(auth.stdout, "stored account").replace(/^stored account\s+/, "").replace(/ \(github\)$/, "");
       expect(text.stdout).toContain(`hub         http://127.0.0.1:1\naccount     @${displayed} (GitHub)\n`);
       expect(json.output + text.output).not.toContain(login.credential.key);
     },

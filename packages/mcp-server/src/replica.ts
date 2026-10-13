@@ -889,6 +889,24 @@ export class Replicas {
     this.recordLastSyncIfCaughtUp();
   }
 
+  /** Await only durable local changes, leaving unrelated hydration out of shutdown. */
+  async waitForPendingChanges(deadline: number): Promise<number> {
+    if (!this.sync.enabled || this.persistenceFailure !== null) {
+      return this.store.pendingRooms().length;
+    }
+    // Poll before releasing markers: a local append has not advanced lastSeq.
+    this.refresh();
+    const rooms = this.store.pendingRooms().map(({ room }) => room);
+    if (rooms.length > 0) {
+      await this.sync.waitForQuiet({
+        isQuiet: () => rooms.every((room) => this.sync.isRoomQuiet(room)),
+        deadline,
+      });
+      if (this.persistenceFailure === null) this.refresh();
+    }
+    return this.store.pendingRooms().length;
+  }
+
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
   private refreshReplicas(): void {
     this.pollAll();

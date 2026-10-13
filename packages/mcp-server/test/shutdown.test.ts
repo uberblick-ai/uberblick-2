@@ -60,7 +60,7 @@ function watchDestruction(replicas: Replicas, order: string[]) {
   return { destroyed: () => destroyed, accessesAfterDestroy: () => accessesAfterDestroy };
 }
 
-it("closes the transport, drains a write waiting on the hub, then destroys replicas and closes the store", async () => {
+it("closes the transport, drains a write, checks acknowledgement, then destroys replicas and closes the store", async () => {
   const config = testConfig({ authSecret: TEST_SECRET });
   const rig = await startServer(config);
   const { uuid } = await rig.ok("create_doc", {
@@ -80,6 +80,11 @@ it("closes the transport, drains a write waiting on the hub, then destroys repli
   vi.spyOn(rig.instance.store, "appendUpdate").mockImplementation((target, payload, origin) => {
     if (target === room) order.push("write logged");
     return appendUpdate(target, payload, origin);
+  });
+  const waitForPendingChanges = rig.instance.replicas.waitForPendingChanges.bind(rig.instance.replicas);
+  vi.spyOn(rig.instance.replicas, "waitForPendingChanges").mockImplementation(async (deadline) => {
+    order.push("acknowledgement checked");
+    return waitForPendingChanges(deadline);
   });
   const storeClose = rig.instance.store.close.bind(rig.instance.store);
   vi.spyOn(rig.instance.store, "close").mockImplementation(() => {
@@ -110,6 +115,7 @@ it("closes the transport, drains a write waiting on the hub, then destroys repli
     expect(order).toEqual([
       "transport closed",
       "write logged",
+      "acknowledgement checked",
       "replicas destroyed",
       "store closed",
     ]);
