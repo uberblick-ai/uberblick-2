@@ -62,6 +62,8 @@ export type {
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { githubItemUrl, githubReference } from "./github-reference.js";
+export type { GitHubItem } from "./github-reference.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";

@@ -1719,6 +1719,38 @@ h3.ub-heading {
   text-decoration: underline;
 }
 
+/* Zero-sized text retains native character-wise caret movement. */
+.ub-github-link-text {
+  font-size: 0;
+  line-height: 0;
+  letter-spacing: 0;
+  word-spacing: 0;
+}
+.ub-link:has(.ub-github-pill) { text-decoration: none; }
+
+.ub-github-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.05em 0.35em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  color: var(--foreground);
+  font: normal 400 0.875rem/1.25 var(--font-sans);
+  letter-spacing: normal;
+  text-transform: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.ub-github-pill svg { width: 1em; height: 1em; }
+.ub-github-pill-repo { color: var(--muted-foreground); }
+.ub-github-pill-number { color: var(--foreground); font-weight: 600; }
+
+/* Keep the existing thread highlight visible above the neutral pill ground. */
+.ub-comment .ub-github-pill { background: transparent; }
+
 /* Document references use dotted underlines; external links use solid ones. */
 .ub-doclink {
   text-decoration: underline dotted;
