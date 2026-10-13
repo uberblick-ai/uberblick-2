@@ -11,7 +11,7 @@ host name. Tailscale is the recommended optional network layer; public DNS is
 also supported. Caddy serves the app and `/uberblick-config.json` and proxies
 `/ws` and `/auth/*` to the hub. The hub is not published directly.
 
-> Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The host's web page receives no credential and shows no documents: direct browser sign-in is not available yet. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
+> Remote sync admits only device credentials with current workspace membership. Run `ub auth login` on each computer and unattended agent host, then use the MCP server or `ub open`. The hub's own page offers GitHub sign-in with a separate 24-hour browser session, including on HTTP localhost. It opens no workspace and shows no documents. A signing secret left in an old `.env` grants no access. Revocation stops live sync but cannot erase data already downloaded.
 
 The access-control boundary and broader-access requirements are described in
 the corpus Permissions (eb9a7801-05f3-417a-81d5-07c18795ac81).
@@ -75,7 +75,7 @@ sync protocol, hub and Caddy states, and configured site origin. It checks the
 site and `/ws` from the host itself and exits 0 only when healthy; an HTTPS
 name the host cannot reach shows as not answering. `--json` prints one JSON
 object. Allow certificate acquisition to finish, then check status again.
-After starting a fresh hub, [claim it](#claim-a-fresh-hub) with `ub auth login`
+After starting a fresh hub, [claim it](#claim-a-fresh-hub) from its web page or with `ub auth login`
 before wider exposure; see the corpus's CLI: ub auth intents and examples
 (0ad5f7da-edb2-4e53-a6eb-9d95922a3e95), “Claim a fresh hub”.
 
@@ -143,7 +143,8 @@ sh bin/remote-compose.sh logs --tail=100 hub caddy
 ```
 
 [Check the site and WebSocket upgrade](#check-the-deployment) on the host, then
-[claim the fresh hub](#claim-a-fresh-hub) with `ub auth login http://localhost:8080`.
+[claim the fresh hub](#claim-a-fresh-hub) by signing in at `http://localhost:8080`
+or with `ub auth login http://localhost:8080`.
 Do this before enabling wider access. A private Tailscale route can also be
 claimed before wider exposure. Confirm that the completed login reports the
 claim and the default workspace's UUID. Startup creates that workspace once,
@@ -258,8 +259,7 @@ those pending edits reach the hub using the existing binding; do not fetch again
 re-create or discard them. Missing membership names the administrator and
 renewal detects a later grant with the existing login.
 
-Host-opened browsers, including phones and tablets, have no document access
-until direct web sign-in is available. The supported browser route is
+Host-opened browsers can sign in but have no document access. The supported editing route is
 `ub auth login` followed by `ub open` on a computer. Revocation and membership
 removal stop live sync but cannot erase downloaded data or local edits.
 
@@ -583,7 +583,7 @@ that the host shell does not still export the override when you recreate it.
 
 ### Shared app limits and controls
 
-These GitHub limits cover ordinary login, first-admin setup and member lookup:
+These GitHub limits cover CLI and browser sign-in, first-admin setup and member lookup:
 
 - [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
   permits 50 verification-code submissions per hour per application, shared by
@@ -625,7 +625,7 @@ These GitHub limits cover ordinary login, first-admin setup and member lookup:
 - [Revoking GitHub App authorization](https://docs.github.com/en/apps/using-github-apps/reviewing-and-revoking-authorization-of-github-apps)
   revokes that person's GitHub tokens for the shared app across hubs. They can
   authorize it again for a later login. This does not revoke already-issued
-  Uberblick credentials; each hub owns that revocation. An operator-owned app
+  Uberblick device credentials or browser sessions; each hub owns that revocation. An operator-owned app
   separates its GitHub authorization from Uberblick Login.
 
 GitHub documents the ten-token and ten-sign-in-per-hour rules specifically for
@@ -693,31 +693,67 @@ without invalidating the login.
 These commands never change workspace memberships, the project's hub or
 workspace binding, or local workspace copies. Concurrent logins and logout
 preserve other hubs' logins, the signing secret and unrelated credential
-fields. Sign-in does not create a browser session.
+fields. CLI sign-in does not create a browser session.
 The hub permits 100 active attempts, independently of finished attempts. Terminal
 statuses expire no later than fifteen minutes after the attempt's expiry; at
 most 100 are retained when new attempts start, evicting oldest requests first. Evicted or restarted
 requests return `unknown-request`.
 
+### Sign in on the hub's web page
+
+Open the hub's own address and choose **Sign in with GitHub**. The page shows
+`https://github.com/login/device` and an approval code, then waits for approval.
+It starts no GitHub attempt until you ask. After approval it names the GitHub
+account and offers **Sign out**. No client, project binding or workspace
+membership is needed. The page still opens no workspace and shows no documents;
+use the computer commands on the page to work through `ub open`.
+
+The browser session lasts 24 hours from completion, without renewal. Reloading
+or reopening the same origin keeps it while the hub still accepts it. The hub
+stores the session separately from devices in its private database, so a restart
+preserves it until expiry or sign-out. Browser sign-in issues no device
+credential, adds no device and does not change an admin's CLI-only Last signed
+in value. The page receives neither a device key, the signing secret nor a
+GitHub token.
+
+The page holds its opaque session token in origin-specific local storage and
+sends it only in `X-Uberblick-Session` on its browser-session requests. There is
+no session cookie to send to another localhost port. Browser auth requests use
+JSON POSTs at `/auth/browser/start`, `/auth/browser/collect`,
+`/auth/browser/cancel`, `/auth/browser/session` and `/auth/browser/sign-out`.
+The hub checks the browser origin, including the port, and binds attempts and
+sessions to that exact origin; it enables no cross-origin access. These tokens
+authorize neither collaboration rooms nor device management.
+
+**Sign out** ends the session at the hub before the page discards its token.
+If the hub cannot confirm revocation, the page says so and keeps the session
+available for another sign-out attempt. Expired and revoked sessions are refused
+by the hub and the page offers sign-in again. Hubs without GitHub sign-in
+configured offer no browser sign-in; `ub open` and loopback development retain
+their existing local behavior.
+
 ### Claim a fresh hub
 
 Keep the fresh hub reachable only from the host or a private network, and
-claim it before wider exposure. With the default loopback route, run this on
-the host using an installed client:
+claim it before wider exposure. With the default loopback route, open
+`http://localhost:8080` on the host and choose **Sign in with GitHub**, or run
+this using an installed client:
 
 ```sh
 ub auth login http://localhost:8080
 ```
 
-The terminal says before approval when the hub is unclaimed: the GitHub account
-that completes approval first becomes administrator of its default workspace.
+The page and terminal say before approval when the hub is unclaimed: the GitHub
+account that completes sign-in first becomes hub administrator and administrator
+of its default workspace.
 Starting a login reserves nothing. If another reachable account completes
-first, it claims the hub instead. After completion, confirm the terminal's
+first, it claims the hub instead. After completion, confirm the page's or terminal's
 claim result and the default workspace UUID; this reports what the hub
 committed, even if the earlier notice has become stale. Keep that UUID for
-subsequent workspace use. Login stores a device credential covering the
+subsequent workspace use. CLI login stores a device credential covering the
 workspace and leaves this computer's hub and workspace binding unchanged.
-It does not sign a browser in.
+It does not sign a browser in; browser sign-in instead creates its own session
+and changes no computer's login or binding.
 
 Use the configured `LOOPBACK_PORT` if different. For a private Tailscale route,
 use `ub auth login https://<WEB_HOST>` from a computer on that tailnet; existing
@@ -735,9 +771,11 @@ An existing deployment is never claimable, even if it has no membership; keep
 using host-only first-admin setup there.
 
 Claiming commits the first account's hub administration, default-workspace
-admin membership and device credential together. Failure before commit claims nothing. If the completed response is
-lost, the claim still stands: signing in again with that account receives a
-credential for its workspace. Other completed logins grant neither membership nor hub administration.
+admin membership and device credential or browser session together. Failure
+before commit claims nothing. If the completed response is lost, the claim still
+stands: signing in again with that account receives a new browser session or
+device credential, according to the route used. Other completed logins grant
+neither membership nor hub administration.
 The first successful host-only first-admin grant, for any workspace, also
 closes claiming. Claiming and host setup racing for the default workspace
 can establish only one initial administrator.
@@ -1132,8 +1170,8 @@ Set `HUB_GITHUB_CLIENT_ID` only for an operator-owned app (see
 `WEB_WORKSPACES` is an optional comma-separated list of workspace UUIDs, each
 optionally prefixed with a display slug (`<slug>-<uuid>`). Its first valid entry
 is the workspace offered at the site's root; an empty list has nothing to open.
-The host-served browser still requires the supported computer route, `ub auth login`
-followed by `ub open`. Changing these settings recreates a container and needs
+The host-served browser can sign in, but editing still requires `ub auth login`
+followed by `ub open` on a computer. Changing these settings recreates a container and needs
 no bundle rebuild.
 
 ### Choose how clients reach the hub
@@ -1245,14 +1283,15 @@ deadline after printing the headers. A `502` on
 backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
-**This hub is unclaimed** and guides the first administrator through
-`ub auth login`, `ub workspace use <link>` with the default workspace UUID reported by
-that login, and `ub open` on their computer. An open page rechecks claim state
+**This hub is unclaimed** and warns that the first completed GitHub sign-in
+claims hub and default-workspace administration. Browser sign-in reports the
+claim and default workspace UUID. The guide also offers `ub auth login`,
+`ub workspace use <link>` and `ub open` on a computer. An open page rechecks claim state
 after each 15-second pause until claiming closes. A closed claim says only that
 the hub can no longer be claimed; an existing installation sealed without a
 claim gives the same answer. Members sign in, use their workspace link unless
-already bound to it, and use `ub open`. This browser is never signed in by those
-steps. A failed, timed-out or incompatible claim-state read says setup state
+already bound to it, and use `ub open`. CLI approval never signs this browser in;
+its own sign-in action does. A failed, timed-out or incompatible claim-state read says setup state
 could not be confirmed; an unclaimed hub unable to accept a claim says GitHub
 sign-in is not configured. Every app address shows the guide, with no documents,
 editor actions or collaboration socket. In browser developer tools,
@@ -1280,10 +1319,11 @@ sh bin/remote-compose.sh up --detach caddy
 The document is served with `Cache-Control: no-store`, so the next page load
 picks up the change. `hubUrl` must be a plain `ws://` or `wss://` address without
 userinfo, query or fragment. Invalid workspace entries are dropped. Direct
-remote browser sign-in remains unavailable, regardless of workspace list.
-The host's guide reads only `GET /auth/claim-state` at its own origin, with no
-credential, and fills its computer commands with that origin, even when
-`WEB_HUB_URL` points elsewhere. The public answer contains only `unclaimed`
+browser sign-in uses `/auth/browser/*` at the page's own origin, regardless of
+workspace list. The host's guide reads `GET /auth/claim-state` at its own origin,
+with no cookie or credential, and fills its computer commands with that origin,
+even when `WEB_HUB_URL` points elsewhere. Browser sign-in also reaches the
+co-located hub in that case. The public claim answer contains only `unclaimed`
 and `canClaim`, never a workspace or identity. The guide grants no document
 access. Use `ub open` after signing in and binding to edit from a computer's
 local replica; its page and loopback development do not show the setup guide.

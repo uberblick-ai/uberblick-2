@@ -43,7 +43,11 @@ function expectUnconfirmed(host: HTMLElement): void {
 beforeEach(() => {
   vi.useFakeTimers();
   fetchMock.mockReset();
-  vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal("fetch", (url: RequestInfo | URL, init?: RequestInit) =>
+    String(url).endsWith("/auth/browser/session")
+      ? Promise.resolve(new Response(JSON.stringify({ status: "signed-out" }), {
+        status: 401, headers: { "Content-Type": "application/json" },
+      })) : fetchMock(url, init));
 });
 
 afterEach(() => {
@@ -81,7 +85,7 @@ describe("the remote hub setup reading", () => {
     const text = host.textContent ?? "";
     expect(text).toContain("This hub can no longer be claimed");
     expect(text).toMatch(/browser is not signed in/i);
-    expect(text).toMatch(/browser sign-in is not available yet/i);
+    expect(text).toMatch(/Browser sessions last 24 hours/i);
     expect(text).toMatch(/signing in.*(does not|never|grants no).*membership|login.*(does not|never).*membership/i);
     expect(text).toMatch(/workspace administrator/i);
     expect(text).toMatch(/already bound/i);

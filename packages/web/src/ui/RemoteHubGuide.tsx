@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 import { PaneNotice } from "./EditorPane.js";
+import { BrowserHubSignIn } from "./BrowserHubSignIn.js";
 
 export const CLAIM_STATE_POLL_MS = 15_000;
 export const CLAIM_STATE_TIMEOUT_MS = 5_000;
@@ -93,9 +94,10 @@ export function RemoteHubGuide(): ReactElement {
           </h1>
           {claimable && (
             <p className="mt-3">
-              The first GitHub approval completed through the claim command below
-              makes that account the first member and administrator of this hub’s
-              default workspace. Claiming happens once.
+              The first GitHub account to finish approval claims this hub. It becomes
+              hub administrator and the first member and administrator of this hub’s
+              default workspace, whether signing in here or from a computer.
+              Claiming happens once.
             </p>
           )}
           {state !== null && state !== "checking" && state.unclaimed && !state.canClaim && (
@@ -105,10 +107,11 @@ export function RemoteHubGuide(): ReactElement {
             <p className="mt-3">The hub did not return a confirmed setup state. This page will check again.</p>
           )}
         </div>
-        <p className="mt-3">
-          This browser is not signed in. Browser sign-in is not available yet.
-          This page has no document access.
-        </p>
+        <BrowserHubSignIn
+          claimable={claimable}
+          claimStateKnown={state !== null && state !== "checking"}
+          onClaim={() => setState({ unclaimed: false, canClaim: false })}
+        />
         {(claimable || closed) && (
           <>
             <h2 className="mt-6 text-base font-semibold">
