@@ -82,6 +82,7 @@ for (const deleted of ["column", "table"] as const) {
       await table.locator("td").first().click();
       await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
       await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
       const remaining = "| B |\n| --- |\n| one |\n| two |";
       if (deleted === "column") {
         editBlock(fixture.doc, fixture.id, SOURCE, remaining, {
@@ -95,6 +96,7 @@ for (const deleted of ["column", "table"] as const) {
       }
       await expect(page.getByRole("menu")).toHaveCount(0);
       await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("menuitem", { name: /^Move column / })).toHaveCount(0);
       if (deleted === "column") {
         await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(remaining);
       } else {
@@ -141,7 +143,65 @@ test("an open column menu keeps its target through collaborator edits, insertion
   } finally { fixture.close(); }
 });
 
-test("a single-column menu cannot delete its last column", async ({ page }) => {
+test("a column move resolves its target after collaborator edits and insertion to its left", async ({ page }) => {
+  const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | one | last |\n| beta | two | tail |";
+  const fixture = await publishTable({ source });
+  try {
+    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+    const table = page.locator(".ub-table");
+    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+    await table.locator("td").nth(1).click();
+    await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
+    const move = page.getByRole("menuitem", { name: "Move column left", exact: true });
+    await expect(move).toBeEnabled();
+    const edited = source.replace("one", "edited one").replace("last", "edited last");
+    editBlock(fixture.doc, fixture.id, source, edited, {
+      tableMapping: { rows: [0, 1, 2], columns: [0, 1, 2] },
+    });
+    await expect(table.locator("td").nth(1)).toHaveText("edited one");
+    const expanded = "| A | New | B | C |\n| --- | --- | --- | --- |\n| alpha | new one | edited one | edited last |\n| beta | new two | two | tail |";
+    editBlock(fixture.doc, fixture.id, edited, expanded, {
+      tableMapping: { rows: [0, 1, 2], columns: [0, null, 1, 2] },
+    });
+    await expect(table.locator("th")).toHaveText(["A", "New", "B", "C"]);
+    await expect(move).toBeEnabled();
+    await move.click();
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(table.locator("th")).toHaveText(["A", "B", "New", "C"]);
+    await expect(table.locator("td")).toHaveText(["alpha", "edited one", "new one", "edited last", "beta", "two", "new two", "tail"]);
+    await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text)
+      .toBe("| A | B | New | C |\n| --- | --- | --- | --- |\n| alpha | edited one | new one | edited last |\n| beta | two | new two | tail |");
+  } finally { fixture.close(); }
+});
+
+for (const direction of ["left", "right"] as const) {
+  test(`an open column menu disables moving ${direction} when its target reaches that edge`, async ({ page }) => {
+    const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | one | last |";
+    const fixture = await publishTable({ source });
+    try {
+      await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
+      const table = page.locator(".ub-table");
+      await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
+      await table.locator("td").nth(1).click();
+      await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
+      const move = page.getByRole("menuitem", { name: `Move column ${direction}`, exact: true });
+      await expect(move).toBeEnabled();
+      const remaining = direction === "left"
+        ? "| B | C |\n| --- | --- |\n| one | last |"
+        : "| A | B |\n| --- | --- |\n| alpha | one |";
+      editBlock(fixture.doc, fixture.id, source, remaining, {
+        tableMapping: { rows: [0, 1], columns: direction === "left" ? [1, 2] : [0, 1] },
+      });
+      await expect(table.locator("th")).toHaveText(direction === "left" ? ["B", "C"] : ["A", "B"]);
+      await expect(move).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(remaining);
+    } finally { fixture.close(); }
+  });
+}
+
+test("a single-column menu cannot move or delete its last column", async ({ page }) => {
   const source = "| A |\n| --- |\n| alpha |";
   const fixture = await publishTable({ source });
   try {
@@ -150,6 +210,8 @@ test("a single-column menu cannot delete its last column", async ({ page }) => {
     await expect(table.locator("th")).toHaveCount(1);
     await table.locator("td").first().click();
     await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
+    await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeDisabled();
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
@@ -171,9 +233,11 @@ test("a column menu closes when concurrent structural edits make its table ragge
     await table.locator("td").first().click();
     await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
     makeRagged(fixture.doc, fixture.id, source);
     await expect(table.locator("tr")).toHaveCount(3);
     await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: /^Move column / })).toHaveCount(0);
     await expect(page.locator(".ub-table-controls")).toHaveCount(0);
     expect(await table.locator("tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("th, td").length)))
       .toEqual([3, 3, 2]);
@@ -285,10 +349,12 @@ test(`a received archive closes its ${kind} menu and removes structural controls
     await table.locator("td").first().click();
     await page.getByRole("button", { name: kind === "row" ? "Row 2 actions" : "Column 1 actions", exact: true }).click();
     await expect(page.getByRole("menuitem", { name: `Delete ${kind}`, exact: true })).toBeVisible();
+    if (kind === "column") await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
     tombstoneDirectoryEntry(fixture.directory, fixture.uuid);
     await expect(page.locator(".ub-archived-banner")).toBeVisible();
     await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "false");
     await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: /^Move column / })).toHaveCount(0);
     await expect(page.locator(".ub-table-controls")).toHaveCount(0);
     await table.locator("td").first().click({ button: "right" });
     await expect(page.getByRole("menu")).toHaveCount(0);
