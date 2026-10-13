@@ -1,4 +1,5 @@
 import type * as Y from "yjs";
+import { githubRepository } from "./github-reference.js";
 
 /** A root in the workspace's _settings room, beside the tag catalog roots. */
 export const WORKSPACE_SETTINGS_KEY = "workspace-settings";
@@ -34,4 +35,26 @@ export function setWorkspaceName(settings: Y.Doc, input: string): string {
   const name = validateWorkspaceName(input);
   settings.getMap<string>(WORKSPACE_SETTINGS_KEY).set("name", name);
   return name;
+}
+
+/** Missing or unreadable repository settings stay unset; reads write no default. */
+export function getWorkspaceMainRepository(settings: Y.Doc): string | null {
+  try {
+    const value = settings.getMap<unknown>(WORKSPACE_SETTINGS_KEY).get("mainRepository");
+    return typeof value === "string" ? githubRepository(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Validate before writing one replaceable identity; an empty value clears it. */
+export function setWorkspaceMainRepository(settings: Y.Doc, input: string): string | null {
+  const repository = input.trim() === "" ? null : githubRepository(input);
+  if (repository === null && input.trim() !== "") {
+    throw new Error("Main repository must be owner/repo or a github.com repository address.");
+  }
+  const map = settings.getMap<string>(WORKSPACE_SETTINGS_KEY);
+  if (repository === null) map.delete("mainRepository");
+  else map.set("mainRepository", repository);
+  return repository;
 }

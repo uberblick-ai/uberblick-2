@@ -8,7 +8,7 @@ import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
-import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
+import { getWorkspaceName, getWorkspaceMainRepository, setWorkspaceMainRepository, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -216,6 +216,7 @@ describe("workspace creation and promotion", () => {
     try {
       const entry = listDirectory(local.replicas.directory().doc)[0]!;
       tombstoneDirectoryEntry(local.replicas.directory().doc, entry.uuid);
+      setWorkspaceMainRepository(local.replicas.settings().doc, "acme/main-repository");
     } finally { await local.close(); }
     const expected = await syncWorkspace(offline(box));
     const { hub, endpoint, login, administered } = await hubFor(box, role);
@@ -256,6 +257,9 @@ describe("workspace creation and promotion", () => {
     const hydrated = await syncWorkspace(offline(other));
     expect(isIdentical(compareCorpus(expected.entries, hydrated.entries))).toBe(true);
     expect(isIdentical(compareCorpus(expected.workspace!, hydrated.workspace!))).toBe(true);
+    const joinedLocal = createMcpServer(offline(other));
+    try { expect(getWorkspaceMainRepository(joinedLocal.replicas.settings().doc)).toBe("acme/main-repository"); }
+    finally { await joinedLocal.close(); }
   });
 
   it.each(["admin", "member", null] as const)("refuses a non-hub administrator with workspace role %s without upload or changing the hub or project binding", async role => {

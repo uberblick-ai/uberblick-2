@@ -52,6 +52,8 @@ export interface CreateEditorOptions {
    * leaves them inert because there is no workspace address to navigate.
    */
   docLinks?: DocLinkContext | null;
+  /** Shared settings drive presentation without changing the document. */
+  workspaceSettings?: Y.Doc | null;
 }
 
 export function createUberblickEditor(options: CreateEditorOptions): Editor {
@@ -94,7 +96,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // Directory and routing behavior is per editor; the docLink mark is shared schema.
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
-    GitHubLinks,
+    GitHubLinks.configure({ settings: options.workspaceSettings ?? null }),
     // Read resolved state from annotations rather than duplicating it in marks.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
     Collaboration.configure({

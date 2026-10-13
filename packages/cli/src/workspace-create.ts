@@ -11,6 +11,7 @@ import { acquireInitLock, seedLockPath } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { PROJECT_CONFIG_FILE, type ProjectBinding, findProjectConfig, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { seedStarterDocs } from "./starter.js";
+import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export const WORKSPACE_CREATE_HELP = `usage: ub workspace create <name>
 
@@ -71,6 +72,7 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
       try {
         storeWorkspaceName(config, name);
         await seedStarterDocs(env, config);
+        await fillMainRepositoryFromOrigin(uuid, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
     } finally { lock.release(); }

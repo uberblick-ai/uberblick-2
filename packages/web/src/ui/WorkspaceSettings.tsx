@@ -12,6 +12,7 @@ import {
   restoreTagCatalogEntry,
   retireTagCatalogEntry,
   seedTagCatalog,
+  setWorkspaceMainRepository,
   setWorkspaceName,
   settingsRoom,
 } from "@uberblick/schema";
@@ -28,6 +29,7 @@ import { Input } from "./shadcn/input.js";
 import { statusReading } from "./status-reading.js";
 import { useTagCatalog } from "./tags.js";
 import { useWorkspaceName } from "./workspace-names.js";
+import { useWorkspaceMainRepository } from "./workspace-main-repository.js";
 import { AccessSettings } from "./AccessSettings.js";
 
 /** What a SyncPanel-style fact reads as before this client knows it. */
@@ -78,6 +80,7 @@ function GeneralSettings({
           General
         </h1>
         <WorkspaceNameForm key={workspace.uuid} workspace={workspace} connection={catalogConnection} />
+        <MainRepositoryForm key={`repository-${workspace.uuid}`} workspace={workspace} connection={catalogConnection} />
         <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <dl className="m-0 grid" data-settings-facts>
             <Fact label="Workspace UUID">{workspace.uuid}</Fact>
@@ -175,6 +178,82 @@ function WorkspaceNameForm({
         {arrived ? "Workspace renaming is unavailable while this page is disconnected." : "Waiting for workspace settings…"}
       </p>}
       {error !== null && <p className="m-0 text-sm" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function MainRepositoryForm({
+  workspace,
+  connection,
+}: {
+  workspace: Workspace;
+  connection: RoomConnection | null;
+}): ReactElement {
+  const status = useRoomStatus(connection);
+  const sharedRepository = useWorkspaceMainRepository(connection);
+  const arrived = connection?.room === settingsRoom(workspace.uuid) && status.hasReceivedServerState;
+  const currentRepository = arrived ? sharedRepository : null;
+  const [draft, setDraft] = useState(currentRepository ?? "");
+  const previousRepository = useRef(currentRepository ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const writable = arrived && status.writable;
+
+  useEffect(() => {
+    const previous = previousRepository.current;
+    const next = currentRepository ?? "";
+    setDraft((value) => value === previous ? next : value);
+    previousRepository.current = next;
+  }, [currentRepository]);
+
+  const save = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (
+      connection === null ||
+      connection.room !== settingsRoom(workspace.uuid) ||
+      !connection.status.hasReceivedServerState ||
+      !connection.status.writable
+    ) {
+      setError("Reconnect before changing the main repository.");
+      return;
+    }
+    try {
+      const repository = setWorkspaceMainRepository(connection.ydoc, draft);
+      setDraft(repository ?? "");
+      setError(null);
+      notifyTransient({
+        key: "workspace-settings",
+        message: repository === null ? "Main repository cleared." : `Saved main repository “${repository}”.`,
+        severity: "success",
+      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "The main repository is invalid.");
+    }
+  };
+
+  return (
+    <div className="mb-4 flex flex-col gap-3">
+      <form className="flex flex-col gap-2" onSubmit={save}>
+        <label htmlFor="ub-main-repository" className="text-sm font-medium">Main repository</label>
+        <div className="flex gap-2">
+          <Input
+            id="ub-main-repository"
+            className="flex-1"
+            value={draft}
+            disabled={!writable}
+            aria-invalid={error !== null}
+            aria-describedby={error === null ? undefined : "ub-main-repository-error"}
+            onChange={(event) => {
+              setDraft(event.currentTarget.value);
+              setError(null);
+            }}
+          />
+          <Button type="submit" variant="outline" aria-label="Save main repository" disabled={!writable}>Save</Button>
+        </div>
+      </form>
+      {!writable && <p className="m-0 text-sm" role="status">
+        {arrived ? "Main repository changes are unavailable while this page is disconnected." : "Waiting for workspace settings…"}
+      </p>}
+      {error !== null && <p id="ub-main-repository-error" className="m-0 text-sm" role="alert">{error}</p>}
     </div>
   );
 }

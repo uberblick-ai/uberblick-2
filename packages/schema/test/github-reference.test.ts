@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { githubItemUrl, githubReference } from "../src/index.js";
+import { githubItemUrl, githubReference, githubRepository } from "../src/index.js";
+
+describe("GitHub repository addresses", () => {
+  it("normalizes repository references, web addresses and SSH origins", () => {
+    for (const input of [
+      " Owner/My_Repo ", "Owner/My_Repo.git", "Owner/My_Repo/",
+      "https://github.com/Owner/My_Repo", "https://github.com/Owner/My_Repo.git/",
+      "http://GITHUB.COM/Owner/My_Repo/", "git@github.com:Owner/My_Repo.git",
+      "ssh://git@github.com/Owner/My_Repo.git",
+      "ssh://git@GITHUB.COM/Owner/My_Repo.git",
+    ]) expect(githubRepository(input), input).toBe("Owner/My_Repo");
+  });
+
+  it("refuses foreign hosts, item paths, credentials and malformed repositories", () => {
+    for (const input of [
+      "", "repo", "owner/repo/extra", "owner/.", "owner/..", "owner/.git",
+      "ow_ner/repo", "owner/re po", "owner/repo#1", "owner/repo?query=1",
+      "https://github.example.com/owner/repo", "https://github.com:444/owner/repo",
+      "https://user@github.com/owner/repo", "https://github.com/owner/repo/issues/1",
+      "https://github.com/owner/repo.git?query=1", "https://github.com/owner/repo#section",
+      "https://github.com/owner/old/../repo", "https://github.com/owner/%2e/repo",
+      "https://github.com/owner/%72epo", "https://github.com/owner/re\npo",
+      "git@github.example.com:owner/repo.git", "ssh://git:secret@github.com/owner/repo",
+      "ssh://git@github.com:22/owner/repo", "ftp://github.com/owner/repo",
+    ]) expect(githubRepository(input), input).toBeNull();
+  });
+});
 
 describe("GitHub item references", () => {
   it("reads issue and pull request kinds while preserving repository spelling", () => {
