@@ -135,10 +135,84 @@ describe("cards through MCP", () => {
     expect(removed.block.text).toBe(noButton);
   });
 
+  it("round-trips all button appearances in authored order after footer", async () => {
+    const rig = await localRig();
+    const appearances = [
+      { input: "outline neutral", canonical: "" },
+      { input: "neutral filled", canonical: " filled" },
+      { input: "blue outline", canonical: " blue" },
+      { input: "filled blue", canonical: " filled blue" },
+      { input: "outline green", canonical: " green" },
+      { input: "green filled", canonical: " filled green" },
+      { input: "violet outline", canonical: " violet" },
+      { input: "filled violet", canonical: " filled violet" },
+    ];
+    const destinations = ["codex://new?prompt=Review", "claude://code/new?q=Review", "claude-cli://open?q=Review", "https://example.com/details"];
+    const buttons = appearances.map(({ input }, index) =>
+      `button: [Action ${index}](${destinations[index % destinations.length]}) ${input}`);
+    const canonicalButtons = appearances.map(({ canonical }, index) =>
+      `button: [Action ${index}](${destinations[index % destinations.length]})${canonical}`);
+    const source = `${buttons.slice(0, 4).join("\n")}\nfooter: Evidence\ntitle: Keep the title\n${buttons.slice(4).join("\n")}\nlabel: Review\n\nKeep the body.`;
+    const canonical = SOURCE.replace("footer: Evidence\n", `footer: Evidence\n${canonicalButtons.join("\n")}\n`);
+    const created = await rig.ok("create_doc", { title: "Several card actions", description: "Buttons keep order and appearance through canonical reads." });
+    const inserted = await rig.ok("insert_block", { uuid: created.uuid, type: "card", text: source });
+    expect(inserted.block.text).toBe(canonical);
+    expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks[0]).toEqual(inserted.block);
+    expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
+      .toBe(`:::card\n${canonical}\n:::\n`);
+    const proseEdit = canonical.replace("Keep the body.", "Changed body.");
+    const edited = await rig.ok("edit_block", { uuid: created.uuid, block_id: inserted.block.id,
+      old_text: canonical, new_text: proseEdit, rev: inserted.block.rev });
+    expect(edited.block.text).toBe(proseEdit);
+    const buttonEdit = proseEdit.replace("button: [Action 3](https://example.com/details) filled blue",
+      "button: [View details](https://example.com/updated) violet filled");
+    const expected = buttonEdit.replace(" violet filled", " filled violet");
+    const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: inserted.block.id,
+      old_text: proseEdit, new_text: buttonEdit, rev: edited.block.rev });
+    expect(changed.block.text).toBe(expected);
+    expect((await rig.ok("export_markdown", { uuid: created.uuid, frontmatter: false })).markdown)
+      .toBe(`:::card\n${expected}\n:::\n`);
+  });
+
+  it("changes rev for each button field and position while preserving the other button", async () => {
+    const rig = await localRig();
+    const first = "button: [Open](codex://new) filled blue";
+    const second = "button: [Details](https://example.com/details) green";
+    const initial = SOURCE.replace("footer: Evidence\n", `footer: Evidence\n${first}\n${second}\n`);
+    const created = await rig.ok("create_doc", { title: "Card action assertions", description: "Every button field and order participates in rev.",
+      blocks: [{ type: "card", text: initial }] });
+    let current = created.blocks[0];
+    const changes = [
+      initial.replace("[Open]", "[Open in Codex]"),
+      initial.replace("[Open]", "[Open in Codex]").replace("codex://new)", "codex://new?prompt=Review)"),
+      initial.replace("[Open]", "[Open in Codex]").replace("codex://new)", "codex://new?prompt=Review)").replace(" filled blue", " blue"),
+      initial.replace("[Open]", "[Open in Codex]").replace("codex://new)", "codex://new?prompt=Review)").replace(" filled blue", " violet"),
+    ];
+    for (const newText of changes) {
+      const changed = await rig.ok("edit_block", { uuid: created.uuid, block_id: current.id,
+        old_text: current.text, new_text: newText, rev: current.rev });
+      expect(changed.block.rev).not.toBe(current.rev);
+      expect(changed.block.text).toBe(newText);
+      expect(changed.block.text).toContain(second);
+      current = changed.block;
+    }
+    const changedFirst = "button: [Open in Codex](codex://new?prompt=Review) violet";
+    const reordered = current.text.replace(`${changedFirst}\n${second}`, `${second}\n${changedFirst}`);
+    const moved = await rig.ok("edit_block", { uuid: created.uuid, block_id: current.id,
+      old_text: current.text, new_text: reordered, rev: current.rev });
+    expect(moved.block.rev).not.toBe(current.rev);
+    expect(moved.block.text).toBe(reordered);
+    const removed = await rig.ok("edit_block", { uuid: created.uuid, block_id: current.id,
+      old_text: moved.block.text, new_text: reordered.replace(`${changedFirst}\n`, ""), rev: moved.block.rev });
+    expect(removed.block.text).toBe(SOURCE.replace("footer: Evidence\n", `footer: Evidence\n${second}\n`));
+  });
+
   it("refuses malformed or disallowed buttons before any create, insert or edit write", async () => {
     const rig = await localRig();
+    const source = SOURCE.replace("footer: Evidence\n",
+      "footer: Evidence\nbutton: [Existing](https://example.com/existing) filled violet\nbutton: [Other](codex://new) blue\n");
     const created = await rig.ok("create_doc", { title: "Card button refusals", description: "Invalid card actions cannot make a partial write.",
-      blocks: [{ type: "card", text: SOURCE }] });
+      blocks: [{ type: "card", text: source }] });
     const doc = rig.instance.replicas.replica(created.uuid).doc;
     const before = Y.encodeStateAsUpdate(doc);
     const writes = rig.instance.store.logSize();
@@ -153,15 +227,18 @@ describe("cards through MCP", () => {
       "[](https://example.com)", "[   ](https://example.com)",
       "[**Discuss**](https://example.com)", "Discuss",
       "[Discuss](https://example.com) trailing", "[Discuss](https://example.com) [Again](https://example.com)",
-      "[Discuss](https://example.com)\nbutton: [Again](https://example.com)",
+      "[Discuss](https://example.com) outline filled", "[Discuss](https://example.com) filled filled",
+      "[Discuss](https://example.com) blue green", "[Discuss](https://example.com) violet violet",
+      "[Discuss](https://example.com) red", "[Discuss](https://example.com) FILLED",
+      "[Discuss](https://example.com) filled blue trailing", "[Discuss](https://example.com) blue filled neutral",
     ];
     for (const button of invalidButtons) {
-      const invalid = `title: Keep the title\nbutton: ${button}\n\nKeep the body.`;
+      const invalid = `title: Keep the title\nbutton: [Valid first](codex://new) filled blue\nbutton: ${button}\nbutton: [Valid last](https://example.com) green\n\nKeep the body.`;
       for (const [name, args] of [
         ["create_doc", { title: "No partial button", description: "All seeds validate before creation.",
           blocks: [{ type: "paragraph", text: "Earlier seed" }, { type: "card", text: invalid }] }],
         ["insert_block", { uuid: created.uuid, type: "card", text: invalid }],
-        ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id, old_text: SOURCE,
+        ["edit_block", { uuid: created.uuid, block_id: created.blocks[0].id, old_text: source,
           new_text: invalid, rev: created.blocks[0].rev }],
       ] as const) {
         const refused = await rig.call(name, args);
@@ -201,6 +278,8 @@ describe("cards through MCP", () => {
     "title: \n\nBody",
     "title: Title\nunknown: Value\n\nBody",
     "title: Title\ntitle: Duplicate\n\nBody",
+    "title: Title\nlabel: First\nlabel: Duplicate\n\nBody",
+    "title: Title\nfooter: First\nfooter: Duplicate\n\nBody",
     "title: Title\nNot a key\n\nBody",
   ])("refuses malformed card content before any create, insert or edit write: %s", async (invalid) => {
     const rig = await localRig();

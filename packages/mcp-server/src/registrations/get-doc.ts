@@ -9,20 +9,22 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
   server.registerTool("get_doc", {
     title: "Read a document",
     description:
-      "Read metadata, blocks and threads before editing. Regular pages return related then linked decision " +
-      "topics; decisions return discussion (RFC UUID or null), separately from curated links and " +
-      "recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first " +
-      "paragraph/list, shortened to 300 characters). Missing description/TL;DR returns null; data lists " +
-      "collection names/counts for deliberate get_data reads. Blocks include rev. Tables return canonical " +
-      "GFM; cards return container content with optional button after footer. Figma returns :::figma content " +
-      "without delimiters: normalized url, optional plain title and height, blank line and marked caption. " +
-      "The read-only figma object has kind (frame, file, prototype, board, slides or community file), file, " +
-      "optional fileName (decoded, dashes as spaces) and optional node (12:345 form). Saving retained only " +
-      "Figma view paths and node-id, starting-point-node-id, version-id on https://www.figma.com; markdown " +
-      "help specifies accepted links, keys and invalid_figma refusals. Tables/cards/Figma have formatting-sensitive " +
-      "rev; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread " +
-      "ranges name their part; Figma ranges name caption with caption-text offsets. This read makes no " +
-      "Figma request; eligible guidance counts toward this process's briefing." +
+      "Read metadata, blocks and threads. Regular pages return related then linked decision topics; " +
+      "decisions return discussion (RFC UUID or null), separate from curated links and recorded answer " +
+      "attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or " +
+      "first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists " +
+      "collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return " +
+      "button: [Text](destination) lines after footer in authored order. Plain labels link to https or " +
+      "exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style " +
+      "outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style " +
+      "before color and omits defaults. Figma returns :::figma content without delimiters: normalized " +
+      "url, optional plain title and height, blank line and marked caption. Read-only figma: kind " +
+      "(frame, file, prototype, board, slides or community file), file, optional decoded fileName " +
+      "(dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive " +
+      "rev, including every button's text, destination, appearance and order; other rev ignores marks. " +
+      "Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma " +
+      "ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward " +
+      "this process's briefing." +
       helpPointer("get_doc"),
     outputSchema: outputSchemas.get_doc,
     inputSchema,

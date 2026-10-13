@@ -639,7 +639,7 @@ describe("the gutter menu", () => {
     const block = mounted.editor.view.dom.children[index];
     if (block === undefined) throw new Error(`no block ${index}`);
     act(() => {
-      block.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" }));
+      block.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse", movementX: 1 }));
     });
   }
 
@@ -670,6 +670,51 @@ describe("the gutter menu", () => {
   function visibleButton(mounted: Mounted): HTMLButtonElement | null {
     return within(mounted.frame).queryByRole<HTMLButtonElement>("button", { name: "Insert block below" });
   }
+
+  it("keeps following a touch caret through stationary compatibility hover after an overlay press, and accepts real pointer movement", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "First" }]);
+    const mounted = mountMenu(ydoc);
+    const block = mounted.editor.view.dom.firstElementChild;
+    if (block === null) throw new Error("no first block");
+    const overlay = document.createElement("button");
+    mounted.frame.appendChild(overlay);
+    try {
+      act(() => {
+        block.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true, pointerType: "touch", clientX: 20, clientY: 30,
+        }));
+        mounted.editor.view.focus();
+      });
+      caret(mounted.editor, 0, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+
+      // A table control sits beside ProseMirror in the editor frame. Its
+      // touch point replaces the cell's before WebKit reports hover on reflow.
+      act(() => {
+        overlay.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true, pointerType: "touch", clientX: 80, clientY: 90,
+        }));
+        block.dispatchEvent(new PointerEvent("pointermove", {
+          bubbles: true, pointerType: "mouse", clientX: 80, clientY: 90, movementX: 0, movementY: 0,
+        }));
+      });
+      type(mounted.editor, "touch edit ");
+      expect(visibleButton(mounted)).not.toBeNull();
+
+      act(() => {
+        block.dispatchEvent(new PointerEvent("pointermove", {
+          bubbles: true, pointerType: "mouse", clientX: 90, clientY: 90, movementX: 10, movementY: 0,
+        }));
+      });
+      expect(visibleButton(mounted)).not.toBeNull();
+      type(mounted.editor, "pointer edit ");
+      expect(visibleButton(mounted)).toBeNull();
+      hoverBlock(mounted, 0);
+      expect(visibleButton(mounted)).not.toBeNull();
+    } finally {
+      mounted.unmount();
+    }
+  });
 
   it("offers an existing caret on a coarse pointer before the first touch and lets mouse hover take over", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)" }));

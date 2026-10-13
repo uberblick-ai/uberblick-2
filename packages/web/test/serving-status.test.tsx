@@ -39,6 +39,7 @@ function client(
 ): DocumentSearchClient {
   return {
     status: vi.fn(read),
+    search: vi.fn(async () => []),
   };
 }
 

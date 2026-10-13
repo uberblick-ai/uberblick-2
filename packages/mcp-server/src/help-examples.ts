@@ -66,7 +66,7 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
   },
   search: {
     details: toolHelpDetails.search,
-    example: { query: "release checklist", limit: 10 },
+    example: { query: "release checklist", kind: "regular", tag: ["mcp", "cli"], limit: 10 },
     related: documentContracts,
   },
   backlinks: {

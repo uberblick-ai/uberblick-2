@@ -358,6 +358,7 @@ export function DocMetaLine({
   onArchiveConfirmationFocusChange,
   hasTldr = false,
   onEditTldr,
+  onRemoveTldr,
 }: {
   connection: RoomConnection;
   /** The workspace settings room that owns the curated tag catalog. */
@@ -381,6 +382,7 @@ export function DocMetaLine({
   /** Whether the document-actions entry adds or edits the person-facing summary. */
   hasTldr?: boolean;
   onEditTldr?: (() => void) | undefined;
+  onRemoveTldr?: (() => void) | undefined;
 }): ReactElement {
   const rev = useDocRev(connection);
   return (
@@ -415,8 +417,10 @@ export function DocMetaLine({
               onArchive={onArchive}
               onConfirmationFocusChange={onArchiveConfirmationFocusChange}
               hasTldr={hasTldr}
+              tldrOptOut={meta.tldrOptOut === true}
               contentReadOnly={contentReadOnly || meta.kind === "decision"}
               onEditTldr={readOnly ? null : (onEditTldr ?? null)}
+              onRemoveTldr={readOnly ? null : (onRemoveTldr ?? null)}
             />
           )}
         </>
@@ -440,8 +444,10 @@ function DocumentActions({
   onArchive,
   onConfirmationFocusChange,
   hasTldr,
+  tldrOptOut,
   contentReadOnly,
   onEditTldr,
+  onRemoveTldr,
 }: {
   title: string;
   pinned: boolean;
@@ -449,8 +455,10 @@ function DocumentActions({
   onArchive: (() => void) | null;
   onConfirmationFocusChange?: ((focused: boolean) => void) | undefined;
   hasTldr: boolean;
+  tldrOptOut: boolean;
   contentReadOnly: boolean;
   onEditTldr: (() => void) | null;
+  onRemoveTldr: (() => void) | null;
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
   const openingTldrEditor = useRef(false);
@@ -506,17 +514,29 @@ function DocumentActions({
                   : "Pin to sidebar"}
             </DropdownMenuItem>
             {!contentReadOnly && (
-              <DropdownMenuItem
-                disabled={onEditTldr === null}
-                onSelect={() => {
-                  openingTldrEditor.current = true;
-                  onEditTldr?.();
-                }}
-              >
-                {onEditTldr === null
-                  ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
-                  : `${hasTldr ? "Edit" : "Add"} TL;DR`}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem
+                  disabled={onEditTldr === null}
+                  onSelect={() => {
+                    openingTldrEditor.current = true;
+                    onEditTldr?.();
+                  }}
+                >
+                  {onEditTldr === null
+                    ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
+                    : `${hasTldr ? "Edit" : "Add"} TL;DR`}
+                </DropdownMenuItem>
+                {!tldrOptOut && (
+                  <DropdownMenuItem
+                    disabled={onRemoveTldr === null}
+                    onSelect={() => onRemoveTldr?.()}
+                  >
+                    {onRemoveTldr === null
+                      ? "Remove TL;DR unavailable — document is read-only"
+                      : "Remove TL;DR"}
+                  </DropdownMenuItem>
+                )}
+              </>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem

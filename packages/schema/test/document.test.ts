@@ -31,6 +31,7 @@ import {
   setStatus,
   setTags,
   setTldr,
+  setTldrOptOut,
   setTitle,
   upsertDirectoryEntry,
 } from "../src/index.js";
@@ -129,6 +130,110 @@ describe("document round-trip", () => {
     });
     expect(getMetaMap(doc).get("tldr")).toBeNull();
   });
+
+  it.each([null, "An existing summary."])(
+    "removes TL;DR %j and marks deliberate absence in one observed write",
+    (summary) => {
+      const doc = seeded();
+      setTldr(doc, summary);
+      setDescription(doc, "Discovery copy.");
+      const observed: ReturnType<typeof getMeta>[] = [];
+      getMetaMap(doc).observe(() => observed.push(getMeta(doc)));
+
+      setTldrOptOut(doc, true);
+
+      expect(observed).toHaveLength(1);
+      expect(observed[0]).toMatchObject({
+        description: "Discovery copy.", tldr: null, tldrOptOut: true,
+      });
+      expect(getMetaMap(doc).get("tldr")).toBeNull();
+      expect(getMetaMap(doc).get("tldrOptOut")).toBe(true);
+      doc.destroy();
+    },
+  );
+
+  it("preserves the mark on ordinary clears and lifts it on opt-in or a summary write", () => {
+    const doc = seeded();
+    setTldrOptOut(doc, true);
+    setTldr(doc, null);
+    expect(getMeta(doc)).toMatchObject({ tldr: null, tldrOptOut: true });
+
+    setTldrOptOut(doc, false);
+    expect(getMeta(doc).tldr).toBeNull();
+    expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+
+    setTldrOptOut(doc, true);
+    const observed: ReturnType<typeof getMeta>[] = [];
+    getMetaMap(doc).observe(() => observed.push(getMeta(doc)));
+    setTldr(doc, "A new summary.");
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.tldr).toBe("A new summary.");
+    expect(observed[0]).not.toHaveProperty("tldrOptOut");
+    expect(getMetaMap(doc).get("tldrOptOut")).toBe(false);
+    setTldr(doc, null);
+    expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+    doc.destroy();
+  });
+
+  it("masks a mark under a legacy summary without writing and never marks a decision", () => {
+    const doc = seeded();
+    setTldrOptOut(doc, true);
+    getMetaMap(doc).set("tldr", "An older client's summary.");
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(getMeta(doc).tldr).toBe("An older client's summary.");
+    expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+
+    setKind(doc, "decision");
+    expect(getMeta(doc).tldr).toBe("An older client's summary.");
+    expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+    getMetaMap(doc).set("tldr", null);
+    expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+    doc.destroy();
+  });
+
+  it.each([
+    [1, 2, false], [2, 1, false], [1, 2, true], [2, 1, true],
+  ] as const)(
+    "converges remove %i versus summary %i (legacy %s) regardless of update order",
+    (removeId, summaryId, legacy) => {
+      const removing = new Y.Doc();
+      removing.clientID = removeId;
+      initDoc(removing, { uuid: UUID, title: "Concurrent summaries" });
+      setTldr(removing, "The original summary.");
+      const writing = new Y.Doc();
+      writing.clientID = summaryId;
+      syncDocs(removing, writing);
+      const initial = Y.encodeStateAsUpdate(removing);
+      const vector = Y.encodeStateVector(removing);
+
+      setTldrOptOut(removing, true);
+      if (legacy) getMetaMap(writing).set("tldr", "The concurrent summary.");
+      else setTldr(writing, "The concurrent summary.");
+      const removeUpdate = Y.encodeStateAsUpdate(removing, vector);
+      const summaryUpdate = Y.encodeStateAsUpdate(writing, vector);
+      syncDocs(removing, writing);
+
+      const expected = removeId < summaryId
+        ? { tldr: "The concurrent summary." }
+        : { tldr: null, tldrOptOut: true };
+      expect(getMeta(removing)).toMatchObject(expected);
+      expect(getMeta(writing)).toEqual(getMeta(removing));
+      for (const updates of [[removeUpdate, summaryUpdate], [summaryUpdate, removeUpdate]]) {
+        const observer = new Y.Doc();
+        Y.applyUpdate(observer, initial);
+        for (const update of updates) {
+          Y.applyUpdate(observer, update);
+          const meta = getMeta(observer);
+          if (meta.tldr !== null) expect(meta).not.toHaveProperty("tldrOptOut");
+        }
+        expect(getMeta(observer)).toEqual(getMeta(removing));
+        observer.destroy();
+      }
+      removing.destroy();
+      writing.destroy();
+    },
+  );
 
   it.each(["A legacy release note.", null])(
     "ignores a stored legacy changelog value %j without writing",

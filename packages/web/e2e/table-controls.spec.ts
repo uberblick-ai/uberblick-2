@@ -625,7 +625,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await page.mouse.move(0, 0);
   await page.keyboard.press("Control+Alt+t");
   await expect(button(page, "Insert column before 1")).toBeFocused();
-  if (info.project.name !== "webkit-iphone") {
+  if (info.project.name !== "webkit-ipad") {
     const order = ["Insert column before 1", "Insert column after 1", "Insert column after 2", "Insert column after 3",
       "Column 1 actions", "Column 2 actions", "Column 3 actions",
       "Insert row after 1", "Insert row after 2", "Insert row after 3", "Row 1 actions", "Row 2 actions", "Row 3 actions"];
@@ -644,7 +644,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   }
   await page.keyboard.press("Enter");
   await expect(table.locator("th")).toHaveCount(4);
-  if (info.project.name === "webkit-iphone") {
+  if (info.project.name === "webkit-ipad") {
     // iOS's native Tab leaves the button set; caret shortcuts keep every
     // insertion available to an attached keyboard there.
     await caretIn(table.locator("tr").nth(1).locator("td").last(), info);
@@ -658,7 +658,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await expect(table.locator("th")).toHaveCount(5);
   await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
 
-  if (info.project.name === "webkit-iphone") {
+  if (info.project.name === "webkit-ipad") {
     await caretIn(table.locator("tr").last().locator("td").first(), info);
     await page.keyboard.press("Control+Alt+ArrowDown");
   } else {

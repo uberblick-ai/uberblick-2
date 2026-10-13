@@ -14,7 +14,7 @@
 
 import { expect, test } from "@playwright/test";
 import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
-import type { Page } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 import { placeCaret } from "./harness.js";
 
 const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head" } });
@@ -214,6 +214,130 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await a.getByRole("button", { name: "Clear", exact: true }).tap();
   await expect(a.locator(".ub-tldr")).toHaveCount(0);
   await expect(b.locator(".ub-tldr")).toHaveCount(0);
+});
+
+async function exerciseTldrOptOut(browser: Browser, touch: boolean): Promise<void> {
+  const a = await openApp(browser, "/", {
+    contextOptions: {
+      colorScheme: "light",
+      ...(touch ? { hasTouch: true } : {}),
+    },
+    readySelector: ".ub-body",
+  });
+  const activate = async (page: Page, label: string): Promise<void> => {
+    const target = page.getByRole("button", { name: label, exact: true });
+    if (touch) await target.tap();
+    else await target.click();
+  };
+  if ((a.viewportSize()?.width ?? 1280) < 1280) {
+    await activate(a, "Show document list");
+  }
+  await createDoc(a, docTitle("tldr-opt-out"));
+  const b = await openApp(browser, new URL(a.url()).pathname, {
+    contextOptions: { colorScheme: "dark", ...(touch ? { hasTouch: true } : {}) },
+    readySelector: ".ub-editor .ProseMirror",
+  });
+  const choose = async (page: Page, label: string, keyboard = false): Promise<void> => {
+    const trigger = page.getByRole("button", { name: "Document actions", exact: true });
+    if (keyboard) {
+      await trigger.focus();
+      await trigger.press("Enter");
+      await page.keyboard.press(label.startsWith("Remove") ? "r" : "a");
+      const target = page.getByRole("menuitem", { name: label, exact: true });
+      await expect(target).toBeFocused();
+      await target.press("Enter");
+    } else {
+      await activate(page, "Document actions");
+      const target = page.getByRole("menuitem", { name: label, exact: true });
+      if (touch) await target.tap();
+      else await target.click();
+    }
+  };
+  const summary = (page: Page) => page.getByLabel(
+    "Write one or two plain-English sentences that help a reader understand this document.",
+  );
+
+  // An empty page can opt out before any summary exists.
+  await choose(a, "Remove TL;DR", !touch);
+  if (!touch) await expect(a.getByRole("button", { name: "Document actions" })).toBeFocused();
+  await activate(b, "Document actions");
+  await expect(b.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toBeVisible();
+  await expect(b.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
+  await b.keyboard.press("Escape");
+
+  await choose(b, "Add TL;DR", !touch);
+  await expect(summary(b)).toBeFocused();
+  await activate(b, "Cancel");
+  await activate(a, "Document actions");
+  await expect(a.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toBeVisible();
+  await a.keyboard.press("Escape");
+  await choose(b, "Add TL;DR");
+  await summary(b).fill("A summary shared with readers.");
+  await activate(b, "Save");
+  await expect(a.locator(".ub-tldr-body > p")).toHaveText("A summary shared with readers.");
+
+  // A removal immediately updates the other connected client's callout and menu.
+  await choose(a, "Remove TL;DR");
+  await expect(a.locator(".ub-tldr")).toHaveCount(0);
+  await expect(b.locator(".ub-tldr")).toHaveCount(0);
+  await activate(b, "Document actions");
+  await expect(b.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
+  const add = b.getByRole("menuitem", { name: "Add TL;DR", exact: true });
+  if (touch) await add.tap();
+  else await add.click();
+  await expect(summary(b)).toBeFocused();
+  await summary(b).fill("Opted back in from the menu.");
+  await activate(b, "Save");
+  await expect(a.locator(".ub-tldr-body > p")).toHaveText("Opted back in from the menu.");
+}
+
+test("Remove TL;DR syncs intentional absence and Add opts back in before cancellation", { tag: "@webkit" }, async ({ browser }) => {
+  await exerciseTldrOptOut(browser, false);
+});
+
+test("TL;DR opt-out menu actions support touch in light and dark appearances", { tag: "@webkit-touch" }, async ({ browser }) => {
+  await exerciseTldrOptOut(browser, true);
+});
+
+test("read-only document menus disable TL;DR removal and opt-in", { tag: "@webkit" }, async ({ browser }) => {
+  const a = await openApp(browser, "/", {
+    upstream: true,
+    contextOptions: { colorScheme: "light" },
+    readySelector: ".ub-body",
+  });
+  if ((a.viewportSize()?.width ?? 1280) < 1280) {
+    await a.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(a, docTitle("tldr-read-only"));
+  const b = await openApp(browser, "/", {
+    upstream: true,
+    contextOptions: { colorScheme: "dark" },
+    readySelector: ".ub-body",
+  });
+  if ((b.viewportSize()?.width ?? 1280) < 1280) {
+    await b.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await createDoc(b, docTitle("tldr-marked-read-only"));
+  await b.getByRole("button", { name: "Document actions", exact: true }).click();
+  await b.getByRole("menuitem", { name: "Remove TL;DR", exact: true }).click();
+
+  await harness().stopHub();
+  try {
+    for (const page of [a, b]) {
+      await expect(page.locator(".ub-title")).toHaveAttribute("readonly", "");
+      await page.getByRole("button", { name: "Document actions", exact: true }).click();
+      await expect(page.getByRole("menuitem", { name: "Add TL;DR unavailable — document is read-only", exact: true })).toHaveAttribute("aria-disabled", "true");
+      if (page === a) {
+        await expect(page.getByRole("menuitem", { name: "Remove TL;DR unavailable — document is read-only", exact: true })).toHaveAttribute("aria-disabled", "true");
+      } else {
+        await expect(page.getByRole("menuitem", { name: /^Remove TL;DR/ })).toHaveCount(0);
+      }
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".ub-tldr")).toHaveCount(0);
+    }
+  } finally {
+    await harness().startHub();
+  }
 });
 
 test("the upstream fact recovers after an acknowledged typing burst", async ({

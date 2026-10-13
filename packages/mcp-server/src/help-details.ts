@@ -67,7 +67,11 @@ export const toolHelpDetails = {
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
     "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one — its blocks and its annotation threads. Lifecycle documents include `kind` and their " +
+    "has written one — its blocks and its annotation threads. A regular page with a deliberate TL;DR removal " +
+    "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
+    "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
+    "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
+    "decision records omit `tldrOptOut`. Lifecycle documents include `kind` and their " +
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
@@ -90,9 +94,11 @@ export const toolHelpDetails = {
     "Every block carries a `rev` content hash — pass it back to edit_block to assert nothing changed since this read.\n\n" +
     "For a table, `text` is canonical GFM with cell formatting as inline markdown, literal punctuation and " +
     "pipes escaped, and every row padded to the widest row; `rev` includes that formatting. Card text is " +
-    "canonical container content with inline Markdown prose parts and optional `button: [Text](destination)` " +
-    "after footer. The button has nonempty plain text and an https URL or exactly claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by ?query. Its rev also includes the button and formatting. Card thread " +
+    "canonical container content with inline Markdown prose parts and repeated `button: [Text](destination)` " +
+    "lines after footer in authored order. Each button has nonempty plain text and an https URL or exactly " +
+    "claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Optional style outline/filled " +
+    "and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits " +
+    "the defaults. Its rev includes every button's text, destination, appearance and order, and prose formatting. Card thread " +
     "ranges name their anchored part. Figma text is canonical :::figma content without delimiters: url, " +
     "optional plain title and height, a blank line and inline-Markdown caption. URL normalization keeps " +
     "only path kind, key/id, name and node-id, starting-point-node-id and version-id on https://www.figma.com. " +
@@ -166,22 +172,31 @@ export const toolHelpDetails = {
     "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
     "state.",
   search:
-    "Full-text search over document titles, descriptions and block text, from the local FTS5 index. The index " +
+    "Full-text search over live document titles, descriptions, content and assigned tag names, from the local FTS5 index. The index " +
     "is derived from the replicas and updated as updates are observed, so it reflects edits from any client " +
-    "this replica has seen.\n\n" +
-    "Matching is all-terms: every searchable term in `query` must occur in one and the same document. Letters " +
+    "this replica has seen. Archived documents stay out until restored; use `list_docs` with `include_deleted` " +
+    "to find them.\n\n" +
+    "Matching is any-word: any searchable word in `query` can match a document. Letters " +
     "and digits make a term; punctuation and emoji are not terms, so a query holding only those matches " +
     "nothing. An underscore-separated group matches its words as an adjacent phrase: `list_docs` matches both " +
-    "`list_docs` and `list docs`, but not `a list of docs`. Case and accents are folded, but nothing is " +
-    "stemmed — `withdrawal` does not find a document that says `withdrawing`. A trailing `*` loosens one term " +
-    "to a prefix match, which is how to reach an inflection: `withdraw*` finds both `withdrawal` and " +
-    "`withdrawing`. No hits means no indexed document matched the whole query under those rules; it does not " +
+    "`list_docs` and `list docs`, but not `a list of docs`. English word forms use FTS5's Porter stemmer: " +
+    "`launch` finds `launching` and `launched`. Other languages match exact words or prefixes. Case and accents " +
+    "fold, so `ecole` finds `École`. A trailing `*` makes a prefix match: `work*` finds `worktree` and `workspace`; " +
+    "prefixes match stems, so `withdraw*` also finds `withdrawal` and `withdrawing`. No hits means no indexed " +
+    "document matched any query word under those rules; it does not " +
     "by itself mean the index is empty.\n\n" +
-    "Every hit carries the document's `description` — null where nobody has written one — so relevance can be " +
-    "judged from the result list rather than by opening each document in turn. Its tag assignments carry " +
-    "canonical ids, current names and retirement state. Pass `tag` as a catalog id or exact current name to " +
-    "restrict hits to that assignment; a value this catalog does not have is refused rather than answered " +
-    "with no hits.",
+    "Results use title-weighted bm25 relevance: a title word weighs more than the same word elsewhere, " +
+    "without guaranteeing that every title match beats a body-only match or that more matched words come first. " +
+    "Pass `kind: regular` for regular documents, including stored requirements, or `kind: decision` for all " +
+    "decision records, including superseded, rejected and withdrawn records. Pass `tag` as one catalog id or " +
+    "exact current name, or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
+    "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
+    "refuse.\n\n" +
+    "Every hit carries `kind`, `description` (null when unwritten), a snippet and canonical tag assignments " +
+    "with current names and retirement state. Every decision hit carries `state`: `in-force`, `superseded`, " +
+    "`open`, `rejected`, `withdrawn` or `conflict`. State is resolved from the current topic records, so a " +
+    "previously indexed answer can become superseded without being edited. Tag-name matching uses the names " +
+    "the hit shows, updated when catalog tags are renamed.",
   find_decisions:
     "Find every live decision record whose prose links one GitHub issue or pull request. This replica-local " +
     "derived index reads only external link hrefs in decision prose; display labels, unlinked text, source " +
@@ -235,14 +250,19 @@ export const toolHelpDetails = {
     "invalid GFM remains `invalid_table`. Malformed input shapes are refused by the MCP input schema before " +
     "the handler. Previously accepted structural and multi-cell table calls must now supply mappings as part " +
     "of the coordinated table cutover. Cards take the canonical content between :::card and :::, with " +
-    "inline Markdown in each prose part and an optional `button: [Text](destination)` header after footer. " +
-    "The button text is nonempty plain text; its destination is an https URL or claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by an opaque ?query. A repeated button or any " +
-    "other button value or destination refuses with invalid_card before writing. An edit splices " +
+    "inline Markdown in each prose part and one `button: [Text](destination)` header per button, after footer " +
+    "in authored order. Each button's text is nonempty plain text; its destination is an https URL or " +
+    "claude://code/new, claude-cli://open or codex://new, alone or followed by an opaque ?query. At most one " +
+    "style word (outline/filled) and one color word (neutral/blue/green/violet) may follow the link in either " +
+    "order; defaults are outline neutral. Canonical output puts style before color and omits default words. " +
+    "Unknown or repeated appearance words, other trailing text and invalid links refuse with invalid_card " +
+    "before writing. Repeated label, title or footer headers remain invalid. An edit splices " +
     "only changed parts, characters and mark keys; unchanged parts and comment anchors on unchanged " +
     "characters survive. Newly added document targets must be known locally; existing targets in a part " +
-    "remain editable. An unchanged button survives prose edits; removing its header line removes it. " +
-    "A card's rev includes its button and formatting. Figma takes the content between :::figma and :::; " +
+    "remain editable. Unchanged buttons keep their appearances and order during prose or other button edits; " +
+    "removing a header line removes that button. The complete button list is one atomic synced value; concurrent " +
+    "button edits may overwrite each other without mixing text and destinations. A card's rev includes every " +
+    "button's text, destination, style, color and order, and prose formatting. Figma takes the content between :::figma and :::; " +
     "url, optional plain one-line title, optional whole-pixel height 240–960 and an inline-Markdown caption " +
     "after the first blank line. The markdown topic owns its accepted links and normalization. " +
     "Invalid content refuses with invalid_figma before writing. Header edits update only changed " +
@@ -269,15 +289,18 @@ export const toolHelpDetails = {
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
     "directory, otherwise `doclink_target_not_known_locally` refuses before any write. A card's text is the " +
-    "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button, " +
-    "each at most once, in any order. A nonempty title is required. Values are one-line inline Markdown " +
-    "after the colon and one optional space, not YAML; quotes stay literal. The optional button value is " +
-    "exactly `[Text](destination)` with nonempty plain text and an https URL or exactly claude://code/new, " +
-    "claude-cli://open or codex://new, alone or followed by an opaque ?query. It accepts no formatting, " +
-    "document links or comments in its text. The first blank line ends the " +
+    "content between lines exactly :::card and :::. Header keys are lowercase label, title, footer and button " +
+    "in any order. Prose keys occur at most once; any number of button lines preserve authored order. " +
+    "A nonempty title is required. Prose values are one-line inline Markdown after the colon and one optional " +
+    "space, not YAML; quotes stay literal. Each button value contains exactly one `[Text](destination)` " +
+    "link with nonempty plain text and an https URL or exactly claude://code/new, claude-cli://open or " +
+    "codex://new, alone or followed by an opaque ?query. It accepts no formatting, document links or comments " +
+    "in its text. At most one style (outline/filled) and one color (neutral/blue/green/violet) may follow the " +
+    "link in either order; defaults are outline neutral, and all other trailing text is invalid. The first blank line ends the " +
     "header, and the remainder is one optional prose body. Parts keep table-cell inline marks. Missing " +
-    "title, invalid buttons, unknown or duplicate keys and non-key header lines refuse with invalid_card and write nothing. " +
-    "get_doc orders present keys label, title, footer, button, then a blank line and body. Export wraps that content " +
+    "title, invalid buttons, unknown or duplicate prose keys and non-key header lines refuse with invalid_card and write nothing. " +
+    "get_doc orders present prose keys label, title, footer, then buttons in authored order, a blank line and body. " +
+    "Canonical buttons put style before color and omit outline and neutral. Export wraps that content " +
     "in :::card and :::, folds header newlines to spaces, omits empty keys and escapes prose/body lines " +
     "beginning :::. Invalid imports become plain paragraphs preserving all container text. " +
     "A figma block takes the :::figma body without delimiters: required url, optional plain one-line title " +
@@ -333,7 +356,14 @@ export const toolHelpDetails = {
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
     "so list_docs and search answer with their new values; backlinks also returns the description.\n\n" +
     "The person-facing TL;DR is independent of the agent-facing description. Empty, whitespace-only and " +
-    "overlong TL;DR values are refused; use null to clear it. On an open decision, non-null tldr refuses with " +
+    "overlong TL;DR values are refused; use null to clear it. A person can deliberately remove a regular " +
+    "page's TL;DR through the web menu; MCP cannot set that mark. On a marked page, non-null `tldr` " +
+    "without `tldr_opt_in: true` refuses with `tldr_opted_out` and `field: \"tldr\"`, writing nothing. " +
+    "Pass `tldr_opt_in: true` with a non-null `tldr` to write the summary and lift the mark. The flag " +
+    "requires a non-null `tldr` in the same call, even when false; on an unmarked page it adds no effect. " +
+    "`tldr: null` alone preserves the mark. Summary text takes precedence over the mark, including " +
+    "concurrent and older-client writes. Only get_doc reports the mark as `tldrOptOut: true`. " +
+    "On an open decision, non-null tldr refuses with " +
     "decision_tldr_unsupported; null clears a legacy value. Decisions hold one to three short answer blocks " +
     "with a brief reason; guidance belongs on the related regular page and discussion in an RFC. Their " +
     "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
@@ -359,7 +389,7 @@ export const toolHelpDetails = {
     "or approvalChanged. It is distinct from curated links and recorded answer attribution.\n\n" +
     "A decided record refuses title, tldr or discussion with `decision_read_only` and the refused field, " +
     "but accepts description, tags and links. An archived document refuses every metadata field. A success " +
-    "returns uuid and the metadata fields as get_doc would read them, including unchanged values and " +
+    "returns uuid and the descriptive metadata fields, including unchanged values and " +
     "discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:

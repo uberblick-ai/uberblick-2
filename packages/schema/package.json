@@ -13,7 +13,8 @@
     "./github-identity": "./src/github-identity.ts",
     "./device-name": "./src/device-name.ts",
     "./loopback": "./src/loopback.ts",
-    "./workspace-names": "./src/workspace-names.ts"
+    "./workspace-names": "./src/workspace-names.ts",
+    "./web-policy": "./src/web-policy.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",

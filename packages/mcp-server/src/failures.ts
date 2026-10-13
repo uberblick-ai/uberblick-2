@@ -191,7 +191,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   invalid_card: {
     recoveryClass: "manual",
-    guidance: "Supply card content without its :::card and ::: delimiter lines: label, title, footer and optional button keys at most once, a nonempty title, then a blank line and optional prose body. A button is exactly [Text](destination), with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. Remove unknown keys and non-key header lines. Nothing was written.",
+    guidance: "Supply card content without its :::card and ::: delimiter lines: label, title and footer at most once, a nonempty title, any number of button lines, then a blank line and optional prose body. Each button contains exactly one [Text](destination) link, with nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, optionally followed by ?query. After its link, allow at most one style (outline or filled) and one color (neutral, blue, green or violet), in either order; defaults are outline neutral. Remove other trailing text, unknown keys and non-key header lines. Nothing was written.",
   },
   annotation_card: {
     recoveryClass: "manual",
@@ -361,6 +361,10 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_tldr_unsupported: {
     recoveryClass: "manual",
     guidance: "Put the answer in content blocks. Omit tldr at creation, or clear a legacy TL;DR with set_metadata and tldr: null before deciding. Nothing was written.",
+  },
+  tldr_opted_out: {
+    recoveryClass: "manual",
+    guidance: "Keep this page without a TL;DR, or pass tldr_opt_in: true with a non-null tldr in set_metadata to opt back in. Nothing was written.",
   },
   decision_data_unsupported: {
     recoveryClass: "manual",

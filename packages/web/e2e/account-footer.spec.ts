@@ -17,7 +17,7 @@ async function showSidebar(page: Page, settings = false): Promise<void> {
 
 for (const scheme of ["light", "dark"] as const) {
   test(`the standard account footer keeps inert account settings and usable preferences — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
-    test.skip(info.project.name === "webkit-iphone", "The paired explicit iPad context owns touch coverage.");
+    test.skip(info.project.name === "webkit-ipad", "The paired explicit iPad context owns touch coverage.");
     const page = await openApp(browser, "/", {
       contextOptions: { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 832 }, colorScheme: scheme, reducedMotion: "reduce" },
       readySelector: ".ub-list-head",

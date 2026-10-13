@@ -242,7 +242,7 @@
                 ]
               },
               "text": {
-                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title, footer and optional button keys at most once, a required nonempty title, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. A button is exactly [Text](destination): nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Invalid buttons, unknown, duplicate or non-key headers refuse with invalid_card. All four prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, button and omits empty prose keys, folds header newlines to spaces, and escapes prose lines starting :::. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
+                "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
                 "type": "string"
               },
               "level": {
@@ -599,7 +599,7 @@
           "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
         },
         "tldrHint": {
-          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal.",
           "type": "string"
         },
         "agentStance": {
@@ -1044,6 +1044,11 @@
             }
           ],
           "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
+        },
+        "tldrOptOut": {
+          "description": "Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records.",
+          "type": "boolean",
+          "const": true
         },
         "tags": {
           "type": "array",
@@ -3303,7 +3308,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read metadata, blocks and threads before editing. Regular pages return related then linked decision topics; decisions return discussion (RFC UUID or null), separately from curated links and recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first paragraph/list, shortened to 300 characters). Missing description/TL;DR returns null; data lists collection names/counts for deliberate get_data reads. Blocks include rev. Tables return canonical GFM; cards return container content with optional button after footer. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. The read-only figma object has kind (frame, file, prototype, board, slides or community file), file, optional fileName (decoded, dashes as spaces) and optional node (12:345 form). Saving retained only Figma view paths and node-id, starting-point-node-id, version-id on https://www.figma.com; markdown help specifies accepted links, keys and invalid_figma refusals. Tables/cards/Figma have formatting-sensitive rev; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. This read makes no Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks and threads. Regular pages return related then linked decision topics; decisions return discussion (RFC UUID or null), separate from curated links and recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. Read-only figma: kind (frame, file, prototype, board, slides or community file), file, optional decoded fileName (dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive rev, including every button's text, destination, appearance and order; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4821,17 +4826,38 @@
         "query": {
           "type": "string",
           "minLength": 1,
-          "description": "Words to match; every term must occur in one document, `list_docs` matches both `list_docs` and `list docs` but not `a list of docs`, and a trailing * makes its term a prefix match."
+          "description": "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches prefixes. Results use title-weighted bm25 relevance."
         },
         "limit": {
+          "description": "Maximum hits, from 1 to 100; defaults to 20 after filters.",
           "type": "integer",
           "minimum": 1,
           "maximum": 100
         },
         "tag": {
-          "description": "Only documents carrying this catalog tag id or exact name.",
+          "description": "One catalog tag id or exact name, or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse.",
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ]
+        },
+        "kind": {
+          "description": "Only regular documents (including stored requirements) or decision records, including superseded, rejected and withdrawn records.",
           "type": "string",
-          "minLength": 1
+          "enum": [
+            "regular",
+            "decision"
+          ]
         }
       },
       "required": [
@@ -4847,96 +4873,229 @@
           "type": "string"
         },
         "tag": {
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "regular",
+            "decision"
+          ]
         },
         "hits": {
           "type": "array",
           "items": {
-            "type": "object",
-            "properties": {
-              "uuid": {
-                "type": "string",
-                "description": "Document identity; a UUID, never a title or path."
-              },
-              "title": {
-                "type": "string"
-              },
-              "description": {
-                "anyOf": [
-                  {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "uuid": {
+                    "type": "string",
+                    "description": "Document identity; a UUID, never a title or path."
+                  },
+                  "title": {
                     "type": "string"
                   },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Agent-facing document description; null when unwritten."
-              },
-              "tags": {
-                "type": "array",
-                "items": {
-                  "anyOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string",
-                          "enum": [
-                            "active",
-                            "retired"
-                          ]
-                        }
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
                       },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Agent-facing document description; null when unwritten."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "retired"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "null"
+                            },
+                            "state": {
+                              "type": "string",
+                              "const": "unresolved"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
                     },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "null"
-                        },
-                        "state": {
-                          "type": "string",
-                          "const": "unresolved"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "name",
-                        "state"
-                      ],
-                      "additionalProperties": false
-                    }
-                  ]
+                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                  },
+                  "snippet": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "regular",
+                    "description": "A regular document, including a stored requirement."
+                  }
                 },
-                "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                "required": [
+                  "uuid",
+                  "title",
+                  "description",
+                  "tags",
+                  "snippet",
+                  "kind"
+                ],
+                "additionalProperties": false
               },
-              "snippet": {
-                "type": "string"
+              {
+                "type": "object",
+                "properties": {
+                  "uuid": {
+                    "type": "string",
+                    "description": "Document identity; a UUID, never a title or path."
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Agent-facing document description; null when unwritten."
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "active",
+                                "retired"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "null"
+                            },
+                            "state": {
+                              "type": "string",
+                              "const": "unresolved"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "state"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "description": "Canonical tag identities, current names and active, retired or unresolved state."
+                  },
+                  "snippet": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "decision",
+                    "description": "A decision record."
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "in-force",
+                      "superseded",
+                      "open",
+                      "rejected",
+                      "withdrawn",
+                      "conflict"
+                    ],
+                    "description": "Resolved from current topic records: in-force is the current answer; superseded is a replaced answer; conflict marks competing approved answers; open, rejected and withdrawn are proposal states."
+                  }
+                },
+                "required": [
+                  "uuid",
+                  "title",
+                  "description",
+                  "tags",
+                  "snippet",
+                  "kind",
+                  "state"
+                ],
+                "additionalProperties": false
               }
-            },
-            "required": [
-              "uuid",
-              "title",
-              "description",
-              "tags",
-              "snippet"
-            ],
-            "additionalProperties": false
+            ]
           }
         }
       },
@@ -4947,7 +5106,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Search document titles, descriptions and block text in this replica's derived FTS5 index. Every searchable query term must occur in the same document. Punctuation or emoji alone matches nothing; underscore groups match adjacent words, case and accents fold, and words are not stemmed. A trailing * enables a prefix match. Hits include description and canonical tag assignments. Optional tag accepts a catalog id or exact current name; an unknown value refuses. No hits means no indexed document matches all terms, without proving the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
+    "description": "Find live documents containing any query word in titles, descriptions, content or assigned tag names. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or exact current name, or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -5519,11 +5678,11 @@
           "type": "string"
         },
         "tldr": {
-          "description": "Present when changed document content has no TL;DR.",
+          "description": "Present when changed regular document content has no TL;DR and the page has not opted out.",
           "type": "null"
         },
         "tldrHint": {
-          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal.",
           "type": "string"
         }
       },
@@ -5537,7 +5696,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Replace one block by diff-and-splice, preserving concurrent edits elsewhere. Assert old_text and preferably rev from get_doc: stale_block or old_text_mismatch returns currentText/currentRev for a fresh diff; assertions are replica-local. Prose uses plain text; edit strictly inside unmarked text, or replace marked spans with delete_block/insert_block and verify export_markdown. Tables require GFM old/new text and table_mapping for structural or multi-cell changes; read help for refusals and mapping rules. Cards parse :::card content and preserve unchanged parts, buttons, marks and anchors; invalid_card refuses malformed input. Figma parses content between :::figma and :::; url, optional plain title and height 240–960, then a blank line and inline-Markdown caption. It accepts HTTPS Figma design/file/proto/board/slides/community-file links and keeps only the view's path, node-id, starting-point-node-id and version-id on www.figma.com. invalid_figma refuses invalid keys, URL or height without writing. Changed headers update only their fields; unchanged caption marks and anchors survive. Figma rev includes caption formatting; get_doc supplies derived fields. Card/Figma conversions and table_mapping are refused; new caption document targets must be known locally.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Splice block text, preserving edits elsewhere. Assert old_text and preferably rev from get_doc; stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block and verify export_markdown. Tables require GFM old/new text and table_mapping for structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: [Text](destination) lines after footer in authored order. New buttons need nonempty plain labels linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output writes style before color and omits defaults. invalid_card refuses bad input; unchanged parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line and marked caption. Accepted Figma view URLs retain only the path and node-id, starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes caption formatting. Card/Figma conversions and table_mapping are refused; new document targets must be known locally.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -5586,7 +5745,7 @@
           ]
         },
         "text": {
-          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title, footer and optional button keys at most once, a required nonempty title, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. A button is exactly [Text](destination): nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or followed by ?query. Invalid buttons, unknown, duplicate or non-key headers refuse with invalid_card. All four prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, button and omits empty prose keys, folds header newlines to spaces, and escapes prose lines starting :::. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
+          "description": "Block text. A table takes exactly one GFM table with inline Markdown cell formatting; alignment is not stored. A card takes the content between exact :::card and ::: lines: lowercase label, title and footer at most once, a required nonempty title, any number of button lines, then a blank line and optional prose body. Prose header values are one-line inline Markdown, not YAML; quotes stay literal. Each button has one [Text](destination) link: nonempty plain text and an https URL or claude://code/new, claude-cli://open or codex://new, alone or with ?query. At most one style (outline/filled) and color (neutral/blue/green/violet) may follow in either order; defaults are outline neutral. Invalid buttons, other trailing text, unknown, duplicate prose or non-key headers refuse with invalid_card. Prose parts support code, bold, italic, strike, external and document links. Export orders label, title, footer, then buttons in authored order, writes style before color and omits default words. Empty prose keys are omitted, prose header newlines fold to spaces, and prose lines starting ::: are escaped. Figma takes the content between :::figma and :::; required url, optional literal plain one-line title and whole-pixel height 240–960 (default 480), then a blank line and optional caption with the same inline marks. Keys are lowercase, each at most once. Only https figma.com/www.figma.com links to design, file, proto, board, slides or community/file are accepted, with a key/id and optional name; saving keeps those path parts and node-id, starting-point-node-id and version-id on https://www.figma.com, dropping other query fields and fragments. Invalid content refuses with invalid_figma and writes nothing; figma blocks take figma.com links only; use a plain link for other sites. get_doc returns canonical text and read-only figma kind, file, optional fileName and node. Source blocks remain literal text.",
           "type": "string"
         },
         "level": {
@@ -5984,11 +6143,11 @@
           "type": "string"
         },
         "tldr": {
-          "description": "Present when changed document content has no TL;DR.",
+          "description": "Present when changed regular document content has no TL;DR and the page has not opted out.",
           "type": "null"
         },
         "tldrHint": {
-          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal.",
           "type": "string"
         }
       },
@@ -6002,7 +6161,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks. Tables take one GFM table with parsed cell marks or refuse with invalid_table. Cards take the :::card body: required title, optional label/footer/button and inline-Markdown prose; invalid_card refuses bad headers or buttons. Figma takes the :::figma body without delimiters: required url, optional plain one-line title and height 240–960, then a blank line and marked caption. HTTPS figma.com/www.figma.com links accept design, file, proto, board, slides or community/file, a key/id and optional name. Saving keeps these path parts and node-id, starting-point-node-id, version-id on https://www.figma.com; other parameters and fragments disappear. Invalid Figma headers, paths or height refuse with invalid_figma and no write; other hosts or HTTP give: figma blocks take figma.com links only; use a plain link for other sites. Caption links require locally known targets; unknown document targets refuse with doclink_target_not_known_locally. get_doc derives Figma kind, file, fileName and node. Other text is plain or literal source; chart source maps this document's data. Nothing here contacts Figma; its web document stays read-only until the viewer is supported.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks. Tables take one GFM table or invalid_table refuses. Cards take :::card content without delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines and inline-Markdown prose. Button labels are plain text; destinations are https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with invalid_card. Figma takes :::figma content without delimiters: required url, optional plain one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com design/file/proto/board/slides/community/file links retain the key/id, optional name and node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments disappear. invalid_figma refuses bad headers, paths or height without writing; other sites require a plain link. Document targets must be known locally or doclink_target_not_known_locally refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. Other text is plain or literal source; chart source maps document data.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -6132,11 +6291,11 @@
           "type": "string"
         },
         "tldr": {
-          "description": "Present when changed document content has no TL;DR.",
+          "description": "Present when changed regular document content has no TL;DR and the page has not opted out.",
           "type": "null"
         },
         "tldrHint": {
-          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records.",
+          "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal.",
           "type": "string"
         }
       },
@@ -6182,6 +6341,7 @@
           "description": "Agent-facing description used to choose whether to open the document."
         },
         "tldr": {
+          "description": "Person-facing summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true.",
           "anyOf": [
             {
               "type": "string",
@@ -6191,8 +6351,11 @@
             {
               "type": "null"
             }
-          ],
-          "description": "One or two sentences of plain English for a person opening the document. At most 300 characters; null clears it."
+          ]
+        },
+        "tldr_opt_in": {
+          "description": "Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark.",
+          "type": "boolean"
         },
         "tags": {
           "type": "array",
@@ -6261,7 +6424,20 @@
             "discussion"
           ]
         }
-      ]
+      ],
+      "dependencies": {
+        "tldr_opt_in": {
+          "required": [
+            "tldr"
+          ],
+          "properties": {
+            "tldr": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
     },
     "outputSchema": {
       "type": "object",
@@ -6463,7 +6639,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer {who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set title, description, tldr, tags, curated links or decision discussion together; name at least one. Omitted fields stay unchanged. Refusals write nothing; field failures name field. Returns metadata/durability, no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears while preserving the mark; marked pages refuse a summary with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. Use list_tags active ids/exact names; assigned retired/unresolved ids may remain. New links must be directory-known; archived/unchanged targets accepted. Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links writable. Decision answers use one to three short answer blocks and a brief reason; guidance on related page, discussion in RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived documents refuse metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -7559,7 +7735,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Render a Markdown projection: code, mermaid, terminal and chart retain literal source fences; tables write padded GFM with inline cell marks. Cards export separate :::card containers, optional button after footer and inline-Markdown prose. Figma exports :::figma containers, separate from source fences, with url, optional literal title and height in that order, a blank line and marked caption. It writes the normalized HTTPS www.figma.com link: accepted design/file/proto/board/slides or community/file path, key/id, optional name and only node-id, starting-point-node-id, version-id. Other query values and fragments were dropped at save. Absent keys are omitted; title newlines fold to spaces and lines starting ::: are escaped. Markdown import restores caption marks and separate adjacent containers; invalid or unclosed containers remain literal paragraphs with delimiters. MCP writes refuse invalid Figma content with invalid_figma; get_doc additionally derives kind/file/fileName/node. Read markdown help for height 240–960, accepted links and refusals. Export contacts no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and MCP has no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Render a Markdown projection: code, mermaid, terminal and chart keep source fences; tables write padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown prose and button: [Text](destination) lines after footer in authored order. Each exported button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; export writes style before color and omits defaults. Import restores buttons and appearances. Figma exports separate :::figma containers: url, optional literal title and height, blank line and marked caption. Normalized HTTPS www.figma.com links retain design/file/proto/board/slides/community/file path, key/id, optional name and node-id, starting-point-node-id, version-id; other query values and fragments were dropped at save. Absent keys are omitted; header newlines fold to spaces and prose lines starting ::: are escaped. Import restores caption marks and adjacent containers; invalid/unclosed containers remain literal paragraphs. MCP refuses bad Figma content with invalid_figma; get_doc derives kind/file/fileName/node. Markdown help owns height 240–960 and accepted links. Export contacts no Figma service. Chart/data records are omitted with a notice; Markdown is never storage and MCP has no import tool.\n\nHelp: export_markdown, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

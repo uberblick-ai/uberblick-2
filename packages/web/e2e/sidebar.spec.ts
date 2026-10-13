@@ -48,7 +48,7 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
 test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
   const page = await openApp(browser);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Working", exact: true });
+  const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Documents", exact: true });
   await page.setViewportSize({ width: 1400, height: 832 });
   await paneControl.focus();
   await page.setViewportSize({ width: 820, height: 832 });

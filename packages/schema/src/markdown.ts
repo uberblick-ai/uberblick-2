@@ -900,10 +900,9 @@ function matchLink(
   return { label: link.label, marks: { link: link.href }, next: link.next };
 }
 
-/** Share link grammar without extending the destinations allowed in inline prose. */
-export function parseSingleMarkdownLink(source: string): { label: string; href: string } | null {
-  const link = matchLinkSyntax(source, 0);
-  return link === null || link.next !== source.length ? null : { label: link.label, href: link.href };
+/** Read a leading link so container grammars can validate their own suffix. */
+export function parseMarkdownLinkPrefix(source: string): { label: string; href: string; next: number } | null {
+  return matchLinkSyntax(source, 0);
 }
 
 function matchLinkSyntax(

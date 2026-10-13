@@ -6,21 +6,10 @@ import type { RoomConnection } from "../collab/rooms.js";
 import type { AwarenessUser } from "../collab/identity.js";
 import type { Workspace } from "./route.js";
 import { useRoomStatus } from "./hooks.js";
+import { useWorkspaceSetting } from "./workspace-setting.js";
 
 export function useWorkspaceName(connection: RoomConnection | null): string | null {
-  const [reading, setReading] = useState<{
-    connection: RoomConnection;
-    name: string | null;
-  } | null>(null);
-  useEffect(() => {
-    if (connection === null) return;
-    const read = (): void => setReading({ connection, name: getWorkspaceName(connection.ydoc) });
-    read();
-    connection.ydoc.on("update", read);
-    return () => connection.ydoc.off("update", read);
-  }, [connection]);
-  if (connection === null) return null;
-  return reading?.connection === connection ? reading.name : getWorkspaceName(connection.ydoc);
+  return useWorkspaceSetting(connection, getWorkspaceName);
 }
 
 /** Local menus use replica snapshots; direct hubs read settings only while open. */

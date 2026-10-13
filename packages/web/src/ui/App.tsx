@@ -1023,6 +1023,8 @@ export function App(): ReactElement {
           <DocumentList
             key={workspace?.uuid}
             connection={directory}
+            catalog={catalog}
+            searchClient={documentSearch ?? null}
             entries={allEntries}
             groups={sidebarGroups}
             onSelect={onSelect}

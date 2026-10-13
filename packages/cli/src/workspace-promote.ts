@@ -180,7 +180,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
       const problem = corpusProblem(endpoint, uploaded);
       if (problem !== null) throw new Error(problem.trim());
       interrupted.signal.throwIfAborted();
-      const checked = await verify({ base, env, target: endpoint, io }, uploaded.entries, uploaded.workspace);
+      const checked = await verify({ base, env, target: endpoint, io }, uploaded.entries, { documents: true, workspace: uploaded.workspace });
       if (checked.problem !== null) throw new Error(checked.problem.trim());
       interrupted.signal.throwIfAborted();
       const bindingLock = await acquireInitLock();

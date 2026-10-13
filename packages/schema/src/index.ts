@@ -13,6 +13,7 @@ export {
   setDescription,
   setDiscussion,
   setTldr,
+  setTldrOptOut,
   setKind,
   setLinks,
   setStatus,
@@ -62,6 +63,8 @@ export type {
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
+export type { GitHubItem } from "./github-reference.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -91,11 +94,11 @@ export {
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
 export {
-  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardButton, cardInline, cardPartElement,
-  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardInput,
-  seedNewCardParts, writeCardButton, writeCardText,
+  CARD_PARTS, CARD_NODE_NAMES, CARD_BUTTON_STYLES, CARD_BUTTON_COLORS, buildCardElement, cardButtons, cardInline, cardPartElement,
+  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardButtons, parseCardInput,
+  seedNewCardParts, writeCardButton, writeCardButtons, writeCardText,
 } from "./card.js";
-export type { CardButton, CardInline, CardPart, CardText } from "./card.js";
+export type { CardButton, CardButtonStyle, CardButtonColor, CardInline, CardPart, CardText } from "./card.js";
 export {
   buildFigmaElement, editFigma, figmaCaptionElement, figmaCaptionTexts, figmaFields,
   figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaInput, writeFigmaInline, writeFigmaText,
@@ -132,7 +135,9 @@ export type { WorkspaceId } from "./workspace.js";
 export {
   MAX_WORKSPACE_NAME_LENGTH,
   WORKSPACE_SETTINGS_KEY,
+  getWorkspaceMainRepository,
   getWorkspaceName,
+  setWorkspaceMainRepository,
   setWorkspaceName,
   validateWorkspaceName,
 } from "./workspace-settings.js";

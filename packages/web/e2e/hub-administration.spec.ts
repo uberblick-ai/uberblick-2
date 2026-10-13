@@ -10,7 +10,7 @@ test.describe("a hub administrator with no workspace membership", () => {
     for (const touch of [false, true]) {
       test(`hub administration uses ${touch ? "iPad touch" : "desktop pointer and keyboard"} in ${appearance}`,
         { tag: touch ? "@webkit-touch" : "@webkit" }, async ({ browser, browserName }, info) => {
-        test.skip(!touch && info.project.name === "webkit-iphone", "The paired iPad context owns touch coverage.");
+        test.skip(!touch && info.project.name === "webkit-ipad", "The paired iPad context owns touch coverage.");
         const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`, {
           contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 832 }, hasTouch: false, isMobile: false }), colorScheme: appearance, reducedMotion: "reduce" },
         });
@@ -108,7 +108,7 @@ test.describe("a hub administrator with no workspace membership", () => {
 
   for (const colorScheme of ["light", "dark"] as const) {
     test(`phone hub tables keep secondary facts with their account or workspace in ${colorScheme}`,
-      { tag: "@webkit-touch" }, async ({ browser }) => {
+      async ({ browser }) => {
       const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`, {
         contextOptions: { viewport: { width: 375, height: 812 }, hasTouch: true, colorScheme },
       });

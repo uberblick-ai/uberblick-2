@@ -131,6 +131,7 @@ export function BlockMenu({
   const touchInput = useRef(
     editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false,
   );
+  const lastTouch = useRef<{ x: number; y: number } | null>(null);
   // iOS may blur the editor between a gutter press and its click. The target
   // must survive that interval so the same native click can open the menu.
   const gutterPressed = useRef(false);
@@ -200,16 +201,23 @@ export function BlockMenu({
       show(id, $head.before(1), true);
     };
     const track = (event: PointerEvent): void => {
-      // Use pointer events to distinguish iPad trackpad input from touch
-      // compatibility mouse events.
-      if (event.pointerType === "touch") return;
+      if (event.pointerType === "touch") {
+        lastTouch.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      // Stationary compatibility hover after reflow is still touch input;
+      // actual pointer movement lets an iPad's trackpad take over.
+      if (touchInput.current && event.pointerType === "mouse" && event.movementX === 0 && event.movementY === 0
+        && lastTouch.current?.x === event.clientX && lastTouch.current.y === event.clientY) return;
       touchInput.current = false;
+      lastTouch.current = null;
       const block = blockAt(editor, event.target);
       if (block === null) return;
       show(block.blockId, block.pos, false);
     };
     const press = (event: PointerEvent): void => {
       touchInput.current = event.pointerType === "touch";
+      lastTouch.current = touchInput.current ? { x: event.clientX, y: event.clientY } : null;
       if (touchInput.current) readCaret();
       else track(event);
     };
@@ -229,6 +237,11 @@ export function BlockMenu({
       readCaret();
     };
     const outsidePress = (event: PointerEvent): void => {
+      // Editor overlays sit beside ProseMirror, so their touch presses do not
+      // reach its listener even when subsequent hover hits a reflowed block.
+      if (event.pointerType === "touch" && event.target instanceof Node && frame?.contains(event.target)) {
+        lastTouch.current = { x: event.clientX, y: event.clientY };
+      }
       if (event.target !== gutterButton.current) release();
     };
     dom.addEventListener("pointermove", track);

@@ -215,6 +215,28 @@ it("describes short decision answers, page context and previews without reposito
   expect(lifecycle).toContain("missing preview is unknown");
 });
 
+it("explains deliberate TL;DR removal and explicit opt-in in help and field contracts", async () => {
+  const rig = await local();
+  const { tools } = await rig.client.listTools();
+  const getDoc = tools.find(tool => tool.name === "get_doc")!;
+  const setMetadata = tools.find(tool => tool.name === "set_metadata")!;
+  const mark = (getDoc.outputSchema as any).properties.tldrOptOut;
+  expect(mark).toMatchObject({ type: "boolean", const: true });
+  expect(mark.description).toContain("on purpose");
+  expect(mark.description).toContain("tldr_opt_in: true");
+  expect((setMetadata.inputSchema as any).properties.tldr_opt_in.description).toContain("non-null tldr");
+  for (const topic of ["workspaces", "get_doc", "set_metadata"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text, topic).toContain("tldrOptOut");
+    expect(text, topic).toContain("tldr_opt_in: true");
+    expect(text, topic).toContain("non-null");
+  }
+  const { text } = await rig.ok("get_help", { topic: "set_metadata" });
+  expect(text).toContain("tldr_opted_out");
+  expect(text).toContain("field: \"tldr\"");
+  expect(text).toContain("MCP cannot set that mark");
+});
+
 it("explains explicit RFC connections, open-only corrections and cached discussion reads", async () => {
   const rig = await local();
   const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;

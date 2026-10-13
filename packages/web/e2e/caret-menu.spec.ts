@@ -60,9 +60,9 @@ async function focusBlock(block: Locator, edge: "start" | "end" = "start"): Prom
   }));
 }
 
-async function longDocument(page: Page, targetRow = 15): Promise<Locator> {
+async function longDocument(page: Page, targetRow = 15, trailingRows = 20): Promise<Locator> {
   const webkit = page.context().browser()?.browserType().name() === "webkit";
-  for (let row = 0; row < targetRow + 20; row += 1) {
+  for (let row = 0; row < targetRow + trailingRows; row += 1) {
     if (row !== targetRow) await page.keyboard.insertText(`context ${row}`);
     await page.keyboard.press("Enter");
     // iOS ProseMirror waits for the native DOM split before replaying Return.
@@ -160,18 +160,29 @@ async function paneCards(page: Page, browserName: string, width?: number): Promi
 
   // Fill a single line up to its right edge, then type the @ trigger there.
   await focusBlock(target);
-  await page.keyboard.insertText("context ");
+  const prefix = await target.evaluate((element) => {
+    const context = document.createElement("canvas").getContext("2d");
+    if (context === null) throw new Error("e2e: missing caret text measurement");
+    const style = getComputedStyle(element);
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    const remaining = element.clientWidth - context.measureText("@collisiontarget1067").width - context.measureText(" ").width - 16;
+    return `${"x".repeat(Math.max(1, Math.floor(remaining / context.measureText("x").width)))} `;
+  });
+  await page.keyboard.insertText(prefix);
   await page.keyboard.type("@collisiontarget1067");
   await alignBlock(target, 42);
   await staysInsidePane(page, "Documents");
   await expect(card(page, "Documents")).toHaveAttribute("data-side", "top");
   const anchor = await caretBox(page);
   const rect = await card(page, "Documents").boundingBox();
-  // At least the smallest pane has a caret close enough to the edge to need
-  // shifting. Wider panes still prove that their own boundary is respected.
-  if ((width ?? page.viewportSize()?.width ?? 1470) < 744) {
-    expect(rect?.x ?? 0).toBeLessThan(anchor.x);
-  }
+  const rightEdge = await target.evaluate((element) => {
+    const pane = element.closest(".ub-document-pane")?.getBoundingClientRect();
+    if (pane === undefined) throw new Error("e2e: no document pane");
+    const viewport = window.visualViewport;
+    return Math.min(pane.right, (viewport?.offsetLeft ?? 0) + (viewport?.width ?? window.innerWidth));
+  });
+  expect(anchor.x + (rect?.width ?? 0)).toBeGreaterThan(rightEdge);
+  expect(rect?.x ?? 0).toBeLessThan(anchor.x);
 }
 
 for (const width of [375, 1280]) {
@@ -186,13 +197,15 @@ test("the slash, gutter and @ cards fit the supported device pane", { tag: "@web
   await paneCards(page, browserName);
 });
 
-test("a short pane bounds all three cards and scrolls their lists internally", { tag: "@webkit-iphone" }, async ({ page, browserName }) => {
+test("a short pane bounds all three cards and scrolls their lists internally", { tag: "@webkit-touch" }, async ({ page, browserName }) => {
   await openDoc(page, browserName);
   for (let index = 0; index < 8; index += 1) {
     await createDoc(page, `height-target1067 ${index}`);
   }
   await createDoc(page, "short pane writing");
-  const target = await longDocument(page);
+  // Leave enough document below the caret to scroll it above a simulated
+  // keyboard while the taller iPad layout viewport stays unchanged.
+  const target = await longDocument(page, 15, 30);
   if (browserName === "chromium") {
     await page.setViewportSize({ width: 375, height: 320 });
   } else {
@@ -370,10 +383,10 @@ test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh t
  * iOS lets Return mutate the DOM, then ProseMirror replays it through its keys.
  * Dispatch that observed input sequence explicitly: hardware Enter alone also
  * takes a 200ms fallback and would miss a stray paragraph left by the mutation.
- * A real iPhone's keyboard remains a separate manual device check.
+ * A real iPad's keyboard remains a separate manual device check.
  */
 test("iOS Return replays through the slash and @ handlers without a stray paragraph", { tag: "@webkit-touch" }, async ({ page, browserName }) => {
-  test.skip(browserName !== "webkit", "the iPhone WebKit project supplies ProseMirror's iOS platform");
+  test.skip(browserName !== "webkit", "the iPad WebKit project supplies ProseMirror's iOS platform");
   await openDoc(page, browserName);
   await createDoc(page, "iOS-target1067");
   await createDoc(page, "iOS writing");
