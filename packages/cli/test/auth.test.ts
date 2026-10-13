@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { hostname } from "node:os";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
 import { parseJoinTarget } from "../src/remote.js";
@@ -25,6 +25,13 @@ afterEach(cleanUp);
 afterAll(removeTempDirs);
 
 describe("ub auth local selection and command surface", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
+      if (JSON.parse(String(init?.body)).operation !== "own-hub-role") throw new Error("unreachable fixture hub");
+      return Response.json({ status: "ok", role: "admin" });
+    }));
+  });
+  afterEach(() => vi.unstubAllGlobals());
   it("provides progressive help and refuses unsupported usage without writing", async () => {
     const box = sandbox();
     const root = await runInProcess(["--help"], box);
@@ -61,8 +68,8 @@ describe("ub auth local selection and command surface", () => {
       expect(run.stderr).toContain("Legacy WORKSPACE_ID / HUB_URL selection is no longer supported");
       expect(run.output).not.toContain("ambient.invalid");
       const local = await runInProcess(["auth", subcommand], box);
-      expect(local.status).toBe(1);
-      expect(local.stderr).toMatch(/local.only.*no login|local.only.*no sign.in/i);
+      expect(local.status).toBe(subcommand === "status" ? 0 : 1);
+      expect(subcommand === "status" ? local.stdout : local.stderr).toMatch(/local.only.*no login|local.only.*no sign.in/i);
     }
     const status = await runInProcess(["status"], box);
     expect(status.output).not.toMatch(/auth login|sign.in/i);
@@ -76,8 +83,8 @@ describe("ub auth local selection and command surface", () => {
       credentials: { hubLogins: { [origin]: fixture() } },
     });
     const unbound = await runInProcess(["auth", "status"], box);
-    expect(unbound.status).toBe(1);
-    expect(unbound.stderr).toContain("no hub given and none bound");
+    expect(unbound.status).toBe(0);
+    expect(unbound.stdout).toContain("local-only");
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
     const selected = await runInProcess(["auth", "status"], box, {
       UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: origin,
@@ -102,7 +109,7 @@ describe("ub auth local selection and command surface", () => {
     expect(explicit.stdout).toContain("previous-user");
   });
 
-  it("finds one offline login across host case, default-port and endpoint spellings without rebinding", async () => {
+  it("finds one stored login across host case, default-port and endpoint spellings without rebinding", async () => {
     const origin = "https://hub.example.ts.net";
     const endpoint = "wss://Hub.Example.TS.net:443/ws";
     const old = fixture();
@@ -115,7 +122,9 @@ describe("ub auth local selection and command surface", () => {
     for (const spelling of [undefined, "Hub.Example.TS.net:443", "https://Hub.Example.TS.net:443", endpoint]) {
       const run = await runInProcess(["auth", "status", ...(spelling ? [spelling] : [])], box);
       expect(run.status, run.stderr).toBe(0);
-      expect(run.stdout).toBe(`hub        ${origin}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n`);
+      expect(run.stdout).toContain(`hub        ${origin}\nstored account  previous-user (github)\nstored available workspaces:\n  ${WORKSPACE}\n`);
+      expect(run.stdout).toMatch(/login \(hub\)\s+accepted/);
+      expect(run.stdout).toMatch(/hub admin \(hub\)\s+yes/);
       expect(run.stderr).toBe("");
       expect(run.output.includes(old.credential.key)).toBe(false);
     }
@@ -143,11 +152,11 @@ describe("ub auth local selection and command surface", () => {
     const before = readFileSync(credentialPath(box), "utf8");
     const status = await runInProcess(["auth", "status"], box);
     expect(status.status).toBe(0);
-    expect(status.stdout).toBe(`hub        http://127.0.0.1:1\nsigned in  previous-user\n${workspaces.length === 0
-      ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}\n` +
-      `You might have expected access to ${OTHER_WORKSPACE} as per your .uberblick.json.\n` +
-      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
-      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
+    expect(status.stdout).toContain(`hub        http://127.0.0.1:1\nstored account  previous-user (github)\n${workspaces.length === 0
+      ? "stored available workspaces: none\n" : `stored available workspaces:\n  ${WORKSPACE}\n`}`);
+    expect(status.stdout).toContain(`bound workspace (.uberblick.json)  ${OTHER_WORKSPACE}`);
+    expect(status.stdout).toContain("The bound workspace is absent from the stored login.");
+    expect(status.stdout).toContain("Ask a workspace admin about access or a hub admin about suspension.");
     expect(status.stderr).toBe("");
     expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
   });
@@ -161,10 +170,9 @@ describe("ub auth local selection and command surface", () => {
       UB_WORKSPACE_ID: `override-${OTHER_WORKSPACE}`, UB_HUB_URL: DEAD_HUB_URL,
     });
     expect(status.status).toBe(0);
-    expect(status.stdout).toBe(`hub        ${origin}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n\n` +
-      `You might have expected access to ${OTHER_WORKSPACE} as per your UB_WORKSPACE_ID.\n` +
-      "But previous-user has no access to this workspace, or it simply doesn't exist on this hub.\n" +
-      "Ask a workspace admin to grant you access: `ub workspace member add previous-user`\n");
+    expect(status.stdout).toContain(`hub        ${origin}\nstored account  previous-user (github)\nstored available workspaces:\n  ${WORKSPACE}\n`);
+    expect(status.stdout).toContain(`bound workspace (UB_WORKSPACE_ID)  ${OTHER_WORKSPACE}`);
+    expect(status.stdout).toContain("The bound workspace is absent from the stored login.");
     expect(status.stderr).toBe("");
   });
 
@@ -174,15 +182,16 @@ describe("ub auth local selection and command surface", () => {
     });
     const status = await runInProcess(["auth", "status", OTHER_HUB], box);
     expect(status.status).toBe(0);
-    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces: none\n`);
+    expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  previous-user (github)\nstored available workspaces: none\n`);
+    expect(status.stdout).not.toContain("bound workspace");
     expect(status.stderr).toBe("");
   });
 
-  it("lists each stored workspace on its own row without contacting the hub", async () => {
+  it("lists each stored workspace on its own row while checking the current hub role", async () => {
     const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: fixture([WORKSPACE, OTHER_WORKSPACE]) } } });
     const status = await runInProcess(["auth", "status", OTHER_HUB], box);
     expect(status.status, status.stderr).toBe(0);
-    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n  ${OTHER_WORKSPACE}\n`);
+    expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  previous-user (github)\nstored available workspaces:\n  ${WORKSPACE}\n  ${OTHER_WORKSPACE}\n`);
     expect(status.stderr).toBe("");
   });
 
@@ -197,7 +206,7 @@ describe("ub auth local selection and command surface", () => {
     const before = readFileSync(credentialPath(box), "utf8");
     const status = await runInProcess(["auth", "status", OTHER_HUB], box);
     expect(status.status, status.stderr).toBe(0);
-    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE} | Synthetic 🧭 "workspace" \\\n  ${OTHER_WORKSPACE}\n`);
+    expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  previous-user (github)\nstored available workspaces:\n  ${WORKSPACE} | Synthetic 🧭 "workspace" \\\n  ${OTHER_WORKSPACE}\n`);
     expect(status.stderr).toBe("");
     expect(readFileSync(credentialPath(box), "utf8")).toBe(before);
   });
@@ -211,8 +220,8 @@ describe("ub auth local selection and command surface", () => {
       const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: login } } });
       const status = await runInProcess(["auth", "status", OTHER_HUB], box);
       expect(status.status, status.stderr).toBe(0);
-      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\n${workspaces.length === 0
-        ? "available workspaces: none\n" : `available workspaces:\n  ${WORKSPACE}\n`}`);
+      expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  previous-user (github)\n${workspaces.length === 0
+        ? "stored available workspaces: none\n" : `stored available workspaces:\n  ${WORKSPACE}\n`}`);
       expect(status.stderr).toBe("");
     }
   });
@@ -227,11 +236,11 @@ describe("ub auth local selection and command surface", () => {
     expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(bound);
     const status = await runInProcess(["auth", "status", OTHER_HUB], box);
     expect(status.status, status.stderr).toBe(0);
-    expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  ${escaped}\navailable workspaces: none\n` + (bound
-      ? `\nYou might have expected access to ${WORKSPACE} as per your .uberblick.json.\n` +
-        `But ${escaped} has no access to this workspace, or it simply doesn't exist on this hub.\n` +
-        `Ask a workspace admin to grant you access: \`ub workspace member add ${escaped}\`\n`
-      : ""));
+    expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  ${escaped} (github)\nstored available workspaces: none\n`);
+    if (bound) {
+      expect(status.stdout).toContain(`bound workspace (.uberblick.json)  ${WORKSPACE}`);
+      expect(status.stdout).toContain("The bound workspace is absent from the stored login.");
+    } else expect(status.stdout).not.toContain("bound workspace");
     expect(status.stderr).toBe("");
   });
 
@@ -264,13 +273,12 @@ describe("ub auth local selection and command surface", () => {
     const status = await runInProcess(["auth", "status", ...(kind === "invalid bound workspace" ? [] : [OTHER_HUB])], box);
     expect(status.status).toBe(1);
     const expected = kind === "missing" ? "no login stored"
-      : kind === "unreadable" ? "stored login unreadable"
+      : kind === "unreadable" ? "could not read credential store"
       : kind === "revoked" ? "recorded as revoked" : "workspaceId";
     expect(status.stderr).toContain(expected);
-    expect(status.stdout).not.toContain(expected);
     if (kind === "revoked") {
-      expect(status.stdout).toBe(`hub        ${OTHER_HUB}\nsigned in  previous-user\navailable workspaces:\n  ${WORKSPACE}\n`);
-      expect(status.stderr).toBe(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${OTHER_HUB}\`.\n`);
+      expect(status.stdout).toContain(`hub        ${OTHER_HUB}\nstored account  previous-user (github)\nstored available workspaces:\n  ${WORKSPACE}\n`);
+      expect(status.stderr).toContain(`ub auth login ${OTHER_HUB}`);
     }
   });
 });
@@ -517,7 +525,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
     }
     await remote.hub.stop();
     const requestCount = remote.requests.length;
-    expect((await runInProcess(["auth", "status"], box)).status).toBe(0);
+    const unavailable = await runInProcess(["auth", "status"], box);
+    expect(unavailable.status).toBe(1);
+    expect(unavailable.stdout).toContain(`stored account  ${USERNAME} (github)`);
+    expect(unavailable.stdout).toMatch(/hub admin \(hub\)\s+not verified/);
     const logout = await runInProcess(["auth", "logout"], box);
     expect(logout.status).toBe(1);
     expect(logout.stderr).toContain(`ub auth logout --all-devices ${remote.origin}`);
@@ -525,7 +536,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(privateDeviceRows(remote.databasePath)[0]?.revoked_at).toBeNull();
     expect(readStore(box).hubLogins?.[OTHER_HUB]).toEqual(other);
     expect(readFileSync(configPath(box))).toEqual(before);
-    expect(remote.requests).toHaveLength(requestCount + 1);
+    expect(remote.requests).toHaveLength(requestCount + 2);
     expect(remote.requests.at(-1)).toMatchObject({ path: "/auth/manage", body: { operation: "revoke-device" } });
   });
 
@@ -557,7 +568,8 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const status = await runInProcess(["auth", "status", remote.origin], box);
     expect(status.status, status.stderr).toBe(0);
     expect(status.stdout).toContain(`  ${workspaces[0]} | ${name}\n`);
-    expect(remote.requests).toHaveLength(requestCount);
+    expect(remote.requests).toHaveLength(requestCount + 1);
+    expect(remote.requests.at(-1)).toMatchObject({ path: "/auth/manage", body: { operation: "own-hub-role" } });
   });
 
   it("signs in with zero workspaces and leaves a different hub binding unchanged", async () => {
@@ -571,7 +583,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
     const status = await runInProcess(["auth", "status", remote.origin], box);
     expect(status.status).toBe(0);
-    expect(status.stdout).toBe(`hub        ${remote.origin}\nsigned in  ${USERNAME}\navailable workspaces: none\n`);
+    expect(status.stdout).toContain(`hub        ${remote.origin}\nstored account  ${USERNAME} (github)\nstored available workspaces: none\n`);
+    expect(status.stdout).toMatch(/login \(hub\)\s+accepted/);
+    expect(status.stdout).toMatch(/hub admin \(hub\)\s+no/);
     expect(status.stderr).toBe("");
     const logout = await runInProcess(["auth", "logout", remote.origin], box);
     expect(logout.status).toBe(0);
