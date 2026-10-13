@@ -462,7 +462,7 @@ test("another localhost port cannot start or end hub sign-in or reuse the hub se
     const embedded = attacker.frameLocator('iframe[title="Embedded hub"]');
     await expect(embedded.getByText("Open this hub in its own browser tab to sign in. This page has no document access.", { exact: true })).toBeVisible();
     const ownTab = embedded.getByRole("link", { name: "Open this hub in its own browser tab", exact: true });
-    await expect(ownTab).toHaveAttribute("href", `${running.appUrl}/`);
+    await expect(ownTab).toHaveAttribute("href", `${running.appUrl}/${WORKSPACE}`);
     await expect(ownTab).toHaveAttribute("target", "_blank");
     await expect(ownTab).toHaveAttribute("rel", "noopener noreferrer");
     await expect(embedded.getByRole("button", { name: "Sign in with GitHub", exact: true })).toHaveCount(0);
