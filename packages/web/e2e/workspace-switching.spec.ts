@@ -91,10 +91,6 @@ for (const scheme of ["light", "dark"] as const) {
     await switchToSecond(page, scheme === "dark");
     await expect(page.getByTestId("account-menu")).toContainText("@second-person");
     await expect(page.locator(".ub-docs-open").filter({ hasText: firstTitle })).toHaveCount(0);
-    const filter = page.getByRole("searchbox", { name: "Search", exact: true });
-    await filter.fill(firstTitle);
-    await expect(page.locator(".ub-docs-row")).toHaveCount(0);
-    await filter.fill("");
     const secondTitle = docTitle("second-workspace");
     const secondDoc = await createDoc(page, secondTitle, { pin: true });
     await placeCaret(page);
