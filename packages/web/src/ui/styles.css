@@ -2493,6 +2493,10 @@ h3.ub-heading {
   vertical-align: middle;
 }
 
+.ub-docs-tags-cell {
+  padding-block: 0.25rem;
+}
+
 .ub-docs-open {
   display: flex;
   align-items: baseline;

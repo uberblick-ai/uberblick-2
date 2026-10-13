@@ -122,7 +122,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
 
   await showSidebar(page, touch);
   await activate(page.getByRole("button", { name: "All docs", exact: true }), touch);
-  await page.getByRole("searchbox", { name: "Search", exact: true }).fill(`${prefix}*`);
+  await page.getByRole("searchbox", { name: "Search", exact: true }).fill(touch ? "ipad" : "desktop");
   await expect(page.locator(".ub-docs-title")).toHaveCount(2);
   const rowHeights = await page.locator(".ub-docs-row").evaluateAll((rows) =>
     rows.map((row) => row.getBoundingClientRect().height));

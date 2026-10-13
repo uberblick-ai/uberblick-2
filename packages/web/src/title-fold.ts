@@ -1,5 +1,5 @@
 /**
- * Fold query and title alike for the list and mention picker: NFD, remove Mn,
+ * Fold query and title alike for mention completion: NFD, remove Mn,
  * then locale-independent lowercase. Keep spacing marks (not all M), or distinct
  * words such as किताब and कतब collapse. The Unicode flag enables Mn escapes.
  * École/ecole and İSTANBUL/istanbul match; simple lowercase does not equate

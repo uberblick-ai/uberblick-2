@@ -72,7 +72,7 @@ describe("the @ picker matches folded title substrings", () => {
   });
 
   it("folds the query and the title through one function, not two copies", () => {
-    // One shared fold keeps both surfaces aligned: `İ` decomposes to `I` plus
+    // Query and title share the fold: `İ` decomposes to `I` plus
     // a combining dot the fold drops, and `toLowerCase` is locale-independent.
     expect(foldForTitleMatch("İSTANBUL")).toBe("istanbul");
     expect(foldForTitleMatch("École")).toBe("ecole");
