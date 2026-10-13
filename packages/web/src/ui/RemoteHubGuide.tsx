@@ -107,11 +107,19 @@ export function RemoteHubGuide(): ReactElement {
             <p className="mt-3">The hub did not return a confirmed setup state. This page will check again.</p>
           )}
         </div>
-        <BrowserHubSignIn
-          claimable={claimable}
-          claimStateKnown={state !== null && state !== "checking"}
-          onClaim={() => setState({ unclaimed: false, canClaim: false })}
-        />
+        {window.top !== window.self ? (
+          <p className="mt-4">
+            <a className="underline" href={window.location.href} target="_blank" rel="noopener noreferrer">
+              Open this hub in its own browser tab
+            </a>{" "}to sign in. This page has no document access.
+          </p>
+        ) : (
+          <BrowserHubSignIn
+            claimable={claimable}
+            claimStateKnown={state !== null && state !== "checking"}
+            onClaim={() => setState({ unclaimed: false, canClaim: false })}
+          />
+        )}
         {(claimable || closed) && (
           <>
             <h2 className="mt-6 text-base font-semibold">

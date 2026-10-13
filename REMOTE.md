@@ -724,6 +724,8 @@ JSON POSTs at `/auth/browser/start`, `/auth/browser/collect`,
 The hub checks the browser origin, including the port, and binds attempts and
 sessions to that exact origin; it enables no cross-origin access. These tokens
 authorize neither collaboration rooms nor device management.
+An embedded hub page offers a link to open it in its own tab and never reads
+or uses the browser session.
 
 **Sign out** ends the session at the hub before the page discards its token.
 If the hub cannot confirm revocation, the page says so and keeps the session

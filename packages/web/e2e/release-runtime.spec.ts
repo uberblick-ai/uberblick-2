@@ -446,6 +446,28 @@ test("another localhost port cannot start or end hub sign-in or reuse the hub se
       return { results, replay: replay.status, stored: localStorage.getItem("uberblick.browser-session") };
     }, { hubOrigin: running.appUrl, token: signedIn.session.token });
     expect(attacks).toEqual({ results: ["refused", "refused"], replay: 401, stored: null });
+
+    const framedAuthRequests: string[] = [];
+    attacker.on("request", (request) => {
+      if (request.frame().parentFrame() !== null && new URL(request.url()).pathname.startsWith("/auth/browser/")) {
+        framedAuthRequests.push(request.url());
+      }
+    });
+    await attacker.evaluate((hubOrigin) => {
+      const frame = document.createElement("iframe");
+      frame.title = "Embedded hub";
+      frame.src = hubOrigin;
+      document.body.append(frame);
+    }, running.appUrl);
+    const embedded = attacker.frameLocator('iframe[title="Embedded hub"]');
+    await expect(embedded.getByText("Open this hub in its own browser tab to sign in. This page has no document access.", { exact: true })).toBeVisible();
+    const ownTab = embedded.getByRole("link", { name: "Open this hub in its own browser tab", exact: true });
+    await expect(ownTab).toHaveAttribute("href", `${running.appUrl}/`);
+    await expect(ownTab).toHaveAttribute("target", "_blank");
+    await expect(ownTab).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(embedded.getByRole("button", { name: "Sign in with GitHub", exact: true })).toHaveCount(0);
+    await expect(embedded.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
+    expect(framedAuthRequests).toEqual([]);
     expect(running.github.starts).toBe(1);
     expect(await sessionStatus(page, signedIn.session.token)).toBe(200);
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
