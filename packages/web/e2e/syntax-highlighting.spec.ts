@@ -197,7 +197,8 @@ test("native keyboard routes reach the active block language, filter, cancel and
 });
 
 for (const deviceName of ["iPhone 13", "iPad Pro 11"] as const) {
-  test(`the code language control opens, filters and picks by touch on ${deviceName}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  test(`the code language control opens, filters and picks by touch on ${deviceName}`,
+    deviceName === "iPad Pro 11" ? { tag: "@webkit-touch" } : {}, async ({ browser }, info) => {
     const context = trackContext(await browser.newContext(devices[deviceName]));
     const page = await context.newPage();
     await openDocument(page, `touch code language ${deviceName}`);

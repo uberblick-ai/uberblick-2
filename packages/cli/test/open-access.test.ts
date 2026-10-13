@@ -1,15 +1,16 @@
 /** The local browser's access authority is bounded to its frozen binding. */
-import { readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
 import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
+import { build } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
-import { pointAt, waitUntil } from "./helpers.js";
+import { PACKAGE_ROOT, REPO_ROOT, pointAt, waitUntil } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, configDir, freePort, get, hubs, open, startHub,
-  WORKSPACE, REBOUND_WORKSPACE, SECRET, writeBinding } from "./open-fixtures.js";
+  WORKSPACE, REBOUND_WORKSPACE, SECRET, silentListener, writeBinding } from "./open-fixtures.js";
 
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 
@@ -210,15 +211,36 @@ describe("ub open: live Access bridge", () => {
 
   it("distinguishes an explicitly local workspace, a shared-secret hub and an unreachable hub", async () => {
     const { box, env } = configured();
-    // Local-only Access needs no upstream credential or implicit default-port hub.
-    rmSync(join(configDir(box), "credentials.json"));
-    const app = await open(box, ["--port", String(await freePort())], env);
+    // A local binding cannot override its fallback endpoint through HUB_URL.
+    // Isolate that default in this test build; keep the real binding and startup.
+    const fallbackPort = await freePort();
+    const fallback = `ws://127.0.0.1:${fallbackPort}`;
+    const cli = join(box.cwd, "local-access.mjs");
+    await build({ entryPoints: [join(PACKAGE_ROOT, "src/main.ts")], outfile: cli,
+      bundle: true, platform: "node", format: "esm", target: "node26", minify: true,
+      plugins: [{ name: "local-access-default", setup(builder) {
+        builder.onResolve({ filter: /^@uberblick\/mcp-server$/ }, () => ({ path: "local-access-default", namespace: "fixture" }));
+        builder.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents:
+          `export * from ${JSON.stringify(join(REPO_ROOT, "packages/mcp-server/src/index.ts"))};\n` +
+          `export const DEFAULT_HUB_URL = ${JSON.stringify(fallback)};`, loader: "ts", resolveDir: REPO_ROOT }));
+      } }],
+    });
+    await silentListener(fallbackPort);
+    const credentials = join(configDir(box), "credentials.json");
+    rmSync(credentials);
+    const binding = readFileSync(join(box.cwd, ".uberblick.json"), "utf8");
+    const app = await open(box, ["--port", String(await freePort())], env, cli);
     try {
       const local = await fetch(`${app.url}api/access`, { method: "POST", headers: {
         ...bearer(await authMessage(localBrowserKey(WORKSPACE, box.env))),
         origin: new URL(app.url).origin, "content-type": "application/json",
       }, body: JSON.stringify({ operation: "own-role", workspaceId: WORKSPACE }) });
       expect(await local.json()).toEqual({ status: "local-only", hub: null });
+      expect(JSON.parse(binding)).toEqual({ workspaceId: WORKSPACE, hubUrl: null });
+      expect(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).toBe(binding);
+      expect(app.stdout()).toContain(`${fallback} (not started: no signing secret`);
+      expect(existsSync(credentials)).toBe(false);
+      expect(existsSync(env.HUB_DB_PATH!)).toBe(false);
     } finally { expect((await app.interrupt()).status).toBe(0); }
 
     const remote = configured();

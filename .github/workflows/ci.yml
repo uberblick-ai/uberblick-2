@@ -8,7 +8,9 @@ name: CI
 # change here is a change to the merge rules. Standard runners cost no Actions
 # minutes in a public repository, macOS ones included.
 #
-# Linux runs everything. macOS runs the tests again, because contributors and
+# Linux runs everything. Browser coverage uses independent interactive runners
+# and a separate workload runner, all behind one required aggregate check.
+# macOS runs the tests again, because contributors and
 # the loop work on Macs and some failures show up on only one of the two; lint
 # and typecheck do not depend on the platform. Browser e2e stays Linux-only
 # until its specs hold on GitHub's macOS runners.
@@ -81,9 +83,9 @@ jobs:
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run site
 
-  # Separate from `checks` so it runs in parallel and only it downloads browsers.
-  e2e:
-    name: browser e2e
+  # Files stay serial internally; each shard gets its own bundle and harnesses.
+  e2e-chromium-1:
+    name: browser chromium (1/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -99,22 +101,138 @@ jobs:
           key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      # Keyed on the lockfile because that is what pins @playwright/test, and
-      # the browser build a Playwright version wants is a function of it.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: playwright-
 
-      - run: mise run install
+      - name: Install workspace packages
+        run: mise run install
         env:
           PNPM_STORE_DIR: ~/.pnpm-store
 
-      # Cached engines do not include system packages, so provision WebKit's
-      # host libraries on every run. Local e2e never installs host packages.
-      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+      - name: Download pinned browser engines
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
-      # The task downloads pinned Chromium and WebKit (a no-op on a cache hit)
-      # and starts its own hub and dev server, so there is nothing else to wire.
-      - run: mise run e2e
+      - name: Run browser suite
+        run: mise run e2e --project=chromium --shard=1/2
+
+  e2e-chromium-2:
+    name: browser chromium (2/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - name: Install workspace packages
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      - name: Download pinned browser engines
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
+
+      - name: Run browser suite
+        run: mise run e2e --project=chromium --shard=2/2
+
+  e2e-webkit:
+    name: browser webkit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - name: Install workspace packages
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # Browser caches omit system packages; locals never install host packages.
+      - name: Provision WebKit host libraries
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+
+      - name: Download pinned browser engines
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
+
+      - name: Run browser suite
+        run: mise run e2e --project=webkit-ipad --project=webkit-macbook
+
+  e2e-workload:
+    name: browser workload
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - name: Install workspace packages
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      - name: Download pinned browser engines
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
+
+      - name: Run browser suite
+        run: mise run e2e --project=chromium-workload --no-deps
+
+  # The workload project retains dependencies locally; --no-deps above puts
+  # probes on separate hardware while interactive CI jobs execute in parallel.
+  e2e:
+    name: browser e2e
+    needs: [e2e-chromium-1, e2e-chromium-2, e2e-webkit, e2e-workload]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # A skipped required check is accepted by rulesets, so reject every result
+      # except success, including cancellation and skips in any browser job.
+      - run: test '${{ needs.e2e-chromium-1.result }}' = success && test '${{ needs.e2e-chromium-2.result }}' = success && test '${{ needs.e2e-webkit.result }}' = success && test '${{ needs.e2e-workload.result }}' = success

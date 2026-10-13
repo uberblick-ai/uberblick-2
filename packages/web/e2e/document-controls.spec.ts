@@ -159,7 +159,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
 }
 
 test("document controls retain desktop target floors and keyboard behavior", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.skip(info.project.name === "webkit-iphone", "The paired explicit iPad context owns touch coverage.");
+  test.skip(info.project.name === "webkit-ipad", "The paired explicit iPad context owns touch coverage.");
   await exerciseDocumentControls(browser, false, info);
 });
 

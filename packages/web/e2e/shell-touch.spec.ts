@@ -79,7 +79,7 @@ for (const { coarse, width } of [
     { tag: coarse && width === 375 ? "@webkit-touch" : [] }, async ({ browser }, info) => {
       const page = await openApp(browser, "/", {
         upstream: true,
-        // WebKit keeps its actual phone input and viewport; Chromium proves
+        // WebKit keeps its actual iPad input and viewport; Chromium proves
         // the coarse drawer and iPad landscape docked surfaces explicitly.
         contextOptions: info.project.name === "chromium"
           ? { hasTouch: coarse, isMobile: coarse, viewport: { width, height: 900 } }
