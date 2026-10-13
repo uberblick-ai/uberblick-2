@@ -581,6 +581,16 @@ describe("the endpoint as it is shown", () => {
 });
 
 describe("the deployments that serve it", () => {
+  it("imports the generated web policy for the app and its deep-link fallback", () => {
+    const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
+    expect(caddyfile).toMatch(/handle \{\s+import \/etc\/caddy\/uberblick-csp\.caddy\s+root \* \/srv\s+try_files \{path\} \/index\.html\s+file_server\s+\}/);
+    expect(caddyfile).not.toContain("figma.com");
+    expect(caddyfile).not.toMatch(/header\s+Content-Security-Policy\s/);
+    expect(readFileSync(resolve(repoRoot, "Dockerfile.hub-release"), "utf8")).toContain(
+      "COPY --from=build /out/web/uberblick-csp.caddy /etc/caddy/uberblick-csp.caddy",
+    );
+  });
+
   it("serves the document uncached, ahead of the SPA fallback, from run-time config", () => {
     const caddyfile = readFileSync(resolve(repoRoot, "Caddyfile"), "utf8");
     const configRoute = caddyfile.indexOf(`handle ${HUB_CONFIG_PATH}`);

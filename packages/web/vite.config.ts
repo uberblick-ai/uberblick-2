@@ -21,7 +21,7 @@ const BUILD_STAMP = "uberblick-build.json";
  * Vite; plain config imports are externalized to Node and cannot resolve them.
  * Its resolver scope is local to this call; the plugin runs only on builds.
  */
-function buildStampPlugin(): Plugin {
+function buildStampPlugin(contentSecurityPolicy: string): Plugin {
   return {
     name: "uberblick:build-stamp",
     apply: "build",
@@ -33,11 +33,18 @@ function buildStampPlugin(): Plugin {
         fileName: BUILD_STAMP,
         source: `${JSON.stringify({ syncProtocolVersion: module.SYNC_PROTOCOL_VERSION })}\n`,
       });
+      this.emitFile({
+        type: "asset",
+        fileName: "uberblick-csp.caddy",
+        source: `header Content-Security-Policy-Report-Only ${JSON.stringify(contentSecurityPolicy)}\n`,
+      });
     },
   };
 }
 
 export default defineConfig(async (): Promise<UserConfig> => {
+  const { module: webPolicy } =
+    await runnerImport<typeof import("@uberblick/schema/web-policy")>("@uberblick/schema/web-policy");
   // Deployable bundles skip machine files; the runner resolves TS .js imports.
   const runtimeConfigOnly = process.env.UBERBLICK_RELEASE_WEB === "1";
   const { module: dev } = runtimeConfigOnly ? { module: null } :
@@ -47,7 +54,7 @@ export default defineConfig(async (): Promise<UserConfig> => {
   return {
     // Omit Tailwind preflight to preserve editor and unmigrated control defaults.
     // Editor content remains plain CSS; see src/ui/tailwind.css.
-    plugins: [tailwindcss(), react(), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin()],
+    plugins: [tailwindcss(), react(), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY)],
     define: {
       __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
       __HUB_URL__: JSON.stringify(config?.hubUrl ?? ""),
@@ -56,6 +63,9 @@ export default defineConfig(async (): Promise<UserConfig> => {
     },
     server: {
       port: 5173,
+      headers: {
+        "Content-Security-Policy-Report-Only": webPolicy.WEB_CONTENT_SECURITY_POLICY,
+      },
     },
   };
 });

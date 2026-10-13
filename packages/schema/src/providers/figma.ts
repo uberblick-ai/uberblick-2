@@ -9,6 +9,8 @@ export interface FigmaFields {
 
 export const FIGMA_PROVIDER = {
   hosts: ["www.figma.com", "figma.com"],
+  frameOrigins: ["https://embed.figma.com", "https://www.figma.com"],
+  connectOrigins: ["https://www.figma.com"],
   paths: ["design", "file", "proto", "board", "slides", "community/file"],
   parameters: ["node-id", "starting-point-node-id", "version-id"],
   normalizeLink: normalizeFigmaLink,

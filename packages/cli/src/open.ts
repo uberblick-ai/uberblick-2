@@ -16,6 +16,7 @@ import {
   readAuthEnvelope,
 } from "@uberblick/schema/protocol";
 import { clampToken } from "@uberblick/schema/token";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
@@ -722,11 +723,15 @@ function serveBundleRequest(
     }
 
     const file = fileFor(root, pathname);
+    const contentType = MIME[extname(file).toLowerCase()] ?? "application/octet-stream";
     const headers = {
-      "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
+      "content-type": contentType,
       // The bundle's filenames are content-hashed by Vite, but index.html is
       // not, and a stale one points at assets that are gone.
       "cache-control": "no-cache",
+      ...(contentType === MIME[".html"] ? {
+        "content-security-policy-report-only": WEB_CONTENT_SECURITY_POLICY,
+      } : {}),
     };
     if (request.method === "HEAD") {
       respond(request, response, 200, headers, "");
