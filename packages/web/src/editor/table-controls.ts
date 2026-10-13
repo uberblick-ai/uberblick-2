@@ -131,7 +131,8 @@ export function resolveTableRow(editor: Editor, target: TableRowTarget): Resolve
 /**
  * Move only the source row: PM reordering rewrites intervening same-type rows.
  * Cloning preserves text, formatting and comments; delete/copy merge limits
- * remain those described in How to Use It. Gaps range from below header to end.
+ * remain those described in Editing in the web editor.
+ * Gaps range from below header to end.
  */
 export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number): boolean {
   const live = resolveTableRow(editor, target);

@@ -30,6 +30,7 @@ import {
   AUTH_LOGOUT_HELP,
   AUTH_LOGOUT_OPTIONS,
   AUTH_STATUS_HELP,
+  AUTH_STATUS_OPTIONS,
 } from "../src/auth.js";
 import { DOCTOR_HELP, DOCTOR_OPTIONS } from "../src/doctor.js";
 import { DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "../src/data.js";
@@ -187,7 +188,7 @@ const PATHS: Path[] = [
   { argv: ["workspace", "member", "remove"], help: WORKSPACE_MEMBER_SUBCOMMAND_HELP.remove, options: {} },
   { argv: ["auth"], help: AUTH_HELP, options: {}, children: ["login", "status", "logout"] },
   { argv: ["auth", "login"], help: AUTH_LOGIN_HELP, options: {} },
-  { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: {} },
+  { argv: ["auth", "status"], help: AUTH_STATUS_HELP, options: AUTH_STATUS_OPTIONS },
   { argv: ["auth", "logout"], help: AUTH_LOGOUT_HELP, options: AUTH_LOGOUT_OPTIONS },
   { argv: ["hub"], help: HUB_HELP, options: {}, children: ["setup", "up", "down", "status", "upgrade"] },
   ...Object.entries(HUB_OPTIONS).map(([sub, options]) => ({ argv: ["hub", sub], help: HUB_HELP, options })),
@@ -405,9 +406,9 @@ options:
     const expected = `usage: ub auth [command]
 
 commands:
-  login [hub]      # Sign in to a hub with GitHub
-  status [hub]     # Show who this computer is signed in as, and what it can reach
-  logout [hub]     # Sign this computer out of a hub; --all-devices signs out all of yours
+  login [hub]            # Sign in to a hub with GitHub
+  status [hub] [--json]  # Check the stored login and current hub administration
+  logout [hub]           # Sign this computer out of a hub; --all-devices signs out all of yours
 `;
     for (const args of [[], ["--help"], ["-h"]]) {
       const run = await dispatch(["auth", ...args]);
@@ -430,7 +431,7 @@ commands:
     expect(help).toMatch(/(?:never changes|stays unchanged).*binding|binding.*(?:never changes|stays unchanged)/);
   });
 
-  it("describes login approval and status's local view", async () => {
+  it("describes login approval and status's stored and current evidence", async () => {
     const login = await dispatch(["auth", "login", "--help"]);
     const loginHelp = login.stdout.replace(/\s+/g, " ");
     expect(loginHelp).toMatch(/bare host.*http\(s\).*ws\(s\)/);
@@ -443,8 +444,12 @@ commands:
 
     const status = await dispatch(["auth", "status", "--help"]);
     const statusHelp = status.stdout.replace(/\s+/g, " ");
-    expect(statusHelp).toMatch(/only.*stored.*this computer|only this computer's stored login/i);
-    expect(statusHelp).toMatch(/ub status.*whether the hub accepts.*login/);
+    expect(statusHelp).toMatch(/stored login/i);
+    expect(statusHelp).toMatch(/hub.*accepts.*login/i);
+    expect(statusHelp).toMatch(/hub admin/i);
+    expect(statusHelp).toContain("--json");
+    expect(statusHelp).toMatch(/local.only.*no login/i);
+    expect(statusHelp).toMatch(/never.*renew|no.*renew/i);
     for (const help of [loginHelp, statusHelp]) {
       expect(help).not.toMatch(/Other stored hubs|Other hubs|binding stays unchanged|Stored login for|GitHub username recorded at sign-in|ub open/);
     }
