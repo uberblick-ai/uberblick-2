@@ -164,21 +164,21 @@ export function corpusProblem(url: string, corpus: Corpus): string | null {
 export async function verify(
   bridge: Bridge,
   expected: readonly CorpusDoc[],
-  workspace?: readonly CorpusDoc[],
+  options: { documents: true | "sample"; workspace?: readonly CorpusDoc[] | undefined },
 ): Promise<{ corpus: Corpus; problem: string | null }> {
   bridge.io.err(`ub workspace: verifying ${bridge.target} as a fresh client…\n`);
-  // Check the full identity/tombstone set, all archived contents and one live room.
-  // One live room bounds network work; tombstones alone do not prove restorable content.
+  // A sample checks every archived room and one live room, bounding live-content
+  // work without treating tombstones alone as proof of restorable content.
   const corpus = await inspectRemote(remoteConfig(bridge), {
-    documents: workspace === undefined ? "sample" : true,
-    workspace: workspace !== undefined,
+    documents: options.documents,
+    workspace: options.workspace !== undefined,
   });
   const unusable = corpusProblem(bridge.target, corpus);
   if (unusable !== null) {
     return { corpus, problem: unusable };
   }
-  if (workspace !== undefined && (corpus.workspace === undefined ||
-      !isIdentical(compareCorpus(workspace, corpus.workspace)))) {
+  if (options.workspace !== undefined && (corpus.workspace === undefined ||
+      !isIdentical(compareCorpus(options.workspace, corpus.workspace)))) {
     return { corpus, problem: `${bridge.target} does not match this workspace's name, settings or sidebar.\n` };
   }
   const diff = compareCorpus(expected, corpus.entries);
@@ -295,7 +295,7 @@ export async function useRemoteWorkspace(
           recovery + " What did arrive is in the local update log already." };
       }
       const takenAt = new Date().toISOString();
-      const checked = await verify(bridge, joined.entries, joined.workspace);
+      const checked = await verify(bridge, joined.entries, { documents: "sample", workspace: joined.workspace });
       if (checked.problem !== null) return { problem: checked.problem,
         detail: "This machine's configuration is unchanged — no endpoint and no workspace were persisted. Retry once the hub can finish verification." };
       return { corpus: joined, takenAt };

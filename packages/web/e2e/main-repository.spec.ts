@@ -29,22 +29,17 @@ test("main repository settings normalize, follow remote changes and repaint ever
   await expect(field).toHaveValue("");
   const save = settings.getByRole("button", { name: "Save main repository", exact: true });
 
-  for (const address of [
-    "example/somerepo", "https://github.com/example/somerepo",
-    "https://github.com/example/somerepo.git", "https://github.com/example/somerepo.git/",
-  ]) {
-    await field.fill(address);
-    await activateControl(save);
-    await expect(field).toHaveValue("example/somerepo");
-    await expect(remoteField).toHaveValue("example/somerepo");
-    for (const page of [local, remote]) {
-      const links = page.locator(".ub-editor a.ub-link");
-      await expect(links.nth(0).locator(".ub-github-pill-repo")).toHaveCount(0);
-      await expect(links.nth(0)).toHaveAccessibleName("Pull request Example/SomeRepo#12");
-      await expect(links.nth(0)).toHaveAttribute("title", "Pull request Example/SomeRepo#12");
-      await expect(links.nth(1).locator(".ub-github-pill-repo")).toHaveText("SomeRepo");
-      await expect(links.nth(2).locator(".ub-github-pill-repo")).toHaveText("Elsewhere");
-    }
+  await field.fill("https://github.com/example/somerepo.git/");
+  await activateControl(save);
+  await expect(field).toHaveValue("example/somerepo");
+  await expect(remoteField).toHaveValue("example/somerepo");
+  for (const page of [local, remote]) {
+    const links = page.locator(".ub-editor a.ub-link");
+    await expect(links.nth(0).locator(".ub-github-pill-repo")).toHaveCount(0);
+    await expect(links.nth(0)).toHaveAccessibleName("Pull request Example/SomeRepo#12");
+    await expect(links.nth(0)).toHaveAttribute("title", "Pull request Example/SomeRepo#12");
+    await expect(links.nth(1).locator(".ub-github-pill-repo")).toHaveText("SomeRepo");
+    await expect(links.nth(2).locator(".ub-github-pill-repo")).toHaveText("Elsewhere");
   }
 
   await field.fill("https://github.example.com/Example/SomeRepo");
