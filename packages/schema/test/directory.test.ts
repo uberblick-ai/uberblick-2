@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  addComment,
+  appendBlock,
+  createAnnotation,
+  deleteBlock,
   directoryStubDiffers,
+  documentDirectoryFields,
+  getAnnotationsMap,
   getDirectoryEntry,
   getDirectoryMap,
+  getMeta,
+  initDoc,
   listDirectory,
+  resolveAnnotationRange,
   restoreDirectoryEntry,
+  setAnnotationResolved,
+  setKind,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "../src/index.js";
@@ -645,6 +656,80 @@ describe("directory doc", () => {
       title: "Alpha",
       tags: [],
     });
+  });
+});
+
+describe("directory unresolved thread cache", () => {
+  it.each([undefined, "decision"] as const)("counts threads on %s documents regardless of anchors or replies", (kind) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: ALPHA, title: "Alpha" });
+    if (kind !== undefined) setKind(doc, kind);
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
+    const block = appendBlock(doc, { type: "paragraph", text: "Discussion" });
+    const open = createAnnotation(doc, block, 0, 3, "reviewer", "First thread");
+    const resolved = createAnnotation(doc, block, 3, 6, "reviewer", "Second thread");
+    setAnnotationResolved(doc, resolved.id, true);
+    addComment(doc, open.id, "author", "Reply");
+    deleteBlock(doc, block);
+    expect(resolveAnnotationRange(doc, open.id)).toBeNull();
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(1);
+    if (kind === "decision") expect(documentDirectoryFields(doc).commentCount).toBe(3);
+
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { ...getMeta(doc), description: "", ...documentDirectoryFields(doc) });
+    setAnnotationResolved(doc, open.id, true);
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(0);
+    expect(directoryStubDiffers(getDirectoryEntry(directory, ALPHA), getMeta(doc), documentDirectoryFields(doc))).toBe(true);
+    setAnnotationResolved(doc, resolved.id, false);
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(1);
+    (getAnnotationsMap(doc).get(open.id) as Y.Map<unknown>).set("resolved", "true");
+    expect(documentDirectoryFields(doc).openThreadCount).toBe(2);
+  });
+
+  it.each([undefined, "decision"] as const)("preserves known counts for %s stubs through omitted writes, archive and restore", (kind) => {
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Alpha", ...(kind === undefined ? {} : { kind }), openThreadCount: 2 });
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Renamed" });
+    tombstoneDirectoryEntry(directory, ALPHA);
+    expect(getDirectoryEntry(directory, ALPHA)).toMatchObject({ deleted: true, openThreadCount: 2 });
+    restoreDirectoryEntry(directory, ALPHA);
+    expect(listDirectory(directory)[0]).toMatchObject({ title: "Renamed", openThreadCount: 2 });
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Renamed", openThreadCount: 0 });
+    expect(getDirectoryEntry(directory, ALPHA)?.openThreadCount).toBe(0);
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Renamed", openThreadCount: null });
+    expect(getDirectoryEntry(directory, ALPHA)).not.toHaveProperty("openThreadCount");
+  });
+
+  it("treats absent, malformed and older-client counts as unknown until hydrated repair", () => {
+    const directory = new Y.Doc();
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: ALPHA, title: "Alpha" });
+    const block = appendBlock(doc, { type: "paragraph", text: "Review this" });
+    const thread = createAnnotation(doc, block, 0, 6, "reviewer", "Open");
+    const fields = documentDirectoryFields(doc);
+    for (const value of [undefined, null, "1", true, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+      getDirectoryMap(directory).set(ALPHA, { title: "Alpha", tags: [], openThreadCount: value });
+      expect(getDirectoryEntry(directory, ALPHA)).not.toHaveProperty("openThreadCount");
+      expect(listDirectory(directory)[0]).not.toHaveProperty("openThreadCount");
+      expect(directoryStubDiffers(getDirectoryEntry(directory, ALPHA), getMeta(doc), fields)).toBe(true);
+      upsertDirectoryEntry(directory, { ...getMeta(doc), description: "", ...fields });
+      expect(getDirectoryEntry(directory, ALPHA)?.openThreadCount).toBe(1);
+      expect(directoryStubDiffers(getDirectoryEntry(directory, ALPHA), getMeta(doc), fields)).toBe(false);
+    }
+    setAnnotationResolved(doc, thread.id, true);
+    expect(directoryStubDiffers(getDirectoryEntry(directory, ALPHA), getMeta(doc), documentDirectoryFields(doc))).toBe(true);
+  });
+
+  it("converges the count with the winning whole-entry write", () => {
+    const [a, b] = replicaPair((directory) => {
+      upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Alpha", openThreadCount: 0 });
+    });
+    upsertDirectoryEntry(a, { uuid: ALPHA, title: "From A", openThreadCount: 1 });
+    upsertDirectoryEntry(b, { uuid: ALPHA, title: "From B", openThreadCount: 2 });
+    syncDocs(a, b);
+    const winner = getDirectoryEntry(a, ALPHA);
+    expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
+    expect(winner?.openThreadCount).toBe(winner?.title === "From A" ? 1 : 2);
   });
 });
 

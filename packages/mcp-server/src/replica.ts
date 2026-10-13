@@ -6,7 +6,7 @@ import {
   SIDEBAR_SUFFIX,
   directoryRoom,
   directoryStubDiffers,
-  decisionDirectoryFields,
+  documentDirectoryFields,
   decisionTopicArchived,
   findBlockElement,
   getBlocksFragment,
@@ -763,8 +763,8 @@ export class Replicas {
       return;
     }
     const now = Date.now();
-    const decisionFields = decisionDirectoryFields(this.replica(meta.uuid).doc);
-    const metaChanged = directoryStubDiffers(stub, meta, decisionFields);
+    const fields = documentDirectoryFields(this.replica(meta.uuid).doc);
+    const metaChanged = directoryStubDiffers(stub, meta, fields);
     const staleStamp =
       stub?.updatedAt === undefined ||
       now - stub.updatedAt >= this.config.updatedAtCoarsenessMs;
@@ -788,7 +788,7 @@ export class Replicas {
       // Explicit absence clears a stale cached lifecycle instead of retaining it.
       kind: meta.kind ?? "",
       status: meta.status ?? "",
-      ...decisionFields,
+      ...fields,
       createdAt: now,
       ...(stamp ? { updatedAt: now } : {}),
     });
