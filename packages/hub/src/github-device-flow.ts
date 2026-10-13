@@ -14,10 +14,11 @@ const MAX_LIFETIME_MS = 15 * 60_000;
 const MAX_REQUESTS = 100;
 const MAX_TERMINAL_REQUESTS = 100;
 type TerminalStatus = "denied" | "expired" | "abandoned" | "failed" | "collected";
-interface SignInRequest {
+interface SignInRequest<Context> {
   secret: string;
   deviceCode?: string;
   deviceName?: string;
+  context?: Context;
   expiresAt: number;
   intervalMs: number;
   nextPollAt: number;
@@ -55,8 +56,8 @@ function providerFailure(error: unknown): GithubFailure {
 }
 
 /** Requests/tokens stay in memory; sign-in and host setup complete synchronously. */
-export class GithubDeviceFlow<Result extends object> {
-  private readonly requests = new Map<string, SignInRequest>();
+export class GithubDeviceFlow<Result extends object, Context = undefined> {
+  private readonly requests = new Map<string, SignInRequest<Context>>();
   private readonly closed = new AbortController();
   private starting = 0;
   private readonly now: () => number;
@@ -64,7 +65,7 @@ export class GithubDeviceFlow<Result extends object> {
 
   constructor(
     private readonly config: GithubSignInConfig,
-    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string) => Result,
+    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string, context?: Context) => Result,
     private readonly log: HubLogger = stderrLogger,
     private readonly event = "hub.github.sign-in.failed",
   ) {
@@ -77,7 +78,7 @@ export class GithubDeviceFlow<Result extends object> {
     this.requests.clear();
   }
 
-  async start(deviceName?: string) {
+  async start(deviceName?: string, context?: Context) {
     if (this.closed.signal.aborted) return { status: "failed" } as const;
     // Active requests and retained outcomes have separate bounds. Outcomes
     // last at most another lifetime; oldest ones may be evicted at capacity.
@@ -117,6 +118,7 @@ export class GithubDeviceFlow<Result extends object> {
       this.requests.set(requestId, {
         secret: collectionSecret, deviceCode: result.device_code, expiresAt,
         ...(deviceName === undefined ? {} : { deviceName }),
+        ...(context === undefined ? {} : { context }),
         intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
       });
       return {
@@ -133,15 +135,15 @@ export class GithubDeviceFlow<Result extends object> {
     }
   }
 
-  cancel(requestId: string, secret: string): DeviceFlowCollection<Result> {
-    const request = this.lookup(requestId, secret);
+  cancel(requestId: string, secret: string, context?: Context): DeviceFlowCollection<Result> {
+    const request = this.lookup(requestId, secret, context);
     if (request === undefined) return { status: "unknown-request" };
     if (this.active(request)) this.finish(request, "abandoned");
     return { status: request.status as TerminalStatus };
   }
 
-  async collect(requestId: string, secret: string): Promise<DeviceFlowCollection<Result>> {
-    const request = this.lookup(requestId, secret);
+  async collect(requestId: string, secret: string, context?: Context): Promise<DeviceFlowCollection<Result>> {
+    const request = this.lookup(requestId, secret, context);
     if (request === undefined) return { status: "unknown-request" };
     if (!this.active(request)) return { status: request.status as TerminalStatus };
     if (request.polling || this.now() < request.nextPollAt) return this.pending(request);
@@ -184,7 +186,7 @@ export class GithubDeviceFlow<Result extends object> {
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
       step = "issuance";
-      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName);
+      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName, request.context);
       // Completion is synchronous: cancellation/expiry cannot interleave with
       // the commit, and another collector cannot complete a second time.
       this.finish(request, "collected");
@@ -208,26 +210,26 @@ export class GithubDeviceFlow<Result extends object> {
     });
   }
 
-  private lookup(id: string, secret: string): SignInRequest | undefined {
+  private lookup(id: string, secret: string, context?: Context): SignInRequest<Context> | undefined {
     const request = this.requests.get(id);
-    if (request === undefined || typeof secret !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(secret) ||
+    if (request === undefined || request.context !== context || typeof secret !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(secret) ||
         !timingSafeEqual(Buffer.from(secret), Buffer.from(request.secret))) return undefined;
     return request;
   }
 
-  private active(request: SignInRequest): boolean {
+  private active(request: SignInRequest<Context>): boolean {
     if (request.status === "pending" && this.closed.signal.aborted) this.finish(request, "failed");
     if (request.status === "pending" && this.now() >= request.expiresAt) this.finish(request, "expired");
     return request.status === "pending";
   }
 
-  private finish(request: SignInRequest, status: TerminalStatus): void {
+  private finish(request: SignInRequest<Context>, status: TerminalStatus): void {
     request.status = status;
     delete request.deviceCode;
     delete request.deviceName;
   }
 
-  private pending(request: SignInRequest): DeviceFlowCollection<Result> {
+  private pending(request: SignInRequest<Context>): DeviceFlowCollection<Result> {
     return { status: "pending", interval: Math.max(1, Math.ceil((request.nextPollAt - this.now()) / 1000)) };
   }
 

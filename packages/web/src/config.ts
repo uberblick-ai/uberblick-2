@@ -533,7 +533,7 @@ export function configuredWorkspaces(): readonly string[] {
   return resolved?.workspaces ?? [];
 }
 
-/** Direct remote browser sign-in is unavailable. */
+/** Hub pages stay outside workspace rooms, including after browser sign-in. */
 export function browserSignInRequired(): boolean {
   const config = settled();
   // A released Docker proxy can be published on host loopback while its hub

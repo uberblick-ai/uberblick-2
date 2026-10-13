@@ -6,7 +6,7 @@
 
 {$WEB_SITE} {
 	# Public runtime configuration contains only the endpoint and workspace list.
-	# Remote browsers have no credential and cannot sign in directly yet; use
+	# Browser sign-in uses /auth/* and a separate session. Document access uses
 	# ub auth login and ub open on a computer. Never serve a signing secret.
 	# Entrypoints validate substitutions before Caddy renders these JSON strings.
 	# This route precedes the SPA fallback and is uncached so reloads see updates.
