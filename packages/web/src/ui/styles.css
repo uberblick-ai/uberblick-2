@@ -2558,7 +2558,9 @@ h3.ub-heading {
 .ub-docs-tag-measure {
   position: absolute;
   visibility: hidden;
-  width: max-content;
+  /* Clip the measuring strip while leaving visible chip focus rings intact. */
+  width: 0;
+  overflow: hidden;
   pointer-events: none;
 }
 

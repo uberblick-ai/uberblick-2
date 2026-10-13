@@ -263,17 +263,18 @@ function RowTags({ tags, title, onPick }: { tags: readonly TagCatalogEntry[]; ti
 type ListSearchClient = Pick<DocumentSearchClient, "search"> | null;
 
 function useListSearch(query: string, client: ListSearchClient, entries: readonly DirectoryEntry[]): { hits: readonly string[]; unavailable: boolean; pending: boolean } {
-  const [result, setResult] = useState<{ query: string; client: ListSearchClient; entries: readonly DirectoryEntry[]; hits: string[]; unavailable: boolean } | null>(null);
+  const [result, setResult] = useState<{ query: string; client: ListSearchClient; hits: string[]; unavailable: boolean } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Directory changes trigger a background refresh of the shared search index.
   useEffect(() => {
     if (query === "" || client === null) return;
     const request = new AbortController();
     void client.search(query, request.signal).then(
-      (hits) => { if (!request.signal.aborted) setResult({ query, client, entries, hits, unavailable: false }); },
-      () => { if (!request.signal.aborted) setResult({ query, client, entries, hits: [], unavailable: true }); },
+      (hits) => { if (!request.signal.aborted) setResult({ query, client, hits, unavailable: false }); },
+      () => { if (!request.signal.aborted) setResult({ query, client, hits: [], unavailable: true }); },
     );
     return () => request.abort();
   }, [query, client, entries]);
-  const current = result?.query === query && result.client === client && result.entries === entries ? result : null;
+  const current = result?.query === query && result.client === client ? result : null;
   const unavailable = query !== "" && (client === null || current?.unavailable === true);
   return { hits: current?.hits ?? [], unavailable, pending: query !== "" && !unavailable && current === null };
 }

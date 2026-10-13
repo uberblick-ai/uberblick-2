@@ -94,6 +94,8 @@ it("ignores late success and failure for text that has changed", async () => {
   await search(container, "old");
   await search(container, "new");
   expect(pending.get("old")?.signal.aborted).toBe(true);
+  expect(within(container).queryAllByRole("rowheader")).toHaveLength(0);
+  expect(within(container).getByRole("status").textContent).toBe("Searching…");
   await act(async () => pending.get("new")?.resolve([TWO]));
   expect(titles(container)).toEqual(["Two"]);
   await act(async () => pending.get("old")?.resolve([ONE]));
@@ -104,6 +106,55 @@ it("ignores late success and failure for text that has changed", async () => {
   await act(async () => pending.get("failing")?.reject(new Error("unavailable")));
   expect(titles(container)).toEqual(["One"]);
   expect(container.textContent).not.toMatch(/unavailable/i);
+});
+
+it("keeps search rows and focus during directory refreshes, then applies the latest answer", async () => {
+  const pending: Array<{ resolve: (hits: string[]) => void; reject: (error: Error) => void; signal: AbortSignal }> = [];
+  const api = { search: vi.fn((_query: string, signal: AbortSignal) => new Promise<string[]>((resolve, reject) => {
+    pending.push({ resolve, reject, signal });
+  })) };
+  const entries = [entry(ONE, "One"), entry(TWO, "Two")];
+  const { container, rerender } = await renderSettled(list({ entries, searchClient: api }));
+  await search(container, "launch");
+  await act(async () => pending[0]?.resolve([ONE, TWO]));
+  const focused = within(container).getByRole("button", { name: "Two" });
+  focused.focus();
+
+  const updated = [...entries, entry(THREE, "Unrelated")];
+  await act(async () => rerender(list({ entries: updated, searchClient: api })));
+  expect(api.search).toHaveBeenCalledTimes(2);
+  expect(titles(container)).toEqual(["One", "Two"]);
+  expect(within(container).getByRole("button", { name: "Two" })).toBe(focused);
+  expect(document.activeElement).toBe(focused);
+  expect(within(container).queryByRole("status")).toBeNull();
+
+  await act(async () => rerender(list({ entries: [...updated, entry(FOUR, "Four")], searchClient: api })));
+  expect(pending[1]?.signal.aborted).toBe(true);
+  await act(async () => pending[2]?.resolve([TWO, FOUR]));
+  expect(titles(container)).toEqual(["Two", "Four"]);
+  expect(document.activeElement).toBe(focused);
+  await act(async () => pending[1]?.reject(new Error("unavailable")));
+  expect(titles(container)).toEqual(["Two", "Four"]);
+  expect(container.textContent).not.toMatch(/unavailable/i);
+
+  await act(async () => rerender(list({ entries: [...updated], searchClient: api })));
+  await act(async () => pending[3]?.reject(new Error("index unavailable")));
+  expect(within(container).getByRole("status").textContent).toMatch(/Search is unavailable/);
+  expect(container.textContent).not.toMatch(/No documents.*match/i);
+});
+
+it("invalidates the previous workspace client's answer even when the query stays the same", async () => {
+  const entries = [entry(ONE, "One"), entry(TWO, "Two")];
+  const state = { ...INITIAL_DOCUMENT_LIST_STATE, query: "launch", relevance: true };
+  const { container, rerender } = await renderSettled(list({ entries, state, searchClient: { search: async () => [ONE] } }));
+  expect(titles(container)).toEqual(["One"]);
+  let answer: ((hits: string[]) => void) | undefined;
+  const nextClient = { search: () => new Promise<string[]>((resolve) => { answer = resolve; }) };
+  await act(async () => rerender(list({ entries, state, searchClient: nextClient })));
+  expect(within(container).queryAllByRole("rowheader")).toHaveLength(0);
+  expect(within(container).getByRole("status").textContent).toBe("Searching…");
+  await act(async () => answer?.([TWO]));
+  expect(titles(container)).toEqual(["Two"]);
 });
 
 it("keeps the 150th match when catalog aliases select its tag", async () => {

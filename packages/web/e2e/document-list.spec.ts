@@ -483,3 +483,117 @@ test("a tag filter retains a matching document beyond the first 100 shared searc
   await pickTags(page, ["auth"], false);
   await expect(listedTitles(page)).toHaveText([tailTitle]);
 });
+
+for (const touch of [false, true]) test(`tag measurement does not widen the document pane and overflow stays accessible on ${touch ? "iPad touch" : "desktop keyboard"} @webkit`, async ({ browser }) => {
+  const contextOptions = { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1024, height: 768 }, hasTouch: false, isMobile: false }) };
+  const settings = await openApp(browser, `/${harness().workspace}/settings/tags`, {
+    upstream: true,
+    readySelector: "#ub-new-tag",
+    contextOptions,
+  });
+  const tagPrefix = touch ? "touch" : "measure";
+  const tags = Array.from({ length: 8 }, (_, index) => `${tagPrefix}-${index}-long-overflow-tags`);
+  const firstTag = `${tagPrefix}-0-long-overflow-tags`;
+  for (const tag of tags) {
+    await settings.getByLabel("Create a tag").fill(tag);
+    await settings.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(settings.getByRole("button", { name: `Retire ${tag}`, exact: true })).toBeVisible();
+  }
+  const title = docTitle("tagmeasurement");
+  const writer = agent().open({ name: "tag-measurement-e2e" });
+  const created = await writer.call<{ tags: Array<{ name: string }> }>("create_doc", {
+    title, description: "A row with more tags than its pane can fit.",
+    blocks: [{ type: "paragraph", text: "All tags remain available through overflow." }], tags,
+  });
+  const page = await openApp(browser, `/${harness().workspace}/all`, {
+    readySelector: ".ub-docs-heading",
+    contextOptions,
+  });
+  expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+  await page.getByRole("searchbox", { name: "Search" }).fill(title);
+  const row = page.locator(".ub-docs-row", { hasText: title });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".ub-docs-tags-cell")).toBeVisible();
+  const pane = page.locator(".ub-pane");
+  const dimensions = await pane.evaluate((element) => ({ client: element.clientWidth, scroll: element.scrollWidth }));
+  const measuredWidth = await row.locator(".ub-docs-tag-measure").evaluate((element) =>
+    Array.from(element.children).reduce((width, chip) => width + chip.getBoundingClientRect().width, 0));
+  expect(measuredWidth).toBeGreaterThan(dimensions.client);
+  expect(dimensions.scroll).toBe(dimensions.client);
+  const more = row.getByRole("button", { name: `Show all tags for ${title}`, exact: true });
+  await expect(more).toHaveText("+8");
+  if (touch) await more.tap();
+  else { await more.focus(); await more.press("Enter"); }
+  const disclosure = page.getByRole("dialog", { name: `All tags for ${title}`, exact: true });
+  await expect(disclosure.getByRole("button")).toHaveText(created.tags.map((tag) => tag.name));
+  await activateControl(disclosure.getByRole("button", { name: firstTag, exact: true }), { touch });
+  await expect(disclosure).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Filter by tags", exact: true })).toContainText(firstTag);
+  await expect(listedTitles(page)).toHaveText([title]);
+});
+
+test("search results retain focus, scroll and tag disclosure during directory refresh @webkit", async ({ browser }) => {
+  const writer = agent().open({ name: "list-refresh-e2e" });
+  const query = docTitle("listrefresh").replaceAll("-", "");
+  for (let index = 0; index < 24; index += 1) {
+    await writer.call("create_doc", {
+      title: `${query} ${index}`, description: "A searchable row to keep mounted.",
+      blocks: [{ type: "paragraph", text: "A matching document." }],
+      tags: ["auth", "billing", "mcp", "permissions", "rfc", "sync"],
+    });
+  }
+  const unrelatedTitle = docTitle("unrelatedrefresh");
+  const unrelated = await writer.call<{ uuid: string }>("create_doc", {
+    title: unrelatedTitle, description: "An unrelated directory entry.",
+    blocks: [{ type: "paragraph", text: "This document does not match the query." }],
+  });
+  const page = await openApp(browser, `/${harness().workspace}/all`, {
+    readySelector: ".ub-docs-heading",
+    contextOptions: { viewport: { width: 1280, height: 640 } },
+  });
+  await expect(page.locator(".ub-docs-row", { hasText: unrelatedTitle })).toHaveCount(1);
+  await page.getByRole("searchbox", { name: "Search" }).fill(query);
+  const rows = page.locator(".ub-docs-row");
+  await expect(rows).toHaveCount(24);
+  const lastRow = rows.last();
+  const open = lastRow.locator(".ub-docs-open");
+  await open.focus();
+  await expect(open).toBeFocused();
+  const pane = page.locator(".ub-pane");
+  const scroll = await pane.evaluate((element) => element.scrollTop);
+  expect(scroll).toBeGreaterThan(100);
+  let requested = 0;
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/search?*", async (route) => {
+    requested += 1;
+    await held;
+    await route.continue();
+  });
+  let refreshed: Promise<unknown> | undefined;
+  try {
+    await writer.call("set_metadata", { uuid: unrelated.uuid, title: `${unrelatedTitle} changed` });
+    await expect.poll(() => requested).toBeGreaterThan(0);
+    await expect(rows).toHaveCount(24);
+    await expect(open).toBeFocused();
+    expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);
+    await expect(page.locator(".ub-docs-empty")).toHaveCount(0);
+    const more = lastRow.getByRole("button", { name: /^Show all tags for/ });
+    await more.focus();
+    await more.press("Enter");
+    const disclosure = page.getByRole("dialog", { name: /^All tags for/ });
+    await expect(disclosure).toBeVisible();
+    const arrivals = requested;
+    await writer.call("set_metadata", { uuid: unrelated.uuid, description: "Another unrelated directory change." });
+    await expect.poll(() => requested).toBeGreaterThan(arrivals);
+    await expect(rows).toHaveCount(24);
+    await expect(disclosure).toBeVisible();
+    refreshed = page.waitForResponse((response) => response.url().includes("/api/search?") && response.status() === 200);
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: "wait" });
+  }
+  await refreshed;
+  await expect(rows).toHaveCount(24);
+  await expect(page.getByRole("dialog", { name: /^All tags for/ })).toBeVisible();
+});
