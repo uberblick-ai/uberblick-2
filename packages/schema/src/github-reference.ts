@@ -6,6 +6,40 @@ export interface GitHubItem {
   kind: "issue" | "pull-request";
 }
 
+/** GitHub repository identity from a reference, web address or origin address. */
+export function githubRepository(value: string): string | null {
+  const input = value.trim();
+  if (/\s/.test(input)) return null;
+  let path = input;
+  const scp = /^git@github\.com:(.+)$/i.exec(input);
+  if (scp?.[1] !== undefined) {
+    path = scp[1];
+  } else if (input.includes("://")) {
+    let url: URL;
+    try {
+      url = new URL(input);
+    } catch {
+      return null;
+    }
+    if (
+      url.host !== "github.com" || url.search !== "" || url.hash !== "" ||
+      url.password !== "" ||
+      !((url.protocol === "https:" || url.protocol === "http:") && url.username === "" ||
+        url.protocol === "ssh:" && url.username === "git")
+    ) return null;
+    // Check the original path too: URL parsing can remove dot segments.
+    const rawPath = /^[a-z]+:\/\/[^/]+(\/[^?#]*)$/i.exec(input)?.[1];
+    if (rawPath !== url.pathname) return null;
+    path = url.pathname.slice(1);
+  }
+  const match = /^([a-z0-9-]+)\/([a-z0-9_.-]+)\/?$/i.exec(path);
+  if (match === null) return null;
+  const owner = match[1];
+  const repo = match[2]?.replace(/\.git$/i, "");
+  if (owner === undefined || repo === undefined || repo === "" || repo === "." || repo === "..") return null;
+  return `${owner}/${repo}`;
+}
+
 /** GitHub item URLs, with their spelling preserved for display. */
 export function githubItemUrl(value: string): GitHubItem | null {
   const input = value.trim();

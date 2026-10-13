@@ -611,6 +611,7 @@ function ForeignFallback({
 // live, and actual binding inputs still pass through React's props comparison.
 const BoundEditor = memo(function BoundEditor({
   connection,
+  catalogConnection,
   author,
   archived,
   contentReadOnly,
@@ -618,6 +619,7 @@ const BoundEditor = memo(function BoundEditor({
   onSelectThread,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
@@ -661,6 +663,7 @@ const BoundEditor = memo(function BoundEditor({
         setBindingEpoch((epoch) => epoch + 1);
       },
       docLinks,
+      workspaceSettings: catalogConnection?.ydoc ?? null,
     });
     // Delegate comment-highlight clicks on the host. Document references and
     // external links win over surrounding thread selection so one gesture has
@@ -755,7 +758,7 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, docLinks, onSelectThread, bindingEpoch]);
+  }, [connection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Change ProseMirror editable in place to preserve caret, scroll, selection
@@ -1045,6 +1048,7 @@ export function EditorPane({
           ) : (
             <BoundEditor
               connection={connection}
+              catalogConnection={catalogConnection}
               author={author}
               archived={archived}
               contentReadOnly={contentReadOnly}

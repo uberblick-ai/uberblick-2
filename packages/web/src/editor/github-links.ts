@@ -3,8 +3,9 @@ import type { Mark, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import { COMMENT_MARK, githubItemUrl } from "@uberblick/schema";
+import { COMMENT_MARK, getWorkspaceMainRepository, githubItemUrl } from "@uberblick/schema";
 import type { GitHubItem } from "@uberblick/schema";
+import type * as Y from "yjs";
 
 interface LinkRange {
   from: number;
@@ -59,7 +60,7 @@ function namesItem(text: string, href: string, item: GitHubItem): boolean {
   );
 }
 
-function pill(item: GitHubItem): HTMLElement {
+function pill(item: GitHubItem, mainRepository: string | null): HTMLElement {
   const dom = document.createElement("span");
   dom.className = "ub-github-pill";
   const label = `${item.kind === "issue" ? "Issue" : "Pull request"} ${item.owner}/${item.repo}#${item.numberText}`;
@@ -85,11 +86,13 @@ function pill(item: GitHubItem): HTMLElement {
   number.className = "ub-github-pill-number";
   number.textContent = `#${item.numberText}`;
   number.setAttribute("aria-hidden", "true");
-  dom.append(icon, repo, number);
+  dom.append(icon);
+  if (`${item.owner}/${item.repo}`.toLowerCase() !== mainRepository?.toLowerCase()) dom.append(repo);
+  dom.append(number);
   return dom;
 }
 
-function decorations(state: EditorState, focused: boolean): DecorationSet {
+function decorations(state: EditorState, focused: boolean, mainRepository: string | null): DecorationSet {
   const result: Decoration[] = [];
   const selection = state.selection;
   for (const range of linkRanges(state.doc)) {
@@ -106,11 +109,11 @@ function decorations(state: EditorState, focused: boolean): DecorationSet {
         class: "ub-github-link-text",
         "aria-hidden": "true",
       }),
-      Decoration.widget(range.to, () => pill(item), {
+      Decoration.widget(range.to, () => pill(item, mainRepository), {
         // Explicit marks keep activation and comment presentation on their usual paths.
         marks: [range.link, ...range.comments],
         side: -1,
-        key: JSON.stringify([range.to, href, range.text, range.comments.map((mark) => mark.attrs)]),
+        key: JSON.stringify([range.to, href, range.text, mainRepository, range.comments.map((mark) => mark.attrs)]),
       }),
     );
   }
@@ -120,12 +123,15 @@ function decorations(state: EditorState, focused: boolean): DecorationSet {
 const githubLinksKey = new PluginKey<DecorationSet>("uberblickGithubLinks");
 
 /** Presentation only: clipboard serialization and Yjs see the original link. */
-export const GitHubLinks = Extension.create({
+export const GitHubLinks = Extension.create<{ settings: Y.Doc | null }>({
   name: "uberblickGithubLinks",
+  addOptions() { return { settings: null }; },
   // The lone-URL shortcut runs before the table's plain-text paste normalization.
   priority: 1200,
   addProseMirrorPlugins() {
     const editor = this.editor;
+    const settings = this.options.settings;
+    const readMainRepository = (): string | null => settings === null ? null : getWorkspaceMainRepository(settings);
     const anchors = new Set<HTMLAnchorElement>();
     const repaint = (): void => {
       for (const anchor of anchors) {
@@ -153,10 +159,10 @@ export const GitHubLinks = Extension.create({
     return [new Plugin({
       key: githubLinksKey,
       state: {
-        init: (_config, state) => decorations(state, editor.isFocused),
+        init: (_config, state) => decorations(state, editor.isFocused, readMainRepository()),
         apply: (tr, previous, _oldState, state) =>
-          tr.docChanged || tr.selectionSet || tr.getMeta("focus") || tr.getMeta("blur")
-            ? decorations(state, editor.isFocused) : previous,
+          tr.docChanged || tr.selectionSet || tr.getMeta("focus") || tr.getMeta("blur") || tr.getMeta(githubLinksKey)
+            ? decorations(state, editor.isFocused, readMainRepository()) : previous,
       },
       props: {
         markViews: {
@@ -197,9 +203,17 @@ export const GitHubLinks = Extension.create({
           return true;
         },
       },
-      view: () => {
+      view: (view) => {
+        let mainRepository = readMainRepository();
+        const settingsChanged = (): void => {
+          const next = readMainRepository();
+          if (next === mainRepository) return;
+          mainRepository = next;
+          view.dispatch(view.state.tr.setMeta(githubLinksKey, true).setMeta("addToHistory", false));
+        };
+        settings?.on("update", settingsChanged);
         repaint();
-        return { update: repaint };
+        return { update: repaint, destroy: () => settings?.off("update", settingsChanged) };
       },
     })];
   },

@@ -3,10 +3,60 @@ import * as Y from "yjs";
 import {
   appendBlock, createAnnotation, exportMarkdown, getBlockInline,
   getBlocksFragment, importMarkdown, initDoc,
+  setWorkspaceMainRepository, WORKSPACE_SETTINGS_KEY,
 } from "@uberblick/schema";
 import { mountEditor } from "./helpers.js";
 
 const HREF = "http://github.com/Owner/Repo/pull/0012/files#diff-abc";
+
+it.each([true, false])("repaints local and remote main-repository changes without document writes (editable %s)", async (editable) => {
+  const { ydoc } = fixture("Owner/Repo#12");
+  const settings = new Y.Doc();
+  const peer = new Y.Doc();
+  const { editor, element } = mountEditor(ydoc, { workspaceSettings: settings });
+  try {
+    editor.setEditable(editable);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const before = Y.encodeStateAsUpdate(ydoc);
+    const markdown = exportMarkdown(ydoc);
+    let writes = 0;
+    ydoc.on("update", () => { writes += 1; });
+    const repo = (): string | undefined => element.querySelector(".ub-github-pill-repo")?.textContent ?? undefined;
+    const expectFullReference = (): void => {
+      const anchor = element.querySelector("a.ub-link");
+      expect(anchor?.getAttribute("aria-label")).toBe("Pull request Owner/Repo#0012");
+      expect(anchor?.getAttribute("title")).toBe("Pull request Owner/Repo#0012");
+      expect(anchor?.querySelector(".ub-github-pill-number")?.textContent).toBe("#0012");
+      expect(anchor?.querySelectorAll("svg")).toHaveLength(1);
+    };
+    expect(repo()).toBe("Repo");
+    setWorkspaceMainRepository(settings, "OWNER/repo");
+    expect(repo()).toBeUndefined();
+    expectFullReference();
+    setWorkspaceMainRepository(settings, "Other/Repo");
+    expect(repo()).toBe("Repo");
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(settings));
+    setWorkspaceMainRepository(peer, "owner/REPO");
+    Y.applyUpdate(settings, Y.encodeStateAsUpdate(peer));
+    expect(repo()).toBeUndefined();
+    expectFullReference();
+    setWorkspaceMainRepository(peer, "");
+    Y.applyUpdate(settings, Y.encodeStateAsUpdate(peer));
+    expect(repo()).toBe("Repo");
+    settings.getMap(WORKSPACE_SETTINGS_KEY).set("mainRepository", { invalid: "Owner/Repo" });
+    expect(repo()).toBe("Repo");
+    expectFullReference();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writes).toBe(0);
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
+    expect(exportMarkdown(ydoc)).toBe(markdown);
+    editor.destroy();
+    expect(() => setWorkspaceMainRepository(settings, "Owner/Repo")).not.toThrow();
+  } finally {
+    if (!editor.isDestroyed) editor.destroy();
+    ydoc.destroy(); settings.destroy(); peer.destroy();
+  }
+});
 
 function fixture(text: string, href = HREF) {
   const ydoc = new Y.Doc();

@@ -39,7 +39,7 @@ export {
 export type { Corpus, CorpusDifference, CorpusDoc } from "./remote.js";
 export { importSeedDir, readSeedDocs } from "./seed.js";
 export type { SeedDoc, SeedImport, StarterSeed } from "./seed.js";
-export { storeWorkspaceName } from "./workspace-settings.js";
+export { fillWorkspaceMainRepository, storeWorkspaceName } from "./workspace-settings.js";
 export { inspectExistingStore, readWorkspaceName } from "./store.js";
 export { createMcpServer } from "./server.js";
 export type { UberblickMcpServer } from "./server.js";

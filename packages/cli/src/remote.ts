@@ -29,6 +29,7 @@ import { type Io, shellArgument } from "./io.js";
 import { displayWorkspaceHub, useBindingLines, useField } from "./workspace-use-output.js";
 import { ORIGIN_LABELS } from "./status.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "./workspace-registry.js";
+import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export interface RemotePersistence {
   /** Files written, for the report. */
@@ -294,7 +295,7 @@ export async function useRemoteWorkspace(
           recovery + " What did arrive is in the local update log already." };
       }
       const takenAt = new Date().toISOString();
-      const checked = await verify(bridge, joined.entries);
+      const checked = await verify(bridge, joined.entries, joined.workspace);
       if (checked.problem !== null) return { problem: checked.problem,
         detail: "This machine's configuration is unchanged — no endpoint and no workspace were persisted. Retry once the hub can finish verification." };
       return { corpus: joined, takenAt };
@@ -313,6 +314,7 @@ export async function useRemoteWorkspace(
         deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
       });
       bindingWritten = true;
+      await fillMainRepositoryFromOrigin(flags.workspace);
       const name = readWorkspaceName(defaultWorkspaceDatabasePath(flags.workspace), flags.workspace) ?? flags.workspace;
       const archived = fetched.corpus.entries.filter(doc => doc.deleted).length;
       text = useField("fetched", `${name} from ${displayWorkspaceHub(flags.endpoint)}: ${plural(fetched.corpus.entries.length, "document")}, ${archived} archived`);

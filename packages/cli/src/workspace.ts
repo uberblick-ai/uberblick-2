@@ -21,6 +21,7 @@ import { processIo, shellArgument } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
 import { workspaceStatusCommand } from "./workspace-status.js";
+import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
@@ -375,6 +376,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     warn(io, admission.warnings);
     const registersPrevious = previous !== null && readWorkspaceHub(previous.workspaceId) === undefined;
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
+    await fillMainRepositoryFromOrigin(id);
     written = [...admission.written, ...(registersPrevious ? [workspaceRegistryPath()] : []), path];
     text = useBindingLines({ workspaceId: id, hubUrl: hub }, previous, path);
   } catch (error) {

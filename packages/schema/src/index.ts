@@ -62,7 +62,7 @@ export type {
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
-export { githubItemUrl, githubReference } from "./github-reference.js";
+export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";
 
 export { blockRev } from "./rev.js";
@@ -134,7 +134,9 @@ export type { WorkspaceId } from "./workspace.js";
 export {
   MAX_WORKSPACE_NAME_LENGTH,
   WORKSPACE_SETTINGS_KEY,
+  getWorkspaceMainRepository,
   getWorkspaceName,
+  setWorkspaceMainRepository,
   setWorkspaceName,
   validateWorkspaceName,
 } from "./workspace-settings.js";
