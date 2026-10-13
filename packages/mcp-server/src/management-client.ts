@@ -10,7 +10,7 @@ export type ManagementAction = Exclude<RequestAction, { operation: "renew-creden
 export interface ManagementReply { status: number; body: Record<string, unknown> }
 
 export class ManagementResponseError extends Error {
-  constructor(readonly updateRequired = false) {
+  constructor(readonly updateRequired = false, readonly status?: number) {
     super("hub returned an invalid management response");
   }
 }
@@ -36,7 +36,7 @@ export async function manageRequest(
   });
   signal.throwIfAborted();
   const reader = response.body?.getReader();
-  if (reader === undefined) throw new ManagementResponseError(true);
+  if (reader === undefined) throw new ManagementResponseError(true, response.status);
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
@@ -45,14 +45,14 @@ export async function manageRequest(
       signal.throwIfAborted();
       if (chunk.done) break;
       length += chunk.value.length;
-      if (length > (options.maxResponseBytes ?? 65_536)) throw new ManagementResponseError();
+      if (length > (options.maxResponseBytes ?? 65_536)) throw new ManagementResponseError(false, response.status);
       chunks.push(chunk.value);
     }
   } finally { await reader.cancel(); }
   let body: unknown;
   try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw new ManagementResponseError(true); }
-  if (body === null || typeof body !== "object" || Array.isArray(body)) throw new ManagementResponseError();
+  catch { throw new ManagementResponseError(true, response.status); }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) throw new ManagementResponseError(false, response.status);
   return { status: response.status, body: body as Record<string, unknown> };
 }
 

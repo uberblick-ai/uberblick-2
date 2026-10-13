@@ -19,15 +19,15 @@ import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
 import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
-import { manageRequest, ManagementResponseError } from "./access-management.js";
+import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 
 export const AUTH_HELP = `usage: ub auth [command]
 
 commands:
-  login [hub]      # Sign in to a hub with GitHub
-  status [hub]     # Show who this computer is signed in as, and what it can reach
-  logout [hub]     # Sign this computer out of a hub; --all-devices signs out all of yours
+  login [hub]            # Sign in to a hub with GitHub
+  status [hub] [--json]  # Check the stored login and current hub administration
+  logout [hub]           # Sign this computer out of a hub; --all-devices signs out all of yours
 `;
 
 export const AUTH_LOGIN_HELP = `usage: ub auth login [hub]
@@ -56,15 +56,22 @@ options:
   -h, --help             show this help
 `;
 
-export const AUTH_STATUS_HELP = `usage: ub auth status [hub]
+export const AUTH_STATUS_OPTIONS = { json: { type: "boolean" } } as const;
 
-Show who this computer is signed in as and the available workspace UUIDs and names
-for the given hub, or the hub selected by this project's binding.
+export const AUTH_STATUS_HELP = `usage: ub auth status [hub] [--json]
+
+Check whether the given hub, or the hub selected by this project's binding,
+currently accepts this computer's stored login and whether it is a hub admin.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
-Read only this computer's stored login, without using the network.
-Run \`ub status\` to see whether the hub accepts that login now.
+Make one read-only request bounded to a few seconds; never renew or write a login.
+Label the account and available workspace UUIDs and cached names as stored.
+When the hub cannot answer, current verification is unavailable, not non-admin.
+With no hub selected, show local-only status; local work needs no login.
+Exit 0 for a confirmed answer or local-only status, 1 when verification is
+unavailable, and 2 for a usage error.
 
 options:
+  --json                print the same report as one JSON object
   -h, --help             show this help
 `;
 
@@ -98,7 +105,13 @@ interface Selection {
 
 const GITHUB_APPROVAL_URL = "https://github.com/login/device";
 
-function selectHub(hub: string | undefined, io: Io, describe = true): Selection | number {
+interface SelectionFailure {
+  outcome: "no-hub" | "binding-invalid" | "usage-error";
+  guidance: string;
+  exitCode: 1 | 2;
+}
+
+function selectHub(hub: string | undefined): Selection | SelectionFailure {
   // An explicit authentication target works before any project is bound.
   // Resolve a binding only for the implicit target, or to describe membership.
   let resolved: ReturnType<typeof resolveProjectBinding> | undefined;
@@ -106,15 +119,15 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
     resolved = resolveProjectBinding();
   } catch (error) {
     if (hub === undefined) {
-      io.err(`ub auth: ${error instanceof Error ? error.message : String(error)}\n`);
-      return 1;
+      return { outcome: "binding-invalid", exitCode: 1,
+        guidance: error instanceof Error ? error.message : "cannot read the project binding" };
     }
   }
   const binding = resolved?.binding;
   const selected = hub ?? binding?.hubUrl ?? undefined;
   if (selected === undefined) {
-    io.err("ub auth: no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`.\n");
-    return 1;
+    return { outcome: "no-hub", exitCode: 1,
+      guidance: "no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`." };
   }
   let origin: string;
   let endpoint: string;
@@ -123,15 +136,12 @@ function selectHub(hub: string | undefined, io: Io, describe = true): Selection 
     origin = authenticationOrigin(endpoint);
   } catch {
     // Never echo an operand: it may be a pasted secret or a credential URL.
-    io.err("ub auth: invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment.\n");
-    return 2;
+    return { outcome: "usage-error", exitCode: 2,
+      guidance: "invalid hub; use a bare host, http(s) address or ws(s) endpoint without credentials, query or fragment." };
   }
   let bound = false;
   if (binding?.hubUrl != null) {
     try { bound = authenticationOrigin(binding.hubUrl) === origin; } catch { /* Invalid binding is never rewritten. */ }
-  }
-  if (describe) {
-    authField(io, "hub", origin);
   }
   return { origin, endpoint, bound, workspace: binding?.workspaceId, bindingOrigin: resolved?.origin ?? null };
 }
@@ -151,38 +161,125 @@ function describeWorkspaces(login: StoredHubLogin, io: Io): void {
       `  ${workspace}${names?.[workspace] === undefined ? "" : ` | ${names[workspace]}`}\n`).join("")}`);
 }
 
-function describeMissingWorkspace(selection: Selection, login: StoredHubLogin, io: Io): boolean {
-  if (!selection.bound || selection.workspace === undefined) return false;
-  let workspace: string;
-  try { workspace = parseWorkspaceId(selection.workspace).uuid; } catch {
-    io.err("ub auth: the bound workspace is invalid; fix workspaceId in the project binding.\n");
-    return true;
-  }
-  if (login.credential.record.workspaces.includes(workspace)) return false;
-  const source = selection.bindingOrigin === "environment" ? "UB_WORKSPACE_ID" : ".uberblick.json";
-  const user = displayUsername(login.identity.githubUsername);
-  io.out(`\nYou might have expected access to ${workspace} as per your ${source}.\n` +
-    `But ${user} has no access to this workspace, or it simply doesn't exist on this hub.\n` +
-    `Ask a workspace admin to grant you access: \`ub workspace member add ${user}\`\n`);
-  return false;
+type AuthStatusOutcome = "hub-admin" | "not-hub-admin" | "no-hub" | "binding-invalid" |
+  "not-signed-in" | "credential-store" | "login-refused" | "hub-unsupported" |
+  "update-required" | "hub-unreachable" | "hub-error";
+
+interface StoredLoginReport {
+  account: { login: string; provider: "github" };
+  workspaces: { id: string; name?: string }[];
+  boundWorkspace?: { id: string; source: ".uberblick.json" | "UB_WORKSPACE_ID"; note: string };
 }
 
-function status(selection: Selection, io: Io): number {
+function storedLoginReport(selection: Selection, login: StoredHubLogin): StoredLoginReport {
+  const report: StoredLoginReport = {
+    account: { login: login.identity.githubUsername, provider: "github" },
+    workspaces: login.credential.record.workspaces.map(id => ({ id,
+      ...(login.credential.workspaceNames?.[id] === undefined ? {} : { name: login.credential.workspaceNames[id] }),
+    })),
+  };
+  if (selection.bound && selection.workspace !== undefined) {
+    const id = parseWorkspaceId(selection.workspace).uuid;
+    if (!login.credential.record.workspaces.includes(id)) {
+      report.boundWorkspace = { id,
+        source: selection.bindingOrigin === "environment" ? "UB_WORKSPACE_ID" : ".uberblick.json",
+        note: "The bound workspace is absent from the stored login. Ask a workspace admin about access or a hub admin about suspension.",
+      };
+    }
+  }
+  return report;
+}
+
+function describeStoredLogin(storedLogin: StoredLoginReport | null, io: Io): void {
+  io.out(`stored account  ${storedLogin === null ? "none read" : `${displayUsername(storedLogin.account.login)} (github)`}\n`);
+  if (storedLogin === null) return;
+  io.out(storedLogin.workspaces.length === 0 ? "stored available workspaces: none\n"
+    : `stored available workspaces:\n${storedLogin.workspaces.map(workspace =>
+      `  ${workspace.id}${workspace.name === undefined ? "" : ` | ${workspace.name}`}\n`).join("")}`);
+  if (storedLogin.boundWorkspace !== undefined) {
+    const bound = storedLogin.boundWorkspace;
+    io.out(`bound workspace (${bound.source})  ${bound.id}\n${bound.note}\n`);
+  }
+}
+
+function printAuthStatus(
+  hub: string | null, outcome: AuthStatusOutcome, storedLogin: StoredLoginReport | null,
+  io: Io, json: boolean, guidance?: string,
+): number {
+  const confirmed = outcome === "hub-admin" || outcome === "not-hub-admin";
+  const loginAccepted = confirmed ? true : outcome === "login-refused" ? false : null;
+  const hubAdmin = confirmed ? outcome === "hub-admin" : null;
+  if (json) io.out(`${JSON.stringify({ hub, outcome, loginAccepted, hubAdmin, storedLogin })}\n`);
+  else {
+    authField(io, "hub", hub ?? (outcome === "no-hub" ? "none (local-only)" : "not selected"));
+    if (outcome === "no-hub") io.out("Local-only work needs no login.\n");
+    else {
+      describeStoredLogin(storedLogin, io);
+      io.out("hub's current answer:\n");
+      const unknown = `not verified (${outcome})`;
+      io.out(`login (hub)  ${loginAccepted === null ? unknown : loginAccepted ? "accepted" : "refused"}\n`);
+      io.out(`hub admin (hub)  ${hubAdmin === null ? unknown : hubAdmin ? "yes" : "no"}\n`);
+    }
+  }
+  if (guidance !== undefined) io.err(`ub auth status: ${guidance}\n`);
+  return confirmed || outcome === "no-hub" ? 0 : 1;
+}
+
+async function checkStoredLogin(origin: string, login: StoredHubLogin): Promise<{ outcome: AuthStatusOutcome; guidance?: string }> {
+  const signIn = `Run \`ub auth login ${origin}\`.`;
+  const action = { operation: "own-hub-role" } as const;
+  let reply: Awaited<ReturnType<typeof manageRequest>>;
+  let responseStatus: number | undefined;
+  const unreachable = { outcome: "hub-unreachable", guidance: "the hub is unreachable or the request timed out; check the network or VPN, then retry." } as const;
+  try {
+    const response = await manageRequest(origin, action, login, {
+      signal: AbortSignal.timeout(Math.max(1, Math.ceil(budget(3_000)))), maxResponseBytes: 16_384,
+    });
+    responseStatus = response.status;
+    reply = sanitizeManagementReply(action, response, login);
+  } catch (error) {
+    if (error instanceof ManagementResponseError) {
+      if ([502, 503, 504].includes(error.status ?? responseStatus ?? 0)) return unreachable;
+      if (error.updateRequired) {
+        return { outcome: "hub-unsupported", guidance: "the hub has no supported management interface; ask whoever runs the hub to update or configure it." };
+      }
+      return { outcome: "hub-error", guidance: "the hub returned an invalid response; ask whoever runs the hub." };
+    }
+    return unreachable;
+  }
+  switch (reply.body.status) {
+    case "ok": return { outcome: "hub-admin" };
+    case "forbidden": return { outcome: "not-hub-admin" };
+    case "sign-in-required": return { outcome: "login-refused", guidance: `the hub refuses this stored login. ${signIn}` };
+    case "invalid-request":
+    case "not-configured":
+      return { outcome: "hub-unsupported", guidance: "the hub cannot check current hub administration; ask whoever runs the hub to update or configure it." };
+    case "protocol-mismatch": {
+      const version = readProtocolMismatch(String(reply.body.reason));
+      return version === null
+        ? { outcome: "hub-error", guidance: "the hub returned an invalid protocol response; ask whoever runs the hub." }
+        : { outcome: "update-required", guidance: `${protocolSkew(version, SYNC_PROTOCOL_VERSION)}.` };
+    }
+    default: return { outcome: "hub-error", guidance: "the hub could not answer; ask whoever runs the hub." };
+  }
+}
+
+async function status(selection: Selection, io: Io, json: boolean): Promise<number> {
   const stored = readHubLogins();
   const login = stored.logins[selection.origin];
+  const signIn = `Run \`ub auth login ${selection.origin}\`.`;
   if (login === undefined) {
-    const reason = stored.state === "refused" ? "stored login refused"
-      : stored.state === "unreadable" || stored.unreadableHubs.includes(selection.origin) ? "stored login unreadable" : "no login stored";
-    io.err(`ub auth: ${reason} for ${selection.origin}. ${stored.diagnostic ?? ""} Run \`ub auth login ${selection.origin}\`.\n`);
-    return 1;
+    const storeProblem = stored.state === "refused" || stored.state === "unreadable" || stored.unreadableHubs.includes(selection.origin);
+    return printAuthStatus(selection.origin, storeProblem ? "credential-store" : "not-signed-in", null, io, json,
+      `${storeProblem ? stored.diagnostic ?? "the stored login is unreadable." : "no login stored for this hub."} ${signIn}`);
   }
-  authField(io, "signed in", displayUsername(login.identity.githubUsername));
-  describeWorkspaces(login, io);
+  const report = storedLoginReport(selection, login);
   if (login.credential.record.revokedAt !== null) {
-    io.err(`ub auth: this stored credential is recorded as revoked. Run \`ub auth login ${selection.origin}\`.\n`);
-    return 1;
+    return printAuthStatus(selection.origin, "not-signed-in", report, io, json,
+      `this stored credential is recorded as revoked. ${signIn}`);
   }
-  return describeMissingWorkspace(selection, login, io) ? 1 : 0;
+  const checked = await checkStoredLogin(selection.origin, login);
+  return printAuthStatus(selection.origin, checked.outcome, report, io, json, checked.guidance);
 }
 
 class DeviceFailure extends Error {}
@@ -583,18 +680,34 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   if (args.includes("--help") || args.includes("-h")) { io.out(help); return 0; }
   let hub: string | undefined;
   let allDevices = false;
+  let json = false;
   try {
-    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : {}, allowPositionals: true });
-    if (parsed.positionals.length > 1) throw new Error();
+    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : sub === "status" ? AUTH_STATUS_OPTIONS : {}, allowPositionals: true });
+    if (parsed.positionals.length > 1) {
+      io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
+      return 2;
+    }
     hub = parsed.positionals[0];
     allDevices = "all-devices" in parsed.values && parsed.values["all-devices"] === true;
-  } catch {
-    io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
+    json = "json" in parsed.values && parsed.values.json === true;
+  } catch (error) {
+    const unknown = error instanceof Error && "code" in error && error.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION";
+    io.err(`ub auth ${sub}: ${unknown ? "unknown option" : "invalid option usage"}\n\n${help}`);
     return 2;
   }
-  const selection = selectHub(hub, io, sub !== "logout");
-  if (typeof selection === "number") return selection;
-  if (sub === "login") return await login(selection, io, options.loginNextAction !== false);
-  if (sub === "status") return status(selection, io);
+  const selection = selectHub(hub);
+  if ("outcome" in selection) {
+    if (sub === "status" && selection.outcome !== "usage-error") {
+      return printAuthStatus(null, selection.outcome, null, io, json, selection.outcome === "no-hub"
+        ? "name a hub to check it with `ub auth status <hub>`." : selection.guidance);
+    }
+    io.err(`ub auth: ${selection.guidance}\n`);
+    return selection.exitCode;
+  }
+  if (sub === "login") {
+    authField(io, "hub", selection.origin);
+    return await login(selection, io, options.loginNextAction !== false);
+  }
+  if (sub === "status") return await status(selection, io, json);
   return await logout(selection, io, allDevices);
 }
