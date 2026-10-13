@@ -22,7 +22,7 @@ export function githubRepository(value: string): string | null {
       return null;
     }
     if (
-      url.host !== "github.com" || url.search !== "" || url.hash !== "" ||
+      url.host.toLowerCase() !== "github.com" || url.search !== "" || url.hash !== "" ||
       url.password !== "" ||
       !((url.protocol === "https:" || url.protocol === "http:") && url.username === "" ||
         url.protocol === "ssh:" && url.username === "git")

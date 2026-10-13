@@ -8,6 +8,7 @@ describe("GitHub repository addresses", () => {
       "https://github.com/Owner/My_Repo", "https://github.com/Owner/My_Repo.git/",
       "http://GITHUB.COM/Owner/My_Repo/", "git@github.com:Owner/My_Repo.git",
       "ssh://git@github.com/Owner/My_Repo.git",
+      "ssh://git@GITHUB.COM/Owner/My_Repo.git",
     ]) expect(githubRepository(input), input).toBe("Owner/My_Repo");
   });
 
