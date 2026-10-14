@@ -126,7 +126,7 @@ chmod 600 .env
 
 `docker create` does not start the container. The copied files include the
 version's `docker-compose.yml`, `remote.https.yml`, `remote.tailscale.yml`, `remote.env.example` template,
-`remote-settings.sh`, operator commands in `bin/`, this manual, RELEASING.md and
+`remote-settings.sh`, Compose and compatibility scripts in `bin/`, this manual, RELEASING.md and
 `release.json`. The Compose file names both exact versioned images; it has
 no host build. The same prebuilt web image serves every host, with its endpoint
 and workspace list supplied only by `/uberblick-config.json`.
@@ -139,6 +139,7 @@ sh bin/remote-compose.sh config --quiet
 sh bin/remote-compose.sh pull
 sh bin/remote-compose.sh up --detach
 sh bin/remote-compose.sh ps
+sh bin/remote-compose.sh exec hub ub-hub status
 sh bin/remote-compose.sh logs --tail=100 hub caddy
 ```
 
@@ -1063,7 +1064,7 @@ run setup in the deployment directory **on the hub host**, for example over SSH.
 [GitHub sign-in](#github-sign-in) is available by default:
 
 ```sh
-sh bin/hub-admin-setup.sh <workspace-uuid>
+sh bin/remote-compose.sh exec hub ub-hub admin-setup <workspace-uuid>
 ```
 
 Name exactly one bare workspace UUID. For an existing workspace, use the UUID
@@ -1083,8 +1084,8 @@ GitHub login and durable account ID, the named workspace, and whether the hub
 already held documents for that workspace. The hub logs the committed grant.
 Approval expires within fifteen minutes.
 
-Host access is the authority for this operation. The script runs a command in
-the running hub container through `bin/remote-compose.sh`; the command connects to
+Host access is the authority for this operation. `ub-hub admin-setup` runs in
+the running hub container; the command connects to
 a private Unix socket beside the hub database. No deployment HTTP or WebSocket
 route can start setup, complete it or retrieve its result. A shared signing
 secret, device credential or supplied GitHub token cannot authorize setup.
@@ -1118,7 +1119,7 @@ existing login even if they previously reported no workspace access.
 ### Cancellation and a missing result
 
 Denied, abandoned, expired and failed approvals end distinctly without a grant.
-With terminal input, the script allocates a container terminal so **Ctrl-C**
+Compose allocates a container terminal so **Ctrl-C**
 reaches the setup command. Over SSH, allocate a terminal with `ssh -t <hub-host>`.
 Press Ctrl-C and wait for `cancelled` or an unknown-result message.
 If the hub observes cancellation or interruption before committing, it fences
@@ -1135,7 +1136,7 @@ Losing the result does **not** establish that nothing changed. Reconnect to
 the host deployment directory and use the setup ID printed by the original command:
 
 ```sh
-sh bin/hub-admin-setup.sh status <setup-uuid>
+sh bin/remote-compose.sh exec hub ub-hub admin-setup status <setup-uuid>
 ```
 
 The committed receipt is private hub data and survives a hub restart. This
@@ -1287,7 +1288,7 @@ Expect `200` from the first and `101 Switching Protocols` from the second;
 the upgraded socket stays open, so the second curl ends on its five-second
 deadline after printing the headers. A `502` on
 `/ws` is Caddy up and the hub down — expected while the hub is stopped for a
-backup, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
+restore, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
 **This hub is unclaimed** and warns that the first completed GitHub sign-in
@@ -1381,110 +1382,121 @@ Deploying a newer release is [its own runbook](#updating-the-host--deliberately)
 The hub handles Compose's `SIGTERM` by flushing pending document updates before
 it exits. The image sets `HUB_DB_PATH=/data/hub.sqlite` in the `hub-data` named
 volume, so normal container replacement and `sh bin/remote-compose.sh down`
-preserve it. Both the hub and `hub-admin-setup` require a non-empty `HUB_DB_PATH`;
+preserve it. Both the hub and `ub-hub` require a non-empty `HUB_DB_PATH` for database operations;
 an unset or empty value refuses startup and names the setting.
+
+### Checking the hub
+
+The hub image supplies `ub-hub` for status, diagnostics, first-admin setup,
+backup and restore. These commands use the private control socket or the
+`hub-data` volume. They cannot be reached over HTTP or WebSocket and never
+start, stop or update containers. Run them from the deployment directory:
+
+```sh
+sh bin/remote-compose.sh exec hub ub-hub status
+sh bin/remote-compose.sh exec hub ub-hub doctor
+```
+
+`status` prints the release version, source commit and sync protocol, the
+database path, size and document count, and whether the hub is claimed. If the
+hub does not answer, it still prints the image's release identity and exits 1.
+`doctor` prints `ok`, `warn`, `FAIL` or `skip` for each hub, database, storage,
+GitHub and clock check, with an action for warnings and failures. It changes
+nothing and exits 1 if a check fails. Site, TLS and Caddy checks remain in
+[Check the deployment](#check-the-deployment).
+
+For a stopped hub or one that keeps restarting, check the database directly:
+
+```sh
+sh bin/remote-compose.sh run --rm hub ub-hub doctor
+```
+
+On deployments using downloaded Compose files, use `docker compose` in place
+of `sh bin/remote-compose.sh` in these operator commands. Bare `ub-hub` and
+`ub-hub --help` list the commands and exit 0; bad arguments exit 2, and
+operational failures exit 1. First-admin setup retains its cancellation codes
+and reports an unknown result when it cannot confirm what happened.
 
 ### Backing the hub up
 
 ```sh
-sh bin/hub-backup.sh ~/uberblick-hub-$(date +%Y-%m-%d).sqlite
+sh bin/remote-compose.sh exec hub ub-hub backup
+# Use the backup path printed by the command:
+sh bin/remote-compose.sh cp hub:/data/<backup-file>.sqlite ~/uberblick-hub-backup.sqlite
+chmod 600 ~/uberblick-hub-backup.sqlite
 ```
 
-Run it from the host's deployment directory, which contains `bin/`. You can
-also invoke the script by its absolute path from any directory; a relative
-backup filename is resolved in your current directory. It **stops the
-hub, copies, and starts it again** — and the stop is the point, not an inconvenience.
-Hocuspocus debounces the store (2s, at most 10s; the hub leaves both at their
-defaults), so a document edited a moment ago may exist only in the hub's memory.
-The only flush an operator can reach is a shutdown: `SIGTERM` makes the hub
-write every pending update and close the database, and `stop_grace_period: 30s`
-already leaves room for that 10s ceiling. Copying a *live* file instead would
-capture whatever SQLite happened to have on disk — a file that opens perfectly
-and is missing the last few minutes of work.
+The hub keeps serving. It first stores every update it had received when the
+backup started, then makes a consistent database copy through its own SQLite
+connection. Copying the live database file directly can miss updates still in
+memory and is not a backup procedure.
 
-**The hub's own verdict is what decides.** `docker compose stop` exits 0 whatever
-the container did, so the script reads the exit code separately, from
-`ps -a --format json` → `ExitCode`. Non-zero — including `137`, the grace period
-expiring — means the flush did not finish, and **no file is written at all**. A
-backup nobody can trust is worse than no backup, because it is the one that gets
-restored. The hub is started again from the exit and signal traps on every path
-— an `EXIT` trap alone does not run when a signal kills the script: with
-`restart: unless-stopped`, a manual stop survives a Docker restart, so a run that
-died between the stop and the start would leave the hub down for good.
+The command creates a new mode-0600 file in `hub-data`, checks it with
+`PRAGMA integrity_check`, and only then prints its path and the host-copy
+command. It never overwrites an existing backup. A failed store, full or
+read-only volume, failed integrity check or interrupted command exits 1,
+leaves no file under a backup's name, and leaves the hub serving.
 
-The file lands at mode `0600`, and it lands whole: the copy goes to a temporary
-sibling and is renamed onto the name you gave, so an interrupted run leaves the
-previous backup exactly as it was rather than a truncated file wearing its name.
-It contains the documents, default workspace and claim state, and private access
-records of every workspace in one readable file; keep it private like a device
-credential. Naming an existing
-directory, or a directory that is not writable, is refused before the hub is
-stopped.
+If the terminal loses the result after a verified copy was published, the
+command reports an unknown result. Inspect `hub-data` for that completed copy.
 
-**Local replicas keep working while the hub is stopped.** Caddy stays up and
-serves the app; `/ws` answers 502 for those seconds. MCP and `ub open` keep
-reading and editing their local copies and converge when the connection returns.
-A browser opened at the remote host has no document access. The window is a few
-seconds, but take backups when you would take a deploy.
+A backup contains documents, default workspace and claim state, and private
+access records for every workspace. Keep it private like a device credential.
+Manage retention yourself; a copy in `hub-data` is lost if that volume is lost.
+The retained `bin/hub-backup.sh` is a compatibility route used by `ub hub
+upgrade`; it stops and restarts the hub and writes its backup to the host.
 
 ### Restoring one
 
 ```sh
-sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/remote-compose.sh stop hub
+sh bin/remote-compose.sh run --rm hub ub-hub restore /data/<backup-file>.sqlite
+sh bin/remote-compose.sh start hub
 ```
 
-**Verified before anything is touched.** A restore runs on somebody's worst day,
-against a file nobody has opened since it was written, over the only copy that is
-left. So the backup is read first — `PRAGMA integrity_check`, *and* documents
-or private access state. Identities, credentials, memberships, committed
-setup receipts and persistent claim state are worth restoring even before the
-first document exists.
-A database with neither documents nor private access records is refused:
-it passes the pragma but would restore nothing. That check runs inside the hub's
-own image through `node:sqlite`, the module the hub itself persists with (the
-image is `node:26-bookworm-slim` and carries no `sqlite3` CLI), and writes the
-candidate to the container's `/tmp`, never to `/data`. A missing, corrupt or
-empty backup exits non-zero **with the hub still running and the volume
-untouched**.
-
-Only then does it stop the hub — and even then it **never writes over the live
-database**. The file is copied in as `/data/hub.sqlite.restoring`, a name the
-hub does not open; only once that copy is whole and owned by the container's
-`node` user does a single `mv -f` put it in place, which within one filesystem
-is atomic. So a copy that dies half way — a full disk, a killed daemon, an
-interrupted script — leaves the database that was already there intact, and the
-script says the live database was **not** replaced and exits non-zero.
-
-**A rollback journal stops the restore rather than being worked around.** After
-the stop, the script looks in the volume for a `hub.sqlite-*` sidecar. If one is
-there the database is mid-transaction and the journal is the half that says what
-to undo — one unit, and not one a restore should take apart: replace the
-database and the journal describes a file that is gone; delete the journal and
-the old database loses the rollback it needs; and every way of moving it out of
-the way has a window where an interruption leaves exactly one of those. So it
-copies nothing, touches nothing, and says so.
-
-Clearing it is one line, and SQLite does the work: a journal is recovered on the
-next clean open.
+Only start the hub after restore reports success. To restore a backup kept on
+the host, including one made by an older `bin/hub-backup.sh`, stream it through
+standard input. `-T` keeps the container terminal from changing binary input:
 
 ```sh
-sh bin/remote-compose.sh up --detach hub
 sh bin/remote-compose.sh stop hub
-sh bin/hub-restore.sh ~/uberblick-hub-2026-08-28.sqlite
+sh bin/remote-compose.sh run --rm -T hub ub-hub restore - < ~/uberblick-hub-backup.sqlite
+sh bin/remote-compose.sh start hub
 ```
 
-A hub that exited non-zero but left no journal is not blocked — that is often
-exactly why somebody is restoring. The exit code is reported either way.
+To copy a host backup into the volume for a later restore, use the running
+container and a new destination name, then stop it and restore that path:
 
-Then the hub starts. It restores into an empty volume
-just as well as over an existing one, which is the case the drill on #404
-exercises: `down --volumes`, `up`, restore, and a fresh client with empty local
-state enumerating and reading the pre-backup corpus.
+```sh
+sh bin/remote-compose.sh exec -T hub sh -c 'umask 077; set -C; cat > /data/restore-candidate.sqlite' < ~/uberblick-hub-backup.sqlite
+sh bin/remote-compose.sh stop hub
+sh bin/remote-compose.sh run --rm hub ub-hub restore /data/restore-candidate.sqlite
+sh bin/remote-compose.sh start hub
+```
 
-Both scripts drive Compose through `sh bin/remote-compose.sh` in the release
-directory. Restore uses the same shell,
-Node runtime and `node` user included in the hub image; it needs no host
-database utility.
+Restore reads the candidate before changing the volume: it must pass
+`PRAGMA integrity_check` and contain documents or private access state.
+Identities, credentials, memberships, committed setup receipts and claim state
+are worth restoring even before the first document exists. A missing, corrupt
+or empty backup leaves the volume untouched. A running hub also refuses the
+restore and names `docker compose stop hub`.
+
+A rollback journal beside `hub.sqlite` refuses restore. Let SQLite recover it
+by opening the database cleanly, then stop the hub and retry; never delete the
+journal to bypass the refusal:
+
+```sh
+sh bin/remote-compose.sh start hub
+sh bin/remote-compose.sh stop hub
+sh bin/remote-compose.sh run --rm hub ub-hub restore /data/<backup-file>.sqlite
+```
+
+The verified candidate is staged under a name the hub does not open. One
+rename replaces `hub.sqlite`, owned by `node` at mode 0600. A failure or
+interruption before that rename leaves the live database unchanged and says
+so. Restore also works in an empty `hub-data` volume. It needs no host Node or
+database utility and does not start or stop the hub for you. Local replicas
+keep reading and editing while the hub is stopped and converge after it starts.
 
 ### What a backup is actually for
 

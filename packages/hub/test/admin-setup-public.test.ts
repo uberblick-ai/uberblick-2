@@ -152,7 +152,7 @@ it("public sign-in remains membership-neutral before/during/after setup and cann
 
 function command(hub: Hub, args: string[]) {
   const child = spawn(process.execPath, ["--import", import.meta.resolve("tsx"),
-    fileURLToPath(new URL("../src/admin-setup-command.ts", import.meta.url)), ...args], {
+    fileURLToPath(new URL("../src/operator-command.ts", import.meta.url)), "admin-setup", ...args], {
     cwd: tmpdir(), timeout: 5000, env: { ...process.env, HUB_DB_PATH: hub.databasePath }, stdio: ["ignore", "pipe", "pipe"],
   });
   processes.push(child);
