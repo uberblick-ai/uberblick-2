@@ -4,14 +4,20 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import { adminSocketPath } from "./admin-setup.js";
 import { requiredHubDatabasePath } from "./team-config.js";
 
+const USAGE = "usage: ub-hub admin-setup <workspace-uuid> | admin-setup status <setup-uuid>";
+
 export async function runAdminSetup(args: string[]): Promise<void> {
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+    console.log(USAGE);
+    return;
+  }
   const status = args.length === 2 && args[0] === "status";
   const id = status ? args[1] : args[0];
   try {
     if (id === undefined || (!status && args.length !== 1) ||
         parseWorkspaceId(id).uuid !== id) throw new Error();
   } catch {
-    console.error("usage: ub-hub admin-setup <workspace-uuid> | admin-setup status <setup-uuid>");
+    console.error(USAGE);
     process.exitCode = 2;
     return;
   }

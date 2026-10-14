@@ -181,7 +181,7 @@ it("status prints image identity even when stopped; help and usage honor their e
     expect(output.join("\n")).toContain(`commit     ${"a".repeat(40)}`);
     expect(output.join("\n")).toContain("hub        not running");
     expect(process.exitCode).toBe(1);
-    for (const args of [[], ["--help"]]) {
+    for (const args of [[], ["--help"], ["admin-setup", "--help"], ["admin-setup", "-h"]]) {
       process.exitCode = 0;
       await runOperatorCommand(args);
       expect(process.exitCode).toBe(0);
