@@ -48,7 +48,7 @@ async function main() {
 	mkdirSync(destination, { recursive: true });
 	await Promise.all([
 		bundleHubEntry("packages/hub/src/main.ts", join(destination, "hub.mjs")),
-		bundleHubEntry("packages/hub/src/admin-setup-command.ts", join(destination, "hub-admin-setup.mjs")),
+		bundleHubEntry("packages/hub/src/operator-command.ts", join(destination, "ub-hub.mjs")),
 	]);
 	const release = join(destination, "release");
 	mkdirSync(release);
@@ -56,7 +56,7 @@ async function main() {
 		cpSync(join(root, file), join(release, file));
 	}
 	mkdirSync(join(release, "bin"));
-	for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", "hub-admin-setup.sh"]) {
+	for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh"]) {
 		cpSync(join(root, "bin", file), join(release, "bin", file));
 	}
 	const compose = readFileSync(join(root, "compose.release.yml"), "utf8")

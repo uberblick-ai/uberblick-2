@@ -4,15 +4,14 @@ import { parseWorkspaceId } from "@uberblick/schema";
 import { adminSocketPath } from "./admin-setup.js";
 import { requiredHubDatabasePath } from "./team-config.js";
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+export async function runAdminSetup(args: string[]): Promise<void> {
   const status = args.length === 2 && args[0] === "status";
   const id = status ? args[1] : args[0];
   try {
     if (id === undefined || (!status && args.length !== 1) ||
         parseWorkspaceId(id).uuid !== id) throw new Error();
   } catch {
-    console.error("usage: hub-admin-setup <workspace-uuid> | status <setup-uuid>");
+    console.error("usage: ub-hub admin-setup <workspace-uuid> | admin-setup status <setup-uuid>");
     process.exitCode = 2;
     return;
   }
@@ -91,8 +90,3 @@ async function main(): Promise<void> {
     });
   });
 }
-
-main().catch(() => {
-  console.error("setup result unknown; check the hub host. This does not establish that nothing changed.");
-  process.exitCode = 1;
-});

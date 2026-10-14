@@ -6,6 +6,7 @@ import { WorkspaceNameReader } from "./workspace-names.js";
 import { WorkspacePromotions } from "./workspace-promotion.js";
 import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
+import { createOperatorControls } from "./operator-control.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
 import { handleBrowserSignIn } from "./browser-sign-in.js";
 import { GithubAccountLookup } from "./github-account-lookup.js";
@@ -34,8 +35,9 @@ export interface TeamHubOptions {
 
 function createTeamExtension(
   config: TeamHubConfig, options: TeamHubOptions,
-  { database, server, deviceCredentials, protocolVersion, log }: HubExtensionContext,
+  context: HubExtensionContext,
 ): HubExtension & Pick<TeamHub, "credentials" | "memberships" | "principals" | "hubAdmins"> {
+  const { database, server, deviceCredentials, protocolVersion, log } = context;
   let signIn: GithubSignIn | undefined;
   let accounts: GithubAccountLookup | undefined;
   let credentials: CredentialRegistry | undefined;
@@ -87,7 +89,8 @@ function createTeamExtension(
           throw new Error("hub setup: durable hub database required");
         }
         adminSetup = await startAdminSetup({ database, principals, memberships, claims,
-          github: config.github, log, hasLiveDocuments });
+          github: config.github, log, hasLiveDocuments,
+          operator: createOperatorControls(context, config, claims) });
       }
     },
     async stop() {

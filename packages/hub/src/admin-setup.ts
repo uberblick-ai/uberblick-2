@@ -9,6 +9,7 @@ import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 import type { HubClaimState } from "./hub-claim.js";
+import type { OperatorControls } from "./operator-control.js";
 
 export function adminSocketPath(databasePath: string): string {
   const absolute = `${resolve(databasePath)}.admin/control.sock`;
@@ -104,6 +105,7 @@ export async function startAdminSetup(options: {
   log: HubLogger;
   hasLiveDocuments: (workspaceId: string) => boolean;
   claims?: HubClaimState | undefined;
+  operator?: OperatorControls;
 }): Promise<{ path: string; stop(): Promise<void> }> {
   const { database, principals, memberships, github, log } = options;
   const path = adminSocketPath(database.databasePath);
@@ -118,6 +120,7 @@ export async function startAdminSetup(options: {
   await clearStaleSocket(path);
   const receipts = new SetupReceipts(database);
   const sessions = new Map<Socket, () => void>();
+  const operations = new Set<Promise<void>>();
   const server = createServer((socket) => {
     let flow: GithubDeviceFlow<Completion> | undefined;
     let approval: { requestId: string; collectionSecret: string } | undefined;
@@ -127,8 +130,10 @@ export async function startAdminSetup(options: {
     let started = false;
     let ended = false;
     let input = "";
+    const abort = new AbortController();
     const fence = () => {
       ended = true;
+      abort.abort();
       clearTimeout(timer);
       if (approval !== undefined) flow?.cancel(approval.requestId, approval.collectionSecret);
       flow?.stop();
@@ -212,6 +217,36 @@ export async function startAdminSetup(options: {
       schedule(result.interval);
     };
 
+    const operatorRequest = (message: { action: string }): boolean => {
+      const operator = options.operator;
+      if (started || Object.keys(message).length !== 1 || operator === undefined ||
+          !["hub-status", "hub-doctor", "backup"].includes(message.action)) return false;
+      started = true;
+      const operation = operator.run(message.action as "hub-status" | "hub-doctor" | "backup", abort.signal)
+        .then(value => { if (!ended) finish(value); })
+        .catch(error => { if (!ended) finish({ status: "failed", error: String(error) }); });
+      operations.add(operation);
+      void operation.finally(() => operations.delete(operation));
+      return true;
+    };
+
+    const handleMessage = (line: string): void => {
+      try {
+        const message = JSON.parse(line);
+        if (message === null || typeof message !== "object" || Array.isArray(message)) throw new Error();
+        if (operatorRequest(message)) return;
+        if (message.action === "cancel" && Object.keys(message).length === 1 && started) {
+          finish({ status: "cancelled", setupId });
+        } else if (!started && message.action === "status" && Object.keys(message).length === 2 &&
+            typeof message.setupId === "string" && /^[0-9a-f-]{36}$/.test(message.setupId)) {
+          finish(receipts.find(message.setupId));
+        } else if (!started && message.action === "start" && Object.keys(message).length === 2 &&
+            typeof message.workspaceId === "string" && parseWorkspaceId(message.workspaceId).uuid === message.workspaceId) {
+          started = true;
+          void start(message.workspaceId).catch(() => finish({ status: "failed", setupId }));
+        } else throw new Error();
+      } catch { finish({ status: "invalid-request" }); }
+    };
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => {
       if (ended) return;
@@ -222,20 +257,7 @@ export async function startAdminSetup(options: {
         if (newline < 0) break;
         const line = input.slice(0, newline);
         input = input.slice(newline + 1);
-        try {
-          const message = JSON.parse(line);
-          if (message === null || typeof message !== "object" || Array.isArray(message)) throw new Error();
-          if (message.action === "cancel" && Object.keys(message).length === 1 && started) {
-            finish({ status: "cancelled", setupId });
-          } else if (!started && message.action === "status" && Object.keys(message).length === 2 &&
-              typeof message.setupId === "string" && /^[0-9a-f-]{36}$/.test(message.setupId)) {
-            finish(receipts.find(message.setupId));
-          } else if (!started && message.action === "start" && Object.keys(message).length === 2 &&
-              typeof message.workspaceId === "string" && parseWorkspaceId(message.workspaceId).uuid === message.workspaceId) {
-            started = true;
-            void start(message.workspaceId).catch(() => finish({ status: "failed", setupId }));
-          } else throw new Error();
-        } catch { finish({ status: "invalid-request" }); }
+        handleMessage(line);
       }
     });
   });
@@ -255,6 +277,7 @@ export async function startAdminSetup(options: {
     async stop() {
       // Closing sessions fences the async flow before the database is closed.
       for (const [socket, fence] of sessions) { fence(); socket.destroy(); }
+      await Promise.all(operations);
       await new Promise<void>((accept, reject) => server.close((error) => error ? reject(error) : accept()));
     },
   };

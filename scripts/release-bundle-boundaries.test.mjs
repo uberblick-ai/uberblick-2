@@ -35,7 +35,7 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 			["ub.mjs", "packages/cli/src/main.ts", true],
 			["mcp.mjs", "packages/mcp-server/src/main.ts", true],
 			["hub.mjs", "packages/hub/src/main.ts", false],
-			["hub-admin-setup.mjs", "packages/hub/src/admin-setup-command.ts", false],
+			["ub-hub.mjs", "packages/hub/src/operator-command.ts", false],
 		]) {
 			const output = join(scratch, name);
 			// Use the production builders themselves, including minification,
@@ -66,13 +66,24 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 					if (databasePath !== undefined) env.HUB_DB_PATH = databasePath;
 					const before = readdirSync(scratch).sort();
 					const result = spawnSync(process.execPath, [output,
-						...(name === "hub-admin-setup.mjs" ? ["00000000-0000-4000-8000-000000001387"] : [])], {
+						...(name === "ub-hub.mjs" ? ["admin-setup", "00000000-0000-4000-8000-000000001387"] : [])], {
 						cwd: scratch, env, encoding: "utf8", timeout: 10_000,
 					});
 					assert.equal(result.error, undefined, `${name} stops without hanging`);
 					assert.equal(result.status, 1, `${name} refuses HUB_DB_PATH=${JSON.stringify(databasePath)}`);
 					assert.match(result.stderr, /HUB_DB_PATH/);
 					assert.deepEqual(readdirSync(scratch).sort(), before, "refusal creates no fallback database or data directory");
+				}
+			}
+			if (name === "ub-hub.mjs") {
+				for (const args of [[], ["--help"]]) {
+					const result = spawnSync(process.execPath, [output, ...args], {
+						cwd: scratch, encoding: "utf8", timeout: 10_000,
+					});
+					assert.equal(result.status, 0, "the bundled operator command prints help without opening a database");
+					for (const command of ["status", "doctor", "admin-setup", "backup", "restore"]) {
+						assert.match(result.stdout, new RegExp(command));
+					}
 				}
 			}
 		}
