@@ -16,6 +16,7 @@ import {
   readAuthEnvelope,
 } from "@uberblick/schema/protocol";
 import { clampToken } from "@uberblick/schema/token";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
@@ -459,7 +460,6 @@ const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
-const SEARCH_LIMIT = 100;
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -649,11 +649,9 @@ async function serveApiRequest(
   }
 
   try {
-    const matches = engine.store.search(query, SEARCH_LIMIT + 1);
     apiResponse(request, response, 200, {
-      hits: matches.slice(0, SEARCH_LIMIT).map(({ uuid }) => ({ uuid })),
-      limit: SEARCH_LIMIT,
-      capped: matches.length > SEARCH_LIMIT,
+      hits: engine.store.searchUuids(query).map((uuid) => ({ uuid })),
+      capped: false,
     });
   } catch {
     apiResponse(request, response, 500, { error: "search_failed" });
@@ -722,11 +720,15 @@ function serveBundleRequest(
     }
 
     const file = fileFor(root, pathname);
+    const contentType = MIME[extname(file).toLowerCase()] ?? "application/octet-stream";
     const headers = {
-      "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream",
+      "content-type": contentType,
       // The bundle's filenames are content-hashed by Vite, but index.html is
       // not, and a stale one points at assets that are gone.
       "cache-control": "no-cache",
+      ...(contentType === MIME[".html"] ? {
+        "content-security-policy-report-only": WEB_CONTENT_SECURITY_POLICY,
+      } : {}),
     };
     if (request.method === "HEAD") {
       respond(request, response, 200, headers, "");

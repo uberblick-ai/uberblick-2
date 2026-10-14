@@ -190,7 +190,6 @@ export function claudeDoctorEntries(
   return { local, user: doctorJsonEntry(doc) };
 }
 
-// Decision: 42a229be-a9b9-4c56-9b68-11f26cb145da.
 function doctorTomlEntry(text: string): DoctorEntry {
   try {
     const doc = parseToml(text, { integersAsBigInt: "asNeeded" });

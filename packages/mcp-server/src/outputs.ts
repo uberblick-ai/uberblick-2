@@ -43,8 +43,8 @@ const documentDurability = {
   tagHint: z.string().optional().describe("Non-blocking request to assign tags from the active vocabulary."),
 };
 const contentReview = {
-  tldr: z.null().optional().describe("Present when changed document content has no TL;DR."),
-  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records."),
+  tldr: z.null().optional().describe("Present when changed regular document content has no TL;DR and the page has not opted out."),
+  tldrHint: z.string().optional().describe("Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal."),
 };
 const touchedRoom = z.object({
   purpose: z.string().describe("The independently written room's purpose."),
@@ -62,6 +62,19 @@ const tag = z.union([
   z.object({ id: z.string(), name: z.null(), state: z.literal("unresolved") }).strict(),
 ]);
 const tags = z.array(tag).describe("Canonical tag identities, current names and active, retired or unresolved state.");
+const searchHitFields = { uuid, title: z.string(), description, tags, snippet: z.string() };
+const searchHit = z.union([
+  z.object({
+    ...searchHitFields,
+    kind: z.literal("regular").describe("A regular document, including a stored requirement."),
+  }).strict(),
+  z.object({
+    ...searchHitFields,
+    kind: z.literal("decision").describe("A decision record."),
+    state: z.enum(["in-force", "superseded", "open", "rejected", "withdrawn", "conflict"])
+      .describe("Resolved from current topic records: in-force is the current answer; superseded is a replaced answer; conflict marks competing approved answers; open, rejected and withdrawn are proposal states."),
+  }).strict(),
+]);
 
 const directoryEntry = z.object({
   uuid,
@@ -83,6 +96,7 @@ const directoryEntry = z.object({
   decidedAt: z.string().optional(),
   approvalChanged: z.boolean().optional(),
   commentCount: count.optional(),
+  openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true, including deleted anchors. Absent when unknown; each decision entry, including inForce, pending and conflicts, has its own count."),
 }).strict();
 const topicResolution = {
   topic: z.string().describe("First record's UUID identifying this decision topic."),
@@ -100,7 +114,7 @@ const docLink = z.object({
 }).strict();
 const blockFields = {
   id: z.string(),
-  text: z.string().describe("Plain prose or source text; tables carry canonical GFM and cards carry canonical container content with inline formatting."),
+  text: z.string().describe("Plain prose or source text; tables carry canonical GFM, while cards and Figma blocks carry canonical container content with inline formatting."),
   rev: z.string().describe("Content hash to assert on a later block edit."),
 };
 const linkRanges = {
@@ -114,6 +128,12 @@ function blockSchema(withLinks: boolean) {
     z.object({ ...prose, type: z.literal("list-item"), list: z.enum(["bullet", "ordered"]), indent: z.number().int().min(0).max(3) }).strict(),
     z.object({ ...blockFields, type: z.literal("code"), language: z.string() }).strict(),
     z.object({ ...blockFields, type: z.enum(["mermaid", "table", "terminal", "chart", "card"]) }).strict(),
+    z.object({ ...blockFields, type: z.literal("figma"), figma: z.object({
+      kind: z.enum(["frame", "file", "prototype", "board", "slides", "community file"]),
+      file: z.string(),
+      fileName: z.string().optional(),
+      node: z.string().optional(),
+    }).strict().describe("Read-only view identity derived from the normalized Figma link.") }).strict(),
   ]);
 }
 const block = blockSchema(false);
@@ -126,7 +146,7 @@ const annotation = z.object({
   range: z.object({
     row: count.optional(),
     column: count.optional(),
-    part: z.enum(["label", "title", "body", "footer"]).optional(),
+    part: z.enum(["label", "title", "body", "footer", "caption"]).optional(),
     start: count,
     end: count,
     collapsed: z.boolean(),
@@ -245,6 +265,7 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
+    tldrOptOut: z.literal(true).optional().describe("Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records."),
     tags,
     links: z.array(z.string()),
     ...lifecycle,
@@ -282,8 +303,9 @@ export const outputSchemas = {
   }).strict(),
   search: z.object({
     query: z.string(),
-    tag: z.string().optional(),
-    hits: z.array(z.object({ uuid, title: z.string(), description, tags, snippet: z.string() }).strict()),
+    tag: z.union([z.string(), z.array(z.string())]).optional(),
+    kind: z.enum(["regular", "decision"]).optional(),
+    hits: z.array(searchHit),
   }).strict(),
   backlinks: z.object({
     uuid,

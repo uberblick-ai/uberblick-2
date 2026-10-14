@@ -1,6 +1,5 @@
 import { chmodSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
-// Decision: 90ce6355-9455-4e18-aa56-eb2347e57d6d
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/mcp-server/storage";
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
@@ -63,6 +62,9 @@ export interface IndexedDoc {
   title: string;
   /** Canonical catalog identities, never display names. */
   tags: string[];
+  /** Current display names of assigned tags, omitting unresolved identities. */
+  tagNames?: readonly string[];
+  kind?: "regular" | "decision";
   /** The document's description, or the empty string when it has none. */
   description: string;
   /** Outbound links, by target document UUID. */
@@ -77,9 +79,10 @@ export interface SearchHit {
   uuid: string;
   title: string;
   tags: string[];
+  kind: "regular" | "decision";
   /** The document's description, or null when it has none. */
   description: string | null;
-  /** Body excerpt (possibly its leading description), or title for a title match. */
+  /** Excerpt from a matching field, or the title when there is no excerpt. */
   snippet: string;
 }
 
@@ -141,6 +144,20 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `;
 
+// Older peers write and read the first three columns by name and position.
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
+  uuid UNINDEXED,
+  title,
+  body,
+  description,
+  tag_names,
+  tokenize = 'porter unicode61'
+);
+`;
+
+const SEARCH_RELEVANCE = "bm25(docs_fts, 0, 2, 1, 1, 1)";
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,13 +190,15 @@ CREATE TABLE IF NOT EXISTS pending_rooms (
 CREATE TABLE IF NOT EXISTS doc_index (
   uuid        TEXT PRIMARY KEY,
   title       TEXT NOT NULL,
-  description TEXT NOT NULL DEFAULT ''
+  description TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL DEFAULT 'regular'
 );
 CREATE TABLE IF NOT EXISTS doc_index_seq (
   uuid                TEXT PRIMARY KEY,
   indexed_through_seq INTEGER NOT NULL,
   catalog_through_seq INTEGER NOT NULL DEFAULT 0,
-  github_refs_indexed INTEGER NOT NULL DEFAULT 0
+  github_refs_indexed INTEGER NOT NULL DEFAULT 0,
+  search_rowid        INTEGER
 );
 CREATE TABLE IF NOT EXISTS doc_tags (
   uuid TEXT NOT NULL,
@@ -200,25 +219,7 @@ CREATE TABLE IF NOT EXISTS decision_github_refs (
 );
 CREATE INDEX IF NOT EXISTS decision_github_refs_target ON decision_github_refs (target);
 
--- The description is searched as part of \`body\` rather than as a column of its
--- own. FTS5 has no ADD COLUMN, so a fourth column would mean dropping and
--- recreating this table — throwing away every existing row's body index for a
--- field no document had until now. Concatenating costs nothing and reindexes
--- one document at a time, as descriptions are written.
---
--- The cost is paid in ranking. bm25 weights columns, and a description folded
--- into \`body\` cannot be weighted apart from it: a term in a description ranks
--- as an ordinary body term rather than as the strong signal about a document
--- that it is, and it lengthens the column it joins, which bm25 reads as
--- slightly diluting every other term in that document. Both effects are small
--- at 300 characters against a whole document, and neither is fixable without
--- the column FTS5 will not add — so this is an accepted trade, not an
--- oversight.
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
-  uuid UNINDEXED,
-  title,
-  body
-);
+${FTS_SCHEMA}
 `;
 
 /** Quote tokens as literal search terms; only trailing * retains FTS5 operator meaning. */
@@ -231,7 +232,7 @@ export function ftsQuery(raw: string): string | null {
     .map((token) =>
       token.endsWith("*") ? `"${token.slice(0, -1)}"*` : `"${token}"`,
     )
-    .join(" ");
+    .join(" OR ");
 }
 
 /** node:sqlite's array bindings check neither arity nor order; declare both here. */
@@ -394,7 +395,7 @@ export class MirrorStore {
     clearPending: Prepared<[string, number]>;
     listPending: Prepared<[]>;
     advanceIndex: Prepared<[string, number, number]>;
-    putDoc: Prepared<[string, string, string]>;
+    putDoc: Prepared<[string, string, string, string]>;
     hasDoc: Prepared<[string]>;
     dropDoc: Prepared<[string]>;
     dropIndexSeq: Prepared<[string]>;
@@ -405,8 +406,10 @@ export class MirrorStore {
     dropGithubRefs: Prepared<[string]>;
     putGithubRef: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
-    putFts: Prepared<[string, string, string]>;
-    search: Prepared<[string, string | null, string | null, number]>;
+    putFts: Prepared<[string, string, string, string, string]>;
+    markSearch: Prepared<[number | bigint, string]>;
+    search: Prepared<[string, string, string | null, string | null, number]>;
+    searchUuids: Prepared<[string]>;
     backlinks: Prepared<[string]>;
     decisionsForGithub: Prepared<[string]>;
   };
@@ -475,6 +478,7 @@ export class MirrorStore {
     this.migrateDocDescription();
     this.migrateCatalogIndexSequence();
     this.migrateGithubRefsIndexSequence();
+    this.migrateSearchIndex();
 
     const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
       this.db.prepare(sql) as Prepared<P>;
@@ -533,12 +537,15 @@ export class MirrorStore {
           "AND doc_index_seq.catalog_through_seq <= excluded.catalog_through_seq " +
           "AND (doc_index_seq.indexed_through_seq < excluded.indexed_through_seq " +
           "OR doc_index_seq.catalog_through_seq < excluded.catalog_through_seq " +
-          "OR doc_index_seq.github_refs_indexed = 0)",
+          "OR doc_index_seq.github_refs_indexed = 0 " +
+          // An older peer can replace the row using only the original columns.
+          "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
+          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL))",
       ),
       putDoc: prepare(
-        "INSERT INTO doc_index (uuid, title, description) VALUES (?, ?, ?) " +
+        "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
           "ON CONFLICT (uuid) DO UPDATE SET title = excluded.title, " +
-          "description = excluded.description",
+          "description = excluded.description, kind = excluded.kind",
       ),
       hasDoc: prepare("SELECT 1 AS present FROM doc_index WHERE uuid = ?"),
       dropDoc: prepare("DELETE FROM doc_index WHERE uuid = ?"),
@@ -557,18 +564,27 @@ export class MirrorStore {
       ),
       dropFts: prepare("DELETE FROM docs_fts WHERE uuid = ?"),
       putFts: prepare(
-        "INSERT INTO docs_fts (uuid, title, body) VALUES (?, ?, ?)",
+        "INSERT INTO docs_fts (uuid, title, body, description, tag_names) VALUES (?, ?, ?, ?, ?)",
       ),
+      markSearch: prepare("UPDATE doc_index_seq SET search_rowid = ? WHERE uuid = ?"),
       // Pack unambiguous JSON IDs into each hit to keep search to one query.
       search: prepare(
-        "SELECT f.uuid AS uuid, d.title AS title, d.description AS description, " +
-          "snippet(docs_fts, 2, '', '', '…', 16) AS snippet, " +
+        "WITH requested_tags AS (SELECT value AS tag FROM json_each(?)) " +
+          "SELECT f.uuid AS uuid, d.title AS title, d.description AS description, d.kind AS kind, " +
+          "snippet(docs_fts, -1, '', '', '…', 16) AS snippet, " +
           "(SELECT json_group_array(t.tag) FROM " +
           "(SELECT tag FROM doc_tags WHERE uuid = f.uuid ORDER BY tag) t) AS tags " +
           "FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
-          "WHERE docs_fts MATCH ? AND (? IS NULL OR EXISTS " +
-          "(SELECT 1 FROM doc_tags WHERE uuid = f.uuid AND tag = ?)) " +
-          "ORDER BY bm25(docs_fts) LIMIT ?",
+          "WHERE docs_fts MATCH ? AND (NOT EXISTS (SELECT 1 FROM requested_tags) OR EXISTS " +
+          "(SELECT 1 FROM doc_tags t JOIN requested_tags r ON r.tag = t.tag WHERE t.uuid = f.uuid)) " +
+          "AND (? IS NULL OR d.kind = ?) " +
+          `ORDER BY ${SEARCH_RELEVANCE} * (1 + 0.1 * ` +
+          "(SELECT COUNT(*) FROM doc_tags t JOIN requested_tags r ON r.tag = t.tag WHERE t.uuid = f.uuid)), " +
+          "f.uuid LIMIT ?",
+      ),
+      searchUuids: prepare(
+        "SELECT f.uuid AS uuid FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
+          `WHERE docs_fts MATCH ? ORDER BY ${SEARCH_RELEVANCE}, f.uuid`,
       ),
       backlinks: prepare(
         "SELECT l.source AS uuid, COALESCE(d.title, '') AS title, " +
@@ -666,7 +682,7 @@ export class MirrorStore {
       if (!written) {
         return;
       }
-      this.statements.putDoc.run(doc.uuid, doc.title, doc.description);
+      this.statements.putDoc.run(doc.uuid, doc.title, doc.description, doc.kind ?? "regular");
       this.statements.dropTags.run(doc.uuid);
       for (const tag of new Set(doc.tags)) {
         this.statements.putTag.run(doc.uuid, tag);
@@ -680,12 +696,14 @@ export class MirrorStore {
         this.statements.putGithubRef.run(doc.uuid, target);
       }
       this.statements.dropFts.run(doc.uuid);
-      // Leading descriptions let description-only matches return relevant snippets.
-      this.statements.putFts.run(
+      const indexed = this.statements.putFts.run(
         doc.uuid,
         doc.title,
-        doc.description === "" ? doc.body : `${doc.description}\n${doc.body}`,
+        doc.body,
+        doc.description,
+        (doc.tagNames ?? []).join("\n"),
       );
+      this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
@@ -857,7 +875,7 @@ export class MirrorStore {
   /**
    * Derive from contiguous document and settings cuts; stale input on either
    * must not replace newer rows. Commit cuts, metadata and dependents together;
-   * allow one equal-cut replacement for rows lacking GitHub-reference derivation.
+   * allow equal-cut replacements only for incomplete derived rows.
    */
   indexDoc(
     doc: IndexedDoc,
@@ -887,15 +905,21 @@ export class MirrorStore {
     })();
   }
 
-  search(query: string, limit: number, tag?: string): SearchHit[] {
+  search(
+    query: string,
+    limit: number,
+    tag?: string | readonly string[],
+    kind?: "regular" | "decision",
+  ): SearchHit[] {
     const match = ftsQuery(query);
     if (match === null) {
       return [];
     }
     const rows = this.statements.search.all(
+      JSON.stringify([...new Set(typeof tag === "string" ? [tag] : tag ?? [])]),
       match,
-      tag ?? null,
-      tag ?? null,
+      kind ?? null,
+      kind ?? null,
       limit,
     ) as {
       uuid: string;
@@ -903,14 +927,24 @@ export class MirrorStore {
       description: string;
       snippet: string;
       tags: string | null;
+      kind: "regular" | "decision";
     }[];
     return rows.map((row) => ({
       uuid: row.uuid,
       title: row.title,
       tags: parseTags(row.tags),
+      kind: row.kind,
       description: row.description === "" ? null : row.description,
       snippet: row.snippet === "" ? row.title : row.snippet,
     }));
+  }
+
+  /** Complete relevance order for callers that filter using directory metadata. */
+  searchUuids(query: string): string[] {
+    const match = ftsQuery(query);
+    if (match === null) return [];
+    const rows = this.statements.searchUuids.all(match) as { uuid: string }[];
+    return rows.map(({ uuid }) => uuid);
   }
 
   /** Documents whose `links` name `uuid`. */
@@ -999,8 +1033,7 @@ export class MirrorStore {
   }
 
   /**
-   * An empty description default preserves rows without a rebuild. FTS5 cannot
-   * add columns, so descriptions join body and reindex as each document changes.
+   * An empty description default preserves cached metadata during the upgrade.
    */
   private migrateDocDescription(): void {
     const columns = this.db
@@ -1058,6 +1091,38 @@ export class MirrorStore {
       },
       "immediate",
     )();
+  }
+
+  /** Retokenize existing rows atomically, then permit one full equal-cut derivation. */
+  private migrateSearchIndex(): void {
+    const hasColumn = (table: string, name: string): boolean =>
+      this.db.prepare("SELECT name FROM pragma_table_info(?) WHERE name = ?")
+        .get(table, name) !== undefined;
+    const current = (): boolean =>
+      hasColumn("doc_index", "kind") &&
+      hasColumn("doc_index_seq", "search_rowid") &&
+      hasColumn("docs_fts", "tag_names");
+    if (current()) return;
+
+    transactional(this.db, () => {
+      // Another opener may have completed the upgrade while this one waited.
+      if (current()) return;
+      if (!hasColumn("doc_index", "kind")) {
+        this.db.exec("ALTER TABLE doc_index ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular'");
+      }
+      if (!hasColumn("doc_index_seq", "search_rowid")) {
+        this.db.exec("ALTER TABLE doc_index_seq ADD COLUMN search_rowid INTEGER");
+      }
+      if (!hasColumn("docs_fts", "tag_names")) {
+        // Preserve searchable content while replicas hydrate and enrich rows.
+        this.db.exec(
+          "CREATE TEMP TABLE search_upgrade AS SELECT uuid, title, body FROM docs_fts; " +
+            "DROP TABLE docs_fts; " + FTS_SCHEMA +
+            "INSERT INTO docs_fts (uuid, title, body) SELECT uuid, title, body FROM search_upgrade; " +
+            "DROP TABLE search_upgrade;",
+        );
+      }
+    }, "immediate")();
   }
 
   /** Both server shutdown and the supplying owner may close; keep it idempotent. */

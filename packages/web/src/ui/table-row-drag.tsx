@@ -1,5 +1,4 @@
 /** A row handle shares a pointer gesture with its standard Radix menu. */
-// Decision: 3c0a953d-5bba-4732-919e-ebdbf2be625c.
 import { useCallback, useLayoutEffect, useRef } from "react";
 import type { MouseEvent, ReactElement } from "react";
 import { useDraggable } from "@dnd-kit/react";

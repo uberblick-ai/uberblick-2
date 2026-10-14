@@ -13,6 +13,7 @@
  * and that no secret and no token ever reaches either stream.
  */
 
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -45,8 +46,11 @@ import {
   getBlocks,
   getMeta,
   initDoc,
+  listDirectory,
   roomForDoc,
   setWorkspaceName,
+  getWorkspaceMainRepository,
+  setWorkspaceMainRepository,
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
   settingsRoom,
@@ -222,6 +226,47 @@ async function webName(hub: Hub, name: string, secret = SECRET): Promise<void> {
   const room = await openRoom(hub, settingsRoom(WORKSPACE), secret);
   setWorkspaceName(room.doc, name);
   await room.done();
+}
+
+async function verificationProxy(
+  hub: Hub,
+  change: () => Promise<void>,
+): Promise<{ endpoint: string; finish: () => Promise<void>; close: () => Promise<void> }> {
+  const sockets = new Set<Socket>();
+  const changes: Promise<void>[] = [];
+  let connections = 0;
+  const proxy = createServer(socket => {
+    sockets.add(socket);
+    socket.on("error", () => {});
+    socket.on("close", () => sockets.delete(socket));
+    const connect = () => {
+      const upstream = createConnection({ host: "127.0.0.1", port: hub.port });
+      sockets.add(upstream);
+      upstream.on("error", () => socket.destroy());
+      upstream.on("close", () => sockets.delete(upstream));
+      socket.on("close", () => upstream.destroy());
+      socket.pipe(upstream).pipe(socket);
+    };
+    connections += 1;
+    if (connections !== 3) { connect(); return; }
+    // The third socket is the fresh-client check, after hydration has closed.
+    changes.push(change().then(connect).catch(error => { socket.destroy(); throw error; }));
+  });
+  await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+  const address = proxy.address();
+  if (address === null || typeof address === "string") throw new Error("missing proxy port");
+  return {
+    endpoint: `ws://127.0.0.1:${address.port}`,
+    async finish() {
+      expect(changes).toHaveLength(1);
+      await Promise.all(changes);
+    },
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>(resolve => proxy.close(() => resolve()));
+      await Promise.allSettled(changes);
+    },
+  };
 }
 
 /** Put a tombstone in a hub's directory without ever creating its document room. */
@@ -656,6 +701,99 @@ describe("ub workspace use <link>", () => {
     box.env.HUB_AUTH_TOKEN = secret;
     return joinUrl(hub);
   }
+
+  it.each([null, "other/selected"])("fills a fetched workspace only after verification and preserves existing repository %s", async initial => {
+    const hub = await startHub();
+    if (initial !== null) {
+      const settings = await openRoom(hub, settingsRoom(WORKSPACE));
+      setWorkspaceMainRepository(settings.doc, initial);
+      await settings.done();
+    }
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
+    execFileSync("git", ["init", "--quiet"], { cwd: box.cwd, env: box.env });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/notes.git"], { cwd: box.cwd, env: box.env });
+    const selectedWorkspace = initial === null ? `notes-${WORKSPACE}` : WORKSPACE;
+    const result = await runInProcess(["workspace", "use", joinUrl(hub, selectedWorkspace), "--json"], box);
+    expect(result.status, result.output).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      binding: { workspaceId: selectedWorkspace, hubUrl: url(hub) }, previous: null, documents: [],
+    });
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")))
+      .toEqual({ workspaceId: selectedWorkspace, hubUrl: url(hub) });
+    expect(result.stderr.trim().split("\n")).toEqual([`ub workspace: fetching http://127.0.0.1:${hub.port}…`]);
+    const local = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), authSecret: null });
+    try { expect(getWorkspaceMainRepository(local.replicas.settings().doc)).toBe(initial ?? "acme/notes"); }
+    finally { await local.close(); }
+    // The optional fill is local pending state after the fetched snapshot was verified.
+    const remote = await openRoom(hub, settingsRoom(WORKSPACE));
+    expect(getWorkspaceMainRepository(remote.doc)).toBe(initial);
+    await remote.done();
+  });
+
+  it.each(["name", "mainRepository"] as const)("refuses changed %s during fresh-client verification before binding or origin fill", async setting => {
+    const hub = await startHub();
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
+    execFileSync("git", ["init", "--quiet"], { cwd: box.cwd, env: box.env });
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/notes.git"], { cwd: box.cwd, env: box.env });
+    const proxy = await verificationProxy(hub, async () => {
+      const settings = await openRoom(hub, settingsRoom(WORKSPACE));
+      if (setting === "name") setWorkspaceName(settings.doc, "Changed during verification");
+      else setWorkspaceMainRepository(settings.doc, "remote/changed");
+      await settings.done();
+    });
+    try {
+      const target = `${proxy.endpoint}/${WORKSPACE}`;
+      const result = await runInProcess(["workspace", "use", target], box);
+      await proxy.finish();
+      expect(result.status, result.output).toBe(1);
+      expect(result.stderr).toContain("does not match this workspace's name, settings or sidebar");
+      expect(result.stdout).toBe("");
+      expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+      const local = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), authSecret: null });
+      try { expect(getWorkspaceMainRepository(local.replicas.settings().doc)).toBeNull(); }
+      finally { await local.close(); }
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it.each(["other live", "sampled live", "archived"] as const)("keeps sampled content verification when %s content changes before the fresh client", async changed => {
+    const hub = await startHub();
+    await webDoc(hub, "First live");
+    await webDoc(hub, "Second live");
+    const archived = await webDoc(hub, "Archived note");
+    await webTombstone(hub, archived, "Archived note");
+    const directory = await openRoom(hub, directoryRoom(WORKSPACE));
+    const live = listDirectory(directory.doc);
+    await directory.done();
+    const uuid = changed === "archived" ? archived : live[changed === "sampled live" ? 0 : 1]!.uuid;
+    const box = unboundSandbox({ credentials: { signingSecret: SECRET } });
+    const proxy = await verificationProxy(hub, async () => {
+      const room = await openRoom(hub, roomForDoc(WORKSPACE, uuid));
+      appendBlock(room.doc, { type: "paragraph", text: "Edited during verification" });
+      await room.done();
+    });
+    try {
+      const result = await runInProcess(["workspace", "use", `${proxy.endpoint}/${WORKSPACE}`, "--verbose"], box);
+      await proxy.finish();
+      if (changed === "other live") {
+        expect(result.status, result.output).toBe(0);
+        expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: proxy.endpoint });
+        expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(proxy.endpoint);
+        expect(result.stdout).toContain("compared every entry, every archived document's content and one live document's content when present");
+      } else {
+        expect(result.status, result.output).toBe(1);
+        expect(result.stderr).toContain("1 document differ in content");
+        expect(result.stderr).toContain(uuid);
+        expect(result.stdout).toBe("");
+        expect(existsSync(join(box.cwd, ".uberblick.json"))).toBe(false);
+        expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+      }
+    } finally {
+      await proxy.close();
+    }
+  });
 
   it("prints only the named fetched result and one progress line despite library output", async () => {
     const hub = await startHub();

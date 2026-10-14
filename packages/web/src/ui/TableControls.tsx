@@ -1,5 +1,4 @@
 /** Quiet table affordances compose framework gestures and live shared edits. */
-// Decision: 211465cd-c58b-44ad-b711-88b5eae825b0.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement, RefObject } from "react";
 import type { Editor } from "@tiptap/core";
@@ -8,7 +7,7 @@ import type { DragDropManager } from "@dnd-kit/react";
 import { Accessibility, Feedback } from "@dnd-kit/dom";
 import { findBlockById } from "../editor/block-menu.js";
 import { isOrdinaryTable } from "../editor/table.js";
-import { actOnTable, deleteTableColumn, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget, tableRowTargets } from "../editor/table-controls.js";
+import { actOnTable, deleteTableColumn, moveTableColumn, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget, tableRowTargets } from "../editor/table-controls.js";
 import type { TableAction, TableColumnTarget, TableRowTarget } from "../editor/table-controls.js";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -199,7 +198,7 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const base = frame.getBoundingClientRect();
       const box = wrapper.getBoundingClientRect();
-      const width = wrapper.clientWidth;
+      const width = box.width;
       const header = table.rows[0];
       const cells = Array.from(header?.cells ?? []);
       const first = cells[0];
@@ -248,7 +247,9 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const next: Geometry = {
         tableId: id, left: box.left - base.left, top: box.top - base.top,
-        width, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft, scrollWidth: wrapper.scrollWidth,
+        width, viewportWidth: width, height: wrapper.clientHeight, scrollLeft: wrapper.scrollLeft,
+        // Keep the native scroll range while retaining fractional CSS bounds.
+        scrollWidth: wrapper.scrollWidth - wrapper.clientWidth + width,
         // A native scroll strip keeps every column in keyboard order. Focus
         // scrolls it normally, and its scroll also brings the table along.
         columns: edges.map((edge) => edge - box.left + wrapper.scrollLeft),
@@ -461,6 +462,12 @@ function TableControlSurface({ tableId, editor, host }: {
     setColumnTarget(null);
     if (acted.current) editor.view.focus();
   };
+  const moveColumn = (direction: -1 | 1): void => {
+    const target = columnMenuRef.current;
+    acted.current = target !== null && moveTableColumn(editor, target, direction);
+    setColumnTarget(null);
+    if (acted.current) editor.view.focus();
+  };
   const indicate = (point: { x: number; y: number }): void => {
     if (drag.current === null) return;
     drag.current.point = point;
@@ -591,6 +598,10 @@ function TableControlSurface({ tableId, editor, host }: {
               editor.view.focus();
               refresh.current();
             }}>
+            <DropdownMenuItem className="min-h-11" disabled={index === 0}
+              onSelect={() => moveColumn(-1)}>Move column left</DropdownMenuItem>
+            <DropdownMenuItem className="min-h-11" disabled={index === geometry.columnTargets.length - 1}
+              onSelect={() => moveColumn(1)}>Move column right</DropdownMenuItem>
             <DropdownMenuItem className="min-h-11" variant="destructive" disabled={geometry.columnTargets.length === 1}
               onSelect={deleteColumn}>Delete column</DropdownMenuItem>
           </DropdownMenuContent>

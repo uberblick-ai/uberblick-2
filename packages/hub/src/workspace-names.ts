@@ -1,4 +1,3 @@
-/** Decision: f80c8445-03d1-47ed-9d95-d8004f7039f4. */
 import { getWorkspaceName, settingsRoom } from "@uberblick/schema";
 import * as Y from "yjs";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";

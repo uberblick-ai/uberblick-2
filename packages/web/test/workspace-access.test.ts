@@ -7,7 +7,7 @@ vi.mock("../src/collab/rooms.js", () => ({ mintHubAuthMessage: vi.fn(async () =>
 
 const ADMIN = { principalId: "principal", githubAccountId: "1234", githubUsername: "person",
   workspaces: 0, lastSignedInAt: 1_790_000_000_000, current: true };
-const WORKSPACE = { workspaceId: "5c974496-a04d-4b31-81da-8b70308565c7", name: "Project", members: 1, admins: ["person"] };
+const WORKSPACE = { workspaceId: "5c974496-a04d-4b31-81da-8b70308565c7", status: "active", name: "Project", members: 1, admins: ["person"] };
 
 function reply(body: unknown) {
   const fetchImpl = vi.fn(async () => Response.json(body));
@@ -48,8 +48,27 @@ describe("the browser's hub management answers", () => {
   });
 
   it("refuses workspace contents that do not meet the display-name and count contract", async () => {
-    for (const workspace of [{ ...WORKSPACE, name: "bad\nname" }, { ...WORKSPACE, members: 0.5 }, { ...WORKSPACE, admins: [null] }]) {
+    for (const workspace of [{ ...WORKSPACE, name: "bad\nname" }, { ...WORKSPACE, members: 0.5 }, { ...WORKSPACE, admins: [null] },
+      { ...WORKSPACE, status: undefined }, { ...WORKSPACE, status: "private" }]) {
       await expect(reply({ status: "ok", workspaces: [workspace], nextCursor: null }).request({ operation: "list-hub-workspaces" })).rejects.toThrow();
     }
+  });
+
+  it("validates the target and resulting state before projecting suspension changes", async () => {
+    for (const [operation, workspaceStatus] of [["suspend-workspace", "suspended"], ["restore-workspace", "active"]] as const) {
+      const action = { operation, workspaceId: WORKSPACE.workspaceId };
+      await expect(reply({ status: "ok", workspaceId: WORKSPACE.workspaceId, workspaceStatus, key: "private" }).request(action))
+        .resolves.toEqual({ status: "ok", hub: null, workspaceId: WORKSPACE.workspaceId, workspaceStatus });
+      for (const body of [
+        { status: "ok", workspaceId: "another-workspace", workspaceStatus },
+        { status: "ok", workspaceId: WORKSPACE.workspaceId, workspaceStatus: workspaceStatus === "active" ? "suspended" : "active" },
+        { status: "ok", workspaceId: WORKSPACE.workspaceId },
+      ]) await expect(reply(body).request(action)).rejects.toThrow("Invalid access answer");
+      await expect(reply({ status: "forbidden", workspaceId: WORKSPACE.workspaceId, workspaceStatus, key: "private" }).request(action))
+        .resolves.toEqual({ status: "forbidden", hub: null });
+    }
+    await expect(reply({ status: "closure-failed", applied: true, message: "private" })
+      .request({ operation: "suspend-workspace", workspaceId: WORKSPACE.workspaceId }))
+      .resolves.toEqual({ status: "closure-failed", applied: true, hub: null });
   });
 });

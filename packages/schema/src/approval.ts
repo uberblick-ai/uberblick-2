@@ -1,4 +1,3 @@
-// Decision approval model: b4e616bb-10f6-460d-a13b-9c21354ca80b
 
 import type * as Y from "yjs";
 import { getBlocksWithInline } from "./blocks.js";
@@ -21,9 +20,9 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
   // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
   // Use plain table text so formatting alone cannot invalidate approval.
-  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButton }) =>
+  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButtons }) =>
     card !== undefined
-      ? cardApprovalText(card, cardButton?.text)
+      ? cardApprovalText(card, cardButtons?.map((button) => button.text) ?? [])
       : table !== undefined && table.length > 0
       ? writeGfmTable(table.map((row) => row.map(inlinePlainText)))
       : block.text,
@@ -36,9 +35,9 @@ export function decisionApprovalFingerprint(doc: Y.Doc): string {
   });
 }
 
-function cardApprovalText(card: CardInline, buttonText?: string): unknown {
+function cardApprovalText(card: CardInline, buttonTexts: string[]): unknown {
   const parts = writeCardText(Object.fromEntries(CARD_PARTS.map((part) => [part, inlinePlainText(card[part])])) as Record<CardPart, string>);
-  return buttonText === undefined ? parts : [parts, buttonText];
+  return buttonTexts.length === 0 ? parts : [parts, ...buttonTexts];
 }
 
 /** No recorded fingerprint means there is no approval to invalidate. */

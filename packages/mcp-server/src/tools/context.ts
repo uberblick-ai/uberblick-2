@@ -12,6 +12,7 @@ import {
   parseTableCell,
   parseTableInput,
   parseCardInput,
+  parseFigmaInput,
   parseInline,
   CARD_PARTS,
   readDirectoryTags,
@@ -297,6 +298,17 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
   };
 
+  /** New caption links must resolve locally; existing targets survive header edits. */
+  const validateFigmaTargets = (source: string, previous?: string): void => {
+    const figma = parseFigmaInput(source);
+    const oldFigma = previous === undefined ? undefined : parseFigmaInput(previous);
+    if (figma.caption === oldFigma?.caption) return;
+    const oldTargets = new Set(parseInline(oldFigma?.caption ?? "").map(run => run.marks.docLink));
+    for (const run of parseInline(figma.caption)) {
+      if (run.marks.docLink !== undefined && !oldTargets.has(run.marks.docLink)) linkTitle(run.marks.docLink);
+    }
+  };
+
   /**
    * Resolve `inline` only for prose; source blocks ignore it, and tables read
    * their cell marks from GFM. Validate all seeds before create_doc opens a room.
@@ -307,6 +319,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     // A bad later seed must not leave earlier blocks or metadata behind.
     if (block.type === "table") validateTableTargets(block.text ?? "");
     if (block.type === "card") validateCardTargets(block.text ?? "");
+    if (block.type === "figma") validateFigmaTargets(block.text ?? "");
     return toBlockInput(
       block,
       isProseBlockType(block.type) ? resolveInline(block.inline) : undefined,
@@ -351,10 +364,12 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   /** A non-blocking reminder returned only after document content changes. */
-  const tldrReview = (replica: Replica): Record<string, unknown> =>
-    getMeta(replica.doc).kind === "decision" ? {} : getMeta(replica.doc).tldr === null
+  const tldrReview = (replica: Replica): Record<string, unknown> => {
+    const meta = getMeta(replica.doc);
+    return meta.kind === "decision" || meta.tldrOptOut === true ? {} : meta.tldr === null
       ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
       : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };
+  };
 
   /**
    * Check health after the write: a refused append must not report applied.
@@ -432,6 +447,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     annotationJson,
     validateTableTargets,
     validateCardTargets,
+    validateFigmaTargets,
     contentDurability,
     titleFor,
     linkTitle,

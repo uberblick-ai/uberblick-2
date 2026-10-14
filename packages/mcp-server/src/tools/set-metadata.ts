@@ -1,4 +1,5 @@
 import {
+  MAX_TLDR_LENGTH,
   assignDocumentTags,
   getMeta,
   getMetaMap,
@@ -25,7 +26,8 @@ export const inputSchema = strictInput({
   uuid: uuidArg,
   title: titleArg.optional(),
   description: descriptionArg.optional(),
-  tldr: tldrArg.optional(),
+  tldr: tldrArg.optional().describe(`Person-facing summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true.`),
+  tldr_opt_in: z.boolean().optional().describe("Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark."),
   tags: z.array(z.string().min(1)).optional(),
   links: z.array(linkArg).optional(),
   discussion: uuidArg.nullable().optional().describe("RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged."),
@@ -37,8 +39,20 @@ export const inputSchema = strictInput({
         message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links` or `discussion`",
       });
     }
+    if (args.tldr_opt_in !== undefined && (args.tldr === undefined || args.tldr === null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tldr_opt_in"],
+        message: "tldr_opt_in requires a non-null `tldr` in the same call",
+      });
+    }
   })
-  .meta({ anyOf: fields.map((field) => ({ required: [field] })) });
+  .meta({
+    anyOf: fields.map((field) => ({ required: [field] })),
+    dependencies: {
+      tldr_opt_in: { required: ["tldr"], properties: { tldr: { type: "string", minLength: 1 } } },
+    },
+  });
 
 /** Add field context only to field refusals, retaining their existing details. */
 function forField<T>(field: typeof fields[number], validate: () => T): T {
@@ -61,7 +75,7 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
 }
 
 export const setMetadataOperation = documentOperation("set_metadata", inputSchema, (context, args, _request, replica) => {
-  const { uuid, title, description, tldr, tags, links, discussion } = args;
+  const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion } = args;
   const current = getMeta(replica.doc);
   if (discussion !== undefined && (current.kind !== "decision" || current.status !== "open")) {
     const code = current.kind === "decision" && current.status === "decided" ? "decision_read_only" : "discussion_not_writable";
@@ -79,6 +93,9 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
   }
   if (current.kind === "decision" && tldr !== undefined && tldr !== null) {
     throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", { uuid, field: "tldr" });
+  }
+  if (current.tldrOptOut === true && tldr !== undefined && tldr !== null && tldr_opt_in !== true) {
+    throw new ToolError("tldr_opted_out", "A person removed this page's TL;DR on purpose.", { uuid, field: "tldr" });
   }
   const tagIds = tags === undefined ? undefined : forField("tags", () =>
     resolveTagSelectors(context.replicas, tags, context.documentTags(replica)));

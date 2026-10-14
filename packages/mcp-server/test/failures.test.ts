@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, upsertDirectoryEntry } from "@uberblick/schema";
+import { applyDocData, createTagCatalogEntry, DATA_LIMITS, DataError, InvalidDocumentLifecycleError, setTags, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   FAILURE_CODES,
@@ -110,6 +110,8 @@ const EXPECTED: Record<
   invalid_table: { recoveryClass: "manual", detail: [] },
   invalid_card: { recoveryClass: "manual", detail: [] },
   annotation_card: { recoveryClass: "manual", detail: ["blockId"] },
+  invalid_figma: { recoveryClass: "manual", detail: [] },
+  annotation_figma: { recoveryClass: "manual", detail: ["blockId"] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
@@ -184,6 +186,7 @@ const EXPECTED: Record<
   },
   decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  tldr_opted_out: { recoveryClass: "manual", detail: ["uuid", "field"] },
   decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
   decision_block_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_answer_too_long: { recoveryClass: "manual", detail: ["kind", "status"] },
@@ -286,6 +289,15 @@ describe("the failure contract", () => {
     });
     record((await rig.call("annotate", {
       uuid: doc.uuid, block_id: card.block.id, start: 0, end: 3, text: "Open this in the web editor",
+    })).payload);
+    record((await rig.call("insert_block", {
+      uuid: doc.uuid, type: "figma", text: "url: https://example.com/design/key\n\nCaption",
+    })).payload);
+    const figma = await rig.ok("insert_block", {
+      uuid: doc.uuid, after_block_id: doc.blockId, type: "figma", text: "url: https://www.figma.com/design/key\n\nCaption",
+    });
+    record((await rig.call("annotate", {
+      uuid: doc.uuid, block_id: figma.block.id, start: 0, end: 3, text: "New Figma caption thread",
     })).payload);
     const table = await rig.ok("insert_block", {
       uuid: doc.uuid, after_block_id: doc.blockId, type: "table", text: "| Header |\n| --- |\n| Cell |",
@@ -464,6 +476,21 @@ describe("the failure contract", () => {
         })
       ).payload,
     );
+    const marked = await seeded(rig);
+    setTldrOptOut(rig.instance.replicas.replica(marked.uuid).doc, true);
+    const beforeMarked = await rig.ok("get_doc", { uuid: marked.uuid });
+    const beforeMarkedLog = rig.instance.store.logSize();
+    const optedOut = await rig.call("set_metadata", {
+      uuid: marked.uuid, title: "Must stay unchanged", tldr: "Refused summary.",
+    });
+    expect(optedOut).toMatchObject({ isError: true, payload: {
+      error: "tldr_opted_out", field: "tldr", applied: false, partial: false, synced: false,
+    } });
+    expect(optedOut.payload.recovery).toContain("tldr_opt_in: true");
+    expect(rig.instance.store.logSize()).toBe(beforeMarkedLog);
+    expect(await rig.ok("get_doc", { uuid: marked.uuid })).toEqual(beforeMarked);
+    record(optedOut.payload);
+
     const archived = await seeded(rig);
     await rig.ok("archive_doc", { uuid: archived.uuid });
     record(

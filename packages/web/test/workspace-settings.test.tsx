@@ -7,6 +7,8 @@ import {
   createTagCatalogEntry,
   listTagCatalog,
   getWorkspaceName,
+  getWorkspaceMainRepository,
+  setWorkspaceMainRepository,
   setWorkspaceName,
   retireTagCatalogEntry,
   settingsRoom,
@@ -464,6 +466,73 @@ it("renames only shared workspace state and refuses invalid drafts without chang
   directory.connection.ydoc.destroy(); settings.connection.ydoc.destroy();
 });
 
+it("normalizes and clears the main repository, preserves other settings and refuses invalid input", async () => {
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  setWorkspaceName(settings.connection.ydoc, "Current name");
+  createTagCatalogEntry(settings.connection.ydoc, "product");
+  const catalog = listTagCatalog(settings.connection.ydoc);
+  const peer = peerOf(settings.connection.ydoc);
+  const host = await mount(null, ENDPOINT, settings.connection);
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Main repository" });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save main repository" });
+  try {
+    expect(input.value).toBe("");
+    act(() => typeInto(input, "https://github.com/Owner/Repo.git/"));
+    act(() => submit.click());
+    expect(input.value).toBe("Owner/Repo");
+    expect(getWorkspaceMainRepository(peer)).toBe("Owner/Repo");
+    act(() => typeInto(input, "https://github.com/Owner/Repo/issues/1"));
+    act(() => submit.click());
+    expect(within(host).getByRole("alert").textContent).toContain("owner/repo or a github.com repository address");
+    expect(getWorkspaceMainRepository(peer)).toBe("Owner/Repo");
+    act(() => typeInto(input, "Owner/Repo"));
+    act(() => setWorkspaceMainRepository(peer, "Other/Repo"));
+    expect(input.value).toBe("Other/Repo");
+    act(() => typeInto(input, "Local/draft"));
+    act(() => setWorkspaceMainRepository(peer, "Remote/repo"));
+    expect(input.value).toBe("Local/draft");
+    act(() => typeInto(input, ""));
+    act(() => submit.click());
+    expect(getWorkspaceMainRepository(peer)).toBeNull();
+    expect(input.value).toBe("");
+    expect(within(host).queryByRole("alert")).toBeNull();
+    expect(getWorkspaceName(peer)).toBe("Current name");
+    expect(listTagCatalog(peer)).toEqual(catalog);
+  } finally { settings.connection.ydoc.destroy(); peer.destroy(); }
+});
+
+it("waits for settings state and refuses main repository writes when disconnected or in a different room", async () => {
+  const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
+  setWorkspaceMainRepository(settings.connection.ydoc, "Owner/Repo");
+  const host = await mount(null, ENDPOINT, settings.connection);
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Main repository" });
+  const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save main repository" });
+  const form = input.form as HTMLFormElement;
+  const forceSubmit = (): void => {
+    act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  };
+  try {
+    expect(input.disabled).toBe(true);
+    expect(submit.disabled).toBe(true);
+    expect(input.value).toBe("");
+    forceSubmit();
+    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
+    settings.update({ hasReceivedServerState: true });
+    expect(input.value).toBe("Owner/Repo");
+    expect(input.disabled).toBe(false);
+    act(() => typeInto(input, "Changed/Repo"));
+    settings.update({ writable: false, connected: false });
+    expect(input.disabled).toBe(true);
+    forceSubmit();
+    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
+    settings.connection.room = settingsRoom("11111111-2222-4333-8444-555555555555");
+    settings.update({ writable: true, connected: true });
+    expect(input.disabled).toBe(true);
+    forceSubmit();
+    expect(getWorkspaceMainRepository(settings.connection.ydoc)).toBe("Owner/Repo");
+  } finally { settings.connection.ydoc.destroy(); }
+});
+
 it("follows shared names while pristine and preserves an edited rename draft", async () => {
   const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(settings.connection.ydoc);
@@ -601,6 +670,8 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
       case "own-hub-role":
       case "list-hub-admins":
       case "list-hub-workspaces":
+      case "suspend-workspace":
+      case "restore-workspace":
       case "remove-hub-admin": body = { status: "forbidden", hub: ACCESS_HUB }; break;
       case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
       case "list-devices": body = { status: "ok", hub: ACCESS_HUB, devices: [...devices] }; break;

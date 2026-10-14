@@ -20,7 +20,7 @@ const member = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername
 const device = { deviceId: DEVICE, signedInAt: Date.now(), current: true };
 const admin = { principalId: PRINCIPAL, githubAccountId: "1234", githubUsername: "octocat",
   workspaces: 0, lastSignedInAt: Date.now(), current: true };
-const workspace = { workspaceId: WORKSPACE, name: "Example project", members: 2, admins: ["octocat"] };
+const workspace = { workspaceId: WORKSPACE, status: "active", name: "Example project", members: 2, admins: ["octocat"] };
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -51,16 +51,31 @@ describe("shared management transport", () => {
   });
 
   it.each([
-    ["over-limit", () => Response.json({ status: "ok", private: "x".repeat(256) }), 64],
-    ["non-object", () => Response.json([]), undefined],
-    ["non-JSON", () => new Response("private-provider-error"), undefined],
-    ["empty body", () => new Response(null), undefined],
-  ])("rejects %s replies with only a fixed error", async (_name, response, limit) => {
+    ["over-limit", () => Response.json({ status: "ok", private: "x".repeat(256) }), 64, false],
+    ["non-object", () => Response.json([]), undefined, false],
+    ["non-JSON", () => new Response("private-provider-error"), undefined, true],
+    ["empty body", () => new Response(null), undefined, true],
+  ])("rejects %s replies with only a fixed error and transport status", async (_name, response, limit, updateRequired) => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(response());
     const request = manageRequest("https://hub.example", { operation: "list-devices" }, login,
       limit === undefined ? {} : { maxResponseBytes: limit });
     await expect(request).rejects.toThrow(ManagementResponseError);
-    await expect(request).rejects.toThrow("hub returned an invalid management response");
+    await expect(request).rejects.toMatchObject({ message: "hub returned an invalid management response", status: 200, updateRequired });
+  });
+
+  it.each([404, 502, 503, 504])("retains HTTP %s on a non-JSON reply without exposing its body", async status => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("private-provider-error", { status }));
+    const error: unknown = await manageRequest("https://hub.example", { operation: "own-hub-role" }, login)
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(ManagementResponseError);
+    expect(error).toMatchObject({ message: "hub returned an invalid management response", updateRequired: true, status });
+    expect(JSON.stringify(error)).not.toContain("private-provider-error");
+  });
+
+  it("retains HTTP status on a missing response body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
+    await expect(manageRequest("https://hub.example", { operation: "own-hub-role" }, login))
+      .rejects.toMatchObject({ updateRequired: true, status: 503 });
   });
 
   it("cancels an over-limit stream without reading the remainder", async () => {
@@ -104,6 +119,8 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-hub-admins" }, { status: "ok", admins: [admin], nextCursor: null }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace], nextCursor: null }],
     [{ operation: "remove-hub-admin", principalId: PRINCIPAL }, { status: "ok" }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" }],
     [{ operation: "own-role", workspaceId: WORKSPACE }, { status: "ok", role: "admin" }],
     [{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "octocat" }, { status: "ok", githubAccountId: "1234", githubUsername: "octocat" }],
     [{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "1234" }, { status: "already-member", member }],
@@ -170,6 +187,12 @@ describe("management replies exposed to a browser", () => {
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [workspace, workspace] }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, members: 1.5 }] }],
     [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, admins: ["private/token"] }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, status: undefined }] }],
+    [{ operation: "list-hub-workspaces" }, { status: "ok", workspaces: [{ ...workspace, status: "private-provider-text" }] }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: PRINCIPAL, workspaceStatus: "suspended" }],
+    [{ operation: "suspend-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "active" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE, workspaceStatus: "suspended" }],
+    [{ operation: "restore-workspace", workspaceId: WORKSPACE }, { status: "ok", workspaceId: WORKSPACE }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, current: false }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [{ ...device, signedInAt: "private" }] }],
     [{ operation: "list-devices" }, { status: "ok", devices: [device, device] }],
@@ -187,7 +210,7 @@ describe("management replies exposed to a browser", () => {
     for (const name of [undefined, 7, "", " name ", "line\nname", login.credential.key]) {
       expect(sanitizeManagementReply({ operation: "list-hub-workspaces" }, { status: 200,
         body: { status: "ok", workspaces: [{ ...workspace, name }], nextCursor: null } }, login)).toEqual({ status: 200,
-        body: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, members: 2, admins: ["octocat"] }], nextCursor: null } });
+        body: { status: "ok", workspaces: [{ workspaceId: WORKSPACE, status: "active", members: 2, admins: ["octocat"] }], nextCursor: null } });
     }
   });
 
@@ -200,5 +223,23 @@ describe("management replies exposed to a browser", () => {
     expect(sanitizeManagementReply({ operation: "list-hub-admins" }, { status: 200,
       body: { status: "ok", admins: [{ ...admin, lastSignedInAt: null }], nextCursor: null } }, login).body.admins)
       .toEqual([{ ...admin, lastSignedInAt: null }]);
+  });
+
+  it("keeps suspension results and fixed failures distinct from arbitrary upstream text", () => {
+    for (const operation of ["suspend-workspace", "restore-workspace"] as const) {
+      const action = { operation, workspaceId: WORKSPACE };
+      expect(sanitizeManagementReply(action, { status: 404,
+        body: { status: "workspace-not-found", message: "private", key: login.credential.key } }))
+        .toEqual({ status: 404, body: { status: "workspace-not-found" } });
+    }
+    expect(sanitizeManagementReply({ operation: "list-hub-workspaces" }, { status: 200,
+      body: { status: "ok", workspaces: [{ ...workspace, status: "suspended" }], nextCursor: null } }, login).body.workspaces)
+      .toEqual([{ ...workspace, status: "suspended" }]);
+    const action = { operation: "suspend-workspace", workspaceId: WORKSPACE } as const;
+    expect(sanitizeManagementReply(action, { status: 500,
+      body: { status: "closure-failed", applied: true, message: "private" } }))
+      .toEqual({ status: 500, body: { status: "closure-failed", applied: true } });
+    expect(() => sanitizeManagementReply(action, { status: 500,
+      body: { status: "closure-failed", applied: false } })).toThrow(ManagementResponseError);
   });
 });

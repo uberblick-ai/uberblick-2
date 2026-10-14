@@ -366,7 +366,7 @@ test(`column hover reaches its top menu and caret, focus and open menus keep it 
   await revealedColumns(table, [2]);
   await hitTarget(trigger);
   await trigger.click();
-  await expect(page.getByRole("menuitem")).toHaveText(["Delete column"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
   await page.getByRole("menu").hover();
   await page.mouse.move(0, 0);
   await revealedColumns(table, [2]);
@@ -411,8 +411,8 @@ test("keyboard reaches every column menu while the native strip reveals off-scre
   }
   await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
   await page.keyboard.press("Enter");
-  const deletion = page.getByRole("menuitem", { name: "Delete column", exact: true });
-  await expect(deletion).toBeFocused();
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeFocused();
+  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(button(page, "Column 8 actions")).toBeFocused();
@@ -444,7 +444,9 @@ test(`touch reveals column menus without moving cells and reaches both wide-tabl
   }))).toEqual(before);
   await button(page, "Column 1 actions").tap();
   await minimumTargets(page.getByRole("menuitem"));
-  await expect(page.getByRole("menuitem")).toHaveText(["Delete column"]);
+  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
+  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
   const wrapper = table.locator("..");
   await wrapper.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
@@ -462,6 +464,56 @@ test(`touch reveals column menus without moving cells and reaches both wide-tabl
   await pageFits(page);
 });
 }
+
+test("column moves swap every row, focus the moved column and each undo separately", { tag: "@webkit" }, async ({ page }, info) => {
+  const table = await openTable(page);
+  const headers = ["First", "Middle", "Last"];
+  const cells = ["left one", "target one", "right one", "left two", "target two", "right two"];
+  for (const [index, text] of [...headers, ...cells].entries()) {
+    await caretIn(table.locator("th, td").nth(index), info);
+    await page.keyboard.insertText(text);
+  }
+  await caretIn(table.locator("td").nth(1), info);
+  await activate(button(page, "Column 2 actions"), info);
+  await expect(page.getByRole("menuitem")).toHaveText(["Move column left", "Move column right", "Delete column"]);
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
+  await activate(page.getByRole("menuitem", { name: "Move column left", exact: true }), info);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(table.locator("th")).toHaveText(["Middle", "First", "Last"]);
+  await expect(table.locator("td")).toHaveText(["target one", "left one", "right one", "target two", "left two", "right two"]);
+  await expect(table.locator("tr").first().locator("td")).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
+  await expect.poll(() => table.locator("th").first().evaluate((cell) => cell.contains(document.getSelection()?.anchorNode ?? null))).toBe(true);
+  await page.mouse.move(0, 0);
+  await revealedColumns(table, [1]);
+
+  await activate(button(page, "Column 1 actions"), info);
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeDisabled();
+  await page.keyboard.press("Home");
+  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(table.locator("th")).toHaveText(headers);
+  await expect(table.locator("td")).toHaveText(cells);
+  await expect(editor(page)).toBeFocused();
+  await expect.poll(() => table.locator("th").nth(1).evaluate((cell) => cell.contains(document.getSelection()?.anchorNode ?? null))).toBe(true);
+  await page.mouse.move(0, 0);
+  await revealedColumns(table, [2]);
+
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(table.locator("th")).toHaveText(["Middle", "First", "Last"]);
+  await expect(table.locator("td")).toHaveText(["target one", "left one", "right one", "target two", "left two", "right two"]);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(table.locator("th")).toHaveText(headers);
+  await expect(table.locator("td")).toHaveText(cells);
+  await caretIn(table.locator("td").nth(2), info);
+  await activate(button(page, "Column 3 actions"), info);
+  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeEnabled();
+  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await pageFits(page);
+});
 
 test("caret and pointer reveal their own rows while hidden controls pass input to cells", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
@@ -625,7 +677,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await page.mouse.move(0, 0);
   await page.keyboard.press("Control+Alt+t");
   await expect(button(page, "Insert column before 1")).toBeFocused();
-  if (info.project.name !== "webkit-iphone") {
+  if (info.project.name !== "webkit-ipad") {
     const order = ["Insert column before 1", "Insert column after 1", "Insert column after 2", "Insert column after 3",
       "Column 1 actions", "Column 2 actions", "Column 3 actions",
       "Insert row after 1", "Insert row after 2", "Insert row after 3", "Row 1 actions", "Row 2 actions", "Row 3 actions"];
@@ -644,7 +696,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   }
   await page.keyboard.press("Enter");
   await expect(table.locator("th")).toHaveCount(4);
-  if (info.project.name === "webkit-iphone") {
+  if (info.project.name === "webkit-ipad") {
     // iOS's native Tab leaves the button set; caret shortcuts keep every
     // insertion available to an attached keyboard there.
     await caretIn(table.locator("tr").nth(1).locator("td").last(), info);
@@ -658,7 +710,7 @@ test("keyboard reaches insertion buttons from a table caret and each button inse
   await expect(table.locator("th")).toHaveCount(5);
   await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
 
-  if (info.project.name === "webkit-iphone") {
+  if (info.project.name === "webkit-ipad") {
     await caretIn(table.locator("tr").last().locator("td").first(), info);
     await page.keyboard.press("Control+Alt+ArrowDown");
   } else {

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer, type ViteDevServer } from "vite";
 import { devConfigDocument } from "../dev-config-document.js";
@@ -100,5 +101,12 @@ describe("checkout web project configuration", () => {
     const response = await fetch(new URL("uberblick-config.json", url));
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ hubUrl: "ws://localhost:1234", workspaces: [OVERRIDE], hubAuthToken: SECRET });
+    for (const path of ["/", `/${OVERRIDE}/document-deep-link`]) {
+      const page = await fetch(new URL(path, url));
+      expect(page.status).toBe(200);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      expect(page.headers.get("content-security-policy-report-only")).toBe(WEB_CONTENT_SECURITY_POLICY);
+      expect(page.headers.has("content-security-policy")).toBe(false);
+    }
   }, 30_000);
 });

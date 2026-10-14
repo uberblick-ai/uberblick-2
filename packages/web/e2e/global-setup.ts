@@ -33,7 +33,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const address = fallback.address();
     if (address === null || typeof address === "string") throw new Error("e2e: fallback has no TCP address");
     const bundle = { directory, hubUrl: `ws://127.0.0.1:${address.port}`, workspace: `e2e-${randomUUID()}` };
+    const buildStarted = performance.now();
     await buildAppBundle(bundle);
+    console.log(`e2e timing: bundle build ${Math.round(performance.now() - buildStarted)} ms`);
     process.env.UBERBLICK_E2E_BUNDLE = JSON.stringify(bundle);
     console.log("e2e: shared app bundle built once");
     return cleanup;

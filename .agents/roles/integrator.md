@@ -60,7 +60,9 @@ reviews' job, and a product question is an escalation.
 ## Context
 
 GitHub carries the PR, its gates, threads and linked issue. Read the product
-documents that issue's Pointers cite before validating acceptance criteria.
+documents that issue's Pointers cite before validating acceptance criteria. A
+technical PR with no linked issue is judged against its description, under
+[delivery-policy.md's Workflow](../protocols/delivery-policy.md#workflow).
 
 ## Records
 

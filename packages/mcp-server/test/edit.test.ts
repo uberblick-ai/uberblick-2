@@ -481,6 +481,7 @@ describe("the derived index", () => {
       {
         uuid: doc.uuid,
         title: "Tagged",
+        kind: "regular",
         tags: [
           {
             id: "00000000-0000-4000-8000-000000000001",
@@ -494,11 +495,7 @@ describe("the derived index", () => {
           },
         ],
         description: "A test document.",
-        // The description leads the indexed body, so a short document's
-        // snippet window reaches back over it. That is the visible cost of
-        // indexing the description as body text rather than as a column FTS5
-        // cannot add — see MirrorStore's docs_fts.
-        snippet: "A test document.\nquokka",
+        snippet: "quokka",
       },
     ]);
 

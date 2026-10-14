@@ -13,6 +13,7 @@ import { log } from "./log.js";
 import type { Replicas } from "./replica.js";
 import type { MirrorStore } from "./store.js";
 import { ServerWork } from "./server-work.js";
+import { SHUTDOWN_CLOSE_RESERVE_MS, SHUTDOWN_TIMEOUT_MS } from "./shutdown.js";
 import { seedTagCatalogOnce } from "./tag-catalog.js";
 import { registerTools } from "./tools.js";
 import { mcpVersion } from "./version.js";
@@ -34,8 +35,8 @@ export interface UberblickMcpServer {
   readonly store: MirrorStore;
   /** Attach a transport and start serving. */
   connect(transport: Transport): Promise<void>;
-  /** Close transport, drain admitted work, then release replicas and the store. */
-  close(): Promise<void>;
+  /** Drain admitted work and await hub acknowledgement before releasing replicas. */
+  close(deadline?: number): Promise<void>;
 }
 
 /**
@@ -99,7 +100,7 @@ export function createMcpServer(
         });
       });
     },
-    close() {
+    close(deadline = performance.now() + SHUTDOWN_TIMEOUT_MS) {
       if (closing !== null) return closing;
       closed = true;
       work.stop();
@@ -112,6 +113,10 @@ export function createMcpServer(
         // SDK close aborts requests and drops replies but does not await
         // handlers. Their local writes still need the live replica and log.
         await work.drain();
+        const pending = await replicas.waitForPendingChanges(deadline - SHUTDOWN_CLOSE_RESERVE_MS);
+        if (replicas.sync.enabled && pending > 0) {
+          log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
+        }
         await workspace.close();
       });
       return closing;

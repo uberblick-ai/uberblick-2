@@ -13,6 +13,7 @@ export {
   setDescription,
   setDiscussion,
   setTldr,
+  setTldrOptOut,
   setKind,
   setLinks,
   setStatus,
@@ -62,6 +63,8 @@ export type {
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
+export type { GitHubItem } from "./github-reference.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -91,11 +94,18 @@ export {
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
 
 export {
-  CARD_PARTS, CARD_NODE_NAMES, buildCardElement, cardButton, cardInline, cardPartElement,
-  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardInput,
-  seedNewCardParts, writeCardButton, writeCardText,
+  CARD_PARTS, CARD_NODE_NAMES, CARD_BUTTON_STYLES, CARD_BUTTON_COLORS, buildCardElement, cardButtons, cardInline, cardPartElement,
+  cardPartTexts, cardText, cardTextParts, isCardButtonHref, isSupportedCard, parseCardButton, parseCardButtons, parseCardInput,
+  seedNewCardParts, writeCardButton, writeCardButtons, writeCardText,
 } from "./card.js";
-export type { CardButton, CardInline, CardPart, CardText } from "./card.js";
+export type { CardButton, CardButtonStyle, CardButtonColor, CardInline, CardPart, CardText } from "./card.js";
+export {
+  buildFigmaElement, editFigma, figmaCaptionElement, figmaCaptionTexts, figmaFields,
+  figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaInput, writeFigmaInline, writeFigmaText,
+} from "./figma.js";
+export type { FigmaInline, FigmaText } from "./figma.js";
+export { FIGMA_PROVIDER, normalizeFigmaLink } from "./providers/figma.js";
+export type { FigmaFields } from "./providers/figma.js";
 
 export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {
@@ -125,7 +135,9 @@ export type { WorkspaceId } from "./workspace.js";
 export {
   MAX_WORKSPACE_NAME_LENGTH,
   WORKSPACE_SETTINGS_KEY,
+  getWorkspaceMainRepository,
   getWorkspaceName,
+  setWorkspaceMainRepository,
   setWorkspaceName,
   validateWorkspaceName,
 } from "./workspace-settings.js";
@@ -158,6 +170,7 @@ export {
   decisionDirectoryFields,
   decisionTopicArchived,
   directoryStubDiffers,
+  documentDirectoryFields,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
@@ -165,7 +178,7 @@ export {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";
-export type { DecisionDirectoryFields, DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
+export type { DecisionDirectoryFields, DirectoryUpsert, DocumentDirectoryFields, ListDirectoryOptions } from "./directory.js";
 
 export {
   EXAMPLE_TAGS,
@@ -196,6 +209,8 @@ export {
   BlockNotFoundError,
   CardAnnotationError,
   CardConversionError,
+  FigmaAnnotationError,
+  FigmaConversionError,
   ConflictingLinkMarksError,
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -212,6 +227,7 @@ export {
   StaleBlockError,
   InvalidTableError,
   InvalidCardError,
+  InvalidFigmaError,
   InvalidTableMappingError,
   TableMappingRequiredError,
   TableAnnotationError,

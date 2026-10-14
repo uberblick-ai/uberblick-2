@@ -7,6 +7,7 @@ import { WorkspacePromotions } from "./workspace-promotion.js";
 import { handleAccessManagement } from "./access-management.js";
 import { startAdminSetup } from "./admin-setup.js";
 import { GithubSignIn, handleGithubSignIn } from "./github-sign-in.js";
+import { handleBrowserSignIn } from "./browser-sign-in.js";
 import { GithubAccountLookup } from "./github-account-lookup.js";
 import { HubClaimState, handleHubClaimState } from "./hub-claim.js";
 import { HubAdminRegistry } from "./hub-admins.js";
@@ -61,7 +62,7 @@ function createTeamExtension(
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
-    admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
+    admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log }, hubAdmins);
   }
 
   let adminSetup: Awaited<ReturnType<typeof startAdminSetup>> | undefined;
@@ -77,6 +78,7 @@ function createTeamExtension(
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins)) return true;
+      if (await handleBrowserSignIn(signIn, request, response)) return true;
       return handleGithubSignIn(signIn, request, response);
     },
     async start() {

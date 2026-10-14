@@ -7,7 +7,8 @@ Reflect the scope briefly, preserve existing spoken decisions, and honor an
 already-chosen destination without repeating the menu. Leave technical grounding
 to the issue preparer.
 
-Use the protocol's linked reference only for shared drafts or resumption by UUID.
+Use the protocol's [RFC procedure](../protocols/rfc-resumption.md) only for shared
+RFCs, resumption by UUID or intakes from an RFC.
 Return the confirmed intake fields and chosen destination when handing off. If
 access or a required protocol is unavailable, name the limitation without
 claiming publication, preparation or queue changes.

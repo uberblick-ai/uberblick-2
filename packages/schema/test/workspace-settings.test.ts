@@ -3,12 +3,75 @@ import * as Y from "yjs";
 import {
   WORKSPACE_SETTINGS_KEY,
   createTagCatalogEntry,
+  getWorkspaceMainRepository,
   getWorkspaceName,
   listTagCatalog,
   setWorkspaceName,
+  setWorkspaceMainRepository,
   validateWorkspaceName,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
+
+describe("shared workspace main repository", () => {
+  it("reads unset without updates and persists one normalized setting beside name and tags", () => {
+    const settings = new Y.Doc();
+    setWorkspaceName(settings, "Product");
+    createTagCatalogEntry(settings, "product", "11111111-1111-4111-8111-111111111111");
+    const tags = listTagCatalog(settings);
+    const before = Y.encodeStateAsUpdate(settings);
+    expect(getWorkspaceMainRepository(settings)).toBeNull();
+    expect(Y.encodeStateAsUpdate(settings)).toEqual(before);
+    expect(setWorkspaceMainRepository(settings, "https://github.com/Owner/Repo.git/")).toBe("Owner/Repo");
+    expect(settings.getMap(WORKSPACE_SETTINGS_KEY).toJSON()).toEqual({ name: "Product", mainRepository: "Owner/Repo" });
+    expect(listTagCatalog(settings)).toEqual(tags);
+    const restored = new Y.Doc();
+    Y.applyUpdate(restored, Y.encodeStateAsUpdate(settings));
+    expect(getWorkspaceMainRepository(restored)).toBe("Owner/Repo");
+    setWorkspaceMainRepository(settings, "Other/Repo");
+    expect(getWorkspaceMainRepository(settings)).toBe("Other/Repo");
+    expect(setWorkspaceMainRepository(settings, "  ")).toBeNull();
+    expect(settings.getMap(WORKSPACE_SETTINGS_KEY).toJSON()).toEqual({ name: "Product" });
+  });
+
+  it("invalid writes change nothing and unreadable stored values read as unset", () => {
+    const settings = new Y.Doc();
+    setWorkspaceMainRepository(settings, "Owner/Repo");
+    const before = Y.encodeStateAsUpdate(settings);
+    for (const input of ["repo", "owner/repo/issues/1", "https://example.com/owner/repo"]) {
+      expect(() => setWorkspaceMainRepository(settings, input)).toThrow(/Main repository/);
+    }
+    expect(Y.encodeStateAsUpdate(settings)).toEqual(before);
+    for (const value of [false, 42, {}, "", "invalid", "https://example.com/owner/repo"]) {
+      settings.getMap<unknown>(WORKSPACE_SETTINGS_KEY).set("mainRepository", value);
+      const unreadable = Y.encodeStateAsUpdate(settings);
+      expect(getWorkspaceMainRepository(settings)).toBeNull();
+      expect(Y.encodeStateAsUpdate(settings)).toEqual(unreadable);
+    }
+    const foreign = new Y.Doc();
+    foreign.getText(WORKSPACE_SETTINGS_KEY).insert(0, "unreadable root");
+    const foreignState = Y.encodeStateAsUpdate(foreign);
+    expect(getWorkspaceMainRepository(foreign)).toBeNull();
+    expect(Y.encodeStateAsUpdate(foreign)).toEqual(foreignState);
+  });
+
+  it("concurrent fills converge to one whole identity in either delivery order", () => {
+    const [left, right] = replicaPair(() => {});
+    setWorkspaceMainRepository(left, "Owner/First");
+    setWorkspaceMainRepository(right, "Owner/Second");
+    const leftUpdate = Y.encodeStateAsUpdate(left);
+    const rightUpdate = Y.encodeStateAsUpdate(right);
+    const observers = [new Y.Doc(), new Y.Doc()];
+    Y.applyUpdate(observers[0]!, leftUpdate);
+    Y.applyUpdate(observers[0]!, rightUpdate);
+    Y.applyUpdate(observers[1]!, rightUpdate);
+    Y.applyUpdate(observers[1]!, leftUpdate);
+    syncDocs(left, right);
+    const winner = getWorkspaceMainRepository(left);
+    expect(["Owner/First", "Owner/Second"]).toContain(winner);
+    expect(getWorkspaceMainRepository(right)).toBe(winner);
+    for (const observer of observers) expect(getWorkspaceMainRepository(observer)).toBe(winner);
+  });
+});
 
 describe("shared workspace name", () => {
   it("starts unnamed and writes only one name beside the unchanged tag catalog", () => {

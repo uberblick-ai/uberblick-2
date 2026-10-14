@@ -26,11 +26,14 @@ import {
   appendBlock,
   addComment,
   createAnnotation,
+  documentDirectoryFields,
   editBlock,
   getDirectoryEntry,
   getDirectoryMap,
   getMetaMap,
   initDoc,
+  resolveAnnotationRange,
+  setAnnotationResolved,
   setDescription,
   setKind,
   setStatus,
@@ -81,6 +84,7 @@ function open(title: string, options: { stub?: string } = {}): Rig {
   upsertDirectoryEntry(directory, {
     uuid: UUID,
     title: options.stub ?? title,
+    openThreadCount: 0,
     createdAt: T0,
     updatedAt: T0,
   });
@@ -160,11 +164,13 @@ describe("directory stamps from the web", () => {
       expect(getDirectoryEntry(peer, UUID)).toMatchObject({
         title: "Lease duration", governs, topic: predecessor, supersedes: predecessor,
         tldr: "Renew a short lease.", agentStance: true, decidedBy: "Reviewer",
-        decidedAt: "2031-01-01T00:00:00.000Z", commentCount: 2, deleted: true,
+        decidedAt: "2031-01-01T00:00:00.000Z", commentCount: 2, openThreadCount: 2,
+        deleted: true,
       });
       addComment(doc, thread.id, "Reviewer", "A reply");
       addComment(doc, second.id, "Author", "Another reply");
       expect(getDirectoryEntry(peer, UUID)?.commentCount).toBe(4);
+      expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(2);
       doc.transact(() => {
         meta.delete("agentStance");
         meta.delete("decidedBy");
@@ -182,7 +188,7 @@ describe("directory stamps from the web", () => {
     }
   });
 
-  it("keeps an ordinary document's TL;DR and comments out of its stub", () => {
+  it("keeps decision-only fields out of an ordinary document's stub", () => {
     const client = rig("Ordinary");
     setTldr(client.doc, "A regular summary.");
     const block = appendBlock(client.doc, { type: "paragraph", text: "prose" });
@@ -190,6 +196,123 @@ describe("directory stamps from the web", () => {
     expect(stub(client)).not.toHaveProperty("tldr");
     expect(stub(client)).not.toHaveProperty("commentCount");
     expect(stub(client)).not.toHaveProperty("topic");
+    expect(stub(client).openThreadCount).toBe(1);
+  });
+
+  it("counts open threads independently of replies and anchors, and stamps count changes immediately", () => {
+    const client = rig("Comments");
+    const block = appendBlock(client.doc, { type: "paragraph", text: "prose" });
+    expect(stub(client).openThreadCount).toBe(0);
+
+    vi.setSystemTime(T0 + 1_000);
+    const thread = createAnnotation(client.doc, block, 0, 5, "Author", "A comment");
+    expect(stub(client)).toMatchObject({
+      openThreadCount: 1, updatedAt: T0 + 1_000,
+    });
+    expect(client.crossed()).toBe(1);
+
+    vi.setSystemTime(T0 + 2_000);
+    addComment(client.doc, thread.id, "Reviewer", "A reply");
+    type(client, block, "prose", "");
+    expect(resolveAnnotationRange(client.doc, thread.id)).toBeNull();
+    expect(stub(client)).toMatchObject({
+      openThreadCount: 1, updatedAt: T0 + 1_000,
+    });
+    expect(client.crossed()).toBe(1);
+
+    vi.setSystemTime(T0 + 3_000);
+    setAnnotationResolved(client.doc, thread.id, true);
+    expect(stub(client)).toMatchObject({
+      openThreadCount: 0, updatedAt: T0 + 3_000,
+    });
+
+    vi.setSystemTime(T0 + 4_000);
+    setAnnotationResolved(client.doc, thread.id, false);
+    expect(stub(client)).toMatchObject({
+      openThreadCount: 1, updatedAt: T0 + 4_000,
+    });
+    expect(client.crossed()).toBe(3);
+  });
+
+  it("backfills known counts on attach and hydration, then repairs peer thread changes without stamping", () => {
+    const source = new Y.Doc();
+    initDoc(source, { uuid: UUID, title: "Existing comments" });
+    const block = appendBlock(source, { type: "paragraph", text: "open done" });
+    const open = createAnnotation(source, block, 0, 4, "Author", "Open");
+    const resolved = createAnnotation(source, block, 5, 9, "Author", "Done");
+    setAnnotationResolved(source, resolved.id, true);
+
+    for (const hydrate of [false, true]) {
+      const doc = new Y.Doc();
+      if (!hydrate) Y.applyUpdate(doc, Y.encodeStateAsUpdate(source));
+      const directory = new Y.Doc();
+      upsertDirectoryEntry(directory, {
+        uuid: UUID, title: "Existing comments", createdAt: T0, updatedAt: T0,
+      });
+      const peer = peerOf(directory);
+      const stop = watchDocumentStub(doc, directory);
+      try {
+        vi.setSystemTime(T0 + WINDOW * 3);
+        if (hydrate) Y.applyUpdate(doc, Y.encodeStateAsUpdate(source));
+        expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+          openThreadCount: 1, createdAt: T0, updatedAt: T0,
+        });
+
+        const remote = peerOf(doc);
+        const added = createAnnotation(remote, block, 4, 5, "Reviewer", "New");
+        expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(2);
+        addComment(remote, added.id, "Author", "Reply");
+        expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(2);
+        setAnnotationResolved(remote, open.id, true);
+        expect(getDirectoryEntry(peer, UUID)?.openThreadCount).toBe(1);
+        setAnnotationResolved(remote, open.id, false);
+        expect(getDirectoryEntry(peer, UUID)).toMatchObject({
+          openThreadCount: 2, createdAt: T0, updatedAt: T0,
+        });
+      } finally {
+        stop();
+      }
+    }
+  });
+
+  it("publishes the current count whichever replica wins the whole-entry stub write", () => {
+    for (const [browserClientId, remoteClientId] of [[2, 3], [3, 2]] as const) {
+      const source = new Y.Doc();
+      initDoc(source, { uuid: UUID, title: "Shared comments" });
+      const block = appendBlock(source, { type: "paragraph", text: "comment" });
+      const thread = createAnnotation(source, block, 0, 7, "Author", "A comment");
+      const browserDoc = new Y.Doc();
+      Y.applyUpdate(browserDoc, Y.encodeStateAsUpdate(source));
+      const base = new Y.Doc();
+      base.clientID = 1;
+      upsertDirectoryEntry(base, {
+        uuid: UUID, title: "Shared comments", openThreadCount: 1,
+        createdAt: T0, updatedAt: T0,
+      });
+      const browser = new Y.Doc();
+      browser.clientID = browserClientId;
+      Y.applyUpdate(browser, Y.encodeStateAsUpdate(base));
+      const remote = new Y.Doc();
+      remote.clientID = remoteClientId;
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(base));
+      const stop = watchDocumentStub(browserDoc, browser);
+      try {
+        vi.setSystemTime(T0 + 1_000);
+        setAnnotationResolved(source, thread.id, true);
+        upsertDirectoryEntry(remote, {
+          uuid: UUID, title: "Shared comments", ...documentDirectoryFields(source),
+          updatedAt: T0 + 1_000,
+        });
+        Y.applyUpdate(browserDoc, Y.encodeStateAsUpdate(source));
+        expect(getDirectoryEntry(browser, UUID)?.openThreadCount).toBe(0);
+        Y.applyUpdate(browser, Y.encodeStateAsUpdate(remote));
+        Y.applyUpdate(remote, Y.encodeStateAsUpdate(browser));
+        expect(getDirectoryEntry(browser, UUID)?.openThreadCount).toBe(0);
+        expect(getDirectoryEntry(remote, UUID)?.openThreadCount).toBe(0);
+      } finally {
+        stop();
+      }
+    }
   });
 
   it("defers stub repair and its authored stamp until the directory is writable", () => {
@@ -294,6 +417,7 @@ describe("directory stamps from the web", () => {
       uuid: UUID,
       title: "Publish after sync",
       tags: [],
+      openThreadCount: 0,
       createdAt: T0,
     });
     stop();
@@ -348,6 +472,7 @@ describe("directory stamps from the web", () => {
     upsertDirectoryEntry(directory, {
       uuid: UUID,
       title: "Arrived",
+      openThreadCount: 0,
       createdAt: T0,
       updatedAt: T0,
     });
@@ -460,7 +585,7 @@ describe("directory stamps from the web", () => {
     stop();
   });
 
-  it("backfills only createdAt on attach and preserves it through later repairs", () => {
+  it("backfills createdAt on attach and preserves it through later repairs", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Legacy" });
     const directory = new Y.Doc();
@@ -504,6 +629,8 @@ describe("directory stamps from the web", () => {
   it("does not backfill a tombstone missing createdAt", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Archived" });
+    const block = appendBlock(doc, { type: "paragraph", text: "still open" });
+    createAnnotation(doc, block, 0, 10, "Author", "Unresolved before archive");
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, { uuid: UUID, title: "Archived" });
     tombstoneDirectoryEntry(directory, UUID);
@@ -587,7 +714,7 @@ describe("directory stamps from the web", () => {
     const stop = watchDocumentStub(doc, directory);
     expect(getDirectoryEntry(peer, UUID)).toEqual({
       uuid: UUID, title: "Legacy page", tags: [], updatedAt: T0,
-      createdAt: T0,
+      openThreadCount: 0, createdAt: T0,
     });
     setTitle(doc, "Edited legacy page");
     expect(getDirectoryEntry(peer, UUID)?.title).toBe("Edited legacy page");

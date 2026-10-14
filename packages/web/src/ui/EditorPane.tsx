@@ -13,6 +13,7 @@ import {
   MAX_TLDR_LENGTH,
   parseRoom,
   setTldr,
+  setTldrOptOut,
   setTitle,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
@@ -611,6 +612,7 @@ function ForeignFallback({
 // live, and actual binding inputs still pass through React's props comparison.
 const BoundEditor = memo(function BoundEditor({
   connection,
+  catalogConnection,
   author,
   archived,
   contentReadOnly,
@@ -618,6 +620,7 @@ const BoundEditor = memo(function BoundEditor({
   onSelectThread,
 }: {
   connection: RoomConnection;
+  catalogConnection: RoomConnection | null;
   author: string;
   /** Archived documents also withhold comments. */
   archived: boolean;
@@ -661,6 +664,7 @@ const BoundEditor = memo(function BoundEditor({
         setBindingEpoch((epoch) => epoch + 1);
       },
       docLinks,
+      workspaceSettings: catalogConnection?.ydoc ?? null,
     });
     // Delegate comment-highlight clicks on the host. Document references and
     // external links win over surrounding thread selection so one gesture has
@@ -755,7 +759,7 @@ const BoundEditor = memo(function BoundEditor({
       setEditor(null);
       binding.destroy();
     };
-  }, [connection, docLinks, onSelectThread, bindingEpoch]);
+  }, [connection, catalogConnection, docLinks, onSelectThread, bindingEpoch]);
 
   /**
    * Change ProseMirror editable in place to preserve caret, scroll, selection
@@ -941,7 +945,11 @@ export function EditorPane({
   const foreign = useForeignBlocks(connection);
   const { writable } = useRoomStatus(connection);
   const openThreads = threads.filter((thread) => !thread.resolved).length;
-  const editingTldr = meta?.kind !== "decision" && connection?.room === tldrEditorRoom;
+  const editingTldr = meta?.kind !== "decision" && meta?.tldrOptOut !== true && connection?.room === tldrEditorRoom;
+
+  useEffect(() => {
+    if (meta?.tldrOptOut === true) setTldrEditorRoom(null);
+  }, [meta?.tldrOptOut]);
 
   if (connection === null) {
     return (
@@ -989,7 +997,16 @@ export function EditorPane({
           onArchive={onArchive}
           onArchiveConfirmationFocusChange={onArchiveConfirmationFocusChange}
           hasTldr={meta?.tldr != null}
-          onEditTldr={() => setTldrEditorRoom(connection.room)}
+          onEditTldr={() => {
+            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            if (getMeta(connection.ydoc).tldrOptOut === true) setTldrOptOut(connection.ydoc, false);
+            setTldrEditorRoom(connection.room);
+          }}
+          onRemoveTldr={() => {
+            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+            setTldrOptOut(connection.ydoc, true);
+            setTldrEditorRoom(null);
+          }}
         />
         {header ?? <input
           className="ub-title"
@@ -1045,6 +1062,7 @@ export function EditorPane({
           ) : (
             <BoundEditor
               connection={connection}
+              catalogConnection={catalogConnection}
               author={author}
               archived={archived}
               contentReadOnly={contentReadOnly}

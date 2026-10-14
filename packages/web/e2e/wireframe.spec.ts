@@ -112,6 +112,50 @@ async function chooseLanguage(page: Page, language: string, keyboard = false): P
   await expect(editor(page)).toBeFocused();
 }
 
+test("the renderer loads on first use and later edits recover from failed chunk loads", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const uuid = await wireframeDoc(session, "Wireframe renderer recovery", SOURCE, "");
+  const requests: string[] = [];
+  let unavailable = true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async (page) => {
+      await page.route(/\/assets\/wireframe-renderer-[^/]+\.js(?:\?.*)?$/, async (route) => {
+        requests.push(route.request().url());
+        if (unavailable) await route.fulfill({ status: 503, contentType: "text/javascript", headers: { "Cache-Control": "no-store" }, body: "Temporarily unavailable" });
+        else await route.continue();
+      });
+    },
+  });
+  await expect(page.locator(".ub-code > code")).toHaveText(SOURCE);
+  expect(requests).toHaveLength(0);
+  await caretEnd(page.locator(".ub-code > code"));
+  await chooseLanguage(page, "wireframe", true);
+  const diagnostics = page.locator(".ub-wireframe-diagnostics");
+  await expect(diagnostics).toContainText("Preview cannot be loaded:");
+  await expect(preview(page).locator(".wf-root")).toHaveCount(0);
+  expect(requests).toHaveLength(1);
+  const firstDiagnostic = await diagnostics.locator("li").elementHandle();
+  if (firstDiagnostic === null) throw new Error("e2e: missing renderer load diagnostic");
+  const failedEdit = SOURCE.replace("Delete draft?", "Still unavailable?");
+  await editSource(session, uuid, failedEdit);
+  await expect.poll(() => requests.length).toBe(2);
+  await expect.poll(() => firstDiagnostic.evaluate(element => element.isConnected)).toBe(false);
+  await expect(diagnostics).toContainText("Preview cannot be loaded:");
+  unavailable = false;
+  const recovered = SOURCE.replace("Delete draft?", "Recovered draft?");
+  await editSource(session, uuid, recovered);
+  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Recovered draft?");
+  await expect(diagnostics).toBeHidden();
+  expect(requests).toHaveLength(3);
+  expect(new Set(requests).size).toBe(3);
+  expect(await authoredText(source(page))).toBe(recovered);
+  expect((await codeBlock(session, uuid)).text).toBe(recovered);
+  await editSource(session, uuid, SOURCE);
+  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
+  expect(requests).toHaveLength(3);
+  expect(new URL(page.url()).pathname).toBe(`/${harness().workspace}/${uuid}`);
+});
+
 test("the language picker makes a wireframe, Source returns its caret, and another language restores ordinary code", async ({ browser }) => {
   const session = writer();
   const uuid = await wireframeDoc(session, "Wireframe picker", SOURCE, "");
@@ -386,7 +430,7 @@ test("warning banners use the product warning colours in both appearances", { ta
   }
 });
 
-test("a phone keeps very wide wireframe content scrolling inside the block", { tag: "@webkit-iphone" }, async ({ browser }, info) => {
+test("a phone keeps very wide wireframe content scrolling inside the block", async ({ browser }, info) => {
   const uuid = await wireframeDoc(writer(), "Phone wireframe", wideSource(12));
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {

@@ -384,7 +384,6 @@ export class HubSync {
       return;
     }
 
-    // Decision: 27805659-0dda-404c-a884-599cad021f64
     this.socket = new UnqueuedHocuspocusProviderWebsocket({
       url: config.hubUrl,
       WebSocketPolyfill: this.connection.websocket(),
@@ -1021,33 +1020,43 @@ export class HubSync {
    * of corpus or queue size. Known unavailability ends early; unfinished rooms
    * remain synced: false and a connected drain owes another settle on the next call.
    */
-  async waitForQuiet(): Promise<void> {
+  async waitForQuiet(options: {
+    /** Use a narrower acknowledgement condition than all attached rooms. */
+    isQuiet?: () => boolean;
+    /** Absolute monotonic deadline shared with the caller's remaining work. */
+    deadline?: number;
+  } = {}): Promise<void> {
     if (this.socket === null || this.destroyed) {
       return;
     }
+    const deadline = options.deadline ?? Infinity;
 
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
     while (this.socketStatus !== "connected") {
-      if (this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline) {
+      if (
+        this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline ||
+        performance.now() >= deadline
+      ) {
         return;
       }
-      await delay(25);
+      await delay(Math.min(25, Math.max(0, deadline - performance.now())));
     }
     if (this.refusedByHub()) {
       return;
     }
 
     const syncDeadline = Date.now() + this.config.syncTimeoutMs;
-    while (!this.allQuiet()) {
+    while (!(options.isQuiet?.() ?? this.allQuiet())) {
       if (
         (this.socketStatus !== "connected" && !this.checkingDeviceRefusal) ||
         this.failedDial ||
         this.refusedByHub() ||
-        Date.now() >= syncDeadline
+        Date.now() >= syncDeadline ||
+        performance.now() >= deadline
       ) {
         return;
       }
-      await delay(25);
+      await delay(Math.min(25, Math.max(0, deadline - performance.now())));
     }
   }
 

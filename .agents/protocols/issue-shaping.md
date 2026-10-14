@@ -48,12 +48,13 @@ Writing requires explicit authorization for meaning and destination. Reuse prior
 authorization: “file it” or “queue it for preparation” chooses an issue. Silence
 or a request for more analysis is not approval. If undecided, offer:
 
-- **Discuss with coworkers:** publish a draft requirement.
+- **Discuss with coworkers:** publish an RFC as a regular document, or reuse
+  one the human confirms.
 - **Create an intake:** file confirmed scope for a maintainer to start.
 
 Do not choose from size or confidence, or repeat an answered menu. Neither path
-authorizes `ready` or implementation. Read [requirement-resumption.md](requirement-resumption.md)
-only for shared drafts or resumption by UUID.
+authorizes `ready` or implementation. Read [rfc-resumption.md](rfc-resumption.md)
+only for shared RFCs, resumption by UUID or intakes from an RFC.
 
 ## Record durable choices
 
@@ -61,12 +62,24 @@ Apply [delivery policy's when-to-record test](delivery-policy.md#decision-record
 Qualifying choices need decision records, not just issue text. Discover relevant
 decision records and any governing lifecycle guidance by purpose under
 [AGENTS.md](../../AGENTS.md#read-for-the-action); use installed MCP schemas for calls.
-The meaning/destination authorization above applies. With the person present,
-record their actual choice as `decided` through `create_doc` or `set_status`
-with `answer: {who, when, where}`, not an agent stance; unanswered topics stay
-`open` with a recommendation. Changes to decided records require an `open`
-successor naming `supersedes`, effective only after recorded human approval.
-Link the record from the intake instead of copying its reasoning; it grants no queue authority.
+The meaning/destination authorization above applies; publishing an RFC creates
+no record on its own. When the person wants a topic for a shaped choice, follow
+[the explicit RFC connection](rfc-resumption.md#connect-a-decision-topic): an
+`open` first record uses `related` and `discussion`, and an `open` reconsideration
+uses `supersedes` and `discussion`. Never create an RFC automatically or tag the
+related page. Write one to three short answer blocks with a brief reason, not
+a TL;DR, decision line, heading or Links section. Guidance belongs on the related
+page (delivery drafts it through `Corpus update`); detailed options, evidence and
+debate belong in the connected RFC or linked GitHub item.
+
+With the person present, record their actual choice through `create_doc` or
+`set_status` with `answer: {who, when, where}`, not an agent stance. Settle an
+RFC-connected open record with `set_status`; unanswered topics stay `open`,
+with a recommendation only when authorized. A successor takes effect only
+after recorded human approval. Reject and withdraw through MCP under the
+existing recorded-answer rules; the web remains a place to read and comment.
+Link the record from the intake instead of copying its reasoning; it grants
+no queue authority.
 
 ## Create a small intake
 
@@ -97,6 +110,6 @@ otherwise leave it unset. Tell the human to set Request Source `Human` in the si
 
 Do not invent `Touches`, relationships, architecture, acceptance criteria,
 Pointers or `ready`; preparation supplies the grounded contract under ISSUE_SPEC.
-Stop after the authorized draft or intake. If creation is unavailable, return the
+Stop after the authorized RFC or intake. If creation is unavailable, return the
 handoff, chosen destination and limitation to the coordinator; never claim creation,
 preparation or readiness.

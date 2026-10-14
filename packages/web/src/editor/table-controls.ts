@@ -1,5 +1,4 @@
-// Decision: 211465cd-c58b-44ad-b711-88b5eae825b0
-/** Table controls act on the live shared row, with independent undo steps. */
+/** Table controls act on live shared targets, with independent undo steps. */
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import * as Y from "yjs";
@@ -90,6 +89,36 @@ export function deleteTableColumn(editor: Editor, target: TableColumnTarget): bo
   return true;
 }
 
+/** Clone only the chosen cells so identical neighbours keep their identities. */
+export function moveTableColumn(editor: Editor, target: TableColumnTarget, direction: -1 | 1): boolean {
+  const live = resolveTableColumn(editor, target);
+  const doc = target.table.doc;
+  if (live === null || doc === null || (direction !== -1 && direction !== 1)) return false;
+  const destination = live.columnIndex + direction;
+  if (destination < 0 || destination >= live.node.child(0).childCount) return false;
+  const rows = target.table.toArray() as Y.XmlElement[];
+  const copies = rows.map((row) => ({ row, cell: (row.get(live.columnIndex) as Y.XmlElement).clone() }));
+  const header = copies[0];
+  if (header === undefined) return false;
+  endUndoCapture(editor.state);
+  doc.transact(() => {
+    copies.forEach(({ row, cell }) => {
+      row.delete(live.columnIndex, 1);
+      row.insert(destination, [cell]);
+    });
+  }, ySyncPluginKey);
+  endUndoCapture(editor.state);
+
+  // The deleted header cannot anchor the caret in its newly inserted copy.
+  const moved = resolveTableColumn(editor, { ...target, cell: header.cell });
+  if (moved !== null) {
+    let cellTextPos = moved.pos + 4;
+    for (let index = 0; index < moved.columnIndex; index += 1) cellTextPos += moved.node.child(0).child(index).nodeSize;
+    editor.commands.setTextSelection(cellTextPos);
+  }
+  return true;
+}
+
 /** Keep the Yjs type itself: remote transactions can replace every PM node. */
 export function tableRowTarget(editor: Editor, tableId: string, rowIndex: number): TableRowTarget | null {
   if (!editor.isEditable || !Number.isInteger(rowIndex) || rowIndex < 0) return null;
@@ -132,7 +161,8 @@ export function resolveTableRow(editor: Editor, target: TableRowTarget): Resolve
 /**
  * Move only the source row: PM reordering rewrites intervening same-type rows.
  * Cloning preserves text, formatting and comments; delete/copy merge limits
- * remain those described in How to Use It. Gaps range from below header to end.
+ * remain those described in Editing in the web editor.
+ * Gaps range from below header to end.
  */
 export function moveTableRow(editor: Editor, target: TableRowTarget, gap: number): boolean {
   const live = resolveTableRow(editor, target);

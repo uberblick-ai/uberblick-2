@@ -9,20 +9,20 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
   server.registerTool("set_metadata", {
     title: "Set document metadata together",
     description:
-      "Set a nonempty subset of title, description, tldr, tags, curated links and decision discussion; omitted " +
-      "fields stay unchanged. All validate before writes; refusals change nothing and field failures name field. " +
-      "Return metadata with durability and no TL;DR reminder. Title/description cannot be empty or " +
-      "cleared; tldr: null clears the person-facing summary. Tags/links replace sets; [] clears. Use active tag " +
-      "ids/exact names from list_tags; assigned retired/unresolved ids may remain. New link UUIDs must be " +
-      "directory-known; archived or unchanged targets are accepted. Only an open decision accepts discussion: " +
-      "a live, locally readable non-decision RFC UUID or null. Reuse/create the RFC first. Separate from curated " +
-      "links and recorded answer, it is fixed after deciding/rejecting/withdrawing. No RFC/page edits or tags, " +
-      "document creation, or approvalFingerprint/approvalChanged change. Open decisions refuse non-null " +
+      "Set title, description, tldr, tags, curated links or decision discussion together; name at least one. " +
+      "Omitted fields stay unchanged. Refusals write nothing; field failures name field. Returns metadata/durability, " +
+      "no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears while preserving the mark; " +
+      "marked pages refuse a summary with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. " +
+      "MCP cannot mark pages. Tags/links replace sets; [] clears. Use list_tags active ids/exact names; assigned " +
+      "retired/unresolved ids may remain. New links must be directory-known; archived/unchanged targets accepted. " +
+      "Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create " +
+      "RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. " +
+      "Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null " +
       "tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; " +
-      "description/tags/links stay writable. Decision answers use one to three short answer blocks with a brief " +
-      "reason; guidance on the related page, discussion in an RFC. Stub answerPreview uses legacy TL;DR/first " +
-      "paragraph/list; page get_doc marks related or linked topics. Answer blocks differ from recorded answer " +
-      "{who, when, where}. Archived documents refuse all metadata; lifecycle uses set_status." +
+      "description/tags/links writable. Decision answers use one to three short answer blocks and a brief reason; " +
+      "guidance on related page, discussion in RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; " +
+      "get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived " +
+      "documents refuse metadata; lifecycle uses set_status." +
       helpPointer("set_metadata"),
     outputSchema: outputSchemas.set_metadata,
     inputSchema,

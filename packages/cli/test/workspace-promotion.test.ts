@@ -8,7 +8,7 @@ import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
-import { getWorkspaceName, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
+import { getWorkspaceName, getWorkspaceMainRepository, setWorkspaceMainRepository, listDirectory, readSidebar, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UB_BIN, removeTempDirs, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -216,6 +216,7 @@ describe("workspace creation and promotion", () => {
     try {
       const entry = listDirectory(local.replicas.directory().doc)[0]!;
       tombstoneDirectoryEntry(local.replicas.directory().doc, entry.uuid);
+      setWorkspaceMainRepository(local.replicas.settings().doc, "acme/main-repository");
     } finally { await local.close(); }
     const expected = await syncWorkspace(offline(box));
     const { hub, endpoint, login, administered } = await hubFor(box, role);
@@ -256,6 +257,9 @@ describe("workspace creation and promotion", () => {
     const hydrated = await syncWorkspace(offline(other));
     expect(isIdentical(compareCorpus(expected.entries, hydrated.entries))).toBe(true);
     expect(isIdentical(compareCorpus(expected.workspace!, hydrated.workspace!))).toBe(true);
+    const joinedLocal = createMcpServer(offline(other));
+    try { expect(getWorkspaceMainRepository(joinedLocal.replicas.settings().doc)).toBe("acme/main-repository"); }
+    finally { await joinedLocal.close(); }
   });
 
   it.each(["admin", "member", null] as const)("refuses a non-hub administrator with workspace role %s without upload or changing the hub or project binding", async role => {
@@ -286,6 +290,16 @@ describe("workspace creation and promotion", () => {
     hub.memberships!.grant({ workspaceId: selected(box).workspaceId, principalId: login.identity.id, role: "admin" });
     const before = accessRows(hub);
     const binding = bindingBytes(box);
+    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "suspended");
+    const suspended = await runInProcess(["workspace", "promote", endpoint], box);
+    expect(suspended.status, suspended.output).toBe(1);
+    expect(suspended.stderr).toContain("workspace is suspended on this hub");
+    expect(suspended.stderr).toContain("ask a hub administrator to restore it");
+    expect(suspended.stderr).not.toContain("rerun this command");
+    expect(suspended.stderr).toContain("local workspace remains usable");
+    expect(bindingBytes(box)).toBe(binding);
+    expect(accessRows(hub)).toEqual(before);
+    hub.hubAdmins!.setWorkspaceStatus(login.identity.id, selected(box).workspaceId, "active");
     const conflict = await runInProcess(["workspace", "promote", endpoint], box);
     expect(conflict.status, conflict.output).toBe(1);
     expect(conflict.stderr).toContain("already holds this workspace UUID");
@@ -325,9 +339,22 @@ describe("workspace creation and promotion", () => {
     expect(hub.hubAdmins!.isAdmin(login.identity.id)).toBe(false);
     const before = accessRows(hub);
     expect(before.receipts).toHaveLength(1);
+    const attemptPath = readdirSync(join(box.configHome, "uberblick"))
+      .find(name => name.startsWith(".workspace-promotion-") && name.endsWith(".json"))!;
+    const attempt = readFileSync(join(box.configHome, "uberblick", attemptPath));
+    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "suspended");
+    const suspended = await runInProcess(["workspace", "promote", endpoint], box);
+    expect(suspended.status, suspended.output).toBe(1);
+    expect(suspended.stderr).toContain("workspace is suspended on this hub");
+    expect(suspended.stderr).not.toContain("rerun this command");
+    expect(accessRows(hub)).toEqual(before);
+    expect(bindingBytes(box)).toBe(binding);
+    expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
+    hub.hubAdmins!.setWorkspaceStatus(other.id, selected(box).workspaceId, "active");
     const retried = await runInProcess(["workspace", "promote", endpoint], box);
     expect(retried.status, retried.output).toBe(0);
     expect(accessRows(hub)).toEqual(before);
+    expect(readFileSync(join(box.configHome, "uberblick", attemptPath))).toEqual(attempt);
     expect(selected(box).hubUrl).toBe(endpoint);
     const created = await runInProcess(["workspace", "create", "Another local workspace"], box);
     expect(created.status, created.output).toBe(0);

@@ -8,10 +8,9 @@
  * peer. A listing that agreed with local history but not with the directory
  * would be a second corpus, which is the one thing discovery cannot be.
  *
- * Both filters are that same derivation: the type mode reads the cached
- * lifecycle shape, and the field narrows by the cached title. Neither crosses
- * a boundary, so there is nothing to inject and nothing to await — which is
- * itself asserted, because "consults only the directory" is the claim.
+ * Type and topic-state filters derive from directory caches. Text searches
+ * supply ranked record UUIDs through an injected local search client; the list
+ * still reads row content from the directory without opening document rooms.
  *
  * The app is mounted whole over shared Y.Docs (the `sidebar.test.tsx`
  * harness): a room is a plain Y.Doc, because the transport is not what is
@@ -30,6 +29,7 @@ import * as Y from "yjs";
 import {
   appendBlock,
   createGroup,
+  createTagCatalogEntry,
   directoryRoom,
   getDirectoryMap,
   initDoc,
@@ -46,9 +46,11 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import { DocumentList, INITIAL_DOCUMENT_LIST_STATE, sortDirectory } from "../src/shell/DocumentList.js";
+import { DocumentList, sortDirectory } from "../src/shell/DocumentList.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { formatTimestamp } from "../src/ui/timestamps.js";
+import * as config from "../src/config.js";
+import * as documentSearch from "../src/shell/document-search.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -199,8 +201,19 @@ function typeInto(input: HTMLInputElement, value: string): void {
 
 function filter(host: HTMLElement): HTMLInputElement {
   return within(host).getByRole<HTMLInputElement>("searchbox", {
-    name: "Filter this list by title",
+    name: "Search",
   });
+}
+
+function localSearch(answers: Readonly<Record<string, readonly string[]>>) {
+  const serving = { workspace: WORKSPACE, remoteHubUrl: null, rebound: false };
+  const client = {
+    search: vi.fn(async (query: string) => [...(answers[query] ?? [])]),
+    status: async () => ({ caughtUp: true, rooms: {} }),
+  };
+  vi.spyOn(config, "localServing").mockReturnValue(serving);
+  vi.spyOn(documentSearch, "createDocumentSearchClient").mockReturnValue(client);
+  return client.search;
 }
 
 async function traverseHistory(direction: "back" | "forward"): Promise<void> {
@@ -208,19 +221,6 @@ async function traverseHistory(direction: "back" | "forward"): Promise<void> {
     const popped = new Promise<void>((resolve) => window.addEventListener("popstate", () => setTimeout(resolve, 0), { once: true }));
     window.history[direction]();
     await popped;
-  });
-}
-
-/**
- * Let anything the render scheduled actually run.
- *
- * The filter has nothing to await, which is the claim; this is what makes
- * "issued no request" an observation rather than a race the assertion won.
- */
-async function flushMicrotasks(): Promise<void> {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
   });
 }
 
@@ -422,9 +422,7 @@ describe("the order", () => {
 });
 
 /**
- * Which scan the list is being read with. Last changed answers *what am I
- * working on*; title answers *what is in here*, which the filter cannot —
- * filtering needs a name you already have.
+ * Column order applies to the complete directory when the search is empty.
  */
 describe("choosing the order", () => {
   /** The order option that is on, read the way the screen shows it. */
@@ -459,16 +457,16 @@ describe("choosing the order", () => {
     expect(table).not.toBeNull();
     expect(table.tagName).toBe("TABLE");
     // The semantic queries also verify the native table structure.
-    expect(table.querySelectorAll("thead th")).toHaveLength(3);
+    expect(table.querySelectorAll("thead th")).toHaveLength(5);
     expect(table.querySelectorAll('tbody th[scope="row"]')).toHaveLength(3);
-    expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(3);
+    expect(within(table).getAllByRole("columnheader", { hidden: true })).toHaveLength(5);
     expect(within(table).getAllByRole("rowheader", { hidden: true })).toHaveLength(3);
     expect(within(host).queryByRole("group", { name: "Order", hidden: true })).toBeNull();
 
     const title = heading(host, "Title");
-    const changed = heading(host, "Last changed");
+    const changed = heading(host, "Changed");
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
-    expect(activeOrder(host)).toBe("Last changed");
+    expect(activeOrder(host)).toBe("Changed");
     expect(changed.getAttribute("aria-sort")).toBe("descending");
     expect(within(changed).getByText("↓").textContent).toBe("↓");
     expect(title.hasAttribute("aria-sort")).toBe(false);
@@ -492,12 +490,12 @@ describe("choosing the order", () => {
     expect(title.getAttribute("aria-sort")).toBe("descending");
     expect(within(title).getByText("↓").textContent).toBe("↓");
 
-    await act(async () => chooseOrder(host, "Last changed").click());
+    await act(async () => chooseOrder(host, "Changed").click());
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Middle"]);
-    expect(activeOrder(host)).toBe("Last changed");
+    expect(activeOrder(host)).toBe("Changed");
     expect(changed.getAttribute("aria-sort")).toBe("descending");
 
-    await act(async () => chooseOrder(host, "Last changed").click());
+    await act(async () => chooseOrder(host, "Changed").click());
     expect(rowTitles(host)).toEqual(["Alpha", "Zebra", "Middle"]);
     expect(changed.getAttribute("aria-sort")).toBe("ascending");
     expect(within(changed).getByText("↑").textContent).toBe("↑");
@@ -598,12 +596,15 @@ describe("the list", () => {
     );
   });
 
-  it("shows the title, the pinned group and the age — and neither description nor tags", async () => {
+  it("shows the title, pinned group, catalog tags and age while leaving descriptions out", async () => {
     const peer = peerOf(directoryDoc());
+    const catalog = room(settingsRoom(WORKSPACE)).ydoc;
+    const product = createTagCatalogEntry(catalog, "product");
+    const reference = createTagCatalogEntry(catalog, "reference");
     upsertDirectoryEntry(peer, {
       uuid: ONE,
       title: "Overview",
-      tags: ["product", "reference"],
+      tags: [product.id, reference.id],
       description: "What uberblick is, and what it deliberately is not.",
       updatedAt: Date.UTC(2026, 0, 3),
     });
@@ -613,16 +614,17 @@ describe("the list", () => {
     pinDoc(sidebarPeer, reading, ONE);
 
     const host = await openApp(`/${WORKSPACE}`);
-    const row = within(documentTable(host)).getByRole("row", { name: /^OverviewReading / });
+    const row = within(documentTable(host)).getByRole("row", { name: /^Overview / });
     expect(within(row).getByText("Overview").textContent).toBe("Overview");
     expect(within(row).getByText("Reading").textContent).toBe("Reading");
     expect(within(row).getByRole("time", { hidden: true }).getAttribute("dateTime")).toBe(
       "2026-01-03T00:00:00.000Z",
     );
-    // The stub still caches both — this is what one screen renders.
     expect(row?.textContent).not.toContain("deliberately is not");
-    expect(row?.textContent).not.toContain("product");
-    expect(row?.textContent).not.toContain("reference");
+    expect(within(row).getByRole("button", { name: "product" }).textContent).toBe("product");
+    expect(within(row).getByRole("button", { name: "reference" }).textContent).toBe("reference");
+    expect(within(row).getByText("Reading").closest("td")?.cellIndex).toBe(1);
+    expect(within(row).getByRole("button", { name: "Overview" }).textContent).not.toContain("Reading");
   });
 
   it("names the group a document is pinned into while the list is open", async () => {
@@ -632,9 +634,9 @@ describe("the list", () => {
     const later = createGroup(sidebarPeer, "Later");
 
     const host = await openApp(`/${WORKSPACE}`);
-    const button = within(documentTable(host)).getByRole("button", { name: "Overview" });
+    const row = within(documentTable(host)).getByRole("button", { name: "Overview" }).closest("tr")!;
     const group = (): string | null =>
-      within(button).queryByText("Later")?.textContent ?? null;
+      within(row).queryByText("Later")?.textContent ?? null;
     expect(group()).toBeNull();
 
     await act(async () => {
@@ -726,14 +728,16 @@ describe("decision topics in the list", () => {
     });
   }
 
-  async function open(entries: DirectoryEntry[]): Promise<HTMLElement> {
+  async function open(entries: DirectoryEntry[], answers: Readonly<Record<string, readonly string[]>> = {}): Promise<HTMLElement> {
     const host = await mount(<DocumentList connection={room("decision-list")}
+      searchClient={{ search: async (query) => [...(answers[query] ?? [])] }}
       entries={entries} groups={[]} onSelect={() => {}} onTogglePin={null} />);
     await chooseDecisions(host);
     return host;
   }
 
   it("lists one current answer per topic using the whole history's caches without joining records", async () => {
+    const search = localSearch({ "pending proposal": [THREE], "stable answer": [TWO] });
     const peer = peerOf(directoryDoc());
     const records = [
       decision(ONE, "Original answer title", {
@@ -759,7 +763,6 @@ describe("decision topics in the list", () => {
 
     const host = await openApp(allPath(WORKSPACE));
     await chooseDecisions(host);
-    const requestsBeforeFiltering = vi.mocked(globalThis.fetch).mock.calls.length;
     expect(rowTitles(host)).toEqual(["Stable answer title", "Alpha answer"]);
     expect(rowUuids(host)).toEqual([ONE, OTHER]);
     const row = topicRow(host, ONE);
@@ -776,10 +779,13 @@ describe("decision topics in the list", () => {
     await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
     expect(rowTitles(host)).toEqual(["Alpha answer", "Stable answer title"]);
     await act(async () => typeInto(filter(host), "pending proposal"));
-    expect(rowTitles(host)).toEqual([]);
+    expect(rowTitles(host)).toEqual(["Stable answer title"]);
     await act(async () => typeInto(filter(host), "stable answer"));
     expect(rowUuids(host)).toEqual([ONE]);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(requestsBeforeFiltering);
+    expect(search.mock.calls.map(([query]) => query)).toEqual(["pending proposal", "stable answer"]);
+    expect([...rooms.keys()].sort()).toEqual(
+      [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
+    );
   });
 
   it("omits unknown or null answer caches and an incomplete history count", async () => {
@@ -816,11 +822,11 @@ describe("decision topics in the list", () => {
     expect(within(topicRow(host, ONE)).getByRole("time").getAttribute("dateTime")).toBe("1970-01-01T00:00:00.500Z");
     expect(within(topicRow(host, FOUR)).queryByRole("time")).toBeNull();
     expect(within(topicRow(host, GONE)).queryByRole("time")).toBeNull();
-    await act(async () => within(documentTable(host)).getByRole("button", { name: "Last changed" }).click());
+    await act(async () => within(documentTable(host)).getByRole("button", { name: "Changed" }).click());
     expect(rowTitles(host)).toEqual(["Zebra", "Alpha", "Absent stamp", "Before Alpha"]);
   });
 
-  it("filters shared states and changed approvals while combining with the topic title", async () => {
+  it("filters shared states and changed approvals while combining with record search hits", async () => {
     const host = await open([
       decision(ONE, "Undecided", { status: "open", answerPreview: "Pending answer." }),
       decision(TWO, "Approved", { approvalChanged: true, answerPreview: "Approved answer." }),
@@ -836,7 +842,7 @@ describe("decision topics in the list", () => {
       decision(ANOTHER, "Latest conflicting title", {
         topic: GONE, createdAt: 2, answerPreview: "Second conflicting answer.",
       }),
-    ]);
+    ], { "latest conflicting": [ANOTHER], "no such title": [], approved: [TWO] });
     expect(stateFilter(host).value).toBe("all");
     expect(within(stateFilter(host)).getAllByRole<HTMLOptionElement>("option").map((option) => [option.value, option.textContent])).toEqual([
       ["all", "All"], ["not-yet-decided", "Not yet decided"],
@@ -938,6 +944,7 @@ describe("decision topics in the list", () => {
   });
 
   it.each(["All docs", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
+    localSearch({ Current: [TWO] });
     const peer = peerOf(directoryDoc());
     for (const [uuid, title, supersedes] of [
       [ONE, "Original answer", undefined], [TWO, "Current answer", ONE],
@@ -978,10 +985,10 @@ describe("decision topics in the list", () => {
     const assertDefaults = (): void => {
       expect(window.location.pathname).toBe(entry === "All docs" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
       expect(within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole("button", { name: "Working" }).getAttribute("aria-pressed")).toBe("true");
+        .getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
       expect(filter(host).value).toBe("");
       expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
-      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Last changed/ }).getAttribute("aria-sort")).toBe("descending");
+      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Changed/ }).getAttribute("aria-sort")).toBe("descending");
     };
     assertDefaults();
     await traverseHistory("back");
@@ -998,7 +1005,8 @@ describe("decision topics in the list", () => {
 });
 
 describe("the filter", () => {
-  it("restores the removed Product history mode as Working, preserving the visit's filter and sort", async () => {
+  it("defaults new fields in older Product history and retains the column order for an empty search", async () => {
+    localSearch({ Roadmap: [ONE] });
     const directory = directoryDoc();
     upsertDirectoryEntry(directory, { uuid: ONE, title: "Roadmap" });
     upsertDirectoryEntry(directory, { uuid: TWO, title: "Other note" });
@@ -1006,18 +1014,18 @@ describe("the filter", () => {
     initDoc(target, { uuid: ONE, title: "Roadmap" });
     appendBlock(target, { type: "paragraph", text: "A regular page." });
     window.history.replaceState({
-      ...INITIAL_DOCUMENT_LIST_STATE,
       mode: "requirement",
       query: "Roadmap",
+      stateFilter: "all",
       sort: { order: "title", direction: "descending" },
     }, "", allPath(WORKSPACE));
     const host = await mount(<App />);
     const assertRestored = (): void => {
       expect(within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole("button", { name: "Working" }).getAttribute("aria-pressed")).toBe("true");
+        .getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
       expect(filter(host).value).toBe("Roadmap");
       expect(rowTitles(host)).toEqual(["Roadmap"]);
-      expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("descending");
+      expect(within(documentTable(host)).getAllByRole("columnheader").some((header) => header.hasAttribute("aria-sort"))).toBe(false);
       expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
     };
     assertRestored();
@@ -1026,9 +1034,11 @@ describe("the filter", () => {
     assertRestored();
     await act(async () => typeInto(filter(host), ""));
     expect(window.history.state.mode).toBe("working");
+    expect(window.history.state.selectedTags).toEqual([]);
+    expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("descending");
   });
 
-  it("opens on Working and keeps each type mode to its own rows", async () => {
+  it("opens on Documents and keeps each type mode to its own rows", async () => {
     const peer = peerOf(directoryDoc());
     getDirectoryMap(peer).set(ONE, {
       title: "Roadmap",
@@ -1068,7 +1078,7 @@ describe("the filter", () => {
     const mode = (name: string): HTMLButtonElement =>
       within(within(host).getByRole("group", { name: "Document type" }))
         .getByRole<HTMLButtonElement>("button", { name });
-    expect(mode("Working")?.getAttribute("aria-pressed")).toBe("true");
+    expect(mode("Documents")?.getAttribute("aria-pressed")).toBe("true");
     expect(rowTitles(host)).toEqual(["Foreign shape", "Legacy without state", "Roadmap", "Status drift", "Working note"]);
     expect(lifecycleBadges(host)).toHaveLength(0);
     expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
@@ -1082,73 +1092,12 @@ describe("the filter", () => {
     expect(documentTable(host).textContent).toContain("Not yet decided");
   });
 
-  it("keeps the rows whose title contains the text, and nothing a description says", async () => {
-    const selected = vi.fn();
+  it("renders a missing-title fallback but follows the index's matching UUIDs", async () => {
+    const search = vi.fn(async () => [TWO]);
     const host = await mount(
       <DocumentList
         connection={null}
-        entries={[
-          entry({ uuid: ONE, title: "Overview" }),
-          entry({
-            uuid: TWO,
-            title: "Editing and blocks",
-            description: "How the overview pane composes a document.",
-          }),
-          entry({ uuid: THREE, title: "Roadmap" }),
-        ]}
-        groups={[]}
-        onSelect={selected}
-        onTogglePin={null}
-      />,
-    );
-    const field = filter(host);
-
-    // Case-insensitive, and a substring rather than a prefix.
-    await act(async () => typeInto(field, "VIE"));
-    expect(rowTitles(host)).toEqual(["Overview"]);
-
-    // The word occurs in the second entry's description and in the first
-    // entry's title. Only the title is consulted, so the description is not a
-    // second corpus this field quietly searches.
-    await act(async () => typeInto(field, "overview pane"));
-    expect(rowTitles(host)).toEqual([]);
-
-    // Two rows, and the second matches only because the comparison folds case.
-    await act(async () => typeInto(field, "r"));
-    expect(rowTitles(host)).toEqual(["Overview", "Roadmap"]);
-    await act(async () =>
-      within(documentTable(host)).getByRole("button", { name: "Overview" }).click(),
-    );
-    expect(selected).toHaveBeenCalledWith(ONE);
-
-    // Clearing restores the unfiltered list.
-    await act(async () => typeInto(field, ""));
-    expect(rowTitles(host)).toEqual([
-      "Editing and blocks",
-      "Overview",
-      "Roadmap",
-    ]);
-  });
-
-  it("does not match the body of a document the page has already opened", async () => {
-    const directory = directoryDoc();
-    upsertDirectoryEntry(directory, { uuid: ONE, title: "Overview" });
-    const target = room(roomForDoc(WORKSPACE, ONE)).ydoc;
-    initDoc(target, { uuid: ONE, title: "Overview" });
-    appendBlock(target, { type: "paragraph", text: "bodyonly quasartrail" });
-
-    const host = await openApp(`/${WORKSPACE}/${ONE}`);
-    await act(async () =>
-      within(host).getByRole("button", { name: "All docs" }).click(),
-    );
-    await act(async () => typeInto(filter(host), "bodyonly"));
-    expect(rowTitles(host)).toEqual([]);
-  });
-
-  it("never matches the Untitled a row draws in place of an absent title", async () => {
-    const host = await mount(
-      <DocumentList
-        connection={null}
+        searchClient={{ search }}
         entries={[
           entry({ uuid: ONE, title: "" }),
           entry({ uuid: TWO, title: "Untitled" }),
@@ -1167,16 +1116,16 @@ describe("the filter", () => {
     expect(fallbacks()).toHaveLength(1);
 
     await act(async () => typeInto(filter(host), "untitled"));
-    // The fallback is this list's word for *no title*, not a title to match
-    // against, so only the document actually called "Untitled" survives.
+    expect(search).toHaveBeenCalledWith("untitled", expect.any(AbortSignal));
     expect(rowUuids(host)).toEqual([TWO]);
     expect(fallbacks()).toHaveLength(0);
   });
 
-  it("narrows inside the chosen tab, and re-applies the text to the next tab", async () => {
+  it("combines matching records with type while preserving the search text", async () => {
     const host = await mount(
       <DocumentList
         connection={null}
+        searchClient={{ search: async () => [ONE, TWO] }}
         entries={[
           entry({ uuid: ONE, title: "Search plan" }),
           entry({
@@ -1205,24 +1154,7 @@ describe("the filter", () => {
     expect(rowTitles(host)).toEqual(["Search decision"]);
   });
 
-  it("asks nobody anything, whatever is typed", async () => {
-    const host = await mount(
-      <DocumentList
-        connection={null}
-        entries={[entry({ uuid: ONE, title: "Overview" })]}
-        groups={[]}
-        onSelect={() => {}}
-        onTogglePin={null}
-      />,
-    );
-    for (const text of ["overview", "nothing at all", "*", ""]) {
-      await act(async () => typeInto(filter(host), text));
-      await flushMicrotasks();
-    }
-    expect(globalThis.fetch).not.toHaveBeenCalled();
-  });
-
-  it("is enabled from first paint and claims nothing about a search", async () => {
+  it("names Search broadly and reports unavailable search outside ub open", async () => {
     const host = await mount(
       <DocumentList
         connection={null}
@@ -1234,17 +1166,14 @@ describe("the filter", () => {
     );
     const field = filter(host);
     expect(field.disabled).toBe(false);
-    // The accessible name and the in-field hint are the field's whole story,
-    // and neither offers document text. Nothing else on the page qualifies the
-    // answer either — no unavailable state, no lag or cap caveat.
-    expect(field.labels?.[0]?.textContent).toBe("Filter this list by title");
-    expect(field.placeholder).toBe("Filter by title");
-    expect(host.textContent).not.toMatch(
-      /unavailable|document text|lag|first \d+ matches|Loading/i,
-    );
+    expect(field.labels?.[0]?.textContent).toBe("Search");
+    expect(field.placeholder).toBe("Search");
+    expect(host.textContent).toContain("Search is unavailable.");
 
     await act(async () => typeInto(field, "overview"));
-    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(rowTitles(host)).toEqual([]);
+    expect(documentTable(host).textContent).toContain("Search is unavailable.");
+    expect(documentTable(host).textContent).not.toContain("No documents");
   });
 });
 
@@ -1264,6 +1193,7 @@ describe("an empty list", () => {
     return await mount(
       <DocumentList
         connection={statusOnly(synced)}
+        searchClient={{ search: async () => [] }}
         entries={entries}
         groups={[]}
         onSelect={() => {}}
@@ -1293,25 +1223,20 @@ describe("an empty list", () => {
     );
   });
 
-  it("asserts that no title matches only once the directory has synced", async () => {
-    // The filter narrows what has arrived, so before the directory has synced
-    // it can only speak about what has arrived — and it says so rather than
-    // asserting the corpus holds no such title.
+  it("qualifies an empty search with what has synced so far", async () => {
     const waiting = await open(false, [entry({ uuid: ONE, title: "Overview" })]);
     await act(async () => typeInto(filter(waiting), "nothing"));
-    expect(within(waiting).getByText("No working documents synced so far have a matching title.").textContent).toBe(
-      "No working documents synced so far have a matching title.",
+    expect(within(waiting).getByText('No documents synced so far match "nothing".').textContent).toBe(
+      'No documents synced so far match "nothing".',
     );
     unmount();
 
     const synced = await open(true, [entry({ uuid: ONE, title: "Overview" })]);
     await act(async () => typeInto(filter(synced), "nothing"));
-    expect(within(synced).getByText("No working documents have a matching title.").textContent).toBe(
-      "No working documents have a matching title.",
+    expect(within(synced).getByText('No documents match "nothing".').textContent).toBe(
+      'No documents match "nothing".',
     );
-    // Neither reading is a failed or a pending search: nothing is in flight,
-    // so there is no third state to report.
-    expect(synced.textContent).not.toMatch(/failed|Searching|…/);
+    expect(synced.textContent).not.toMatch(/Search is unavailable|Searching/);
   });
 });
 
@@ -1368,7 +1293,7 @@ describe("the sidebar entry", () => {
     expect(readSidebar(sidebarPeer).map((group) => group.docs)).toEqual([[ONE]]);
     expect(pin()?.getAttribute("aria-pressed")).toBe("true");
     // The pin is what puts the group in the row: one write, both readings.
-    const overview = within(documentTable(host)).getByRole("button", { name: "OverviewPinned" });
+    const overview = within(documentTable(host)).getByRole("button", { name: "Overview" }).closest("tr")!;
     expect(within(overview).getByText("Pinned").textContent).toBe("Pinned");
 
     // The same control both ways, and the document is what remembers.

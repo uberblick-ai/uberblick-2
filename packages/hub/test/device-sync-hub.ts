@@ -13,6 +13,7 @@ import { handleCredentialRenewal } from "../src/credential-renewal.js";
 import { CredentialRegistry } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
+import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { readAuthEnvelope, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { TokenClaims } from "@uberblick/schema/token";
@@ -42,8 +43,10 @@ export async function startDeviceSyncHub(options: {
   database.open();
   const credentials = new CredentialRegistry(database);
   const memberships = new MembershipRegistry(database);
+  const admins = new HubAdminRegistry(database);
   const principalId = randomUUID();
   const adminId = randomUUID();
+  admins.grant(adminId);
   const logs: HubLogRecord[] = [];
   const authentications: DeviceSyncAuthentication[] = [];
   let server: Server<CredentialContext> | undefined;
@@ -71,7 +74,7 @@ export async function startDeviceSyncHub(options: {
   async function resume(): Promise<void> {
     if (closed) throw new Error("device sync test hub is closed");
     if (server !== undefined) return;
-    const admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log });
+    const admission = new CredentialAdmission(credentials, memberships, { protocolVersion, log }, admins);
     const candidate = new Server<CredentialContext>({
       address: "127.0.0.1", port, quiet: true, stopOnSignals: false,
       debounce: 10, maxDebounce: 50,
@@ -147,6 +150,9 @@ export async function startDeviceSyncHub(options: {
       memberships.remove({ workspaceId, principalId: memberId, actorPrincipalId: adminId });
     },
     revoke(credentialId: string): void { credentials.revoke(credentialId); },
+    setWorkspaceStatus(workspaceId: string, status: "active" | "suspended"): void {
+      admins.setWorkspaceStatus(adminId, workspaceId, status);
+    },
     setRenewalReply(reply: DeviceSyncRenewalReply | null): void { renewalReply = reply; },
     setRenewalDelay(ms: number): void { renewalDelayMs = ms; },
     closeConnections(): void { server?.hocuspocus.closeConnections(); },

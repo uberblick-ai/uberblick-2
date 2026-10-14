@@ -5,7 +5,7 @@ import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView } from "@tiptap/pm/view";
 import { ySyncPluginKey } from "y-prosemirror";
-import { CARD_NODE_NAMES, CARD_PARTS, TABLE_CELL_MARKS, parseCardButton } from "@uberblick/schema";
+import { CARD_NODE_NAMES, CARD_PARTS, TABLE_CELL_MARKS, parseCardButtons } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 
 const PLACEHOLDERS: Record<CardPart, string> = {
@@ -97,7 +97,7 @@ export function cardTitleOffset(card: ProseMirrorNode): number {
 function supportedCard(node: ProseMirrorNode): boolean {
   if (node.childCount !== CARD_PARTS.length) return false;
   if (node.attrs.button !== null) {
-    try { parseCardButton(node.attrs.button); } catch { return false; }
+    try { parseCardButtons(node.attrs.button); } catch { return false; }
   }
   return CARD_PARTS.every((part, index) => {
     const child = node.child(index);

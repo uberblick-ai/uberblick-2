@@ -1,8 +1,9 @@
 // @vitest-environment node
-/** The browser trusts only a validated local status answer. */
+/** The browser trusts only complete search results and validated status answers. */
 
 import { describe, expect, it, vi } from "vitest";
 import { createDocumentSearchClient } from "../src/shell/document-search.js";
+import { mintHubAuthMessage } from "../src/collab/rooms.js";
 
 vi.mock("../src/collab/rooms.js", () => ({
   mintHubAuthMessage: vi.fn(async () => "local-token"),
@@ -61,4 +62,39 @@ describe("local status answers", () => {
         });
     },
   );
+});
+
+describe("local search answers", () => {
+  it("keeps every UUID in server order and authenticates each uncached request", async () => {
+    const hits = Array.from({ length: 150 }, (_, index) => ({ uuid: `document-${149 - index}` }));
+    const fetchImpl = vi.fn(async () => Response.json({ hits, capped: false }));
+    const client = createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch);
+    const signal = new AbortController().signal;
+    vi.mocked(mintHubAuthMessage).mockClear();
+    await expect(client.search("sync & launch", signal)).resolves.toEqual(hits.map((hit) => hit.uuid));
+    await client.search("sync", signal);
+    expect(fetchImpl).toHaveBeenNthCalledWith(1, "/api/search?q=sync%20%26%20launch", {
+      cache: "no-store", headers: { Accept: "application/json", Authorization: "Bearer local-token" }, signal,
+    });
+    expect(mintHubAuthMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { hits: [{ uuid: "one" }], capped: true },
+    { hits: [{ uuid: "one" }] },
+    { hits: "one", capped: false },
+    { hits: [null], capped: false },
+    { hits: [{ uuid: 12 }], capped: false },
+    { hits: [{ uuid: "" }], capped: false },
+  ])("refuses incomplete or malformed results: %j", async (body) => {
+    const fetchImpl = vi.fn(async () => Response.json(body));
+    await expect(createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch)
+      .search("sync", new AbortController().signal)).rejects.toThrow(/search answer/);
+  });
+
+  it.each([404, 503])("does not treat unavailable search (%s) as zero matches", async (status) => {
+    const fetchImpl = vi.fn(async () => Response.json({ error: "replica_unavailable", reason: "replica-held" }, { status }));
+    await expect(createDocumentSearchClient("workspace", "browser", fetchImpl as typeof fetch)
+      .search("sync", new AbortController().signal)).rejects.toThrow();
+  });
 });

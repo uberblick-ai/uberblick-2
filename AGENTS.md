@@ -130,8 +130,8 @@ A pointer is a route to the source, not a substitute for reading it.
 
 - **Discuss or shape:** `.agents/protocols/issue-shaping.md` plus relevant corpus;
   condense intent into the smallest useful outcome before technical preparation.
-  It routes shared drafts and resumption by UUID to the linked reference.
-  A draft grants no queue authority.
+  It routes shared RFCs, resumption by UUID and intakes from an RFC to
+  `.agents/protocols/rfc-resumption.md`. An RFC grants no queue authority.
 - **Run a role:** `.agents/roles/README.md`, then `.agents/roles/<role>.md`.
 - **Prepare an issue:** `.agents/protocols/issue-preparation.md` and
   `.github/ISSUE_SPEC.md` for the issue contract.
@@ -145,7 +145,7 @@ A pointer is a route to the source, not a substitute for reading it.
   never append: change the affected sentences to the new present-tense truth,
   delete what they replace, and add a block only for a fact no existing block
   owns. No PR or issue number, merge date, run id or "since" clause reaches a
-  Regular Document; GitHub owns that provenance. Decision-record Links may cite
+  Regular Document; GitHub owns that provenance. Decision-record prose may cite
   GitHub items. Corpus edits
   must stay within recorded authorization: update descriptions of delivered
   behavior, but do not weaken a guarantee or expand agent authority through a

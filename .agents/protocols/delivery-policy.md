@@ -43,7 +43,7 @@ Missing required guidance does not grant authority; stop the dependent decision.
 `create_doc` and `set_status` record a person's answer with
 `answer: {who, when, where}`; a first record decided without one is
 `agentStance`. Do not invent an answer or reject a stance without a person's
-recorded answer. A decided record's title, decision line and blocks refuse
+recorded answer. A decided record's title and answer blocks refuse
 writes with `decision_read_only`; a change needs a successor a person approves.
 
 Implementation and review corrections follow
@@ -55,7 +55,12 @@ routes do not change the review or merge tiers below.
 
 1. **Issue first.** Every change starts as a GitHub issue that conforms to
    `.github/ISSUE_SPEC.md`; the `ready` label asserts that it does. No issue,
-   no branch.
+   no branch. A technical pull request without a linked issue (a dependency
+   upgrade, a build, performance or tooling change, one that changes no
+   product behavior the corpus describes) may still be integrated when its
+   description states clear intent, goals or acceptance criteria and the code
+   matches them; the description then stands in for the issue in these gates.
+   Any other change without an issue escalates.
 2. **Branch and pull request.** An implementer run builds it on its own branch
    under `.agents/roles/implementer.md` and opens a pull request against
    `main` that closes the issue (`Closes #N`) and states what changed and how
@@ -74,7 +79,9 @@ routes do not change the review or merge tiers below.
      shutdown, networking, concurrency — passing happy-path tests is not
      enough: run focused failure-path probes and post reproducible findings.
      Worktree tests help while building but are never merge evidence.
-   - **Acceptance.** Every acceptance criterion of the issue, with evidence.
+   - **Acceptance.** Every acceptance criterion of the issue, or for a
+     technical pull request without one, every intent, goal or criterion its
+     description states, with evidence.
    - **Independent review**, per "Reviews owed" below, settled under
      `review-protocol.md`.
    - **No unanswered remarks.** Immediately before merging, every review

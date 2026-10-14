@@ -154,6 +154,13 @@ describe("login browser handoff", () => {
     expect(result.stdout).toBe(stdout(remote.origin, unclaimed));
     expect(result.stderr).toBe("");
     expect(cli.calls()).toEqual([{ args: [URL], output: guidance(remote.origin, unclaimed) }]);
+    await waitUntil("browser recorder publishes its URL", () => {
+      try {
+        return typeof JSON.parse(readFileSync(browser.record, "utf8")).url === "string";
+      } catch {
+        return false;
+      }
+    }, 5_000);
     expect(JSON.parse(readFileSync(browser.record, "utf8")).url).toBe(URL);
     expect(remote.routes.filter(route => route.endsWith("collect"))).toHaveLength(2);
     expectStored(box, remote.origin);

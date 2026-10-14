@@ -1,4 +1,4 @@
-import { resolveTagAssignments } from "@uberblick/schema";
+import { resolveDecisionTopics, resolveTagAssignments } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { resolveTagFilter } from "../tag-catalog.js";
@@ -9,23 +9,43 @@ export const inputSchema = strictInput({
     .string()
     .min(1)
     .describe(
-      "Words to match; every term must occur in one document, `list_docs` matches both `list_docs` and `list docs` but not `a list of docs`, and a trailing * makes its term a prefix match.",
+      "Match any word in title, description, content or assigned tag names, including English word forms. Case and accents fold; `list_docs` matches adjacent `list docs`, and a trailing * matches prefixes. Results use title-weighted bm25 relevance.",
     ),
-  limit: z.number().int().min(1).max(100).optional(),
-  tag: z.string().min(1).optional().describe("Only documents carrying this catalog tag id or exact name."),
+  limit: z.number().int().min(1).max(100).optional().describe("Maximum hits, from 1 to 100; defaults to 20 after filters."),
+  tag: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional()
+    .describe("One catalog tag id or exact name, or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse."),
+  kind: z.enum(["regular", "decision"]).optional()
+    .describe("Only regular documents (including stored requirements) or decision records, including superseded, rejected and withdrawn records."),
 });
 
-export const searchOperation = operation("search", inputSchema, (context, { query, limit, tag }, _request) => {
+type RecordState = "in-force" | "superseded" | "open" | "rejected" | "withdrawn" | "conflict";
+
+export const searchOperation = operation("search", inputSchema, (context, { query, limit, tag, kind }, _request) => {
   const { replicas, tagCatalog } = context;
 
   const catalog = tagCatalog();
-  const tagId = tag === undefined ? undefined : resolveTagFilter(replicas, tag);
-  const hits = replicas.store.search(query, limit ?? 20, tagId);
+  const tagIds = tag === undefined ? undefined : [...new Set(
+    (Array.isArray(tag) ? tag : [tag]).map((value) => resolveTagFilter(replicas, value)),
+  )];
+  const hits = replicas.store.search(query, limit ?? 20, tagIds, kind);
+  const states = new Map<string, RecordState>();
+  if (hits.some((hit) => hit.kind === "decision")) {
+    for (const topic of resolveDecisionTopics(replicas.directory().doc)) {
+      for (const record of topic.records) {
+        states.set(record.uuid, record.status === "rejected" || record.status === "withdrawn" ? record.status : "open");
+      }
+      for (const record of topic.superseded) states.set(record.uuid, "superseded");
+      for (const record of topic.conflicts) states.set(record.uuid, "conflict");
+      if (topic.inForce !== null) states.set(topic.inForce.uuid, "in-force");
+    }
+  }
   return {
     query,
     ...(tag === undefined ? {} : { tag }),
+    ...(kind === undefined ? {} : { kind }),
     hits: hits.map((hit) => ({
       ...hit,
+      ...(hit.kind === "decision" ? { state: states.get(hit.uuid) ?? "open" } : {}),
       tags: resolveTagAssignments(catalog, hit.tags),
     })),
   };

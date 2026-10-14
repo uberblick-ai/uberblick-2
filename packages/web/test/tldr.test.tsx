@@ -19,6 +19,7 @@ import {
   setKind,
   setStatus,
   setTldr,
+  setTldrOptOut,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { EditorPane } from "../src/ui/EditorPane.js";
@@ -151,9 +152,103 @@ describe("the document TL;DR", () => {
     act(() => openActions(host));
     expect(menuItem("Edit TL;DR")).toBeUndefined();
     expect(menuItem("Add TL;DR")).toBeUndefined();
+    expect(menuItem("Remove TL;DR")).toBeUndefined();
     act(() => setTldr(ydoc, null));
     expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
     expect(menuItem("Add TL;DR")).toBeUndefined();
+    expect(menuItem("Remove TL;DR")).toBeUndefined();
+  });
+
+  it.each([null, "The first summary."])("removes %s in one write and opts back in before a cancelled Add", async (summary) => {
+    const ydoc = documentWith(summary);
+    const peer = peerOf(ydoc);
+    const { host } = await mountPane(ydoc);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+
+    act(() => openActions(host));
+    expect(menuItem(summary === null ? "Add TL;DR" : "Edit TL;DR")).toBeDefined();
+    act(() => menuItem("Remove TL;DR")?.click());
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(getMeta(ydoc)).toMatchObject({ tldr: null, tldrOptOut: true });
+    expect(getMeta(peer)).toMatchObject({ tldr: null, tldrOptOut: true });
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    act(() => openActions(host));
+    expect(menuItem("Remove TL;DR")).toBeUndefined();
+    expect(menuItem("Add TL;DR")).toBeDefined();
+    act(() => menuItem("Add TL;DR")?.click());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.activeElement).toBe(field(host));
+    expect(getMeta(ydoc).tldrOptOut).toBeUndefined();
+    expect(getMeta(peer).tldrOptOut).toBeUndefined();
+    act(() => within(host).getByRole("button", { name: "Cancel" }).click());
+    expect(getMeta(ydoc).tldr).toBeNull();
+    expect(getMeta(ydoc).tldrOptOut).toBeUndefined();
+    act(() => openActions(host));
+    expect(menuItem("Remove TL;DR")).toBeDefined();
+    peer.destroy();
+  });
+
+  it("follows remote removal without reloading and gives legacy summary text precedence in the menu", async () => {
+    const ydoc = documentWith("The first summary.");
+    const peer = peerOf(ydoc);
+    const { host } = await mountPane(ydoc);
+    await openInline(host);
+    act(() => typeInto(field(host), "An unsaved draft."));
+    act(() => setTldrOptOut(peer, true));
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    act(() => openActions(host));
+    expect(menuItem("Add TL;DR")).toBeDefined();
+    expect(menuItem("Remove TL;DR")).toBeUndefined();
+
+    // Older clients write only the summary, leaving the stored mark behind.
+    act(() => peer.getMap("meta").set("tldr", "Written by an older client."));
+    expect(within(host).getByText("Written by an older client.")).toBeDefined();
+    expect(getMeta(ydoc).tldrOptOut).toBeUndefined();
+    expect(menuItem("Edit TL;DR")).toBeDefined();
+    expect(menuItem("Remove TL;DR")).toBeDefined();
+    peer.destroy();
+  });
+
+  it.each([false, true])("keeps opt-out %s actions disabled in an unwritable room", async (marked) => {
+    const ydoc = documentWith(null);
+    if (marked) setTldrOptOut(ydoc, true);
+    const { host } = await mountPane(ydoc, false, false);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    act(() => openActions(host));
+    const add = menuItem("Add TL;DR unavailable — document is read-only");
+    expect(add?.getAttribute("aria-disabled")).toBe("true");
+    act(() => add?.click());
+    const remove = menuItem("Remove TL;DR unavailable — document is read-only");
+    if (marked) expect(remove).toBeUndefined();
+    else {
+      expect(remove?.getAttribute("aria-disabled")).toBe("true");
+      act(() => remove?.click());
+    }
+    expect(field(host)).toBeNull();
+    expect(getMeta(ydoc).tldrOptOut).toBe(marked ? true : undefined);
+    expect(updates).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("guards opt-out %s actions against a live write refusal before the menu updates", async (marked) => {
+    const ydoc = documentWith(null);
+    if (marked) setTldrOptOut(ydoc, true);
+    const { host, connection } = await mountPane(ydoc);
+    const updates = vi.fn();
+    ydoc.on("update", updates);
+    act(() => openActions(host));
+    connection.status = { ...connection.status, writable: false };
+    act(() => menuItem(marked ? "Add TL;DR" : "Remove TL;DR")?.click());
+    expect(field(host)).toBeNull();
+    expect(getMeta(ydoc).tldrOptOut).toBe(marked ? true : undefined);
+    expect(updates).not.toHaveBeenCalled();
   });
 
   it("discards an open summary form when a remote client adopts the decision kind, guarding the live write", async () => {

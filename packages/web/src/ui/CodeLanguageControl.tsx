@@ -1,5 +1,4 @@
 /** A block-owned language picker; ProseMirror still owns all source text. */
-// Decision: 52fb560e-4d1d-4af1-b887-29e161209957.
 import { useEffect, useId, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { createPortal } from "react-dom";

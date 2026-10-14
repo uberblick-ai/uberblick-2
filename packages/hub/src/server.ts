@@ -87,7 +87,8 @@ function handleUnconfiguredAuthRequest(request: IncomingMessage, response: Serve
     const valid = request.method === "GET";
     status = valid ? 200 : 405;
     body = valid ? { unclaimed: false, canClaim: false } : { status: "invalid-request" };
-  } else if (["/auth/credential/renew", "/auth/manage", "/auth/github/start", "/auth/github/collect", "/auth/github/cancel"].includes(path)) {
+  } else if (["/auth/credential/renew", "/auth/manage", "/auth/github/start", "/auth/github/collect", "/auth/github/cancel",
+    "/auth/browser/start", "/auth/browser/collect", "/auth/browser/cancel", "/auth/browser/session", "/auth/browser/sign-out"].includes(path)) {
     status = 503;
     body = { status: "not-configured" };
   }

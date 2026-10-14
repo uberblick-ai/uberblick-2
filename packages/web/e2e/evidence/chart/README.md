@@ -58,8 +58,7 @@ Linux x86_64 with an AMD EPYC-Genoa processor and the same twofold Chromium CPU
 throttling. Its complete eight-panel block first drew in 645.6 ms; all ten
 live redraws took 322.4–367.7 ms, with a 338.0 ms median.
 
-Regenerate the chart screenshots and timing attachments, with shared-frame
-table regression coverage:
+Regenerate the chart screenshots, with shared-frame table regression coverage:
 
 ```sh
 mise run e2e -- chart.spec.ts data-table.spec.ts --project=chromium
@@ -78,16 +77,23 @@ python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path
 
 The paired desktop/iPad test is tagged for WebKit; it explicitly creates the
 iPad context instead of treating a narrow desktop viewport as a touch device.
-The phone test is tagged for the supported iPhone WebKit project. Run both:
-`mise run e2e -- chart.spec.ts --project=webkit-macbook --project=webkit-iphone`.
+Phone-size screenshots retain design evidence through Chromium; phone WebKit
+coverage is deferred. Run the supported desktop and iPad WebKit projects:
+`mise run e2e -- chart.spec.ts --project=webkit-macbook --project=webkit-ipad`.
 Copy the Chromium evidence before this second run, because Playwright clears
 its prior output directory.
+
+Run the isolated chart and data-table timing probes:
+
+```sh
+mise run e2e -- chart.spec.ts data-table.spec.ts --project=chromium-workload --no-deps
+```
 
 The shared gate records timings and
 asserts complete data availability, successive live redraws and zero renderer
 writes; host-dependent wall-clock timings do not fail it. To enforce the
 recorded budgets on a benchmark host, run
-`env UB_CHART_TIMING_BUDGETS=1 mise run e2e -- chart.spec.ts --project=chromium --workers=1`.
+`env UB_CHART_TIMING_BUDGETS=1 mise run e2e -- chart.spec.ts --project=chromium-workload --no-deps --workers=1`.
 That opt-in requires representative first draw within 500 ms and median redraw
 within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.
 The panels variant enforces the same bounded budget for the complete block,

@@ -11,14 +11,15 @@ export const inputSchema = strictInput({
   tag: z.string().min(1).optional().describe("Only documents carrying this tag."),
   kind: documentKindArg.optional().describe("Only documents of this kind."),
   status: documentStatusArg.optional().describe("Only documents at this lifecycle state."),
+  has_open_threads: z.literal(true).optional().describe("Only documents with a known positive openThreadCount; topic rows match any live record. False refuses."),
   include_deleted: z.boolean().optional(),
   include_superseded: z.boolean().optional().describe("Return every decision record instead of one row per topic."),
 });
 
-export const listDocsOperation = operation("list_docs", inputSchema, (context, { tag, kind, status, include_deleted, include_superseded }, _request) => {
+export const listDocsOperation = operation("list_docs", inputSchema, (context, { tag, kind, status, has_open_threads, include_deleted, include_superseded }, _request) => {
   const { replicas, tagCatalog, topicJson } = context;
 
-  const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined;
+  const hasPredicate = tag !== undefined || kind !== undefined || status !== undefined || has_open_threads === true;
   const catalog = tagCatalog();
   const tagId = tag === undefined ? null : resolveTagFilter(replicas, tag);
   const directory = replicas.directory().doc;
@@ -27,7 +28,8 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
     const assignments = readDirectoryTags(entry, catalog);
     return (tagId === null || assignments.some((assignment) => assignment.id === tagId)) &&
       (kind === undefined || entry.kind === kind) &&
-      (status === undefined || entry.status === status);
+      (status === undefined || entry.status === status) &&
+      (has_open_threads !== true || (entry.openThreadCount ?? 0) > 0);
   };
   const documents = entries.filter(entry => entry.kind !== "decision" &&
     (include_deleted || !entry.deleted) && matches(entry));
@@ -39,7 +41,8 @@ export const listDocsOperation = operation("list_docs", inputSchema, (context, {
       if ((!include_deleted && topic.archived) || (kind !== undefined && kind !== "decision")) return false;
       const live = topic.records.filter(entry => entry.status !== "rejected" && entry.status !== "withdrawn");
       return (status === undefined || live.some(entry => entry.status === status)) &&
-        (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId)));
+        (tagId === null || live.some(entry => readDirectoryTags(entry, catalog).some(assignment => assignment.id === tagId))) &&
+        (has_open_threads !== true || live.some(entry => (entry.openThreadCount ?? 0) > 0));
     })
       .map(topic => ({ ...topic.representative, deleted: topic.archived, ...topicJson(topic) }));
   // Derived, never stored: the sidebar doc is the one place a pin lives.

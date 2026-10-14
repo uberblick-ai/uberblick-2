@@ -1,4 +1,3 @@
-// Decision: a467cfd6-4231-4cdf-bdba-2121abf5f895
 import type { ChartSeries, ChartSeriesMapping } from "./chart-data.js";
 
 export interface ChartPanelRange { min: number; max: number }

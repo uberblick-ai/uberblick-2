@@ -5,6 +5,7 @@ import {
   directoryRoom,
   sidebarRoom,
   settingsRoom,
+  getWorkspaceMainRepository,
   getWorkspaceName,
   readSidebar,
   listTagCatalog,
@@ -171,8 +172,8 @@ export function docFingerprint(doc: Y.Doc): string {
         start: run.start,
         end: run.end,
       })),
-      ...(block.type === "table" || block.type === "card" ? {
-        // GFM/rev can lose edge whitespace and marks. Stored cell deltas retain
+      ...(block.type === "table" || block.type === "card" || block.type === "figma" ? {
+        // Canonical text/rev can lose edge whitespace and marks. Stored part deltas retain
         // those characters, formatting and comment-anchor deletions for verification.
         cells: structuredContent(findBlockElement(doc, block.id)),
       } : {}),
@@ -386,7 +387,10 @@ export async function inspectRemote(
 /** The corpus a hydrated replica set holds, read out of its documents. */
 function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc): CorpusDoc[] {
   return [
-    { uuid: "_settings", doc: settings, content: { name: getWorkspaceName(settings), tags: listTagCatalog(settings) } },
+    { uuid: "_settings", doc: settings, content: {
+      name: getWorkspaceName(settings), mainRepository: getWorkspaceMainRepository(settings),
+      tags: listTagCatalog(settings),
+    } },
     { uuid: "_sidebar", doc: sidebar, content: readSidebar(sidebar) },
   ].map(({ uuid, doc, content }) => ({
     uuid, title: uuid, tags: [], deleted: false,

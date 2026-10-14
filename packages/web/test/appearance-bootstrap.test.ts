@@ -4,13 +4,13 @@
  *
  * `src/ui/theme.ts` owns the theme for the life of the session, but it cannot
  * own the *first paint*: it arrives on a deferred module script, and the page
- * is painted well before that. The blocking snippet in `index.html` is the only
+ * is painted well before that. The blocking script in `index.html` is the only
  * code that runs early enough, which makes it the one place a reader's choice
  * can be lost — silently, and only on a real page load, where no jsdom suite
  * would ever see it.
  *
- * So the snippet itself is what is executed here: the test reads `index.html`,
- * takes the inline script out of it and runs that text against a stubbed
+ * So the script itself is what is executed here: the test reads `index.html`,
+ * follows the head script's source and runs that text against a stubbed
  * storage and document. A copy of the logic would pass while the shipped page
  * had a typo in it, which is exactly the failure this is for.
  *
@@ -29,17 +29,18 @@ import { SETTINGS_KEY } from "../src/settings.js";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** The inline `<script>` from the shipped page — the head one, not the module. */
+/** The classic head script from the shipped page, including its timing contract. */
 function bootstrapSource(): string {
   const html = readFileSync(resolve(webRoot, "index.html"), "utf8");
-  const inline = /<script>([\s\S]*?)<\/script>/.exec(html);
-  if (inline?.[1] === undefined) {
-    throw new Error("index.html has no inline bootstrap script");
+  const head = /<head>([\s\S]*?)<\/head>/.exec(html)?.[1];
+  const script = /<script\s+src="(\/[^"\s]+)"\s*><\/script>/.exec(head ?? "");
+  if (script?.[1] === undefined) {
+    throw new Error("index.html has no blocking classic bootstrap script in head");
   }
-  return inline[1];
+  return readFileSync(resolve(webRoot, "public", script[1].slice(1)), "utf8");
 }
 
-/** What the document holds after the snippet has run over `storage`. */
+/** What the document holds after the script has run over `storage`. */
 function stamped(storage: { getItem: (key: string) => string | null }): string | null {
   let attribute: string | null = null;
   const document = {
@@ -49,7 +50,7 @@ function stamped(storage: { getItem: (key: string) => string | null }): string |
       },
     },
   };
-  // The snippet is page script, so it reads bare globals: hand it exactly the
+  // The bootstrap is page script, so it reads bare globals: hand it exactly the
   // two it names and nothing else.
   new Function("localStorage", "document", bootstrapSource())(storage, document);
   return attribute;
@@ -99,7 +100,7 @@ describe("the appearance bootstrap in index.html", () => {
   });
 
   it("reads the key the settings module writes", () => {
-    // The snippet cannot import anything, so the key is spelled twice in the
+    // The classic script cannot import anything, so the key is spelled twice in the
     // repo. This is what makes renaming it in settings.ts fail loudly here
     // instead of quietly reintroducing the flash.
     expect(bootstrapSource()).toContain(SETTINGS_KEY);
