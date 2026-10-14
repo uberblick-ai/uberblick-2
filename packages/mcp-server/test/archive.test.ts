@@ -224,6 +224,7 @@ describe("archive_doc", () => {
       description: "A test document.",
       deleted: true,
       pinned: false,
+      openThreadCount: 0,
       // Stamped at creation and carried through the tombstone — see
       // timestamps.test.ts for what they mean.
       createdAt: expect.any(Number),
@@ -585,6 +586,7 @@ describe("restore_doc", () => {
       pinned: false,
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
+      openThreadCount: 0,
     });
 
     const hits = await rig.ok("search", { query: "glossary" });
@@ -790,6 +792,7 @@ describe("restore_doc", () => {
       pinned: false,
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
+      openThreadCount: 0,
     });
   });
 });

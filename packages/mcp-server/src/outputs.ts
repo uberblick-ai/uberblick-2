@@ -96,6 +96,7 @@ const directoryEntry = z.object({
   decidedAt: z.string().optional(),
   approvalChanged: z.boolean().optional(),
   commentCount: count.optional(),
+  openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true, including deleted anchors. Absent when unknown; each decision entry, including inForce, pending and conflicts, has its own count."),
 }).strict();
 const topicResolution = {
   topic: z.string().describe("First record's UUID identifying this decision topic."),

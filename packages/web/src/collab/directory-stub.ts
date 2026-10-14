@@ -11,7 +11,7 @@
 
 import type * as Y from "yjs";
 import {
-  decisionDirectoryFields,
+  documentDirectoryFields,
   directoryStubDiffers,
   getDirectoryEntry,
   getMeta,
@@ -35,8 +35,8 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
   const stub = getDirectoryEntry(dirDoc, meta.uuid);
   if (stub?.deleted === true && meta.kind !== "decision") return;
 
-  const decisionFields = decisionDirectoryFields(docDoc);
-  const metaChanged = directoryStubDiffers(stub, meta, decisionFields);
+  const documentFields = documentDirectoryFields(docDoc);
+  const metaChanged = directoryStubDiffers(stub, meta, documentFields);
   const staleStamp =
     stub?.updatedAt === undefined ||
     (changedAt !== null &&
@@ -53,7 +53,7 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
     description: meta.description ?? "",
     kind: meta.kind ?? "",
     status: meta.status ?? "",
-    ...decisionFields,
+    ...documentFields,
     createdAt: Date.now(),
     ...(stamp ? { updatedAt: changedAt } : {}),
   });
