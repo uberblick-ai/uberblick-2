@@ -44,7 +44,13 @@ export const toolHelpDetails = {
     "`doc_not_found` or `doc_not_hydrated`, before a UUID is allocated or a room is written. `discussion` " +
     "without `kind: \"decision\"` is an argument error. For a new topic, create an open first record with " +
     "related and discussion; it has no answer until one is recorded. For reconsideration, create an open " +
-    "successor with supersedes and discussion; the current answer stays in force. A record created decided " +
+    "successor with supersedes and discussion; the current answer stays in force. In both flows, the title " +
+    "names the stable topic or question, never the answer; successors keep it. " +
+    'Example: "Exact behavior of milestone setting `gate`", not "Milestone gate skips milestones with nothing to start". ' +
+    "The blocks hold the short answer with brief reasons; a superseding record carries the new answer. " +
+    'Do not repeat the topic as a "Topic:" line or write a specification: detailed behavior and guidance ' +
+    "belong on the related regular page, discussion in the RFC. These answer blocks are distinct from " +
+    "recorded `answer: {who, when, where}` attribution. A record created decided " +
     "can also name its discussion. Successors never inherit discussion, even when they inherit the related " +
     "page. set_metadata can correct or clear it only while open; set_status settles, rejects or withdraws " +
     "under the existing recorded-answer contract. The reference is fixed once the record leaves open. " +

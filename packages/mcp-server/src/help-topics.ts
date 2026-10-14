@@ -62,6 +62,8 @@ Ordinary documents omit \`kind\` and \`status\`. Decision records have kind \`de
 
 ## Decision answers and topics
 
+A decision title names the stable topic or question, never the answer; successors keep the title. For example, use "Exact behavior of milestone setting \`gate\`", not "Milestone gate skips milestones with nothing to start". The answer blocks hold the short answer; a superseding record carries the new answer. Do not restate the topic as a "Topic:" line or write a specification in the blocks: detailed behavior and guidance belong on the related regular page, discussion in the RFC.
+
 A decision record holds its current answer with a brief reason in one to three short answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Guidance belongs on the related regular page and discussion in a separately connected RFC. Headings, quotes, Mermaid, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
 
 Open records may be empty. Every move from another state to \`decided\`, including creation and kind adoption, requires at least one answer block with non-blank text, a valid answer shape, no TL;DR and no structured data. Refusals use \`decision_answer_empty\`, \`decision_tldr_unsupported\`, \`decision_data_unsupported\` or the matching shape code and write nothing. Decision content writes carry no TL;DR review reminder. Legacy content remains readable; an already decided record is not re-checked when its stance is confirmed or rejected.

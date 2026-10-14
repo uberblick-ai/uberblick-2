@@ -137,7 +137,7 @@ describe("create_doc lifecycle arguments", () => {
 
     expect((await inputSchema(rig, "create_doc")).oneOf).toEqual([
       {
-        title: "A decision document (`kind: decision`)",
+        title: expect.stringMatching(/^A decision document \(`kind: decision`\)\. /),
         required: ["kind"],
         properties: { kind: { const: "decision" } },
       },
