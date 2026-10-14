@@ -6,8 +6,8 @@ import type { HubAdministration } from "./hub-administration.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "../shadcn/alert-dialog.js";
 import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "../timestamps.js";
 
-const CELL = "border-b border-(--border) px-2 py-3 text-left text-sm";
-const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] text-sm text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
+const CELL = "border-b border-(--border) px-2 py-3 text-left";
+const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] ub-type-ui text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
 
 function failure(status: string): string {
   switch (status) {
@@ -71,7 +71,7 @@ function WorkspaceRow({ workspace, disabled, changeStatus }: {
   const action = suspended ? "Restore" : "Suspend";
   const name = workspace.name ?? `Unnamed workspace (${workspace.workspaceId.slice(0, 8)})`;
   return <tr>
-    <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) text-xs" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
+    <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) ub-type-caption" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
     </th>
     <td className={`${CELL} tabular-nums`}>{workspace.members}</td>
     <td className={CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
@@ -167,19 +167,19 @@ export function HubSettings({ page, administration }: {
 
   return <section className="ub-pane ub-document-pane" data-settings-page aria-labelledby="ub-settings-title">
     <div className="ub-column flex flex-col gap-4">
-      <h1 id="ub-settings-title" className="ub-heading mt-0 mb-0 font-(family-name:--font-display) font-medium">{page === "hub-admins" ? "Admins" : "Workspaces"}</h1>
-      <p className="m-0 text-sm">{page === "hub-admins" ? `Hub admins of ${host(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}</p>
-      {authority === null ? <p className="m-0 text-sm" role="status">Reading hub access…</p> :
-        !admin ? <p className="m-0 text-sm" role="alert">{failure(authority.status)}</p> :
-        list === null ? <p className="m-0 text-sm" role="status">Reading from the hub…</p> :
-        list.status !== "ok" ? <p className="m-0 text-sm" role="alert">{failure(list.status)}</p> : null}
-      {feedback !== null && <p className="m-0 text-sm" role={feedback.ok ? "status" : "alert"}>{feedback.text}</p>}
+      <h1 id="ub-settings-title" className="mt-0 mb-0 ub-type-title font-(family-name:--font-display) font-medium tracking-[-0.021em]">{page === "hub-admins" ? "Admins" : "Workspaces"}</h1>
+      <p className="m-0 ub-type-small">{page === "hub-admins" ? `Hub admins of ${host(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}</p>
+      {authority === null ? <p className="m-0 ub-type-ui" role="status">Reading hub access…</p> :
+        !admin ? <p className="m-0 ub-type-ui" role="alert">{failure(authority.status)}</p> :
+        list === null ? <p className="m-0 ub-type-ui" role="status">Reading from the hub…</p> :
+        list.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(list.status)}</p> : null}
+      {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.ok ? "status" : "alert"}>{feedback.text}</p>}
       {ready && <table className="w-full table-auto border-collapse" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
         {page === "hub-admins" ? <>
-          <thead><tr><th className={CELL} scope="col">Account</th><th className={CELL} scope="col">Workspaces</th><th className={CELL} scope="col">Last signed in</th><th className={CELL} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Account</th><th className={`${CELL} ub-type-ui`} scope="col">Workspaces</th><th className={`${CELL} ub-type-ui`} scope="col">Last signed in</th><th className={`${CELL} ub-type-ui`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
           <tbody>{list.admins?.map((person) => <AdminRow key={person.principalId} admin={person} now={now} disabled={busy} remove={(person) => { void remove(person); }} />)}</tbody>
         </> : <>
-          <thead><tr><th className={CELL} scope="col">Workspace</th><th className={CELL} scope="col">Members</th><th className={CELL} scope="col">Admins</th><th className={CELL} scope="col">Status</th><th className={CELL} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Workspace</th><th className={`${CELL} ub-type-ui`} scope="col">Members</th><th className={`${CELL} ub-type-ui`} scope="col">Admins</th><th className={`${CELL} ub-type-ui`} scope="col">Status</th><th className={`${CELL} ub-type-ui`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
           <tbody>{list.workspaces?.map((workspace) => <WorkspaceRow key={workspace.workspaceId} workspace={workspace} disabled={busy} changeStatus={(workspace) => { void changeStatus(workspace); }} />)}</tbody>
         </>}
       </table>}

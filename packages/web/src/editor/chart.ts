@@ -42,7 +42,11 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   // Chart.js also extends all-negative axes to zero when enabled.
   const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
     axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
-  const font = { family: colors.fontFamily, size: 11 };
+  const font = {
+    family: colors.fontFamily,
+    size: Number.parseFloat(colors.fontSize),
+    lineHeight: colors.lineHeight,
+  };
   const ranges = layout === "panels" ? chartPanelRanges(result.series) : [];
   const panelUnit = (index: number): string => result.series[index]?.unit || "";
   const formatValue = (index: number, value: number): string =>
@@ -171,7 +175,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
             color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
           } },
-          tooltip: { callbacks: {
+          tooltip: { titleFont: font, bodyFont: font, footerFont: font, callbacks: {
             title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
             label: item => {
               const index = indices[item.datasetIndex] ?? 0;

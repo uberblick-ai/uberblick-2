@@ -65,7 +65,7 @@ export function WorkspaceSwitcher({
               <span className="ub-workspace-name min-w-0 flex-1 truncate" title={current === null ? undefined : currentLabel}>
                 {currentLabel}
               </span>
-              <span className="ub-workspace-caret shrink-0 text-[0.7rem] text-(--sidebar-muted-foreground)" aria-hidden="true">
+              <span className="ub-workspace-caret shrink-0 ub-type-caption text-(--sidebar-muted-foreground)" aria-hidden="true">
                 ▾
               </span>
             </SidebarMenuButton>
@@ -81,7 +81,7 @@ export function WorkspaceSwitcher({
                   aria-current={here ? "true" : undefined}
                   onSelect={() => onSwitch(workspace.segment)}
                 >
-                  <span className="ub-menu-text min-w-0 flex-1 truncate text-[0.8rem]">{workspaceLabel(workspace, names, workspaces)}</span>
+                  <span className="ub-menu-text min-w-0 flex-1 truncate ub-type-ui">{workspaceLabel(workspace, names, workspaces)}</span>
                   {here && <span className="ub-workspace-current shrink-0" aria-hidden="true">✓</span>}
                 </DropdownMenuItem>
               );

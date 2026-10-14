@@ -41,12 +41,12 @@
   border: 0;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  font: 0.8rem/1.7 var(--font-mono);
+  font: var(--type-small-size)/1.7 var(--font-mono);
   white-space: pre;
 }
 .ub-wireframe-editing > .ub-wireframe-source,
 .ub-wireframe[data-annotated="true"] > .ub-wireframe-source { display: block; }
 .ub-wireframe-stale,
-.ub-wireframe-diagnostics { margin: 0.5rem 0 0; font: 0.75rem/1.5 var(--font-sans); color: var(--muted-foreground); }
+.ub-wireframe-diagnostics { margin: 0.5rem 0 0; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); }
 .ub-wireframe-diagnostics { padding-left: 1.2rem; overflow-wrap: anywhere; }
 .ub-wireframe-stale { font-weight: 500; }
