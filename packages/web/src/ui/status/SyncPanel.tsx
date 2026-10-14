@@ -24,9 +24,11 @@ const UNKNOWN = "—";
 function Fact({
   label,
   value,
+  mono = false,
 }: {
   label: string;
   value: string | ReactElement;
+  mono?: boolean;
 }): ReactElement {
   return (
     <div className="ub-sync-fact flex items-baseline gap-2 py-[0.15rem]">
@@ -34,7 +36,7 @@ function Fact({
         {label}
       </dt>
       {/* Identifiers and exact timestamps wrap inside the panel. */}
-      <dd className="m-0 min-w-0 font-mono text-xs/[1.5] [overflow-wrap:anywhere]">
+      <dd className={`m-0 min-w-0 text-xs/[1.5] [overflow-wrap:anywhere]${mono ? " font-mono" : ""}`}>
         {value}
       </dd>
     </div>
@@ -84,7 +86,7 @@ export function SyncPanel({
     <div>
       <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
       <dl className="ub-sync-facts m-0 mb-5">
-        <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} />
+        <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} mono />
         {/* Always name the configuration source beside its hub endpoint. */}
         <Fact
           label="Source"
@@ -94,7 +96,7 @@ export function SyncPanel({
               : endpointSourceLabel(namedEndpoint.source)
           }
         />
-        <Fact label="Room" value={connection?.room ?? UNKNOWN} />
+        <Fact label="Room" value={connection?.room ?? UNKNOWN} mono />
         <Fact
           label="State"
           value={hasReading ? (facts.primary ?? UNKNOWN) : UNKNOWN}

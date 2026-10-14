@@ -73,7 +73,7 @@ function WorkspaceRow({ workspace, disabled, changeStatus }: {
   return <tr>
     <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) text-xs" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
     </th>
-    <td className={CELL}>{workspace.members}</td>
+    <td className={`${CELL} tabular-nums`}>{workspace.members}</td>
     <td className={CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
     <td className={CELL}>{suspended ? "Suspended" : "Active"}</td>
     <td className={CELL}><AlertDialog>

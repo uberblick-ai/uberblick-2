@@ -330,7 +330,7 @@ export function CopyLink({
         title={`${label} — copies the canonical document URL for ${address}`}
         onClick={() => void copy()}
       >
-        {label}
+        {identity ? <span>uuid <span className="ub-doc-id">{shortUuid}</span></span> : label}
       </button>
     </span>
   );
@@ -406,7 +406,7 @@ export function DocMetaLine({
               copyPath={copyPath}
               shortUuid={meta.uuid.slice(0, 8)}
             />
-            <span className="ub-doc-rev"> · rev {rev ?? "········"}</span>
+            <span className="ub-doc-rev"> · rev <span className="ub-doc-id">{rev ?? "········"}</span></span>
           </span>
           {!archived && (
             <DocumentActions

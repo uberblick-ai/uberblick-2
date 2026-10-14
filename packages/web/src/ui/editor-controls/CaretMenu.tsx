@@ -155,7 +155,7 @@ export function CaretMenu({
           {options.map((option, index) => (
             <Fragment key={option.id}>
               {option.group && options[index - 1]?.group !== option.group && (
-                <p role="presentation" className="mt-[0.35rem] mb-[0.15rem] px-[0.4rem] font-(family-name:--font-mono) text-[0.65rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
+                <p role="presentation" className="mt-[0.35rem] mb-[0.15rem] px-[0.4rem] text-[0.65rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
                   {option.group}
                 </p>
               )}
@@ -174,7 +174,7 @@ export function CaretMenu({
                 onClick={() => choose(index)}
               >
                 <span className="min-w-0 flex-1">{option.label}</span>
-                {option.hint && <span className="font-(family-name:--font-mono) text-xs text-(--muted-foreground)">{option.hint}</span>}
+                {option.hint && <span className="text-xs text-(--muted-foreground)">{option.hint}</span>}
               </button>
             </Fragment>
           ))}
