@@ -132,11 +132,11 @@ export const toolHelpDetails = {
     "Merged invalidity is observed through the shared reader without dropping, repairing or writing values.",
   list_docs:
     "Documents in the workspace, from the synced directory document — never from locally observed creations. " +
-    "The unfiltered orientation listing omits `kind: \"decision\"` records. Pass any `kind`, `status` or `tag` " +
+    "The unfiltered orientation listing omits `kind: \"decision\"` records. Pass any `kind`, `status`, `tag` or `has_open_threads` " +
     "predicate to ask for its exact matches, including matching decisions; `kind: \"decision\"` lists decision " +
     "topics with one row per topic. Each row presents the record in force, else a pending record, else the " +
     "first record, and names all pending records and all conflicting maximal decided records. `inForce: null` " +
-    "means no answer is in force. A status or tag predicate matches a topic if any live record matches; each " +
+    "means no answer is in force. A status, tag or open-thread predicate matches a topic if any live record matches; each " +
     "predicate may match a different live record. Resolution still uses its whole graph. `include_superseded: " +
     "true` returns every record with predicates applied per record. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
@@ -151,6 +151,25 @@ export const toolHelpDetails = {
     "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
     "neither exists, and absent when unknown. Page get_doc reads mark related and linked topics separately; " +
     "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
+    "Every entry, regular or decision, including `inForce`, `pending` and `conflicts`, carries " +
+    "`openThreadCount` when known: the count of that document's threads whose `resolved` is not `true`, " +
+    "including threads whose anchored text was deleted (`range: null`). Resolved threads do not count; " +
+    "replies do not add threads. An absent field means the stub cache is unknown, not zero. " +
+    "`has_open_threads: true` matches known counts of at least one and combines with the other filters. " +
+    "`has_open_threads: false` refuses at argument validation. A topic matches through any live record " +
+    "(not rejected or withdrawn), including a superseded answer, while its representative's own count may " +
+    "be zero or unknown. With `include_superseded: true`, the predicate applies to each record instead.\n\n" +
+    "To discover topics, call `list_docs({has_open_threads: true})`. To read every matching document's " +
+    "threads, call `list_docs({has_open_threads: true, include_superseded: true})`, then `get_doc` on each " +
+    "hit for threads and anchors, then `annotate` with `thread_id` to reply, resolve or reopen. Resolving " +
+    "the last open thread sets that document's count to zero and removes its per-record match; the topic " +
+    "leaves the topic-row filter when none of its live records matches.\n\n" +
+    "Hydrated MCP and web replicas recompute the cache after document changes, including peer updates. " +
+    "Local `annotate` results are reflected in the next listing; web changes appear once synced. Existing " +
+    "live documents gain a known count on hydration or replay without a thread change. Whole-entry stub " +
+    "writes use Yjs ordering: during version skew an older writer can drop the field, making it unknown " +
+    "and excluding it from the filter until a current replica sees another document change or replays it " +
+    "on restart. Archived regular stubs are not repaired; restore supplies the current count.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
     "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
@@ -163,11 +182,11 @@ export const toolHelpDetails = {
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +
     "stamp exceeds it. It is also deliberately coarse — at most one re-stamp every few minutes of its own " +
-    "edits, immediately on a title or tag change. Both come from the clock of whichever replica wrote them, " +
+    "edits, immediately on a metadata or cached thread-count change. Both come from the clock of whichever replica wrote them, " +
     "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
-    "room, and combine with `tag`. A tag filter accepts a catalog id or exact current name; a value this " +
+    "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or exact current name; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
     "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
     "state.",

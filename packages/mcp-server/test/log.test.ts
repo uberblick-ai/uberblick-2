@@ -101,6 +101,7 @@ describe("the update log", () => {
           pinned: false,
           createdAt: expect.any(Number),
           updatedAt: expect.any(Number),
+          openThreadCount: 0,
         },
       ]);
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
 import { appendBlock, createAnnotation, deleteBlock, editBlock, getBlocks, getBlocksFragment, initDoc, listAnnotations, resolveAnnotationRange } from "@uberblick/schema";
-import { actOnTable, deleteTableColumn, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget } from "../src/editor/table-controls.js";
+import { actOnTable, deleteTableColumn, moveTableColumn, moveTableRow, resolveTableColumn, resolveTableRow, tableColumnTargets, tableRowTarget } from "../src/editor/table-controls.js";
 import type { TableAction, TableColumnTarget, TableRowTarget } from "../src/editor/table-controls.js";
 import { isOrdinaryTable } from "../src/editor/table.js";
 import { mountEditor } from "./helpers.js";
@@ -283,6 +283,301 @@ describe("shared table column deletion", () => {
       expect(cells(f.editor)).toEqual([["A"], ["alpha"]]);
       expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
       expect(getBlocks(f.a).find((block) => block.id === nextId)?.text).toBe("Surrounding content");
+    } finally { remoteEditor.destroy(); f.close(); }
+  });
+});
+
+describe("shared table column moves", () => {
+  it.each([[0, 1], [1, -1], [1, 1], [2, -1]] as const)("moves column %i by %i with its marks, links and highlights, preserving every other identity", (column, direction) => {
+    const f = fixture("| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |\n| delta | echo | foxtrot |");
+    try {
+      const destination = column + direction;
+      const table = sharedCells(f.a);
+      cellText(table, 0, column).format(0, 1, { bold: {} });
+      cellText(table, 1, column).format(1, 3, { bold: {}, link: { href: "https://example.test/moved" } });
+      cellText(table, 1, destination).format(0, 3, { italic: {} });
+      const movedThread = createAnnotation(f.a, f.id, 1, 3, "Reader", "Moved cell", { row: 1, column });
+      const neighbourThread = createAnnotation(f.a, f.id, 1, 3, "Reader", "Neighbour cell", { row: 1, column: destination });
+      const original = f.editor.state.doc.child(0).toJSON();
+      const rows = table.toArray() as Y.XmlElement[];
+      const originalCells = rows.map((row) => row.toArray());
+      const expectedCells = rows.map((_row, rowIndex) => {
+        const cells = Array.from({ length: 3 }, (_, cellIndex) => f.editor.state.doc.child(0).child(rowIndex).child(cellIndex).toJSON());
+        [cells[column], cells[destination]] = [cells[destination]!, cells[column]!];
+        return cells;
+      });
+      const target = columnTargetOf(f.editor, f.id, column);
+      let updates = 0;
+      f.a.on("update", () => { updates += 1; });
+      expect(moveTableColumn(f.editor, target, direction)).toBe(true);
+      expect(updates).toBe(1);
+      expect(sharedCells(f.a)).toBe(table);
+      expect(table.getAttribute("id")).toBe(f.id);
+      expect(table.toArray()).toEqual(rows);
+      rows.forEach((row, rowIndex) => {
+        expect(row.get(destination)).not.toBe(originalCells[rowIndex]![column]);
+        for (let cellIndex = 0; cellIndex < 3; cellIndex += 1) {
+          if (cellIndex !== column) expect(row.get(cellIndex === destination ? column : cellIndex)).toBe(originalCells[rowIndex]![cellIndex]);
+        }
+        const cells = f.editor.state.doc.child(0).child(rowIndex);
+        expect(Array.from({ length: 3 }, (_, index) => cells.child(index).toJSON())).toEqual(expectedCells[rowIndex]);
+        cells.forEach((cell) => { expect(cell.type.name).toBe(rowIndex === 0 ? "tableHeader" : "tableCell"); });
+      });
+      expect(resolveTableColumn(f.editor, target)).toBeNull();
+      const movedTarget = columnTargetOf(f.editor, f.id, destination);
+      expect(resolveTableColumn(f.editor, movedTarget)?.columnIndex).toBe(destination);
+      expect(f.editor.state.selection.$from.node(3)).toBe(f.editor.state.doc.child(0).child(0).child(destination));
+      expect(f.editor.state.selection.$from.parentOffset).toBe(0);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      for (const doc of [f.a, f.b]) {
+        expect(resolveAnnotationRange(doc, movedThread.id)).toEqual({ row: 1, column: destination, start: 1, end: 3, collapsed: false });
+        expect(resolveAnnotationRange(doc, neighbourThread.id)).toEqual({ row: 1, column, start: 1, end: 3, collapsed: false });
+      }
+      const highlight = f.editor.view.dom.querySelector(`[data-comment-thread="${movedThread.id}"]`)!;
+      expect(highlight.closest("td")).toBe(f.editor.view.dom.querySelectorAll("tr")[1]!.children[destination]);
+      expect(undo(f.editor.state)).toBe(true);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(f.editor.state.doc.child(0).toJSON()).toEqual(original);
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      for (const doc of [f.a, f.b]) expect(resolveAnnotationRange(doc, movedThread.id)).toEqual({ row: 1, column, start: 1, end: 3, collapsed: false });
+    } finally { f.close(); }
+  });
+
+  it("isolates each move from typing immediately before and after it and from another move", () => {
+    const f = fixture();
+    try {
+      const original = getBlocks(f.a);
+      const target = columnTargetOf(f.editor, f.id, 0);
+      f.editor.commands.setTextSelection(4);
+      f.editor.view.dispatch(f.editor.state.tr.insertText("before "));
+      const before = getBlocks(f.a);
+      expect(moveTableColumn(f.editor, target, 1)).toBe(true);
+      const changed = getBlocks(f.a);
+      f.editor.view.dispatch(f.editor.state.tr.insertText("after "));
+      expect(cells(f.editor)[0]).toEqual(["B", "after before A"]);
+      const typed = getBlocks(f.a);
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 1), -1)).toBe(true);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(getBlocks(f.a)).toEqual(typed);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(getBlocks(f.a)).toEqual(changed);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(getBlocks(f.a)).toEqual(before);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(getBlocks(f.a)).toEqual(original);
+    } finally { f.close(); }
+  });
+
+  it.each([
+    ["", -1, "before"], ["", 1, "before"], ["same", -1, "before"], ["same", 1, "before"],
+    ["", -1, "after"], ["", 1, "after"], ["same", -1, "after"], ["same", 1, "after"],
+  ] as const)("preserves unseen edits to identical '%s' neighbours when moving by %i with their offline edit made %s the move", (text, direction, timing) => {
+    const f = fixture(`| Same | Same | Same |\n| --- | --- | --- |\n| ${text} | ${text} | ${text} |`);
+    try {
+      const table = sharedCells(f.a);
+      const rows = table.toArray() as Y.XmlElement[];
+      const originalCells = rows.map((row) => row.toArray());
+      const target = columnTargetOf(f.editor, f.id, 1);
+      if (timing === "after") expect(moveTableColumn(f.editor, target, direction)).toBe(true);
+      const remote = sharedCells(f.b);
+      cellText(remote, 1, 0).insert(0, "left ");
+      cellText(remote, 1, 2).insert(0, "right ");
+      const neighbour = 1 + direction;
+      cellText(remote, 1, neighbour).format(0, 4, { bold: {} });
+      const neighbourThread = createAnnotation(f.b, f.id, 0, 4, "Reader", "Unseen neighbour comment", { row: 1, column: neighbour });
+      cellText(remote, 1, 1).insert(0, "moved ");
+      const movedThread = createAnnotation(f.b, f.id, 0, 5, "Reader", "Unseen moved comment", { row: 1, column: 1 });
+      if (timing === "before") expect(moveTableColumn(f.editor, target, direction)).toBe(true);
+      rows.forEach((row, index) => {
+        expect(row.get(direction === -1 ? 1 : 0)).toBe(originalCells[index]![0]);
+        expect(row.get(direction === 1 ? 1 : 2)).toBe(originalCells[index]![2]);
+      });
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      expect(cells(f.editor)).toEqual([["Same", "Same", "Same"], direction === -1 ? [text, `left ${text}`, `right ${text}`] : [`left ${text}`, `right ${text}`, text]]);
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      for (const doc of [f.a, f.b]) {
+        expect(resolveAnnotationRange(doc, neighbourThread.id)).toEqual({ row: 1, column: 1, start: 0, end: 4, collapsed: false });
+        expect(listAnnotations(doc).map((thread) => thread.id)).toContain(movedThread.id);
+        expect(resolveAnnotationRange(doc, movedThread.id)).toBeNull();
+      }
+      const neighbourCell = f.editor.state.doc.child(0).child(1).child(1);
+      expect(neighbourCell.child(0).child(0).marks.map((mark) => mark.type.name)).toContain("bold");
+      expect(f.editor.view.dom.querySelector(`[data-comment-thread="${neighbourThread.id}"]`)!.closest("td")).toBe(f.editor.view.dom.querySelectorAll("tr")[1]!.children[1]);
+    } finally { f.close(); }
+  });
+
+  it("undo restores the moved column's prior content, with the accepted loss of later edits only to its copy", () => {
+    const f = fixture("| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |");
+    try {
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 1), 1)).toBe(true);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      const remote = sharedCells(f.b);
+      cellText(remote, 1, 2).insert(0, "later ");
+      cellText(remote, 1, 1).insert(0, "neighbour ");
+      cellText(remote, 1, 0).insert(0, "other ");
+      const thread = createAnnotation(f.b, f.id, 0, 9, "Reader", "Later neighbour comment", { row: 1, column: 1 });
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      expect(cells(f.editor)[1]).toEqual(["other alpha", "neighbour charlie", "later bravo"]);
+      expect(undo(f.editor.state)).toBe(true);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(cells(f.editor)).toEqual([["A", "B", "C"], ["other alpha", "bravo", "neighbour charlie"]]);
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      for (const doc of [f.a, f.b]) expect(resolveAnnotationRange(doc, thread.id)).toEqual({ row: 1, column: 2, start: 0, end: 9, collapsed: false });
+    } finally { f.close(); }
+  });
+
+  it.each([-1, 1] as const)("re-resolves its header after remote insertion, neighbour deletion and a received source edit before moving by %i", (direction) => {
+    const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |";
+    const f = fixture(source);
+    try {
+      const target = columnTargetOf(f.editor, f.id, 1);
+      const expanded = "| New | A | B | C |\n| --- | --- | --- | --- |\n| new | alpha | received bravo | charlie |";
+      editBlock(f.b, f.id, source, expanded, { tableMapping: { rows: [0, 1], columns: [null, 0, 1, 2] } });
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      expect(resolveTableColumn(f.editor, target)?.columnIndex).toBe(2);
+      const shortened = "| New | B | C |\n| --- | --- | --- |\n| new | received bravo | charlie |";
+      editBlock(f.b, f.id, expanded, shortened, { tableMapping: { rows: [0, 1], columns: [0, 2, 3] } });
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      expect(resolveTableColumn(f.editor, target)?.columnIndex).toBe(1);
+      expect(moveTableColumn(f.editor, target, direction)).toBe(true);
+      expect(cells(f.editor)).toEqual(direction === -1 ? [["B", "New", "C"], ["received bravo", "new", "charlie"]] : [["New", "C", "B"], ["new", "charlie", "received bravo"]]);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      const before = getBlocks(f.a);
+      expect(moveTableColumn(f.editor, target, -direction as -1 | 1)).toBe(false);
+      expect(getBlocks(f.a)).toEqual(before);
+    } finally { f.close(); }
+  });
+
+  it.each(["column", "table", "read-only", "ragged"] as const)("refuses a stale target after %s without writing or moving the caret", (change) => {
+    const f = fixture();
+    try {
+      const target = columnTargetOf(f.editor, f.id, 1);
+      if (change === "column") {
+        editBlock(f.b, f.id, SOURCE, "| A |\n| --- |\n| alpha |\n| beta |", { tableMapping: { rows: [0, 1, 2], columns: [0] } });
+        Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      } else if (change === "table") {
+        deleteBlock(f.b, f.id);
+        Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      } else if (change === "read-only") f.editor.setEditable(false);
+      else {
+        (sharedCells(f.b).get(1) as Y.XmlElement).delete(1, 1);
+        Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      }
+      const before = getBlocks(f.a);
+      const selection = f.editor.state.selection.toJSON();
+      let updates = 0;
+      f.a.on("update", () => { updates += 1; });
+      for (const direction of [-1, 1] as const) expect(moveTableColumn(f.editor, target, direction)).toBe(false);
+      expect(updates).toBe(0);
+      expect(getBlocks(f.a)).toEqual(before);
+      expect(f.editor.state.selection.toJSON()).toEqual(selection);
+    } finally { f.close(); }
+  });
+
+  it.each([-1, 1] as const)("refuses moving by %i after a neighbour deletion makes the target an edge", (direction) => {
+    const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |";
+    const f = fixture(source);
+    try {
+      const target = columnTargetOf(f.editor, f.id, 1);
+      const remaining = direction === -1 ? "| B | C |\n| --- | --- |\n| bravo | charlie |" : "| A | B |\n| --- | --- |\n| alpha | bravo |";
+      editBlock(f.b, f.id, source, remaining, { tableMapping: { rows: [0, 1], columns: direction === -1 ? [1, 2] : [0, 1] } });
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      expect(resolveTableColumn(f.editor, target)?.columnIndex).toBe(direction === -1 ? 0 : 1);
+      const before = getBlocks(f.a);
+      const selection = f.editor.state.selection.toJSON();
+      let updates = 0;
+      f.a.on("update", () => { updates += 1; });
+      expect(moveTableColumn(f.editor, target, direction)).toBe(false);
+      expect(updates).toBe(0);
+      expect(getBlocks(f.a)).toEqual(before);
+      expect(f.editor.state.selection.toJSON()).toEqual(selection);
+    } finally { f.close(); }
+  });
+
+  it.each(["| A |\n| --- |", "| A |\n| --- |\n| alpha |"])("refuses both directions in a single-column table %s", (source) => {
+    const f = fixture(source);
+    try {
+      const target = columnTargetOf(f.editor, f.id, 0);
+      const before = getBlocks(f.a);
+      let updates = 0;
+      f.a.on("update", () => { updates += 1; });
+      for (const direction of [-1, 1] as const) expect(moveTableColumn(f.editor, target, direction)).toBe(false);
+      expect(updates).toBe(0);
+      expect(getBlocks(f.a)).toEqual(before);
+    } finally { f.close(); }
+  });
+
+  it("moves and undoes a column in a header-only table", () => {
+    const f = fixture("| A | B |\n| --- | --- |");
+    try {
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 1), -1)).toBe(true);
+      expect(cells(f.editor)).toEqual([["B", "A"]]);
+      expect(isOrdinaryTable(f.editor.state.doc.child(0))).toBe(true);
+      expect(undo(f.editor.state)).toBe(true);
+      expect(cells(f.editor)).toEqual([["A", "B"]]);
+    } finally { f.close(); }
+  });
+
+  it("retains two complete marked columns in the known concurrent same-column collision", () => {
+    const f = fixture("| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |");
+    let remoteEditor: ReturnType<typeof mountEditor>["editor"] | undefined;
+    try {
+      cellText(sharedCells(f.a), 1, 1).format(0, 5, { bold: {} });
+      const thread = createAnnotation(f.a, f.id, 1, 3, "Reader", "Both copies", { row: 1, column: 1 });
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      remoteEditor = mountEditor(f.b).editor;
+      const source = [f.editor.state.doc.child(0).child(0).child(1).toJSON(), f.editor.state.doc.child(0).child(1).child(1).toJSON()];
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 1), -1)).toBe(true);
+      expect(moveTableColumn(remoteEditor, columnTargetOf(remoteEditor, f.id, 1), 1)).toBe(true);
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+      expect(cells(remoteEditor)).toEqual(cells(f.editor));
+      expect(cells(f.editor).map((row) => row.length)).toEqual([4, 4]);
+      for (let rowIndex = 0; rowIndex < 2; rowIndex += 1) {
+        const row = f.editor.state.doc.child(0).child(rowIndex);
+        const copies = Array.from({ length: 4 }, (_, column) => row.child(column)).filter((cell) => cell.textContent === (rowIndex === 0 ? "B" : "bravo"));
+        expect(copies.map((cell) => cell.toJSON())).toEqual([source[rowIndex], source[rowIndex]]);
+      }
+      expect(f.editor.view.dom.querySelectorAll(`[data-comment-thread="${thread.id}"]`)).toHaveLength(2);
+    } finally { remoteEditor?.destroy(); f.close(); }
+  });
+
+  it("retains the complete moved copy in the known concurrent deletion limit", () => {
+    const f = fixture("| A | B | C |\n| --- | --- | --- |\n| alpha | bravo | charlie |");
+    const remoteEditor = mountEditor(f.b).editor;
+    try {
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 1), 1)).toBe(true);
+      expect(deleteTableColumn(remoteEditor, columnTargetOf(remoteEditor, f.id, 1))).toBe(true);
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      expect(cells(f.editor)).toEqual([["A", "C", "B"], ["alpha", "charlie", "bravo"]]);
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
+    } finally { remoteEditor.destroy(); f.close(); }
+  });
+
+  it.each([["add", false], ["move", false], ["add", true], ["move", true]] as const)("keeps a %sed row's contents through the known column-order limit (undo: %s)", (action, undoMove) => {
+    const f = fixture();
+    const remoteEditor = mountEditor(f.b).editor;
+    try {
+      expect(moveTableColumn(f.editor, columnTargetOf(f.editor, f.id, 0), 1)).toBe(true);
+      if (undoMove) Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      if (action === "add") {
+        const table = sharedCells(f.b);
+        table.insert(2, [(table.get(1) as Y.XmlElement).clone()]);
+      } else expect(moveTableRow(remoteEditor, targetOf(remoteEditor, f.id, 1), 3)).toBe(true);
+      Y.applyUpdate(f.a, Y.encodeStateAsUpdate(f.b));
+      if (undoMove) expect(undo(f.editor.state)).toBe(true);
+      Y.applyUpdate(f.b, Y.encodeStateAsUpdate(f.a));
+      const header = undoMove ? ["A", "B"] : ["B", "A"];
+      const addedOrMoved = undoMove ? ["one", "alpha"] : ["alpha", "one"];
+      const first = undoMove ? ["alpha", "one"] : ["one", "alpha"];
+      const last = undoMove ? ["beta", "two"] : ["two", "beta"];
+      expect(cells(f.editor)).toEqual(action === "add" ? [header, first, addedOrMoved, last] : [header, last, addedOrMoved]);
+      expect(getBlocks(f.b)).toEqual(getBlocks(f.a));
     } finally { remoteEditor.destroy(); f.close(); }
   });
 });

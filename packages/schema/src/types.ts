@@ -330,6 +330,8 @@ export interface DirectoryEntry {
   kind?: DocumentKind;
   /** Cached lifecycle state, present only when it is legal for {@link kind}. */
   status?: DocumentStatus;
+  /** Cached unresolved thread count; absent when the cache is unknown. */
+  openThreadCount?: number;
   /** Decision-only metadata caches. Other document kinds carry none of these. */
   governs?: string;
   topic?: string;
