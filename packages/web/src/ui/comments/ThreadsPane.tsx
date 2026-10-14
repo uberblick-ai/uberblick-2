@@ -93,7 +93,7 @@ function ThreadCard({
       >
         <span className="ub-thread-head flex items-center gap-[0.35rem]">
           {/* The one auto margin keeps both state chips together at the edge. */}
-          <span className="ub-thread-ref mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{thread.blockRef}</span>
+          <span className="ub-thread-ref mr-auto text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{thread.blockRef}</span>
           {thread.orphaned && (
             // The subtle warning fill disappears on a focused amber ground.
             <span className={`ub-chip ub-chip-orphaned rounded-(--radius-sm) px-[0.3rem] text-[0.65rem] tracking-[0.04em] uppercase ${focused ? "bg-(--status-warning) text-(--brand-foreground)" : "bg-(--status-warning-subtle) text-foreground"}`}>

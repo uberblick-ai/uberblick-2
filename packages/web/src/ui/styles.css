@@ -137,7 +137,7 @@
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
 
-  /* UI and prose use Geist; machine text uses Geist Mono. The document title
+  /* UI and prose use Geist; pasteable text uses Geist Mono. The document title
      and TL;DR heading share the Fraunces display stack. System fallbacks cover
      the font-swap period. */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
@@ -277,10 +277,7 @@ body {
   font-size: 0.8rem;
 }
 
-/* Machine identifiers and sync details use the mono face. Keep these
-   selectors scoped: `.ub-muted` also carries running prose. */
-.ub-list-head .ub-muted,
-.ub-status,
+/* Raw stored blocks and their identifiers remain pasteable source text. */
 .ub-foreign-list {
   font-family: var(--font-mono);
 }
@@ -361,7 +358,7 @@ body {
   color: var(--sidebar-muted-foreground);
 }
 
-/* Sync detail shares the group labels' size and tint while staying mono. */
+/* Sync detail shares the group labels' size and tint. */
 .ub-list-head .ub-muted {
   font-size: 11px;
   color: var(--sidebar-group-label);
@@ -536,7 +533,6 @@ body {
 
 .ub-panel-fact dd {
   margin: 0;
-  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -655,7 +651,6 @@ body {
 
 .ub-mention {
   font-size: 0.7rem;
-  font-family: var(--font-mono);
   padding: 0 0.3rem;
 }
 
@@ -750,7 +745,7 @@ h1.ub-heading {
   background: var(--card);
   color: var(--card-foreground);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-  font: 0.8rem/1.2 var(--font-mono);
+  font: 0.8rem/1.2 var(--font-sans);
 }
 
 .ub-peer-overflow-row .ub-muted {
@@ -814,12 +809,15 @@ h1.ub-heading {
   min-height: 2rem;
 }
 
-/* Mono machine facts keep changing revisions at a stable character width. */
 .ub-doc-ids {
-  font-family: var(--font-mono);
   flex: none;
   display: inline-flex;
   align-items: center;
+}
+
+/* Short ids and the revision placeholder share a stable character width. */
+.ub-doc-id {
+  font-family: var(--font-mono);
 }
 
 /* Keep the actions target at 44px even when tags give up width. */
@@ -1129,7 +1127,7 @@ h3.ub-heading {
   border: 0;
   border-radius: var(--radius-sm);
   padding: 0.05rem 0.3rem;
-  font: 0.7rem/1 var(--font-mono);
+  font: 0.7rem/1 var(--font-sans);
   letter-spacing: 0.04em;
   cursor: pointer;
 }
@@ -2060,9 +2058,10 @@ h3.ub-heading {
 }
 
 /* Reserve the longest reading, including "update required", and one line
-   even while blank so settled status moves no adjacent content. */
+   even while blank. Face-independent widths keep the slots and their adjacent
+   content still; ch would change with the selected face's zero advance. */
 .ub-status-word {
-  width: 15ch;
+  width: 9em;
   min-height: 1lh;
   flex: none;
   line-height: 1.2;
@@ -2071,17 +2070,17 @@ h3.ub-heading {
 
 /* Saved and hub readings each reserve their longest label width while blank. */
 .ub-status-word--saved {
-  width: 12ch;
+  width: 7.2em;
 }
 
 .ub-status-word--hub {
-  width: 19ch;
+  width: 11.4em;
 }
 
 /* Inline not-saved only accompanies ordinary sync words. Reserve their
    longest reading, rather than refusal words, to keep presence in the pane. */
 .ub-status-word--unsaved {
-  width: 9ch;
+  width: 5.4em;
 }
 
 /* A lit quarter of the warning ring rotates in the fixed status-mark slot. */

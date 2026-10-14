@@ -758,8 +758,9 @@ async function clickCopy(
   const button = within(host).getByRole<HTMLButtonElement>("button", { name: `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${segment}/${UUID}` });
   const label = button?.textContent ?? "";
   const ariaLabel = button?.getAttribute("aria-label") ?? "";
-  const revisionIsInsideControl =
-    button.contains(within(host).getByText(/· rev /));
+  const revision = host.querySelector(".ub-doc-rev");
+  expect(revision).not.toBeNull();
+  const revisionIsInsideControl = button.contains(revision);
   await act(async () => {
     button?.click();
   });

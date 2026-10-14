@@ -35,11 +35,16 @@ import { AccessSettings } from "./AccessSettings.js";
 /** What a SyncPanel-style fact reads as before this client knows it. */
 const UNKNOWN = "—";
 
-function Fact({ label, children }: { label: string; children: ReactNode }): ReactElement {
+function Fact({ label, children, mono = false, tabular = false }: {
+  label: string;
+  children: ReactNode;
+  mono?: boolean;
+  tabular?: boolean;
+}): ReactElement {
   return (
     <div className="flex items-baseline justify-between gap-2 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
       <dt className="text-sm">{label}</dt>
-      <dd className="m-0 max-w-[70%] font-(family-name:--font-mono) text-sm text-right wrap-anywhere">
+      <dd className={`m-0 max-w-[70%] text-sm text-right wrap-anywhere${mono ? " font-(family-name:--font-mono)" : ""}${tabular ? " tabular-nums" : ""}`}>
         {children}
       </dd>
     </div>
@@ -83,10 +88,10 @@ function GeneralSettings({
         <MainRepositoryForm key={`repository-${workspace.uuid}`} workspace={workspace} connection={catalogConnection} />
         <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <dl className="m-0 grid" data-settings-facts>
-            <Fact label="Workspace UUID">{workspace.uuid}</Fact>
-            <Fact label="Address segment">{workspace.segment}</Fact>
-            <Fact label="Documents">{documents ?? UNKNOWN}</Fact>
-            <Fact label="Hub">{endpoint?.url ?? UNKNOWN}</Fact>
+            <Fact label="Workspace UUID" mono>{workspace.uuid}</Fact>
+            <Fact label="Address segment" mono>{workspace.segment}</Fact>
+            <Fact label="Documents" tabular>{documents ?? UNKNOWN}</Fact>
+            <Fact label="Hub" mono>{endpoint?.url ?? UNKNOWN}</Fact>
             <Fact label="Source">
               {endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
             </Fact>
@@ -98,7 +103,7 @@ function GeneralSettings({
                 </span>
               )}
             </Fact>
-            <Fact label="MCP connections">{agentSessions}</Fact>
+            <Fact label="MCP connections" tabular>{agentSessions}</Fact>
           </dl>
         </div>
       </div>

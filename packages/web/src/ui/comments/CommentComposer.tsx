@@ -488,7 +488,7 @@ export function CommentComposer({
       {mode === "comment" ? (
         <>
           <p className="m-0 flex items-center gap-[0.35rem]">
-            <span className="mr-auto font-(family-name:--font-mono) text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{blockRef}</span>
+            <span className="mr-auto text-[0.7rem] tracking-[0.02em] text-(--muted-foreground)">{blockRef}</span>
             {target.clamped && (
               <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] text-[0.65rem] tracking-[0.04em] text-foreground uppercase">{cell ? "first cell only" : card ? "first part only" : "first block only"}</span>
             )}

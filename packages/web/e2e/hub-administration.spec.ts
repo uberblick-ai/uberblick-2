@@ -48,6 +48,9 @@ test.describe("a hub administrator with no workspace membership", () => {
     await expect(inventory.getByText(harness().workspaceUuid.slice(0, 8), { exact: true })).toBeVisible();
     await expect(inventory.getByText("@other-admin", { exact: true })).toBeVisible();
     const workspace = inventory.getByRole("row").filter({ hasText: harness().workspaceUuid.slice(0, 8) });
+    await expect(workspace.getByRole("cell").first()).toHaveCSS("font-variant-numeric", "tabular-nums");
+    await expect(workspace.getByRole("cell").first()).toHaveCSS("font-family",
+      await page.evaluate(() => getComputedStyle(document.documentElement).fontFamily));
     await expect(workspace.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
     const suspend = workspace.getByRole("button", { name: /^Suspend / });
     await activateControl(suspend);
