@@ -19,6 +19,9 @@ states. It measures every existing syntax token against the code tint.
 Desktop source actions and playback use keyboard activation; iPad uses touch.
 The tagged proof runs in Chromium and WebKit with explicit desktop and iPad
 contexts in both appearances.
+The comment proof flashes a real quote annotation, then reaches it by native
+keyboard navigation. Its neutral focus ring survives the flash in normal and
+reduced motion, and Enter returns to the matching comment card.
 
 Regenerate the screenshots with the focused production-browser proof:
 

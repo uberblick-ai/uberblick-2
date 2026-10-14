@@ -1467,6 +1467,7 @@ h3.ub-heading {
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source { display: none; }
 .ub-comment:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .ub-block-frame :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ub-block-frame .ub-comment:focus-visible { animation: none; }
 
 /* Annotations retain an amber underline as well as their tinted ground.
    Resolved ranges instead use a dotted neutral line with no ground, emitted

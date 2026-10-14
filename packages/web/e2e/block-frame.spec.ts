@@ -317,3 +317,62 @@ for (const touch of [false, true]) {
     });
   }
 }
+
+for (const appearance of ["light", "dark"] as const) {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`a flashing framed comment keeps its neutral keyboard ring — ${appearance}, ${reducedMotion}`,
+      { tag: "@webkit" }, async ({ browser, browserName }) => {
+      const session = writer();
+      const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+        title: "Framed comment focus", description: "Keyboard focus while a real rail activation flashes its comment.",
+        blocks: [{ type: "paragraph", text: "Neighbor prose." }, { type: "quote", text: "A framed comment stays readable." }],
+      });
+      const stored = await session.call<Document>("get_doc", { uuid });
+      const quote = stored.blocks.find(block => block.type === "quote");
+      if (quote === undefined) throw new Error("e2e: quote fixture is missing");
+      await session.call("annotate", { uuid, block_id: quote.id, start: 2, end: 16, text: "Discuss this framed comment." });
+      const before = await session.call<Document>("get_doc", { uuid });
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        contextOptions: { viewport: { width: 1366, height: 900 }, hasTouch: false, isMobile: false,
+          colorScheme: appearance, reducedMotion },
+      });
+      const highlight = page.locator(".ub-quote [data-comment-thread]");
+      await expect(highlight).toHaveText("framed comment");
+      const card = page.locator(".ub-thread-card").filter({ hasText: "Discuss this framed comment." });
+      const cardButton = card.locator(".ub-thread");
+      await highlight.click();
+      await expect(cardButton).toHaveAttribute("aria-current", "true");
+      // Hold the product's removal timer while native Tab and CSS focus paint
+      // run, so the flash cannot expire before the conflicting cascade is read.
+      await page.clock.install();
+      await page.clock.pauseAt(new Date(Date.now() + 100));
+      await cardButton.click();
+      await expect(highlight).toHaveClass(/ub-comment-flash/);
+      await page.getByRole("button", { name: "Document actions", exact: true }).focus();
+      const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+      for (let count = 0; count < 20; count += 1) {
+        if (await highlight.evaluate(element => document.activeElement === element)) break;
+        await page.keyboard.press(nextControl);
+      }
+      await expect(highlight).toBeFocused();
+      expect(await highlight.evaluate(element => element.matches(":focus-visible"))).toBe(true);
+      const ring = await colorToken(page.locator(".ub-pane"), "--ring");
+      const amber = await colorToken(page.locator(".ub-pane"), "--brand");
+      for (const advance of [0, 400]) {
+        if (advance > 0) await page.clock.runFor(advance);
+        await expect(highlight).toHaveClass(/ub-comment-flash/);
+        const paint = await highlight.evaluate(element => {
+          const style = getComputedStyle(element);
+          return { color: style.outlineColor, style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+        });
+        expect(paint.style).not.toBe("none");
+        expect(paint.width).toBeGreaterThan(0);
+        expect(paint.color).toBe(ring);
+        expect(paint.color).not.toBe(amber);
+      }
+      await page.keyboard.press("Enter");
+      await expect(cardButton).toBeFocused();
+      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+    });
+  }
+}
