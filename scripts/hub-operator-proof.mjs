@@ -127,7 +127,7 @@ try {
   }
   await compose(["up", "--detach", "hub"]);
   const status = await serving();
-  assert.match(status.stdout, /release\s+0\.0\.1/); assert.match(status.stdout, new RegExp(sha));
+  assert.match(status.stdout, /release\s+0\.0\.1/); assert.ok(status.stdout.includes(sha), status.stdout);
   assert.match(status.stdout, new RegExp(`protocol\\s+${protocol}`)); assert.match(status.stdout, /database\s+\/data\/hub\.sqlite/);
   assert.match(status.stdout, /documents\s+1/); assert.match(status.stdout, /claimed\s+no/);
   const doctor = await exec(["ub-hub", "doctor"], { allowFailure: true });
@@ -159,7 +159,7 @@ try {
   assert.deepEqual((await textState()).documents, initial.documents);
   await compose(["stop", "hub"]);
   const stoppedStatus = await offline(["ub-hub", "status"], { allowFailure: true });
-  assert.equal(stoppedStatus.code, 1); assert.match(stoppedStatus.stdout, new RegExp(sha)); assert.match(stoppedStatus.stdout, /hub\s+not running/);
+  assert.equal(stoppedStatus.code, 1); assert.ok(stoppedStatus.stdout.includes(sha), stoppedStatus.stdout); assert.match(stoppedStatus.stdout, /hub\s+not running/);
   const stoppedDoctor = await offline(["ub-hub", "doctor"], { allowFailure: true }); assertDoctor(stoppedDoctor);
   assert.match(stoppedDoctor.stdout, /^FAIL\s+hub\s/m); assert.match(stoppedDoctor.stdout, /^ok\s+database\s/m);
   const unchanged = await fileHash();

@@ -340,7 +340,7 @@ db.exec("COMMIT"); db.close();`);
       const help = await compose(["exec", "-T", "hub", "ub-hub", "--help"]);
       for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(help.stdout, new RegExp(name));
       const status = await compose(["exec", "-T", "hub", "ub-hub", "status"]);
-      assert.match(status.stdout, new RegExp(versions[1].replaceAll(".", "\\.")));
+      assert.ok(status.stdout.includes(versions[1]), status.stdout);
       assert.match(status.stdout, /\/data\/hub\.sqlite/);
       const backup = await compose(["exec", "-T", "hub", "ub-hub", "backup"]);
       const backupPath = backup.stdout.match(/\/data\/[^\s]+\.sqlite/)?.[0];
