@@ -1,6 +1,6 @@
 /*
  * Unlayered product rules outrank Tailwind utilities. light-dark() pairs
- * appearances; the terminal palette stays local. Keep normal/emphasis at
+ * appearances. Keep normal/emphasis at
  * 400/500, avatar initials, overflow counts and TL;DR label at 600, and prose
  * strong at browser bold.
  */
@@ -101,6 +101,17 @@
   --syntax-name: light-dark(oklch(0.43 0.11 240), oklch(0.78 0.1 240));
   --syntax-string: light-dark(oklch(0.42 0.1 145), oklch(0.78 0.12 145));
   --syntax-number: light-dark(oklch(0.46 0.13 40), oklch(0.8 0.14 40));
+
+  --block-slate-bar: light-dark(oklch(0.55 0.03 250), oklch(0.7 0.03 250));
+  --block-slate-tint: light-dark(oklch(0.97 0.006 250), oklch(0.22 0.012 250));
+  --block-rose-bar: light-dark(oklch(0.55 0.07 10), oklch(0.7 0.07 10));
+  --block-rose-tint: light-dark(oklch(0.97 0.006 10), oklch(0.22 0.012 10));
+  --block-green-bar: light-dark(oklch(0.55 0.07 145), oklch(0.7 0.07 145));
+  --block-green-tint: light-dark(oklch(0.97 0.006 145), oklch(0.22 0.012 145));
+  --block-blue-bar: light-dark(oklch(0.55 0.07 240), oklch(0.7 0.07 240));
+  --block-blue-tint: light-dark(oklch(0.97 0.006 240), oklch(0.22 0.012 240));
+  --block-violet-bar: light-dark(oklch(0.55 0.07 305), oklch(0.7 0.07 305));
+  --block-violet-tint: light-dark(oklch(0.97 0.006 305), oklch(0.22 0.012 305));
 
   /* Cursor labels and user tiles keep white ink in both appearances:
      the inline #rrggbb awareness palette in src/collab/identity.ts gives it
@@ -607,13 +618,6 @@ body {
   border-radius: 999px;
 }
 
-.ub-code-caption,
-.ub-mermaid::before,
-.ub-terminal::before {
-  font-size: 0.7rem;
-  color: var(--muted-foreground);
-}
-
 .ub-tldr-form textarea:focus {
   outline: 2px solid var(--ring);
 }
@@ -1025,51 +1029,78 @@ h3.ub-heading {
   white-space: nowrap;
 }
 
-.ub-quote {
+/* Each type supplies colour; frame geometry and caption chrome are shared. */
+.ub-code { --block-bar: var(--block-slate-bar); --block-tint: var(--block-slate-tint); }
+.ub-quote { --block-bar: var(--block-rose-bar); --block-tint: var(--block-rose-tint); }
+.ub-terminal { --block-bar: var(--block-green-bar); --block-tint: var(--block-green-tint); }
+.ub-chart { --block-bar: var(--block-blue-bar); --block-tint: var(--block-blue-tint); }
+.ub-mermaid { --block-bar: var(--block-violet-bar); --block-tint: var(--block-violet-tint); }
+
+.ub-block-frame:not([data-view="table"]) {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
   margin: 0.7em 0;
-  padding: 0.1rem 0 0.1rem 0.9rem;
-  border-left: 3px solid var(--brand);
+  padding: 0.6rem 0.75rem;
+  border: 0;
+  border-left: 3px solid var(--block-bar);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--block-tint);
   color: var(--prose-text);
-  font-style: italic;
 }
 
-.tableWrapper,
-.ub-mermaid,
-.ub-terminal {
-  position: relative;
-  margin: 0.7em 0;
-}
-
-.ub-chart {
-  position: relative;
-  margin: 0.7em 0;
-  padding-top: 1.8rem;
-}
-
-.ub-chart::before {
-  content: "chart mapping";
-  position: absolute;
-  top: 0;
+.ub-block-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
   color: var(--muted-foreground);
-  font: 0.75rem var(--font-mono);
+  font: 0.75rem/1rem var(--font-sans);
+  font-style: normal;
+  white-space: nowrap;
+  user-select: none;
 }
-
-.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]) { padding-top: 0; }
-.ub-chart:not(.ub-chart-editing):not([data-annotated="true"])::before { display: none; }
-.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]) > .ub-copy { top: 0.75rem; right: 0.75rem; }
-/* Without a title the controls fit in the existing top padding, clear of
-   the plot or table header, without a header row. Source chrome stays intact. */
-.ub-chart:not(.ub-chart-editing):not([data-annotated="true"]):has(.ub-chart-title[hidden]) > .ub-copy { top: 0; line-height: 1; }
-
-.ub-chart-panel {
-  padding: 0.75rem;
-  border: 1px solid var(--border);
+.ub-block-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ub-block-actions { display: flex; flex: none; gap: 0.3rem; }
+.ub-block-actions > button {
+  pointer-events: auto;
+  position: static;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0.05rem 0.3rem;
+  border: 0;
   border-radius: var(--radius-sm);
-  background: var(--card);
-  color: var(--prose-text);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  letter-spacing: normal;
+  text-align: center;
+  cursor: pointer;
+}
+.ub-block-actions > button:focus-visible { color: var(--foreground); }
+@media (hover: hover) {
+  .ub-block-actions > button:hover { color: var(--foreground); }
+}
+.ub-code-language-trigger { pointer-events: auto; }
+@media (any-pointer: coarse) {
+  .ub-block-actions > button,
+  .ub-block-caption .ub-code-language-trigger { min-width: 2.75rem; min-height: 2.75rem; }
 }
 
-.ub-chart-title { margin: 0 0 0.5rem; padding-right: 7rem; font-weight: 500; }
+.ub-quote { font-style: italic; }
+.tableWrapper { position: relative; margin: 0.7em 0; }
+.ub-chart { position: relative; margin: 0.7em 0; }
+.ub-chart-panel { color: var(--prose-text); }
+.ub-chart-title { margin: 0; color: var(--prose-text); font-weight: 500; }
 .ub-chart-screen { position: relative; width: 100%; aspect-ratio: 2 / 1; min-height: 200px; max-height: 300px; }
 .ub-chart-panels {
   display: grid;
@@ -1090,37 +1121,29 @@ h3.ub-heading {
 }
 .ub-chart-series-header strong { font-size: 1.05rem; font-weight: 600; }
 .ub-chart-series-plot { position: relative; height: 150px; }
-.ub-chart-open {
-  position: absolute;
-  top: 0.75rem;
-  right: 5rem;
-  z-index: 1;
+/* Generated tables keep their existing footer controls outside block chrome. */
+.ub-chart-footer > .ub-chart-open,
+.ub-chart-footer > .ub-copy {
   color: var(--muted-foreground);
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
   padding: 0.05rem 0.3rem;
-  font: 0.7rem var(--font-mono);
-  line-height: 1;
+  font: 0.7rem/1 var(--font-mono);
   letter-spacing: 0.04em;
   cursor: pointer;
 }
-.ub-chart-panel:has(> .ub-chart-title[hidden]) > .ub-chart-open { top: 0; }
 .ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
   font-size: 0.8rem;
   margin: 0.5rem 0 0;
 }
 .ub-chart-source {
   display: none;
-  font: 0.8rem var(--font-mono);
+  margin: 0;
+  font: 0.8rem/1.7 var(--font-mono);
   white-space: pre;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--muted-foreground);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.75rem;
 }
 .ub-chart-editing > .ub-chart-source,
 .ub-chart[data-annotated="true"] > .ub-chart-source { display: block; }
@@ -1128,8 +1151,14 @@ h3.ub-heading {
 .ub-chart[data-annotated="true"] > .ub-chart-panel { display: none; }
 .ub-chart-probe { position: absolute; visibility: hidden; font-family: var(--font-sans); color: var(--muted-foreground); border-color: var(--border); }
 
-.ub-chart[data-view="table"] { padding-top: 0; }
-.ub-chart[data-view="table"]::before { content: none; }
+.ub-chart[data-view="table"] > .ub-block-caption { display: none; }
+.ub-chart[data-view="table"] > .ub-chart-source {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted-foreground);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+}
 .ub-chart[data-view="table"] > .ub-chart-panel {
   padding: 0;
   border: 0;
@@ -1346,21 +1375,9 @@ h3.ub-heading {
 .ub-mermaid pre,
 .ub-terminal-source,
 .ub-terminal-frame {
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font: 0.8rem/1.7 var(--font-mono);
   white-space: pre;
 }
-
-.ub-code,
-.ub-mermaid pre,
-.ub-terminal-source {
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--muted-foreground);
-  border-radius: var(--radius-sm);
-  padding: 0.6rem 0.75rem;
-}
-
 .ub-code > code,
 .ub-mermaid pre,
 .ub-terminal-source,
@@ -1368,55 +1385,12 @@ h3.ub-heading {
   overflow-x: auto;
   overscroll-behavior-x: contain;
 }
-
-/* Only the editable source scrolls; the caption and copy button stay in the
-   panel's chrome. Keep the NodeView and serialized pre/code structure alike. */
-.ub-code > code {
-  display: block;
-  font: inherit;
-}
-
-.ub-code,
-.ub-mermaid pre {
-  margin: 0.7em 0;
-}
-
-/* Reserve the header even without a language. Caption and copy stay outside
-   the horizontally scrolling source. */
-.ub-code {
-  position: relative;
-  padding-top: 1.7rem;
-}
-
-.ub-code-caption {
-  position: absolute;
-  top: 0.15rem;
-  left: 0.75rem;
-  max-width: calc(100% - 7rem);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  user-select: none;
-  pointer-events: none;
-}
-
-.ub-code-caption,
-.ub-code .ub-copy {
-  line-height: 1.5;
-}
-
-.ub-code-language-trigger {
-  pointer-events: auto;
-}
-
-.ub-code-caption-text {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ub-code-caption:has(.ub-code-language-trigger) > .ub-code-caption-text {
-  display: none;
-}
+.ub-code > code { display: block; font: inherit; }
+.ub-code-caption { min-width: 0; max-width: 100%; pointer-events: none; }
+/* Passive language labels leave caret placement to the source view. */
+.ub-code:not(.ub-wireframe) > .ub-block-caption { pointer-events: none; }
+.ub-code-caption-text { display: block; overflow: hidden; text-overflow: ellipsis; }
+.ub-code-caption:has(.ub-code-language-trigger) > .ub-code-caption-text { display: none; }
 
 .ub-code .hljs-comment,
 .ub-code .hljs-quote,
@@ -1460,57 +1434,9 @@ h3.ub-heading {
   color: var(--syntax-number);
 }
 
-/* Brand-edged source panels retain zero margins inside their block wrappers. */
 .ub-mermaid pre,
-.ub-terminal-source {
-  margin: 0;
-  border-left-color: var(--brand);
-}
-
-.ub-mermaid::before,
-.ub-terminal::before {
-  display: block;
-  min-height: 1.5rem;
-  margin-bottom: 0.2rem;
-  padding-right: 7rem;
-}
-
-.ub-mermaid { min-width: 0; max-width: 100%; }
-.ub-mermaid-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.2rem;
-  color: var(--muted-foreground);
-  font: 0.7rem/1.5 var(--font-mono);
-}
-.ub-mermaid-actions { display: flex; gap: 0.3rem; }
-.ub-mermaid-actions > button {
-  position: static;
-  min-width: max(1.5rem, 8ch);
-  min-height: 1.5rem;
-  padding: 0.05rem 0.3rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted-foreground);
-  font: inherit;
-  cursor: pointer;
-}
-@media (hover: hover) {
-  .ub-mermaid-actions > button:hover { color: var(--foreground); }
-}
-.ub-mermaid-actions > button:focus-visible,
-.ub-mermaid-panel:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.ub-mermaid-panel {
-  max-width: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-}
+.ub-terminal-source { margin: 0; }
+.ub-mermaid-panel { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .ub-mermaid > .ub-mermaid-source { display: none; }
 .ub-mermaid-editing > .ub-mermaid-source,
 .ub-mermaid[data-annotated="true"] > .ub-mermaid-source,
@@ -1518,151 +1444,29 @@ h3.ub-heading {
 .ub-mermaid-error {
   margin: 0.5rem 0;
   color: var(--muted-foreground);
-  font: 0.75rem/1.5 var(--font-sans);
+  font: 0.75rem/1rem var(--font-sans);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-@media (any-pointer: coarse) {
-  .ub-mermaid-actions > button { min-width: max(2.75rem, 8ch); min-height: 2.75rem; }
-}
 
-/* The terminal's screen, text, cursor and controls share one fixed dark
-   palette in both appearances. */
-.ub-terminal {
-  --terminal-screen: #12151a;
-  --terminal-ink: #d6dde6;
-  --terminal-cursor: #7fd6a2;
-  --terminal-control-ink: oklch(0.708 0 0);
-  --terminal-control-hover-ink: oklch(0.985 0 0);
-}
-
-.ub-terminal::before {
-  content: "terminal transcript";
-}
-
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing)::before {
-  content: none;
-}
-
-.ub-terminal-screen {
-  display: none;
-  border-radius: var(--radius-sm);
-  background: var(--terminal-screen);
-  padding: 1.7rem 0.9rem 0.75rem;
-  cursor: text;
-}
-
-/* Terminal screens and annotations keep keyboard focus visible over
-   their grounds. */
-.ub-terminal-screen:focus-visible,
-.ub-comment:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
-}
-
-/* Reserve a minimum frame height for empty and short terminal output;
-   longer output may grow beyond the floor. */
-.ub-terminal-frame {
-  margin: 0;
-  min-height: 4.5em;
-  color: var(--terminal-ink);
-  line-height: 1.5;
-}
-
-/* The typing cursor stays solid, adding no animation to the demonstration. */
+.ub-terminal-screen { display: none; cursor: text; }
+.ub-terminal-frame { margin: 0; min-height: 4.5em; color: var(--prose-text); line-height: 1.5; }
 .ub-terminal-cursor {
   display: inline-block;
   width: 0.55ch;
   height: 1.05em;
   margin-left: 0.05ch;
   vertical-align: text-bottom;
-  background: var(--terminal-cursor);
+  background: var(--prose-text);
 }
-
-.ub-terminal-toggle,
-.ub-copy {
-  position: absolute;
-  top: 0.15rem;
-  padding: 0.05rem 0.3rem;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-align: center;
-  user-select: none;
-}
-
-/* Apply the shared target floors only to these source controls. Chart copy
-   shares .ub-copy but keeps its own compact chrome. */
-.ub-code > .ub-copy,
-.ub-mermaid > .ub-copy,
-.ub-terminal > .ub-copy {
-  min-height: 1.5rem;
-  min-width: max(1.5rem, 8ch);
-}
-
-/* Keep the copy label on the language caption's line inside the taller target. */
-.ub-code > .ub-copy {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-@media (any-pointer: coarse) {
-  .ub-code,
-  .ub-terminal-screen {
-    padding-top: 3rem;
-  }
-
-  .ub-mermaid::before,
-  .ub-terminal::before {
-    min-height: 3rem;
-  }
-
-  .ub-code > .ub-copy,
-  .ub-mermaid > .ub-copy,
-  .ub-terminal > .ub-copy {
-    min-height: 2.75rem;
-    min-width: max(2.75rem, 8ch);
-  }
-
-  .ub-terminal > .ub-terminal-toggle {
-    min-height: 2.75rem;
-    min-width: max(2.75rem, 6ch);
-  }
-}
-
-/* The screen controls use local fixed dark inks: root light-dark() tokens
-   resolve before inheritance. */
-.ub-terminal-toggle {
-  display: none;
-  left: 0.4rem;
-  min-height: 1.5rem;
-  min-width: max(1.5rem, 6ch);
-  color: var(--terminal-control-ink);
-}
-
-@media (hover: hover) {
-  .ub-terminal-toggle:hover {
-    color: var(--terminal-control-hover-ink);
-  }
-}
-
-.ub-terminal-toggle:focus-visible {
-  color: var(--terminal-control-hover-ink);
-}
-
-/* Outside editing, data-rendered swaps transcript for screen. Annotation
-   anchors keep the transcript visible. Hidden playback controls stay hidden:
-   a later [hidden] reset would lose to this selector's specificity. */
+.ub-terminal-toggle { display: none; }
+/* Source visibility and playback remain selection-derived. Hidden static
+   controls must stay hidden despite the rendered selector's specificity. */
 .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-screen,
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle:not([hidden]) {
-  display: block;
-}
-
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source {
-  display: none;
-}
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-terminal-toggle:not([hidden]) { display: block; }
+.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) > .ub-terminal-source { display: none; }
+.ub-comment:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.ub-block-frame :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 /* Annotations retain an amber underline as well as their tinted ground.
    Resolved ranges instead use a dotted neutral line with no ground, emitted
@@ -2312,47 +2116,13 @@ h3.ub-heading {
   overflow: hidden;
 }
 
-/* Position copy in the reserved source chrome, visible at rest and brighter
-   on hover or keyboard focus. */
-.ub-copy {
-  right: 0.4rem;
-  color: var(--muted-foreground);
-  transition:
-    opacity 120ms ease,
-    color 120ms ease;
-}
-
+.ub-copy { color: var(--muted-foreground); transition: opacity 120ms ease, color 120ms ease; }
+.ub-copy:focus-visible { opacity: 1; color: var(--foreground); }
 @media (hover: hover) {
   .ub-code:hover .ub-copy,
   .ub-mermaid:hover .ub-copy,
   .ub-terminal:hover .ub-copy,
-  .ub-copy:hover {
-    opacity: 1;
-    color: var(--foreground);
-  }
-}
-
-.ub-copy:focus-visible {
-  opacity: 1;
-  color: var(--foreground);
-}
-
-/* Rendered terminal copy uses fixed dark-screen inks; source uses page ink. */
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy {
-  color: var(--terminal-control-ink);
-  opacity: 0.6;
-}
-
-@media (hover: hover) {
-  .ub-terminal[data-rendered="true"]:not(.ub-terminal-editing):hover .ub-copy {
-    color: var(--terminal-control-hover-ink);
-    opacity: 1;
-  }
-}
-
-.ub-terminal[data-rendered="true"]:not(.ub-terminal-editing) .ub-copy:focus-visible {
-  color: var(--terminal-control-hover-ink);
-  opacity: 1;
+  .ub-copy:hover { opacity: 1; color: var(--foreground); }
 }
 
 /* Reduced motion removes decoration while preserving every state change. */

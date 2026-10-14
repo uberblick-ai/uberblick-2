@@ -172,8 +172,7 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
   ] as const) {
     await insertSource(page, name, LONG_LINE);
     const source = page.locator(selector);
-    const copy = name === "Mermaid" ? page.locator(".ub-mermaid-header .ub-copy")
-      : source.locator("..").locator(":scope > .ub-copy");
+    const copy = source.locator("..").locator(".ub-block-caption .ub-copy");
     await expectSourceControl(copy, source, floor);
     await expectPinned(copy, source);
     if (name === "Code") {
@@ -203,7 +202,7 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
   await expect(toggle).toHaveText("Play");
   const frame = page.locator(".ub-terminal-frame");
   await expectSourceControl(toggle, frame, floor);
-  const copy = page.locator(".ub-terminal > .ub-copy");
+  const copy = page.locator(".ub-terminal .ub-block-caption .ub-copy");
   await expectSourceControl(copy, frame, floor);
   for (const control of [toggle, copy]) await expectPinned(control, page.locator(".ub-terminal-screen"));
   if (touch) await toggle.tap();
@@ -267,8 +266,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
       // Clicking a drawn terminal opens its editable transcript.
       if (selector === ".ub-terminal-source" && !await source.isVisible()) await page.locator(".ub-terminal-screen").click();
       await source.scrollIntoViewIfNeeded();
-      const copy = selector === ".ub-mermaid-source" ? page.locator(".ub-mermaid-header .ub-copy")
-        : source.locator("..").locator(":scope > .ub-copy");
+      const copy = source.locator("..").locator(".ub-block-caption .ub-copy");
       for (const collapsed of [true, false]) {
         await page.locator(".ub-editor .ProseMirror").focus();
         await setNativeSelection(source, () => source.evaluate((element, caretOnly) => {
@@ -289,7 +287,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         const previous = (await notices.elementHandles())[0];
         if (touch) await copy.tap();
         else await copy.click();
-        await expect(copy).toHaveText(selector === ".ub-mermaid-source" ? "Copy" : "copy");
+        await expect(copy).toHaveText("Copy");
         // Wait for native dismissal so the previous success cannot satisfy
         // assertions before the replacement has been published.
         if (previous !== undefined) {
@@ -398,7 +396,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   const copy = block.locator(".ub-copy");
   const before = await copy.boundingBox();
   const language = block.getByRole("button", { name: "Code language" });
-  await expect(language).toHaveText("python▾");
+  await expect(language).toHaveText("Python▾");
   const caption = await language.boundingBox();
   await code.evaluate((element) => { element.scrollLeft = 0; });
   expect(await copy.boundingBox()).toEqual(before);
@@ -409,7 +407,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   await expect(copy).toBeInViewport();
   if (info.project.use.hasTouch === true) await copy.tap();
   else await copy.click();
-  await expect(copy).toHaveText("copy");
+  await expect(copy).toHaveText("Copy");
   const copied = page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
     has: page.locator("[data-description]", { hasText: /^Copied to clipboard$/ }),
   });

@@ -168,6 +168,7 @@ describe("the chart's derived lifecycle", () => {
     const root = editor.view.dom.querySelector(".ub-chart") as HTMLElement;
     const source = root.querySelector(".ub-chart-open") as HTMLButtonElement;
     expect(root.dataset.view).toBe("table");
+    expect(root.querySelector<HTMLElement>(".ub-block-caption")?.hidden).toBe(true);
     expect(source.getAttribute("aria-label")).toBe("Open table source");
     expect(root.querySelector(".ub-chart-footer .ub-copy")).not.toBeNull();
     expect(root.querySelector("caption")?.textContent).toBe("Data table of trend");
@@ -185,7 +186,8 @@ describe("the chart's derived lifecycle", () => {
     expect(root.dataset.view).toBe("line");
     expect(root.querySelectorAll(".ub-data-table tbody tr")).toHaveLength(0);
     expect(source.getAttribute("aria-label")).toBe("Open chart source");
-    expect(root.querySelector(":scope > .ub-copy")).not.toBeNull();
+    expect(root.querySelector(".ub-block-caption .ub-copy")).not.toBeNull();
+    expect(root.querySelector<HTMLElement>(".ub-block-caption")?.hidden).toBe(false);
     expect(root.querySelector(".ub-chart-footer")?.hasAttribute("hidden")).toBe(true);
     expect(root.querySelector(".ub-chart-notice")?.hasAttribute("hidden")).toBe(true);
     expect(charts.instances).toHaveLength(1);
@@ -207,7 +209,12 @@ describe("the chart's derived lifecycle", () => {
     expect(options.scales?.y?.ticks).toMatchObject({ maxTicksLimit: 6 });
     expect(editor.view.dom.querySelector(".ub-chart-diagnostics")?.hasAttribute("hidden")).toBe(true);
     const source = editor.view.dom.querySelector(".ub-chart-open");
-    expect(source?.textContent).toBe("source");
+    const caption = editor.view.dom.querySelector(".ub-block-caption");
+    expect(editor.view.dom.querySelectorAll(".ub-block-caption")).toHaveLength(1);
+    expect(caption?.querySelector(".ub-block-label")?.firstChild?.textContent).toBe("Chart");
+    expect(caption?.querySelector(".ub-chart-title")).not.toBeNull();
+    expect([...caption!.querySelectorAll(".ub-block-actions > button")].map(button => button.textContent)).toEqual(["Copy", "Source"]);
+    expect(source?.textContent).toBe("Source");
     expect(source?.getAttribute("aria-label")).toBe("Open chart source");
     const data = instance.data as ChartConfiguration<"line">["data"];
     expect(data.datasets[0]).toMatchObject({ label: "Delivery", yAxisID: "y", pointHoverRadius: 4 });
@@ -361,6 +368,11 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(readDocData).toHaveBeenCalledTimes(1);
     expect(editor.view.dom.querySelectorAll(".ub-chart-panel[data-state=collection-unusable]")).toHaveLength(2);
+    const table = editor.view.dom.querySelector('.ub-chart[data-view="table"]');
+    expect(table).not.toBeNull();
+    expect(table?.querySelector(".ub-block-caption")?.hasAttribute("hidden")).toBe(true);
+    expect(table?.querySelector(".ub-chart-footer .ub-copy")).not.toBeNull();
+    expect(table?.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open table source");
     peer.getMap("data").set(JSON.stringify(["record", "trend", "a"]), { day: 1, value: 9 });
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));
     flush();
@@ -818,7 +830,7 @@ describe("the panel chart's shared presentation and lifecycle", () => {
     expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 9_000 } })).toBe("Denials: 9,000 requests");
     expect(third?.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: null } })).toBe("");
     expect(root.querySelector(".ub-chart-open")?.getAttribute("aria-label")).toBe("Open chart source");
-    expect(root.querySelector(":scope > .ub-copy")).not.toBeNull();
+    expect(root.querySelector(".ub-block-caption .ub-copy")).not.toBeNull();
     expect(root.querySelectorAll(".ub-chart-diagnostics")).toHaveLength(1);
     editor.destroy(); doc.destroy(); directory.destroy();
   });

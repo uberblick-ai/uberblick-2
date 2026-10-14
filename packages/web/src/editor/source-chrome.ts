@@ -11,6 +11,7 @@ import type { EditorState } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { NodeView } from "@tiptap/pm/view";
 import { notifyTransient } from "../notifications.js";
+import { codeLanguageLabel } from "./syntax-highlighting.js";
 
 /**
  * Try the secure-context Clipboard API, then selection copy for supported plain
@@ -64,7 +65,7 @@ export function copyButton(source: () => string): {
   element.type = "button";
   element.className = "ub-copy";
   element.contentEditable = "false";
-  element.textContent = "copy";
+  element.textContent = "Copy";
   element.title = "Copy this block's source";
 
   // Prevent mousedown: by click time the browser has already moved the caret.
@@ -81,6 +82,24 @@ export function copyButton(source: () => string): {
   });
 
   return { element };
+}
+
+/** Shared, noneditable caption chrome for every framed source block. */
+export function blockCaption(text: string): {
+  row: HTMLSpanElement;
+  label: HTMLSpanElement;
+  actions: HTMLSpanElement;
+} {
+  const row = document.createElement("span");
+  row.className = "ub-block-caption";
+  row.contentEditable = "false";
+  const label = document.createElement("span");
+  label.className = "ub-block-label";
+  label.textContent = text;
+  const actions = document.createElement("span");
+  actions.className = "ub-block-actions";
+  row.append(label, actions);
+  return { row, label, actions };
 }
 
 /** Mirror one node attribute onto the DOM, or remove it when unset. */
@@ -110,6 +129,7 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
     const dom = chrome.root();
     const contentDOM = chrome.content();
     const button = copyButton(() => current.textContent);
+    const header = blockCaption("");
     const caption = chrome.caption === undefined ? null : document.createElement("span");
     const captionText = caption === null ? null : document.createElement("span");
     if (caption !== null && captionText !== null) {
@@ -118,9 +138,10 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
       captionText.className = "ub-code-caption-text";
       captionText.textContent = chrome.caption?.(current) ?? "";
       caption.append(captionText);
-      dom.append(caption);
+      header.label.append(caption);
     }
-    dom.append(button.element, contentDOM);
+    header.actions.append(button.element);
+    dom.append(header.row, contentDOM);
     chrome.sync(current, dom);
 
     return {
@@ -140,11 +161,11 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
       // Only the chrome's own events. A click anywhere else in the block —
       // including the padding around the text — must still place the caret.
       stopEvent: (event: Event): boolean =>
-        event.target instanceof Node && (button.element.contains(event.target) || caption?.contains(event.target) === true),
+        event.target instanceof Node && header.row.contains(event.target),
       // Ignore only chrome mutations; suppressing contentDOM repair can make
       // later keystrokes visible without storing them in the document.
       ignoreMutation: (mutation: { target: Node }): boolean =>
-        button.element.contains(mutation.target) || caption?.contains(mutation.target) === true,
+        header.row.contains(mutation.target),
     };
   };
 }
@@ -153,11 +174,11 @@ export function sourceBlockView(chrome: SourceBlockChrome): NodeViewRenderer {
 export const codeBlockChrome: SourceBlockChrome = {
   root: () => {
     const pre = document.createElement("pre");
-    pre.className = "ub-code";
+    pre.className = "ub-code ub-block-frame";
     return pre;
   },
   content: () => document.createElement("code"),
-  caption: (node) => typeof node.attrs.language === "string" ? node.attrs.language : "",
+  caption: (node) => codeLanguageLabel(node.attrs.language),
   sync: (node, root) => {
     mirrorAttribute(root, "id", node.attrs.id);
     mirrorAttribute(root, "data-language", node.attrs.language);
@@ -168,7 +189,7 @@ export const codeBlockChrome: SourceBlockChrome = {
 export const mermaidChrome: SourceBlockChrome = {
   root: () => {
     const div = document.createElement("div");
-    div.className = "ub-mermaid";
+    div.className = "ub-mermaid ub-block-frame";
     div.setAttribute("data-block-type", "mermaid");
     return div;
   },
@@ -183,7 +204,7 @@ export const mermaidChrome: SourceBlockChrome = {
 export const terminalChrome: SourceBlockChrome = {
   root: () => {
     const div = document.createElement("div");
-    div.className = "ub-terminal";
+    div.className = "ub-terminal ub-block-frame";
     div.setAttribute("data-block-type", "terminal");
     return div;
   },
@@ -199,7 +220,7 @@ export const terminalChrome: SourceBlockChrome = {
 export const chartChrome: SourceBlockChrome = {
   root: () => {
     const div = document.createElement("div");
-    div.className = "ub-chart";
+    div.className = "ub-chart ub-block-frame";
     div.setAttribute("data-block-type", "chart");
     return div;
   },

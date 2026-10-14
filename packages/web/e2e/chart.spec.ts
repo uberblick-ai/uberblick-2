@@ -9,6 +9,7 @@ import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { renderedText } from "./contrast-helpers.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -30,6 +31,33 @@ function writer(): McpSession {
   if (agent === null) throw new Error("e2e: chart MCP agent is not configured");
   return agent.open({ name: "chart-data-e2e" });
 }
+
+test("all eight panel caption colours keep AA on the blue tint in both appearances", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...MAPPING, layout: "panels", y: Array.from({ length: 8 }, (_, index) => ({
+    field: "latency", label: `Series ${index + 1}`, unit: "ms",
+  })) };
+  const uuid = await chartDoc(session, "Eight panel inks", mapping);
+  await measurements(session, uuid);
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { viewport: { width: 1366, height: 900 }, colorScheme: appearance },
+    });
+    await expectReady(page);
+    const panels = page.locator(".ub-chart-series-panel");
+    await expect(panels).toHaveCount(8);
+    const colours = await panels.locator(".ub-chart-series-header").evaluateAll(elements =>
+      elements.map(element => getComputedStyle(element).color));
+    expect(new Set(colours).size).toBe(8);
+    for (let index = 0; index < 8; index += 1) {
+      const selector = `.ub-chart-series-panel:nth-child(${index + 1}) .ub-chart-series-header`;
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const readings = await renderedText(page, selector);
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
 
 interface DocPayload {
   uuid: string;
@@ -151,33 +179,31 @@ async function expectPanelTickGeometry(
   return ticks;
 }
 
-/** Controls share the title's line and stay inside the panel in every state. */
+/** One caption holds the chart label, title and controls in every state. */
 async function expectCornerControls(page: Page, sourceName = "Open chart source"): Promise<void> {
   const root = page.locator(".ub-chart");
-  const panel = page.locator(".ub-chart-panel");
+  const caption = root.locator(".ub-block-caption");
   const source = page.getByRole("button", { name: sourceName, exact: true });
   const copy = root.locator(".ub-copy");
-  await expect(source).toHaveText("source");
+  await expect(source).toHaveText("Source");
   await expect(source).toBeVisible();
   await expect(copy).toBeVisible();
-  const frame = await root.evaluate((element) => ({
-    label: getComputedStyle(element, "::before").content,
-    labelDisplay: getComputedStyle(element, "::before").display,
-    padding: Number.parseFloat(getComputedStyle(element).paddingTop),
-  }));
-  expect(frame.labelDisplay === "none" || ["none", '""'].includes(frame.label)).toBe(true);
-  expect(frame.padding).toBe(0);
-  const panelBox = await panel.boundingBox();
+  await expect(caption).toHaveCount(1);
+  await expect(caption).toBeVisible();
+  await expect(caption.locator(".ub-block-label")).toContainText("Chart");
+  const rootBox = await root.boundingBox();
+  const captionBox = await caption.boundingBox();
   const sourceBox = await source.boundingBox();
   const copyBox = await copy.boundingBox();
-  if (panelBox === null || sourceBox === null || copyBox === null) throw new Error("e2e: chart corner controls have no box");
-  expect(sourceBox.x).toBeGreaterThan(panelBox.x + panelBox.width / 2);
-  expect(copyBox.x).toBeGreaterThanOrEqual(sourceBox.x + sourceBox.width);
-  expect(copyBox.x + copyBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
-  expect(sourceBox.y).toBeGreaterThanOrEqual(panelBox.y);
-  expect(copyBox.y).toBeGreaterThanOrEqual(panelBox.y);
-  // A hidden title contributes no line; the controls still occupy the corner.
-  const title = panel.locator(".ub-chart-title");
+  if (rootBox === null || captionBox === null || sourceBox === null || copyBox === null) throw new Error("e2e: chart caption controls have no box");
+  expect(copyBox.x).toBeGreaterThan(rootBox.x + rootBox.width / 2);
+  expect(sourceBox.x).toBeGreaterThanOrEqual(copyBox.x + copyBox.width);
+  expect(sourceBox.x + sourceBox.width).toBeLessThanOrEqual(rootBox.x + rootBox.width);
+  for (const box of [sourceBox, copyBox]) {
+    expect(box.y).toBeGreaterThanOrEqual(captionBox.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(captionBox.y + captionBox.height + 0.5);
+  }
+  const title = caption.locator(".ub-chart-title");
   if (await title.isVisible()) {
     const titleBox = await title.boundingBox();
     if (titleBox === null) throw new Error("e2e: chart title has no box");

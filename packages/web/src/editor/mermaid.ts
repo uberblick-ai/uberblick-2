@@ -5,7 +5,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
-import { copyButton, mermaidChrome, sourceEditingPlugin } from "./source-chrome.js";
+import { blockCaption, copyButton, mermaidChrome, sourceEditingPlugin } from "./source-chrome.js";
 
 export function mermaidBlockView(): NodeViewRenderer {
   return ({ node, editor, getPos }: NodeViewRendererProps): NodeView => {
@@ -15,21 +15,13 @@ export function mermaidBlockView(): NodeViewRenderer {
     let destroyed = false;
     const dom = mermaidChrome.root();
     dom.dataset.state = "loading";
-    const header = document.createElement("div");
-    header.className = "ub-mermaid-header";
-    header.contentEditable = "false";
-    const caption = document.createElement("span");
-    caption.textContent = "Mermaid";
-    const actions = document.createElement("div");
-    actions.className = "ub-mermaid-actions";
+    const header = blockCaption("Mermaid");
     const source = document.createElement("button");
     source.type = "button";
     source.textContent = "Source";
     source.setAttribute("aria-label", "Open Mermaid source");
     const copy = copyButton(() => current.textContent);
-    copy.element.textContent = "Copy";
-    actions.append(copy.element, source);
-    header.append(caption, actions);
+    header.actions.append(copy.element, source);
     const panel = document.createElement("div");
     panel.className = "ub-mermaid-panel";
     panel.contentEditable = "false";
@@ -45,7 +37,7 @@ export function mermaidBlockView(): NodeViewRenderer {
     error.hidden = true;
     const contentDOM = mermaidChrome.content();
     contentDOM.className = "ub-mermaid-source";
-    dom.append(header, panel, error, contentDOM);
+    dom.append(header.row, panel, error, contentDOM);
 
     const draw = async (requested: number): Promise<void> => {
       pending = null;
@@ -129,8 +121,8 @@ export function mermaidBlockView(): NodeViewRenderer {
         return true;
       },
       stopEvent: event => event.target instanceof Node &&
-        (header.contains(event.target) || panel.contains(event.target) || error.contains(event.target)),
-      ignoreMutation: mutation => header.contains(mutation.target) || panel.contains(mutation.target) || error.contains(mutation.target) ||
+        (header.row.contains(event.target) || panel.contains(event.target) || error.contains(event.target)),
+      ignoreMutation: mutation => header.row.contains(mutation.target) || panel.contains(mutation.target) || error.contains(mutation.target) ||
         (mutation.type === "attributes" && mutation.target === dom &&
           ["id", "data-annotated", "data-state"].includes(mutation.attributeName ?? "")),
       destroy: () => {

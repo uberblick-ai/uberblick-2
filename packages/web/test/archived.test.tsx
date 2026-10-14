@@ -694,7 +694,7 @@ describe("code language requires a writable document", () => {
       if (editor == null) throw new Error("fixture document did not bind an editor");
       const before = Y.encodeStateAsUpdate(ydoc);
       act(() => editor.commands.setTextSelection(3));
-      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("TypeScript");
       expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
       expect(host.querySelector(".ub-toolbar")).toBeNull();
       expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
@@ -705,7 +705,7 @@ describe("code language requires a writable document", () => {
       });
       const control = screen.getByRole("button", { name: "Code language" });
       expect(host.querySelector(".ub-code-caption")?.contains(control)).toBe(true);
-      expect(control.textContent).toContain("ts");
+      expect(control.textContent).toContain("TypeScript");
       expect(host.querySelector(".ub-toolbar")).toBeNull();
 
       await act(async () => {
@@ -713,7 +713,7 @@ describe("code language requires a writable document", () => {
         else emitStatus(docRoom, { writable: false });
       });
       expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
-      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("TypeScript");
     });
   }
 });

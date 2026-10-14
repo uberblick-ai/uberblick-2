@@ -236,7 +236,7 @@ for (const deviceName of ["iPad Pro 11"] as const) {
     expect(header.width).toBeGreaterThanOrEqual(44);
     expect(header.bottom).toBeLessThanOrEqual(header.sourceTop);
     // Inactive blocks also reserve a touch target above their editable source.
-    const inactiveCopy = await earlier.locator(":scope > .ub-copy").boundingBox();
+    const inactiveCopy = await earlier.locator(".ub-block-caption .ub-copy").boundingBox();
     const inactiveSource = await earlier.locator(":scope > code").boundingBox();
     if (inactiveCopy === null || inactiveSource === null) throw new Error("e2e: missing inactive code geometry");
     expect(inactiveCopy.width).toBeGreaterThanOrEqual(44);

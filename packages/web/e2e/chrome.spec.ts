@@ -1808,7 +1808,7 @@ for (const scheme of ["light"] as const) {
       expect(selected.focused).toBe(true);
       expect(selected.from).not.toBe(selected.to);
       for (const [selector, , text] of sources) {
-        const copyLabel = selector === ".ub-mermaid" ? "Copy" : "copy";
+        const copyLabel = "Copy";
         const copy = page.locator(selector).getByRole("button", { name: copyLabel, exact: true });
         await activateCopy(page, copy);
         await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
@@ -1830,7 +1830,7 @@ for (const scheme of ["light"] as const) {
         await expect(copyNotice(page, mode === "failed" ? "Copy failed" : "Copied to clipboard")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
         expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [sources[0][2]]);
         expect(await editorSelection(page)).toEqual(selected);
-        await expect(copy).toHaveText("copy");
+        await expect(copy).toHaveText("Copy");
         await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
       }
     } finally {
@@ -2595,10 +2595,8 @@ for (const scheme of ["light"] as const) {
   });
 }
 
-// Tokens and axe cannot observe a positioned sibling screen or the controls' opacity/focus cascade.
-// The screen is deliberately dark in both appearances. Compare each light
-// control to the corresponding dark rendering, including opacity and focus.
-test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {
+// Tokens and axe cannot establish the controls' opacity/focus cascade.
+test("terminal caption controls keep AA contrast on the appearance-aware tint", async ({ browser }, testInfo) => {
   const page = await openAppearanceApp(browser, "dark");
   await contrastDocument(page, "dark", async () => {
     // The preceding diagram changes the terminal's position when it renders.
@@ -2625,18 +2623,11 @@ test("terminal controls keep their dark-screen contrast in either appearance", a
     console.log(`Terminal readings: ${JSON.stringify(readings)}`);
     await testInfo.attach("terminal-controls", { body: JSON.stringify(readings, null, 2), contentType: "application/json" });
     for (const [key, values] of Object.entries(readings)) {
-      const floor = key.endsWith("rest")
-        ? key.includes("ub-copy") ? 3.317915 : 7.054520
-        : 17.521906;
-      expect(values[0]?.ratio, key).toBeGreaterThanOrEqual(floor);
+      expect(values.length, key).toBeGreaterThan(0);
+      for (const reading of values) expect(reading.ratio, `${key} ${JSON.stringify(reading)}`).toBeGreaterThanOrEqual(4.5);
     }
-    for (const [key, light] of Object.entries(readings).filter(([key]) => key.startsWith("light"))) {
-      const dark = readings[key.replace(/^light/, "dark")];
-      expect(light.length).toBe(1);
-      expect(dark?.length).toBe(1);
-      expect(legacySrgb(light[0]?.ground ?? "")).toEqual(legacySrgb(await painted(page, ".ub-terminal-screen", "background-color")));
-      expect(light[0]?.ratio).toBeGreaterThanOrEqual(dark?.[0]?.ratio ?? Infinity);
-    }
+    expect(legacySrgb(readings["light .ub-terminal-toggle rest"]?.[0]?.ground ?? ""))
+      .not.toEqual(legacySrgb(readings["dark .ub-terminal-toggle rest"]?.[0]?.ground ?? ""));
   });
 });
 

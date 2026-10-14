@@ -3,7 +3,7 @@
 /**
  * The palette is cheapest to defend at its source. This table reads the actual
  * declarations, including light-dark(), aliases, both page-gradient stops and
- * the terminal's local palette. No DOM or browser participates.
+ * every framed block tint. No DOM or browser participates.
  *
  * Consumer wiring, later cascade rules, opacity groups and positioned sibling
  * grounds remain browser obligations: a good palette does not prove good paint.
@@ -23,7 +23,6 @@ function declarations(source: string): Tokens {
   const tokens: Tokens = new Map();
   for (const [selector, pattern] of [
     [":root", /(?:^|\n):root\s*\{([^}]*)\}/g],
-    [".ub-terminal", /(?:^|\n)\.ub-terminal\s*\{([^}]*)\}/g],
   ] as const) {
     const blocks = [...clean.matchAll(pattern)];
     if (blocks.length === 0) throw new Error(`missing token source ${selector}`);
@@ -138,10 +137,11 @@ const pairs: Pair[] = [
   // ink on the title cluster and the overflow row, including its hover fill.
   ...["--background", "--card", "--card-accent"]
     .map((ground) => text("departed avatar ink", "--muted-foreground", ground)),
-  // Terminal controls have their existing stricter floors, not generic AA.
-  { name: "terminal toggle at rest", ink: "--terminal-control-ink", ground: "--terminal-screen", floor: 7.054520 },
-  { name: "terminal copy at rest", ink: "--terminal-control-ink", ground: "--terminal-screen", opacity: 0.6, floor: 3.317915 },
-  { name: "terminal controls hovered/focused", ink: "--terminal-control-hover-ink", ground: "--terminal-screen", floor: 17.521906 },
+  ...["slate", "rose", "green", "blue", "violet"].flatMap((hue) =>
+    ["--muted-foreground", "--foreground", "--prose-text"].map((ink) =>
+      text("framed caption, actions and content", ink, `--block-${hue}-tint`))),
+  ...["comment", "keyword", "name", "string", "number"].map((syntax) =>
+    text("syntax on code tint", `--syntax-${syntax}`, "--block-slate-tint")),
 ];
 
 const tokens = declarations(stylesheet);
