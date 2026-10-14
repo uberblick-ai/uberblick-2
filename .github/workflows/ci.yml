@@ -10,10 +10,11 @@ name: CI
 #
 # Linux runs everything. Browser coverage uses independent interactive runners
 # and a separate workload runner, all behind one required aggregate check.
-# macOS runs the tests again, because contributors and
-# the loop work on Macs and some failures show up on only one of the two; lint
-# and typecheck do not depend on the platform. Browser e2e stays Linux-only
-# until its specs hold on GitHub's macOS runners.
+# WebKit runs on iPad only; Chromium covers the desktop.
+# macOS reruns only the suites whose behaviour can differ by OS (`mise run
+# test-os`): contributors and the loop work on Macs and run the full suite
+# there, and lint, typecheck and pure logic do not depend on the platform.
+# Browser e2e stays Linux-only until its specs hold on GitHub's macOS runners.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test`, `site` and `e2e` need none.
 
@@ -76,8 +77,10 @@ jobs:
         run: mise run lint
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run typecheck
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run test
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'macOS' }}
+        run: mise run test-os
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
@@ -152,8 +155,8 @@ jobs:
       - name: Run browser suite
         run: mise run e2e --project=chromium --shard=2/2
 
-  e2e-webkit:
-    name: browser webkit
+  e2e-webkit-1:
+    name: browser webkit (1/2)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -188,7 +191,45 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
-        run: mise run e2e --project=webkit-ipad --project=webkit-macbook
+        run: mise run e2e --project=webkit-ipad --shard=1/2
+
+  e2e-webkit-2:
+    name: browser webkit (2/2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+
+      - name: Install workspace packages
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      # Browser caches omit system packages; locals never install host packages.
+      - name: Provision WebKit host libraries
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+
+      - name: Download pinned browser engines
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
+
+      - name: Run browser suite
+        run: mise run e2e --project=webkit-ipad --shard=2/2
 
   e2e-workload:
     name: browser workload
@@ -228,11 +269,11 @@ jobs:
   # probes on separate hardware while interactive CI jobs execute in parallel.
   e2e:
     name: browser e2e
-    needs: [e2e-chromium-1, e2e-chromium-2, e2e-webkit, e2e-workload]
+    needs: [e2e-chromium-1, e2e-chromium-2, e2e-webkit-1, e2e-webkit-2, e2e-workload]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # A skipped required check is accepted by rulesets, so reject every result
       # except success, including cancellation and skips in any browser job.
-      - run: test '${{ needs.e2e-chromium-1.result }}' = success && test '${{ needs.e2e-chromium-2.result }}' = success && test '${{ needs.e2e-webkit.result }}' = success && test '${{ needs.e2e-workload.result }}' = success
+      - run: test '${{ needs.e2e-chromium-1.result }}' = success && test '${{ needs.e2e-chromium-2.result }}' = success && test '${{ needs.e2e-webkit-1.result }}' = success && test '${{ needs.e2e-webkit-2.result }}' = success && test '${{ needs.e2e-workload.result }}' = success
