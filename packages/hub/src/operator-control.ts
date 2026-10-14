@@ -15,6 +15,11 @@ function integrity(database: HubExtensionContext["database"]): string[] {
   catch (error) { return [String(error)]; }
 }
 
+function databaseSize(path: string): number {
+  try { return statSync(path).size; }
+  catch { return 0; }
+}
+
 export function createOperatorControls(
   context: HubExtensionContext, config: TeamHubConfig, claims: HubClaimState | undefined,
 ): OperatorControls {
@@ -31,8 +36,11 @@ export function createOperatorControls(
         return { status: "complete", path };
       }
       const info = {
-        databasePath: resolve(database.databasePath), size: statSync(database.databasePath).size,
-        documentCount: Number(database.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count),
+        databasePath: resolve(database.databasePath), size: action === "hub-status"
+          ? statSync(database.databasePath).size : databaseSize(database.databasePath),
+        ...(action === "hub-status" ? {
+          documentCount: Number(database.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count),
+        } : {}),
         claimed: claims === undefined || !claims.state(config.github !== undefined).unclaimed,
         port: context.server().address.port, host: config.address,
         storeFailure: context.storeFailure(), githubClientId: config.github?.clientId ?? null,

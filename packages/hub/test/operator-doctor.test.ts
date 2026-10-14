@@ -103,6 +103,39 @@ it("refuses offline journal recovery and leaves both files untouched", async () 
   expect(readFileSync(`${databasePath}-journal`, "utf8")).toBe("an unrecovered journal");
 });
 
+it("preserves an ambiguous control answer and never opens its database directly", async () => {
+  const databasePath = tempDatabasePath();
+  writeFileSync(databasePath, "not a SQLite database", { mode: 0o600 });
+  const before = readFileSync(databasePath);
+  const siblings = readdirSync(dirname(databasePath));
+  const report = await doctor(databasePath, { controlError: "invalid hub control response" });
+
+  expect(report.code).toBe(1);
+  expect(report.output).toMatch(/FAIL\s+hub\s+live control inspection is unavailable: invalid hub control response/);
+  expect(report.output).toMatch(/skip\s+database\s+live inspection is unavailable/);
+  expect(report.output).toMatch(/ok\s+storage\s+.*store history is unavailable/);
+  expect(report.output).not.toContain("no running hub");
+  expect(report.output).toMatch(/ok\s+github/);
+  expect(readFileSync(databasePath)).toEqual(before);
+  expect(readdirSync(dirname(databasePath))).toEqual(siblings);
+});
+
+it("detects offline CHECK violations through a private copy without changing the source or volume", async () => {
+  const databasePath = offlineDatabase();
+  const database = new DatabaseSync(databasePath);
+  database.exec("CREATE TABLE constrained (value INTEGER CHECK(value = 1)); PRAGMA ignore_check_constraints = ON; INSERT INTO constrained VALUES (0)");
+  database.close();
+  const before = readFileSync(databasePath);
+  const siblings = readdirSync(dirname(databasePath));
+  const report = await doctor(databasePath);
+
+  expect(report.code).toBe(1);
+  expect(report.output).toMatch(/FAIL\s+database\s+.*CHECK constraint failed/);
+  expect(readFileSync(databasePath)).toEqual(before);
+  expect(readdirSync(dirname(databasePath))).toEqual(siblings);
+  expect(statSync(databasePath).mode & 0o777).toBe(0o600);
+});
+
 it("fails database ownership, permissions and corrupt databases without stopping other checks", async () => {
   const databasePath = offlineDatabase();
   chmodSync(databasePath, 0o644);

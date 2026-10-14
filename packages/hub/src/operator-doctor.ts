@@ -1,8 +1,9 @@
 import { CLOCK_SKEW_SECONDS } from "@uberblick/schema/token";
 import { createHash, randomBytes } from "node:crypto";
-import { statfsSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, rmSync, statfsSync, statSync } from "node:fs";
 import { request } from "node:http";
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { checkDatabaseIntegrity, hasRollbackJournal } from "./operator-database.js";
 import { SHARED_GITHUB_CLIENT_ID } from "./team-config.js";
@@ -27,6 +28,7 @@ interface Check {
 export interface OperatorDoctorOptions {
   databasePath: string;
   live?: OperatorLiveStatus;
+  controlError?: string;
   githubClientId?: string | null;
   writeLine: (line: string) => void;
   fetch?: typeof globalThis.fetch;
@@ -80,6 +82,7 @@ function websocketUpgrade(host: string, port: number): Promise<void> {
 
 async function hubCheck(options: OperatorDoctorOptions): Promise<Check> {
   const live = options.live;
+  if (options.controlError !== undefined) return failure("hub", `live control inspection is unavailable: ${message(options.controlError)}`, "inspect docker compose logs hub and repair the private control socket before retrying");
   if (live === undefined) return failure("hub", "no running hub answers on the private control socket", "run docker compose up -d hub, then inspect docker compose logs hub if it keeps restarting");
   if (resolve(live.databasePath) !== resolve(options.databasePath)) {
     return failure("hub", `the running hub serves ${live.databasePath}, not ${options.databasePath}`, "point HUB_DB_PATH at the database this deployment serves");
@@ -105,16 +108,24 @@ async function hubCheck(options: OperatorDoctorOptions): Promise<Check> {
 
 function integrityResults(databasePath: string, live: OperatorLiveStatus | undefined): string[] {
   if (live !== undefined) return live.integrity;
-  const database = new DatabaseSync(databasePath, { readOnly: true });
+  const directory = mkdtempSync(join(tmpdir(), "ub-hub-doctor-"));
   try {
-    checkDatabaseIntegrity(database);
+    const copy = join(directory, "database.sqlite");
+    copyFileSync(databasePath, copy);
+    chmodSync(copy, 0o600);
+    // SQLite skips CHECK constraints on read-only handles; inspect a private copy.
+    const database = new DatabaseSync(copy);
+    try { checkDatabaseIntegrity(database); } finally { database.close(); }
     return ["ok"];
   } finally {
-    database.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 }
 
 function databaseCheck(options: OperatorDoctorOptions): Check {
+  if (options.controlError !== undefined) {
+    return { name: "database", status: "skip", reason: "live inspection is unavailable; the database was not opened directly" };
+  }
   const path = options.databasePath;
   const repair = "restore a verified backup with ub-hub restore; repair file ownership and set its mode to 0600 if needed";
   try {
@@ -154,7 +165,7 @@ function storageCheck(options: OperatorDoctorOptions): Check {
     }
     return {
       name: "storage", status: "ok",
-      reason: `${free} bytes free; ${options.live === undefined ? "no running hub, so store history is unavailable" : "no document store has failed since the hub started"}`,
+      reason: `${free} bytes free; ${options.controlError !== undefined ? "live inspection is unavailable, so store history is unavailable" : options.live === undefined ? "no running hub, so store history is unavailable" : "no document store has failed since the hub started"}`,
     };
   } catch (error) {
     return failure("storage", message(error), "restore access to the hub-data volume and inspect docker compose logs hub");

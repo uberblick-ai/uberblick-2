@@ -27,10 +27,31 @@ function releaseIdentity(path: string): void {
 
 async function liveInfo(databasePath: string, doctor = false): Promise<Record<string, unknown>> {
   const result = await requestOperator(databasePath, doctor ? "hub-doctor" : "hub-status");
-  if (result.status !== "ok" || result.info === null || typeof result.info !== "object") {
+  if (result.status !== "ok") throw new Error(String(result.error ?? "hub inspection failed"));
+  if (!validLiveInfo(result.info, doctor)) {
     throw new Error(String(result.error ?? "invalid hub response"));
   }
   return result.info as Record<string, unknown>;
+}
+
+function validLiveInfo(value: unknown, doctor: boolean): boolean {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const info = value as Record<string, unknown>;
+  const base = typeof info.databasePath === "string" && info.databasePath.length > 0 &&
+    typeof info.size === "number" && Number.isSafeInteger(info.size) && info.size >= 0 &&
+    typeof info.port === "number" && Number.isInteger(info.port) && info.port > 0 && info.port <= 65535 &&
+    (info.host === undefined || typeof info.host === "string") &&
+    (info.storeFailure === null || typeof info.storeFailure === "string") &&
+    (info.githubClientId === null || typeof info.githubClientId === "string");
+  return base && (doctor
+    ? Array.isArray(info.integrity) && info.integrity.length > 0 && info.integrity.every(item => typeof item === "string")
+    : typeof info.claimed === "boolean" && typeof info.documentCount === "number" &&
+      Number.isSafeInteger(info.documentCount) && info.documentCount >= 0);
+}
+
+function controlAbsent(error: unknown): boolean {
+  if (error === null || typeof error !== "object" || !("code" in error)) return false;
+  return error.code === "ENOENT" || error.code === "ECONNREFUSED";
 }
 
 async function runWithSignals(work: (signal: AbortSignal) => Promise<void>): Promise<void> {
@@ -66,15 +87,17 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
       const info = await liveInfo(databasePath);
       console.log(`hub        running\ndatabase   ${info.databasePath}\nsize       ${info.size} bytes\ndocuments  ${info.documentCount}\nclaimed    ${info.claimed ? "yes" : "no"}`);
     } catch (error) {
-      console.log("hub        not running");
+      console.log(controlAbsent(error) ? "hub        not running" : "hub        inspection failed");
       console.error(String(error));
       process.exitCode = 1;
     }
   } else if (command === "doctor") {
     let live: OperatorLiveStatus | undefined;
+    let controlError: string | undefined;
     try { live = await liveInfo(databasePath, true) as unknown as OperatorLiveStatus; }
-    catch { /* Offline inspection covers a stopped or restarting deployment. */ }
+    catch (error) { if (!controlAbsent(error)) controlError = String(error); }
     process.exitCode = await runOperatorDoctor({ databasePath, ...(live === undefined ? {} : { live }),
+      ...(controlError === undefined ? {} : { controlError }),
       githubClientId: process.env.HUB_GITHUB_CLIENT_ID || SHARED_GITHUB_CLIENT_ID, writeLine: console.log });
   } else if (command === "backup") {
     await runWithSignals(async signal => {
