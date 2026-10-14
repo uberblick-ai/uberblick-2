@@ -257,6 +257,13 @@ On `main` the same run records whether `main` itself is clean. A pull
 request's run uses that pull request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
 
+`mise run ci` runs the same commands locally, in the workflow's order, under
+`CI=true`, and names every check that failed. It is a convenience, not a
+substitute for the required checks. Its tests are the job for your platform,
+its browser run covers every project CI shards, and it refuses to start while
+`ub open` holds the default port. `mise run ci --skip-e2e` stops before the
+browser suite.
+
 GitHub Actions also retains release publishing and the Linux Homebrew upgrade
 proof after packaging changes. The latter runs after merges changing the formula
 or its payload, and on demand from the Actions tab, through
