@@ -54,6 +54,12 @@ function createTeamExtension(
     principals = new PrincipalRegistry(database);
     memberships = new MembershipRegistry(database);
     hubAdmins = new HubAdminRegistry(database, workspaceNames);
+    // A fresh hub gets its administrator by claiming; an existing deployment
+    // never can, so it adopts its oldest workspace member instead.
+    if (claims !== undefined && !claims.state(false).unclaimed) {
+      const adopted = hubAdmins.adoptOldestMember();
+      if (adopted !== undefined) log({ event: "hub.admin.adopted", ...adopted });
+    }
     if (config.github !== undefined) {
       credentials = new CredentialRegistry(database);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);

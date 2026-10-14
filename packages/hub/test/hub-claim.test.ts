@@ -13,7 +13,7 @@ import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { silentLogger } from "../src/log.js";
+import { silentLogger, type HubLogRecord } from "../src/log.js";
 import { TEST_SECRET, WORKSPACE } from "./helpers.js";
 
 const CLIENT_ID = "Iv1.0123456789abcdef";
@@ -353,5 +353,67 @@ describe("credential-free claim-state report", () => {
     expect(result.credential.record.workspaces).toEqual([]);
     expect(inspect.database.connection.prepare("SELECT * FROM hub_memberships").all()).toEqual([]);
     expect(inspect.database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
+  });
+});
+
+describe("existing deployment without a hub administrator", () => {
+  async function start(path: string, events: HubLogRecord[]) {
+    const github = new GithubFake();
+    const hub = await createHub({ authSecret: TEST_SECRET, databasePath: path, address: "127.0.0.1", port: 0,
+      log: (record) => { events.push(record); },
+      github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time } }, { initializeDefaultWorkspace: true });
+    hubs.push(hub);
+    return hub;
+  }
+
+  it("adopts its oldest workspace member once, and keeps that choice across restarts", async () => {
+    const old = rig(undefined, false);
+    old.principals.identify("1001", "signed-in-without-access");
+    const oldest = old.principals.identify("1002", "oldest-member");
+    const admin = old.principals.identify("1003", "newer-admin");
+    old.memberships.grant({ workspaceId: WORKSPACE, principalId: oldest.id, role: "member" });
+    old.memberships.grant({ workspaceId: WORKSPACE, principalId: admin.id, role: "admin" });
+    const path = old.database.databasePath;
+    old.database.close();
+
+    const events: HubLogRecord[] = [];
+    const hub = await start(path, events);
+    expect(hub.hubAdmins!.isAdmin(oldest.id)).toBe(true);
+    expect(hub.hubAdmins!.isAdmin(admin.id)).toBe(false);
+    expect(events.filter((record) => record.event === "hub.admin.adopted"))
+      .toEqual([{ event: "hub.admin.adopted", principalId: oldest.id, githubUsername: "oldest-member" }]);
+    await hub.stop();
+
+    const again: HubLogRecord[] = [];
+    const restarted = await start(path, again);
+    expect(again.some((record) => record.event === "hub.admin.adopted")).toBe(false);
+    expect(rig(path).database.connection.prepare("SELECT principal_id FROM hub_admins").all())
+      .toEqual([{ principal_id: oldest.id }]);
+    expect(restarted.hubAdmins!.isAdmin(admin.id)).toBe(false);
+  });
+
+  it("leaves an existing administrator, a hub without members and a fresh claimable hub alone", async () => {
+    const administered = rig(undefined, false);
+    const member = administered.principals.identify("2001", "member");
+    const admin = administered.principals.identify("2002", "hub-admin");
+    administered.memberships.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "admin" });
+    administered.hubAdmins.grant(admin.id);
+    const administeredPath = administered.database.databasePath;
+    administered.database.close();
+
+    const empty = rig(undefined, false);
+    empty.principals.identify("3001", "signed-in-without-access");
+    const emptyPath = empty.database.databasePath;
+    empty.database.close();
+
+    const events: HubLogRecord[] = [];
+    const first = await start(administeredPath, events);
+    expect(first.hubAdmins!.isAdmin(member.id)).toBe(false);
+    await start(emptyPath, events);
+    const fresh = await start(databasePath(), events);
+    expect(await (await fetch(`http://127.0.0.1:${fresh.port}/auth/claim-state`)).json())
+      .toEqual({ unclaimed: true, canClaim: true });
+    expect(events.some((record) => record.event === "hub.admin.adopted")).toBe(false);
+    expect(rig(emptyPath).database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
   });
 });
