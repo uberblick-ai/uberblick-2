@@ -34,6 +34,7 @@
 @source "./document/DocChrome.tsx";
 @source "./PickerList.tsx";
 @source "./editor-controls/CodeLanguageControl.tsx";
+@source "./editor-controls/CardButtonControls.tsx";
 @source "./document/EditorPane.tsx";
 @source "../shell/DocumentList.tsx";
 @source "./status/PeerCluster.tsx";
