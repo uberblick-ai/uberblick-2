@@ -1,8 +1,54 @@
 import { defineConfig } from "vitest/config";
 
+// `mise run test-os`, the macOS CI job, runs only the suites whose behaviour
+// can differ by OS: file modes, locks and paths, signals and process
+// lifecycles. List a suite here when it tests such a seam.
+const osSensitive = [
+  "auth",
+  "auth-browser",
+  "auth-device-name",
+  "auth-protocol",
+  "auth-status",
+  "auth-store",
+  "browser",
+  "browser-key",
+  "cli",
+  "config",
+  "data-sync",
+  "doctor",
+  "doctor-persistence",
+  "hub",
+  "hub-backup-restore",
+  "hub-host",
+  "init-lock",
+  "install",
+  "launcher",
+  "local-browser-server",
+  "mise-welcome",
+  "open",
+  "open-account",
+  "open-ports",
+  "open-presence-name",
+  "open-workspaces",
+  "project-binding",
+  "remote",
+  "serve",
+  "status",
+  "storage",
+  "storage-layout",
+  "update",
+  "workspace-create",
+  "workspace-main-repository",
+  "workspace-promotion",
+  "workspace-registry",
+];
+
 export default defineConfig({
   test: {
-    include: ["test/**/*.test.ts", "src/**/*.test.ts"],
+    include:
+      process.env.UB_TEST_SCOPE === "os"
+        ? osSensitive.map((name) => `test/${name}.test.ts`)
+        : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
     reporters: process.env.CI ? ["dot"] : ["default"],

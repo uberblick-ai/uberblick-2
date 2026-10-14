@@ -561,7 +561,6 @@ test("a record limit follows the latest x values with a neutral count and unchan
 });
 
 test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.skip(info.project.name === "webkit-ipad", "Explicit desktop and iPad contexts own this paired proof.");
   test.setTimeout(120_000);
   const session = writer();
   const uuid = await chartDoc(session, "Daily chart observations");

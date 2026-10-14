@@ -155,6 +155,12 @@ description = "Run all test suites"
 # `pnpm-workspace.yaml` globs `packages/*` only.
 run = "pnpm test"
 
+[tasks.test-os]
+description = "Run the suites whose behaviour can differ by OS, as the macOS CI job does"
+# The per-package lists live in each vitest.config.ts (`osSensitive`); the
+# script suites here run on the host's own shell, Python and process tree.
+run = "pnpm run test:os"
+
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Chromium and tagged WebKit)"
 # The harness builds the current checkout into private storage, starts its own
@@ -174,8 +180,8 @@ usage = 'flag "--skip-e2e" help="Stop after the site build; the browser suite is
 # A local convenience, not the merge gate: GitHub Actions stays the only source
 # of the required checks. It runs the workflow's commands in its order, under
 # `CI=true` like a runner, and keeps going past a failure so one run shows
-# everything that is red, as the workflow does. The `test` step is the job for
-# the platform you are on: `macOS tests` on a Mac, the Linux job elsewhere.
+# everything that is red, as the workflow does. The `test` step is the full
+# suite on every platform, a superset of the `macOS tests` job's `test-os`.
 # The browser jobs collapse into one `mise run e2e`, which runs every project
 # CI shards across runners; WebKit on Linux needs the host libraries CI
 # provisions with `playwright install-deps webkit`.
