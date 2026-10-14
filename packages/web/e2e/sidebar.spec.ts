@@ -355,30 +355,6 @@ test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   }
 });
 
-test("a drag reorders the sidebar, and the other browser sees the new order", async ({
-  browser,
-}) => {
-  const first = docTitle("first");
-  const second = docTitle("second");
-
-  const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await expect(a.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await expect(b.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await createPinnedDoc(a, first);
-  await createPinnedDoc(a, second);
-  await expect(pinnedTitles(a)).toHaveText([first, second]);
-
-  // The sidebar is a synced document like any other, so the second browser is
-  // already looking at it — nobody told it anything.
-  await expect(pinnedTitles(b)).toHaveText([first, second]);
-
-  // Dragging the row reorders it without also opening its document.
-  await dragOnto(a, a.getByRole("button", { name: second, exact: true }), pinnedTitles(a).nth(0));
-
-  await expect(pinnedTitles(a)).toHaveText([second, first]);
-  await expect(pinnedTitles(b)).toHaveText([second, first]);
-});
-
 test("the drawer's menus, group editing and pointer, keyboard and touch sorting work with a hidden docked preference", async ({ browser }) => {
   const page = await openApp(browser, "/", { contextOptions: { hasTouch: true } });
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();

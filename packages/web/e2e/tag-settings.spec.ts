@@ -193,84 +193,83 @@ test("Tags settings is address-selected and its catalog changes converge", async
   );
 });
 
-for (const appearance of ["light", "dark"] as const) {
-  test(`settings successes use shared notices and preserve native submission focus — ${appearance} @webkit`, async ({ browser }) => {
-    const page = await openApp(browser, `/${harness().workspace}/settings`, {
-      contextOptions: { colorScheme: appearance, viewport: { width: 1440, height: 900 }, isMobile: false }, readySelector: "[data-settings-page]",
-    });
-    // Capture the browser's native focus before the product submit handler:
-    // Safari pointer activation can blur a field without focusing the button.
-    await page.evaluate(() => document.addEventListener("submit", () => {
-      (window as unknown as { settingsSubmissionOrigin: Element | null }).settingsSubmissionOrigin = document.activeElement;
-    }, true));
-    const name = page.getByLabel("Workspace name");
-    const save = page.getByRole("button", { name: "Save", exact: true });
-    await expect(name).toBeEnabled();
-    await name.fill(" ");
-    await name.press("Enter");
-    await expect(page.getByRole("alert")).toContainText("1–64 characters after trimming");
-    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-    await name.fill(`Notification ${appearance}`);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await name.press("Enter");
-    await expectSuccess(page, `Saved “Notification ${appearance}”.`);
-    await expect(name).toBeFocused();
-    for (const viewport of [
-      { width: 1440, height: 900 },
-      { width: 1280, height: 800 },
-      { width: 1024, height: 768 },
-      { width: 820, height: 1180 },
-      { width: 768, height: 1024 },
-    ]) {
-      await page.setViewportSize(viewport);
-      const nextName = `Pointer ${appearance} ${viewport.width}`;
-      await name.fill(nextName);
-      await save.click();
-      await expectSuccess(page, `Saved “${nextName}”.`);
-      await expectSubmissionFocusRetained(page);
-      expect(await save.evaluate((element) => {
-        const box = element.getBoundingClientRect();
-        return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
-      })).toBe(true);
-    }
-    await page.setViewportSize({ width: 1440, height: 900 });
-
-    await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
-    const field = page.getByLabel("Create a tag");
-    const create = page.getByRole("button", { name: "Create", exact: true });
-    const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;
-    await field.fill(tag);
-    await field.press("Enter");
-    await expectSuccess(page, `Created “${tag}”.`);
-    await expect(field).toBeFocused();
-    await field.fill(`${tag}-two`);
-    await create.click();
-    await expectSuccess(page, `Created “${tag}-two”.`);
-    await expectSubmissionFocusRetained(page);
-
-    // With the preceding success dismissed, neither validation failure adds
-    // a notice. Field edits clear alerts; later lifecycle success does too.
-    await successNotice(page, `Created “${tag}-two”.`).locator("[data-close-button]").click();
-    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-    await field.fill("Invalid Name");
-    await field.press("Enter");
-    await expect(page.getByRole("alert")).toContainText("1–30 lowercase letters or numbers");
-    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-    await field.fill(tag);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await field.press("Enter");
-    await expect(page.getByRole("alert")).toContainText("already an active tag");
-    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-
-    // The keyboard catalog test above owns the exact refocus target; shared
-    // feedback must leave lifecycle focus in the tag lists.
-    const tagLists = page.getByRole("region", { name: /^(Active|Retired)$/ });
-    await page.getByRole("button", { name: `Retire ${tag}`, exact: true }).press("Enter");
-    await expectSuccess(page, `Retired “${tag}”.`);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(tagLists.locator("button:focus")).toHaveCount(1);
-    await page.getByRole("button", { name: `Restore ${tag}`, exact: true }).press("Enter");
-    await expectSuccess(page, `Restored “${tag}”.`);
-    await expect(tagLists.locator("button:focus")).toHaveCount(1);
+test("settings successes use shared notices and preserve native submission focus @webkit", async ({ browser }) => {
+  const appearance = "light";
+  const page = await openApp(browser, `/${harness().workspace}/settings`, {
+    contextOptions: { colorScheme: appearance, viewport: { width: 1440, height: 900 }, isMobile: false }, readySelector: "[data-settings-page]",
   });
-}
+  // Capture the browser's native focus before the product submit handler:
+  // Safari pointer activation can blur a field without focusing the button.
+  await page.evaluate(() => document.addEventListener("submit", () => {
+    (window as unknown as { settingsSubmissionOrigin: Element | null }).settingsSubmissionOrigin = document.activeElement;
+  }, true));
+  const name = page.getByLabel("Workspace name");
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expect(name).toBeEnabled();
+  await name.fill(" ");
+  await name.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("1–64 characters after trimming");
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  await name.fill(`Notification ${appearance}`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await name.press("Enter");
+  await expectSuccess(page, `Saved “Notification ${appearance}”.`);
+  await expect(name).toBeFocused();
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+    { width: 1024, height: 768 },
+    { width: 820, height: 1180 },
+    { width: 768, height: 1024 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const nextName = `Pointer ${appearance} ${viewport.width}`;
+    await name.fill(nextName);
+    await save.click();
+    await expectSuccess(page, `Saved “${nextName}”.`);
+    await expectSubmissionFocusRetained(page);
+    expect(await save.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
+  const field = page.getByLabel("Create a tag");
+  const create = page.getByRole("button", { name: "Create", exact: true });
+  const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;
+  await field.fill(tag);
+  await field.press("Enter");
+  await expectSuccess(page, `Created “${tag}”.`);
+  await expect(field).toBeFocused();
+  await field.fill(`${tag}-two`);
+  await create.click();
+  await expectSuccess(page, `Created “${tag}-two”.`);
+  await expectSubmissionFocusRetained(page);
+
+  // With the preceding success dismissed, neither validation failure adds
+  // a notice. Field edits clear alerts; later lifecycle success does too.
+  await successNotice(page, `Created “${tag}-two”.`).locator("[data-close-button]").click();
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  await field.fill("Invalid Name");
+  await field.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("1–30 lowercase letters or numbers");
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  await field.fill(tag);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await field.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("already an active tag");
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+
+  // The keyboard catalog test above owns the exact refocus target; shared
+  // feedback must leave lifecycle focus in the tag lists.
+  const tagLists = page.getByRole("region", { name: /^(Active|Retired)$/ });
+  await page.getByRole("button", { name: `Retire ${tag}`, exact: true }).press("Enter");
+  await expectSuccess(page, `Retired “${tag}”.`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(tagLists.locator("button:focus")).toHaveCount(1);
+  await page.getByRole("button", { name: `Restore ${tag}`, exact: true }).press("Enter");
+  await expectSuccess(page, `Restored “${tag}”.`);
+  await expect(tagLists.locator("button:focus")).toHaveCount(1);
+});

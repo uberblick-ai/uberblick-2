@@ -323,15 +323,21 @@ test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh t
     const session = await context.newCDPSession(page);
     const point = { x: bounds.x + 4, y: bounds.y + bounds.height - 60 };
     const initialScroll = await pane.evaluate((element) => element.scrollTop);
+    await pane.evaluate((element) => {
+      element.addEventListener("scrollend", () => element.setAttribute("data-swipe-ended", "true"), { once: true });
+    });
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point] });
     for (let step = 1; step <= 6; step += 1) {
       await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...point, y: point.y - 15 * step }] });
+      // Pace the native swipe so the browser processes distinct touch moves.
       await page.waitForTimeout(20);
     }
-    await page.waitForTimeout(150);
+    await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(initialScroll);
     await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(initialScroll);
     await expect(menu(page)).toBeVisible();
+    // Chromium consumes taps during momentum scrolling; wait for the native scroll end.
+    await expect(pane).toHaveAttribute("data-swipe-ended", "true");
     await page.touchscreen.tap(point.x, point.y);
     await expect(menu(page)).toHaveCount(0);
     await focusBlock(target, "end");

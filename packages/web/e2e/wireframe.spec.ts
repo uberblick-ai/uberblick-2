@@ -1,5 +1,6 @@
 /** Wireframe previews use ordinary code source through the production replica. */
-import { devices, expect, test } from "@playwright/test";
+import { setNativeSelection } from "./native-selection.js";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { writeFileSync } from "node:fs";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
@@ -67,9 +68,7 @@ async function caretEnd(element: Locator): Promise<void> {
     if (view === null) throw new Error("e2e: source has no editor");
     view.focus();
   });
-  // ProseMirror reconciles focus after 20ms; let it finish before replacing the caret.
-  await element.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-  await element.evaluate((node) => {
+  await setNativeSelection(element, () => element.evaluate((node) => {
     const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
       acceptNode: (text) => text.parentElement?.closest(".ProseMirror-yjs-cursor") === null
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
@@ -83,7 +82,7 @@ async function caretEnd(element: Locator): Promise<void> {
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  });
+  }));
   // A native key flushes pending selection work before the following input.
   await element.page().keyboard.press("Shift");
   await expect.poll(() => element.evaluate((node) => {
@@ -308,63 +307,62 @@ async function evidence(page: Page, info: TestInfo, name: string): Promise<void>
 test("desktop and iPad wireframes fit inside their column and follow both appearances with UI fonts", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const uuid = await wireframeDoc(session, "Wireframe fit and appearance");
-  for (const touch of [false, true]) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 } }), colorScheme: "light" },
-    });
-    await expect(preview(page).locator(".wf-root")).toBeVisible();
-    await activateControl(openSource(page), { touch });
-    await expect(source(page)).toBeVisible();
-    const font = await preview(page).locator(".wf-root").evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(font).not.toMatch(/mono/i);
-    expect(await source(page).evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
-    expect(await openSource(page).evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
-    await activateControl(neighbor(page), { touch });
-    await expect(source(page)).toBeHidden();
-    const paper = preview(page).locator(".wf-dialog-card");
-    const light = await paper.evaluate((element) => getComputedStyle(element).backgroundColor);
-    const root = await preview(page).locator(".wf-root").elementHandle();
-    if (root === null) throw new Error("e2e: themed wireframe is missing");
-    await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-light`);
-    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-    await expect.poll(() => paper.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(light);
-    expect(await root.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
-    expect(await preview(page).locator(".wf-focus").evaluate((element) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--brand)";
-      element.append(probe);
-      const amber = getComputedStyle(probe).color;
-      probe.remove();
-      return getComputedStyle(element).outlineColor !== amber;
-    })).toBe(true);
-    await activateControl(openSource(page), { touch });
-    await expect(source(page)).toBeVisible();
-    await activateControl(neighbor(page), { touch });
-    await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
-    await editSource(session, uuid, wideSource(12));
-    await expect(preview(page).locator(".wf-button")).toHaveCount(12);
-    await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
-    const viewport = page.locator(".ub-wireframe-viewport");
-    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-    await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-    expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-    await expectContained(page);
-    // A less-wide drawing fits by shrinking, before the scrolling floor.
-    const mediumLength = await viewport.evaluate((element) => {
-      const button = element.querySelector(".wf-button");
-      const context = document.createElement("canvas").getContext("2d");
-      if (button === null || context === null) throw new Error("e2e: missing width measurement");
-      const style = getComputedStyle(button);
-      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      return Math.ceil(element.clientWidth * 1.2 / context.measureText("x").width);
-    });
-    await editSource(session, uuid, wideSource(1, mediumLength));
-    await expect(preview(page).locator(".wf-button")).toHaveCount(1);
-    await expect.poll(() => fitScale(page)).toBeGreaterThan(0.6);
-    expect(await fitScale(page)).toBeLessThan(1);
-    await expectContained(page);
-    await editSource(session, uuid, SOURCE);
-  }
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { colorScheme: "light" },
+  });
+  await expect(preview(page).locator(".wf-root")).toBeVisible();
+  await activateControl(openSource(page), { touch });
+  await expect(source(page)).toBeVisible();
+  const font = await preview(page).locator(".wf-root").evaluate((element) => getComputedStyle(element).fontFamily);
+  expect(font).not.toMatch(/mono/i);
+  expect(await source(page).evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
+  expect(await openSource(page).evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
+  await activateControl(neighbor(page), { touch });
+  await expect(source(page)).toBeHidden();
+  const paper = preview(page).locator(".wf-dialog-card");
+  const light = await paper.evaluate((element) => getComputedStyle(element).backgroundColor);
+  const root = await preview(page).locator(".wf-root").elementHandle();
+  if (root === null) throw new Error("e2e: themed wireframe is missing");
+  await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-light`);
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await expect.poll(() => paper.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(light);
+  expect(await root.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
+  expect(await preview(page).locator(".wf-focus").evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--brand)";
+    element.append(probe);
+    const amber = getComputedStyle(probe).color;
+    probe.remove();
+    return getComputedStyle(element).outlineColor !== amber;
+  })).toBe(true);
+  await activateControl(openSource(page), { touch });
+  await expect(source(page)).toBeVisible();
+  await activateControl(neighbor(page), { touch });
+  await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
+  await editSource(session, uuid, wideSource(12));
+  await expect(preview(page).locator(".wf-button")).toHaveCount(12);
+  await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
+  const viewport = page.locator(".ub-wireframe-viewport");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expectContained(page);
+  // A less-wide drawing fits by shrinking, before the scrolling floor.
+  const mediumLength = await viewport.evaluate((element) => {
+    const button = element.querySelector(".wf-button");
+    const context = document.createElement("canvas").getContext("2d");
+    if (button === null || context === null) throw new Error("e2e: missing width measurement");
+    const style = getComputedStyle(button);
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return Math.ceil(element.clientWidth * 1.2 / context.measureText("x").width);
+  });
+  await editSource(session, uuid, wideSource(1, mediumLength));
+  await expect(preview(page).locator(".wf-button")).toHaveCount(1);
+  await expect.poll(() => fitScale(page)).toBeGreaterThan(0.6);
+  expect(await fitScale(page)).toBeLessThan(1);
+  await expectContained(page);
+  await editSource(session, uuid, SOURCE);
 });
 
 test("warning banners use the product warning colours in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -462,6 +460,7 @@ test("100 wireframes do no rendering work during prose typing and record compara
   }
   const wireframePage = pages[1];
   if (wireframePage === undefined) throw new Error("e2e: wireframe workload page is missing");
+  // Observe beyond the 200 ms redraw debounce without faking the performance clock.
   await wireframePage.waitForTimeout(300);
   expect(await wireframePage.evaluate(() => (window as unknown as { wireframeTyping: { redraws: number } }).wireframeTyping.redraws)).toBe(0);
   const measured = { ordinaryCode: plain, wireframes: wireframe, ordinaryMedianMs: median(plain), wireframeMedianMs: median(wireframe), blocks: 100 };

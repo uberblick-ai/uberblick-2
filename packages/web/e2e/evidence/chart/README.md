@@ -12,9 +12,11 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
 | Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
 
-The browser suite covers source insertion and keyboard/pointer access, live
-data and mapping updates, canvas names/descriptions, appearance changes, reopen,
-problem recovery and content locks. Canvas observations check that date
+The browser suite covers source insertion and keyboard/pointer access, canvas
+names/descriptions and appearance changes. The combined chart/table journey in
+`chart.spec.ts` covers live data and mapping updates, reload and reopen;
+`data-table.spec.ts` checks both views through problem recovery and content locks.
+Canvas observations check that date
 labels anchor only at plotted observations, preserve continuous
 spacing, and omit crowded labels only where they overlap retained labels.
 The geometry probe resets on each canvas clear and measures painted text

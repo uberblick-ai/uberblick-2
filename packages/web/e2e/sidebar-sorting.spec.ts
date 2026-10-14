@@ -245,9 +245,10 @@ test("leaving a cross-group target cancels; a later peer unpin stays safe", asyn
   for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["beta"]);
 });
 
-test("leaving an in-group target restores the optimistic order", async ({ peers: [a, b] }) => {
+test("leaving an in-group target restores the optimistic order; a committed drop synchronizes", async ({ peers: [a, b] }) => {
   for (const title of ["alpha", "beta"]) await createPinnedDoc(a, title);
   await expect(titles(b, "Pinned")).toHaveText(["alpha", "beta"]);
+  const path = new URL(a.url()).pathname;
   await hover(a, row(a, "beta"), titles(a, "Pinned").first());
   await expect(titles(a, "Pinned")).toHaveText(["beta", "alpha"]);
   const first = await titles(a, "Pinned").first().boundingBox();
@@ -261,6 +262,9 @@ test("leaving an in-group target restores the optimistic order", async ({ peers:
   await a.mouse.up();
   for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["alpha", "beta"]);
   await expect(a.locator('body > [role="status"]')).toContainText("Cancelled moving beta");
+  await dragOnto(a, row(a, "beta"), titles(a, "Pinned").first());
+  for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["beta", "alpha"]);
+  expect(new URL(a.url()).pathname).toBe(path);
 });
 
 test("keyboard boundaries do not wrap and adjacent moves synchronize", async ({ peers: [a, b] }) => {

@@ -1,5 +1,5 @@
 /** Mermaid drawings keep source, permissions and failures local to their block. */
-import { devices, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
@@ -456,47 +456,46 @@ test("desktop and iPad diagrams fit the column and redraw legibly in light and d
   const session = writer();
   const wide = `flowchart LR\n  ${Array.from({ length: 12 }, (_, index) => `N${index}[Long label ${index}]`).join(" --> ")}`;
   const uuid = await mermaidDoc(session, "Mermaid fit and appearance", [wide]);
-  for (const touch of [false, true]) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 } }), colorScheme: "light" },
-    });
-    await expectReady(page, "Long label 11");
-    const node = drawing(page).locator(".node rect").first();
-    const light = await node.evaluate((element) => getComputedStyle(element).fill);
-    for (const appearance of ["light", "dark"] as const) {
-      if (appearance === "dark") {
-        const previous = await drawing(page).elementHandle();
-        if (previous === null) throw new Error("e2e: appearance drawing is missing");
-        await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-        await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
-        await expectReady(page, "Long label 11");
-        expect(await node.evaluate((element) => getComputedStyle(element).fill)).not.toBe(light);
-      }
-      await activateControl(openSource(page), { touch });
-      await expect(source(page)).toBeVisible();
-      await activateControl(neighbor(page), { touch });
-      await expect(source(page)).toBeHidden();
-      expect(await page.evaluate(() => {
-        const pane = document.querySelector<HTMLElement>(".ub-pane");
-        return pane !== null && pane.scrollWidth <= pane.clientWidth && document.documentElement.scrollWidth <= innerWidth;
-      })).toBe(true);
-      const panel = block(page).locator(".ub-mermaid-panel");
-      const fitsOrScrolls = await panel.evaluate((element) => {
-        const svg = element.shadowRoot?.querySelector("svg");
-        if (svg === null || svg === undefined) return false;
-        const bounds = svg.getBoundingClientRect();
-        return bounds.width <= element.clientWidth + 1 || ["auto", "scroll"].includes(getComputedStyle(element).overflowX);
-      });
-      expect(fitsOrScrolls).toBe(true);
-      const name = `mermaid-${touch ? "ipad" : "desktop"}-${appearance}`;
-      const path = info.outputPath(`${name}.png`);
-      await block(page).screenshot({ path });
-      await info.attach(name, { path, contentType: "image/png" });
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { colorScheme: "light" },
+  });
+  await expectReady(page, "Long label 11");
+  const node = drawing(page).locator(".node rect").first();
+  const light = await node.evaluate((element) => getComputedStyle(element).fill);
+  for (const appearance of ["light", "dark"] as const) {
+    if (appearance === "dark") {
+      const previous = await drawing(page).elementHandle();
+      if (previous === null) throw new Error("e2e: appearance drawing is missing");
+      await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+      await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
+      await expectReady(page, "Long label 11");
+      expect(await node.evaluate((element) => getComputedStyle(element).fill)).not.toBe(light);
     }
-    // The system preference route also replaces the diagram when no explicit appearance is set.
-    await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
-    await expect.poll(() => node.evaluate((element) => getComputedStyle(element).fill)).toBe(light);
-    await page.emulateMedia({ colorScheme: "dark" });
-    await expect.poll(() => node.evaluate((element) => getComputedStyle(element).fill)).not.toBe(light);
+    await activateControl(openSource(page), { touch });
+    await expect(source(page)).toBeVisible();
+    await activateControl(neighbor(page), { touch });
+    await expect(source(page)).toBeHidden();
+    expect(await page.evaluate(() => {
+      const pane = document.querySelector<HTMLElement>(".ub-pane");
+      return pane !== null && pane.scrollWidth <= pane.clientWidth && document.documentElement.scrollWidth <= innerWidth;
+    })).toBe(true);
+    const panel = block(page).locator(".ub-mermaid-panel");
+    const fitsOrScrolls = await panel.evaluate((element) => {
+      const svg = element.shadowRoot?.querySelector("svg");
+      if (svg === null || svg === undefined) return false;
+      const bounds = svg.getBoundingClientRect();
+      return bounds.width <= element.clientWidth + 1 || ["auto", "scroll"].includes(getComputedStyle(element).overflowX);
+    });
+    expect(fitsOrScrolls).toBe(true);
+    const name = `mermaid-${touch ? "ipad" : "desktop"}-${appearance}`;
+    const path = info.outputPath(`${name}.png`);
+    await block(page).screenshot({ path });
+    await info.attach(name, { path, contentType: "image/png" });
   }
+  // The system preference route also replaces the diagram when no explicit appearance is set.
+  await page.evaluate(() => document.documentElement.removeAttribute("data-theme"));
+  await expect.poll(() => node.evaluate((element) => getComputedStyle(element).fill)).toBe(light);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => node.evaluate((element) => getComputedStyle(element).fill)).not.toBe(light);
 });

@@ -4,6 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { join } from "node:path";
 import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
+import { setNativeSelection } from "./native-selection.js";
 
 const { harness } = setupHarness();
 
@@ -23,15 +24,14 @@ async function openCard(page: Page): Promise<Locator> {
 
 async function selectPart(part: Locator): Promise<void> {
   await part.locator("p").click();
-  await part.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-  await part.evaluate((element) => {
+  await setNativeSelection(part, () => part.evaluate((element) => {
     element.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, pointerId: 1 }));
     const range = document.createRange();
     range.selectNodeContents(element.querySelector("p") ?? element);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  });
+  }));
 }
 
 test("both menu paths focus the title and optional placeholders collapse outside the focused card", { tag: "@webkit" }, async ({ page }, info) => {

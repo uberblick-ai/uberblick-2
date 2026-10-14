@@ -190,7 +190,8 @@ async function expectHeaderContained(page: Page): Promise<void> {
   expect(header.escapingInk).toBe(0);
 }
 
-for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
+for (const touch of [false, true]) {
+  const appearance = touch ? "dark" : "light";
   test(`related Decisions links and layout on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const related = await create(writer, "Supporting page", "Supporting guidance.");

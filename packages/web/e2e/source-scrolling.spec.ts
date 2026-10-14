@@ -1,6 +1,7 @@
 /** Fenced source stays aligned, scrolls inside its panel, and keeps usable chrome. */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import { setNativeSelection } from "./native-selection.js";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
@@ -270,8 +271,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         : source.locator("..").locator(":scope > .ub-copy");
       for (const collapsed of [true, false]) {
         await page.locator(".ub-editor .ProseMirror").focus();
-        await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-        await source.evaluate((element, caretOnly) => {
+        await setNativeSelection(source, () => source.evaluate((element, caretOnly) => {
           const first = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
           if (first === null) throw new Error("e2e: missing source text");
           const range = document.createRange();
@@ -280,7 +280,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
           const selection = document.getSelection();
           selection?.removeAllRanges();
           selection?.addRange(range);
-        }, collapsed);
+        }, collapsed));
         await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         const before = await editorSelection(page);
         expect(before.focused).toBe(true);
@@ -368,9 +368,10 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
     const rect = range.getBoundingClientRect();
     return { x: rect.left, y: rect.top + rect.height / 2 };
   });
-  if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
-  else await page.mouse.click(end.x, end.y);
-  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  await setNativeSelection(code, async () => {
+    if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
+    else await page.mouse.click(end.x, end.y);
+  });
   await expect.poll(() => code.evaluate((element) => {
     const selection = document.getSelection();
     if (selection === null || !selection.isCollapsed || selection.focusNode === null || !element.contains(selection.focusNode)) return "";
