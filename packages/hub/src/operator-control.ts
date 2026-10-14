@@ -40,8 +40,8 @@ export function createOperatorControls(
           ? statSync(database.databasePath).size : databaseSize(database.databasePath),
         ...(action === "hub-status" ? {
           documentCount: Number(database.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count),
+          claimed: claims === undefined || !claims.state(config.github !== undefined).unclaimed,
         } : {}),
-        claimed: claims === undefined || !claims.state(config.github !== undefined).unclaimed,
         port: context.server().address.port, host: config.address,
         storeFailure: context.storeFailure(), githubClientId: config.github?.clientId ?? null,
         ...(action === "hub-doctor" ? { integrity: integrity(database) } : {}),

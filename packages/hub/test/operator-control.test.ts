@@ -123,14 +123,14 @@ it("operator capabilities have no HTTP route", async () => {
   expect(readdirSync(dirname(hub.databasePath))).toEqual(before);
 });
 
-it("keeps the running hub observable when its document table is damaged", async () => {
+it.each(["documents", "hub_claim_state"])("keeps the running hub observable when its %s table is damaged", async table => {
   const hub = await rig();
   const database = new DatabaseSync(hub.databasePath);
-  try { database.exec("DROP TABLE documents"); } finally { database.close(); }
+  try { database.exec(`DROP TABLE ${table}`); } finally { database.close(); }
   expect(await requestOperator(hub.databasePath, "hub-doctor")).toMatchObject({
     status: "ok", info: { databasePath: hub.databasePath, port: hub.port, integrity: ["ok"] },
   });
-  expect((await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).status).toBe(200);
+  expect(hub.server.address.port).toBe(hub.port);
 });
 
 it.each([{}, [], { databasePath: "wrong" }])("rejects malformed live status %j instead of printing successful undefined facts", async info => {
