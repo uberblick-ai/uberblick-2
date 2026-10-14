@@ -6,7 +6,7 @@ import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 
 const SIZES = [12, 13, 14, 16, 18, 22, 36];
-const DRAWN_TEXT = ".ub-mermaid-rendered, .ub-wireframe-preview";
+const DRAWN_TEXT = ".ub-mermaid-panel, .ub-wireframe-drawing";
 
 async function expectStep(element: Locator, size: number, leading: number): Promise<void> {
   await expect(element).toHaveCSS("font-size", `${size}px`);
