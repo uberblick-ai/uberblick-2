@@ -184,7 +184,7 @@ export const Quote = Node.create({
   renderHTML({ HTMLAttributes }) {
     return [
       "blockquote",
-      mergeAttributes({ class: "ub-quote" }, HTMLAttributes),
+      mergeAttributes({ class: "ub-quote ub-block-frame" }, HTMLAttributes),
       0,
     ];
   },
@@ -222,7 +222,7 @@ export const CodeBlock = Node.create({
   renderHTML({ HTMLAttributes }) {
     return [
       "pre",
-      mergeAttributes({ class: "ub-code" }, HTMLAttributes),
+      mergeAttributes({ class: "ub-code ub-block-frame" }, HTMLAttributes),
       ["code", {}, 0],
     ];
   },
@@ -265,7 +265,7 @@ export const Mermaid = Node.create({
     return [
       "div",
       mergeAttributes(
-        { class: "ub-mermaid", "data-block-type": "mermaid" },
+        { class: "ub-mermaid ub-block-frame", "data-block-type": "mermaid" },
         HTMLAttributes,
       ),
       ["pre", {}, 0],
@@ -299,7 +299,7 @@ export const Terminal = Node.create({
     return [
       "div",
       mergeAttributes(
-        { class: "ub-terminal", "data-block-type": "terminal" },
+        { class: "ub-terminal ub-block-frame", "data-block-type": "terminal" },
         HTMLAttributes,
       ),
       ["pre", { class: "ub-terminal-source" }, 0],
@@ -327,7 +327,7 @@ export const ChartBlock = Node.create<{ ydoc: Y.Doc | null }>({
     return [{ tag: "div[data-block-type=chart]", preserveWhitespace: "full" }];
   },
   renderHTML({ HTMLAttributes }) {
-    return ["div", mergeAttributes({ class: "ub-chart", "data-block-type": "chart" }, HTMLAttributes),
+    return ["div", mergeAttributes({ class: "ub-chart ub-block-frame", "data-block-type": "chart" }, HTMLAttributes),
       ["pre", { class: "ub-chart-source" }, 0]];
   },
   addNodeView() { return chartBlockView(this.options.ydoc); },

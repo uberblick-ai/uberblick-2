@@ -367,7 +367,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(table).toContainText("/relative");
     await expect(table.getByRole("link")).toHaveCount(1);
     const openSource = page.getByRole("button", { name: "Open table source", exact: true });
-    const copy = block.getByRole("button", { name: "copy", exact: true });
+    const copy = block.getByRole("button", { name: "Copy", exact: true });
     await editor(page).locator(":scope > p").first().click();
     await expect(openSource).toHaveCSS("opacity", "0");
     await expect(copy).toHaveCSS("opacity", "0");

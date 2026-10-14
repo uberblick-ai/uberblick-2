@@ -64,6 +64,10 @@ describe("copying a source block", () => {
 
     const buttons = [...element.querySelectorAll<HTMLButtonElement>(".ub-copy")];
     expect(buttons).toHaveLength(2);
+    for (const root of element.querySelectorAll(".ub-block-frame")) {
+      expect(root.querySelectorAll(":scope > .ub-block-caption")).toHaveLength(1);
+      expect(root.querySelectorAll(".ub-block-actions .ub-copy")).toHaveLength(1);
+    }
 
     // The caret never moves because the default on *mousedown* is prevented —
     // by click time the browser has already focused and placed it.
@@ -87,7 +91,7 @@ describe("copying a source block", () => {
     for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
       expect(notice).toEqual({ key: "clipboard", message: "Copied to clipboard", severity: "success" });
     }
-    expect(buttons.map(button => button.textContent)).toEqual(["copy", "Copy"]);
+    expect(buttons.map(button => button.textContent)).toEqual(["Copy", "Copy"]);
 
     editor.destroy();
   });
@@ -113,7 +117,7 @@ describe("copying a source block", () => {
     const captionText = caption.firstChild!;
     const sourceText = document.createTextNode(SHELL);
     view.contentDOM!.appendChild(sourceText);
-    expect(captionText.textContent).toBe("sh");
+    expect(captionText.textContent).toBe("Bash");
     expect((caption as HTMLElement).contentEditable).toBe("false");
 
     // Only `target` is read, so a stand-in record is enough to state the rule.
@@ -123,6 +127,7 @@ describe("copying a source block", () => {
     expect(view.ignoreMutation!(changed(button))).toBe(true);
     expect(view.ignoreMutation!(changed(caption))).toBe(true);
     expect(view.ignoreMutation!(changed(captionText))).toBe(true);
+    expect(view.ignoreMutation!(changed(view.dom.querySelector(".ub-block-caption")!))).toBe(true);
     expect(view.ignoreMutation!(changed(view.contentDOM!))).toBe(false);
     expect(view.ignoreMutation!(changed(sourceText))).toBe(false);
     expect(view.ignoreMutation!(changed(view.dom))).toBe(false);
@@ -189,7 +194,7 @@ describe("copying a source block", () => {
       expect(document.activeElement).toBe(origin);
       expect([origin.selectionStart, origin.selectionEnd]).toEqual([2, 7]);
       expect(editor.state.selection.eq(selection)).toBe(true);
-      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("copy");
+      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("Copy");
       // The scratch textarea is gone again; it exists only for the selection.
       expect(document.querySelector("textarea")).toBeNull();
     } finally {
@@ -216,7 +221,7 @@ describe("copying a source block", () => {
         key: "clipboard", message: "Copy failed", severity: "error",
       }));
       expect(execCommand).toHaveBeenCalledWith("copy");
-      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("copy");
+      expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("Copy");
       expect(document.querySelector("textarea")).toBeNull();
     } finally {
       Reflect.deleteProperty(document, "execCommand");

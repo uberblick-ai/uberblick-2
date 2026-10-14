@@ -20,7 +20,7 @@ import {
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { redo, undo, yUndoPluginKey } from "y-prosemirror";
-import { codeHighlightingKey } from "../src/editor/syntax-highlighting.js";
+import { codeHighlightingKey, codeLanguageLabel } from "../src/editor/syntax-highlighting.js";
 import { threadIdFromTarget } from "../src/ui/comments/threads.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 
@@ -87,6 +87,22 @@ function expectKeywords(element: HTMLElement, expected: string[]): void {
 }
 
 describe("code syntax highlighting", () => {
+  it.each([
+    ["json", "JSON"], ["typescript", "TypeScript"], ["ts", "TypeScript"],
+    ["bash", "Bash"], ["sh", "Bash"], ["xml", "HTML, XML"],
+    ["wireframe", "Wireframe"], ["plaintext", "Plain text"], ["", "Plain text"],
+    ["my-language", "My-language"],
+  ])("shows the grammar's display name for %s without changing its stored id", (language, label) => {
+    const ydoc = new Y.Doc();
+    const id = appendBlock(ydoc, { type: "code", language, text: "literal source" });
+    const before = snapshotFragment(ydoc);
+    const { element } = mount(ydoc);
+    expect(codeLanguageLabel(language)).toBe(label);
+    expect(element.querySelector(`[id="${id}"] .ub-code-caption-text`)?.textContent).toBe(label);
+    expect(snapshotFragment(ydoc)).toEqual(before);
+    expect(exportMarkdown(ydoc, { frontmatter: false })).toContain(`\`\`\`${language}\nliteral source\n\`\`\``);
+  });
+
   it("colours the common web and shell grammars, including their aliases", () => {
     const ydoc = new Y.Doc();
     initDoc(ydoc, { uuid: "highlight-languages", title: "Languages" });

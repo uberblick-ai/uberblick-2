@@ -193,7 +193,7 @@ describe("read-only decision records", () => {
     const editor: Editor | null = binding.mock.results[0]?.value.editor ?? null;
     if (editor == null) throw new Error("fixture document did not bind");
     act(() => editor.commands.setTextSelection(editor.state.doc.child(0).nodeSize + 3));
-    expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+    expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("TypeScript");
     expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
   });
@@ -216,7 +216,7 @@ describe("read-only decision records", () => {
       await act(async () => setStatus(peer, status));
       expect(screen.queryByRole("button", { name: "Code language" })).toBeNull();
       expect(screen.queryByRole("combobox", { name: "Search languages" })).toBeNull();
-      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("ts");
+      expect(host.querySelector(".ub-code-caption-text")?.textContent).toBe("TypeScript");
       expect(getBlocks(ydoc).find((node) => node.id === id)?.language).toBe("ts");
       expect(editorElement(host)).toBe(prose);
       expect(prose.getAttribute("contenteditable")).toBe("false");

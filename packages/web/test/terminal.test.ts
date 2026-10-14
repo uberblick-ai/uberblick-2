@@ -229,6 +229,10 @@ describe("the terminal block", () => {
     const editor = mount(ydoc);
     try {
       expect(block(editor)?.getAttribute("data-rendered")).toBe("true");
+      expect(block(editor)?.querySelectorAll(":scope > .ub-block-caption")).toHaveLength(1);
+      expect(block(editor)?.querySelector(".ub-block-label")?.textContent).toBe("Terminal");
+      expect(block(editor)?.querySelectorAll(".ub-block-actions > button")).toHaveLength(2);
+      expect(block(editor)?.querySelector(".ub-block-actions .ub-terminal-toggle")).toBe(toggle(editor));
       // Nothing plays until the panel is on screen — however long nobody looks.
       vi.advanceTimersByTime(20_000);
       expect(shown(editor)).toBe("");
