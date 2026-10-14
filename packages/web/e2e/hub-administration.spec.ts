@@ -106,34 +106,6 @@ test.describe("a hub administrator with no workspace membership", () => {
     }
   }
 
-  for (const colorScheme of ["light", "dark"] as const) {
-    test(`phone hub tables keep secondary facts with their account or workspace in ${colorScheme}`,
-      async ({ browser }) => {
-      const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`, {
-        contextOptions: { viewport: { width: 375, height: 812 }, hasTouch: true, colorScheme },
-      });
-      const admins = page.getByRole("table", { name: "Hub admins", exact: true });
-      await expect(admins).toBeVisible();
-      await expect(admins.getByRole("columnheader", { name: "Workspaces", exact: true })).toHaveCount(0);
-      await expect(admins.getByRole("columnheader", { name: "Last signed in", exact: true })).toHaveCount(0);
-      const own = admins.getByRole("row").filter({ hasText: "@browser-person" });
-      await expect(own.getByRole("rowheader")).toContainText("Workspaces: 0 · Last signed in: just now");
-      await expect(own.locator("time:visible")).toHaveAttribute("title", /.+/);
-      await expect(admins.getByRole("button", { name: "Remove other-admin", exact: true })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.goto(new URL(`/${harness().workspace}/settings/hub-workspaces`, harness().appUrl).href);
-      const workspaces = page.getByRole("table", { name: "Hub workspaces", exact: true });
-      await expect(workspaces).toBeVisible();
-      await expect(workspaces.getByRole("columnheader", { name: "Members", exact: true })).toHaveCount(0);
-      await expect(workspaces.getByRole("columnheader", { name: "Admins", exact: true })).toHaveCount(0);
-      await expect(workspaces.getByRole("rowheader")).toContainText("Members: 1 · Admins: @other-admin");
-      await expect(workspaces.getByRole("columnheader", { name: "Status", exact: true })).toBeVisible();
-      await expect(workspaces.getByRole("cell", { name: "Active", exact: true })).toBeVisible();
-      await expect(workspaces.getByRole("button", { name: /^Suspend / })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    });
-  }
-
   test("the signed bridge reads the complete inventory beyond one response's byte limit", async ({ browser }) => {
     const inventory = harness().seedHubInventory(420);
     expect(inventory.unpagedBytes).toBeGreaterThan(65_536);

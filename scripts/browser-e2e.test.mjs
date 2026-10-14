@@ -12,7 +12,7 @@ const absentWorkflow = existsSync(workflowPath)
 	? undefined
 	: ".github/workflows is absent from the isolated review context";
 const workflow = existsSync(workflowPath) ? readFileSync(workflowPath, "utf8") : "";
-const browserJobs = ["e2e-chromium-1", "e2e-chromium-2", "e2e-webkit", "e2e-workload"];
+const browserJobs = ["e2e-chromium-1", "e2e-chromium-2", "e2e-webkit-1", "e2e-webkit-2", "e2e-workload"];
 
 function job(id) {
 	const body = workflow.match(new RegExp(`^ {2}${id}:\\n((?: {4}.*\\n|\\n)*)`, "m"))?.[0];
@@ -94,7 +94,7 @@ test("CI selections partition the full browser suite exactly once without splitt
 		assert.ok(arguments_, `the browser job ${id} must execute its suite`);
 		return arguments_;
 	});
-	assert.equal(argumentsByJob[3], "--project=chromium-workload --no-deps");
+	assert.equal(argumentsByJob[4], "--project=chromium-workload --no-deps");
 	const complete = list([]);
 	assert.equal(complete.config.fullyParallel, false);
 	assert.equal(complete.config.workers, 2);
@@ -104,6 +104,8 @@ test("CI selections partition the full browser suite exactly once without splitt
 	const selected = selections.flat().map(({ key }) => key);
 	assert.equal(new Set(selected).size, selected.length, "no project case may run in more than one job");
 	assert.deepEqual(selected.sort(), completeCases.map(({ key }) => key).sort(), "every retained case must run");
-	const firstShardFiles = new Set(selections[0].map(({ file }) => file));
-	assert.ok(selections[1].every(({ file }) => !firstShardFiles.has(file)), "shared-harness files stay on one shard");
+	for (const [first, second] of [[0, 1], [2, 3]]) {
+		const firstShardFiles = new Set(selections[first].map(({ file }) => file));
+		assert.ok(selections[second].every(({ file }) => !firstShardFiles.has(file)), "shared-harness files stay on one shard");
+	}
 });

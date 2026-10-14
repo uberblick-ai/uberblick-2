@@ -1,4 +1,4 @@
-/** Table controls act on the live shared row, with independent undo steps. */
+/** Table controls act on live shared targets, with independent undo steps. */
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import * as Y from "yjs";
@@ -86,6 +86,36 @@ export function deleteTableColumn(editor: Editor, target: TableColumnTarget): bo
     for (const row of target.table.toArray()) (row as Y.XmlElement).delete(live.columnIndex, 1);
   }, ySyncPluginKey);
   endUndoCapture(editor.state);
+  return true;
+}
+
+/** Clone only the chosen cells so identical neighbours keep their identities. */
+export function moveTableColumn(editor: Editor, target: TableColumnTarget, direction: -1 | 1): boolean {
+  const live = resolveTableColumn(editor, target);
+  const doc = target.table.doc;
+  if (live === null || doc === null || (direction !== -1 && direction !== 1)) return false;
+  const destination = live.columnIndex + direction;
+  if (destination < 0 || destination >= live.node.child(0).childCount) return false;
+  const rows = target.table.toArray() as Y.XmlElement[];
+  const copies = rows.map((row) => ({ row, cell: (row.get(live.columnIndex) as Y.XmlElement).clone() }));
+  const header = copies[0];
+  if (header === undefined) return false;
+  endUndoCapture(editor.state);
+  doc.transact(() => {
+    copies.forEach(({ row, cell }) => {
+      row.delete(live.columnIndex, 1);
+      row.insert(destination, [cell]);
+    });
+  }, ySyncPluginKey);
+  endUndoCapture(editor.state);
+
+  // The deleted header cannot anchor the caret in its newly inserted copy.
+  const moved = resolveTableColumn(editor, { ...target, cell: header.cell });
+  if (moved !== null) {
+    let cellTextPos = moved.pos + 4;
+    for (let index = 0; index < moved.columnIndex; index += 1) cellTextPos += moved.node.child(0).child(index).nodeSize;
+    editor.commands.setTextSelection(cellTextPos);
+  }
   return true;
 }
 

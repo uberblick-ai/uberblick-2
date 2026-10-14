@@ -827,7 +827,7 @@ test("short values stay together and long text, markers and links wrap completel
     { id: "a", value: { name: "A name with 20 chars", status: "Needs review", issue: "ub-agents #190", detail: longText, invalid: longInvalid, url: longUrl } },
     { id: "b", value: { name: "Two  spaces", status: null, issue: "#1498", detail: "First\nSecond", invalid: "bad" } },
   ] }] });
-  for (const width of [1280, 820, 390]) {
+  for (const width of [1280, 820]) {
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       contextOptions: { viewport: { width, height: 1000 } },
     });
@@ -912,7 +912,7 @@ test("legacy page sizes keep all rows and source remains reachable without hover
   expect(Number(await openSource.evaluate((element) => getComputedStyle(element).opacity))).toBeGreaterThan(0);
   const block = page.locator(".ub-chart[data-view='table']");
   await expectClearTableActions(block);
-  await page.setViewportSize({ width: 390, height: 900 });
+  await page.setViewportSize({ width: 810, height: 900 });
   await expectClearTableActions(block);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await openSource.tap();

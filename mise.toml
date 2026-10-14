@@ -155,6 +155,12 @@ description = "Run all test suites"
 # `pnpm-workspace.yaml` globs `packages/*` only.
 run = "pnpm test"
 
+[tasks.test-os]
+description = "Run the suites whose behaviour can differ by OS, as the macOS CI job does"
+# The per-package lists live in each vitest.config.ts (`osSensitive`); the
+# script suites here run on the host's own shell, Python and process tree.
+run = "pnpm run test:os"
+
 [tasks.e2e]
 description = "Run the browser end-to-end proof points (Chromium and tagged WebKit)"
 # The harness builds the current checkout into private storage, starts its own
@@ -167,6 +173,51 @@ description = "Run the browser end-to-end proof points (Chromium and tagged WebK
 # dependency pnpm can fetch: it is a no-op once pinned Chromium and WebKit are
 # cached. System libraries are provisioned separately by CI or the host operator.
 run = 'sh "{{config_root}}/bin/run-e2e.sh"'
+
+[tasks.ci]
+description = "Run what .github/workflows/ci.yml runs, locally: install, lint, typecheck, test, site, then e2e"
+usage = 'flag "--skip-e2e" help="Stop after the site build; the browser suite is the slow part"'
+# A local convenience, not the merge gate: GitHub Actions stays the only source
+# of the required checks. It runs the workflow's commands in its order, under
+# `CI=true` like a runner, and keeps going past a failure so one run shows
+# everything that is red, as the workflow does. The `test` step is the full
+# suite on every platform, a superset of the `macOS tests` job's `test-os`.
+# The browser jobs collapse into one `mise run e2e`, which runs every project
+# CI shards across runners; WebKit on Linux needs the host libraries CI
+# provisions with `playwright install-deps webkit`.
+run = """
+set -u
+CI=true
+export CI
+
+# Under CI=true the CLI suite proves `ub open` on the literal default web port
+# (DEFAULT_WEB_PORT in packages/cli/src/open.ts), which only a free port passes.
+if ! node -e 'const s = require("node:net").createServer(); s.once("error", () => process.exit(1)); s.listen(13379, "127.0.0.1", () => s.close())'; then
+  printf 'ci: port 13379 is in use, probably by a running `ub open`. Stop it and rerun; the default-port proof needs it free.\\n' >&2
+  exit 1
+fi
+
+if ! mise run install; then
+  printf 'ci: install failed, so no check ran.\\n' >&2
+  exit 1
+fi
+
+failed=""
+for check in lint typecheck test site; do
+  mise run "$check" || failed="$failed $check"
+done
+if [ "${usage_skip_e2e:-false}" = "true" ]; then
+  printf 'ci: browser e2e skipped.\\n'
+else
+  mise run e2e || failed="$failed e2e"
+fi
+
+if [ -n "$failed" ]; then
+  printf 'ci: failed:%s\\n' "$failed" >&2
+  exit 1
+fi
+printf 'ci: every check passed.\\n'
+"""
 
 [tasks.fue]
 description = "First-user experience: run the documented install path on a clean machine, then assert what it promised"

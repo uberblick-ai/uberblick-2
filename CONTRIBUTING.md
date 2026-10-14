@@ -157,22 +157,26 @@ what their server sends. Other tests belong in `mise run test`. Arguments after
 mise run e2e -- --repeat-each=3 outline.spec.ts
 ```
 
-The full suite runs in Chromium; a tagged device and engine set also runs in
-WebKit at iPad (gen 7) and 13-inch MacBook sizes. WebKit needs host system libraries,
+The full suite runs in Chromium, which covers the desktop; a tagged device and
+engine set also runs in WebKit at iPad (gen 7) size. WebKit needs host system libraries,
 which CI installs separately. The task downloads engines without installing
 system packages, and a missing library fails the full run. Use
 `mise run e2e -- --project=chromium` for Chromium alone. Physical-device checks
 for keyboard, native selection menu and composition are in the
 [manual input checklist](packages/web/e2e/device-input.md).
 
-CI runs two Chromium shards, the two WebKit projects and the workload project
+CI runs two Chromium shards, two WebKit iPad shards and the workload project
 on separate Linux runners. The required `browser e2e` aggregate succeeds only
-when every job succeeds, including both shards. The workload job uses
+when every job succeeds, including every shard. The workload job uses
 `--project=chromium-workload --no-deps` so it cannot rerun interactive tests.
 A local `mise run e2e` runs all projects, with workload probes after the
 interactive projects. Retries stay disabled, and sharding keeps each file's
-tests together. Phone-specific WebKit checks are deferred; retained narrow-width
-Chromium checks still protect containment and responsive behavior.
+tests together. A flaky test is quarantined instead: when a test fails on
+`main` and no change explains the failure, mark it `test.fixme` (Playwright)
+or `it.skip` (Vitest) in its own pull request, linking a new issue that fixes
+or deletes it. `main` stays green, and the skip records the coverage it lost.
+Phone-specific WebKit checks are deferred; retained narrow-width Chromium
+checks still protect containment and responsive behavior.
 
 ### Repository MCP and workspace configuration
 
@@ -250,12 +254,20 @@ existing state cannot stand in for what initialization should create.
 ## CI
 
 Every push to `main` and every pull request runs `.github/workflows/ci.yml`
-on GitHub: lint, typecheck, tests and browser e2e on Linux, and the tests again
-on macOS. The checks `lint, typecheck and tests`, `macOS tests` and `browser e2e`
-are required to merge; the main ruleset accepts them only from GitHub Actions.
+on GitHub: lint, typecheck, tests and browser e2e on Linux, and on macOS the
+suites whose behaviour can differ by OS (`mise run test-os`). The checks
+`lint, typecheck and tests`, `macOS tests` and `browser e2e` are required to
+merge; the main ruleset accepts them only from GitHub Actions.
 On `main` the same run records whether `main` itself is clean. A pull
 request's run uses that pull request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
+
+`mise run ci` runs the same commands locally, in the workflow's order, under
+`CI=true`, and names every check that failed. It is a convenience, not a
+substitute for the required checks. Its tests are the full suite on every
+platform, its browser run covers every project CI shards, and it refuses to
+start while `ub open` holds the default port. `mise run ci --skip-e2e` stops before the
+browser suite.
 
 GitHub Actions also retains release publishing and the Linux Homebrew upgrade
 proof after packaging changes. The latter runs after merges changing the formula

@@ -75,9 +75,19 @@ function pill(item: GitHubItem, mainRepository: string | null): HTMLElement {
   icon.setAttribute("stroke-width", "1.5");
   const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
   path.setAttribute("d", item.kind === "issue"
-    ? "M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13M8 4.5v4M8 10.5v1"
+    ? "M8 1.5a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13"
     : "M4 5v6M4 2a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M4 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 0 0 0-3M12 11V6a3 3 0 0 0-3-3H8M10 1L8 3l2 2");
   icon.append(path);
+  if (item.kind === "issue") {
+    // GitHub's issue mark is a ring around a solid dot, not an exclamation mark.
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", "8");
+    dot.setAttribute("cy", "8");
+    dot.setAttribute("r", "1.5");
+    dot.setAttribute("fill", "currentColor");
+    dot.setAttribute("stroke", "none");
+    icon.append(dot);
+  }
   const repo = document.createElement("span");
   repo.className = "ub-github-pill-repo";
   repo.textContent = item.repo;

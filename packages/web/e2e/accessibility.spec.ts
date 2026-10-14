@@ -152,13 +152,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("Threads and reply form — docked");
 
       for (const [device, viewport] of [
-        ["iPhone", { width: 390, height: 844 }],
+        ["iPad", { width: 810, height: 1080 }],
       ] as const) {
         await page.setViewportSize(viewport);
         await page.locator(".ub-threads-toggle").click();
         // The retained reply form lives in different Sheet DOM below 1280px.
         await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toBeVisible();
-        if (device === "iPhone") await scan(`Threads drawer and reply form — ${device} ${viewport.width}px`);
+        if (device === "iPad") await scan(`Threads drawer and reply form — ${device} ${viewport.width}px`);
         await page.getByRole("button", { name: "Close threads", exact: true }).click();
         await scan(`document and closed drawers — ${device} ${viewport.width}px`);
         await page.getByRole("button", { name: "Show document list", exact: true }).click();

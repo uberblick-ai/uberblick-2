@@ -11,10 +11,11 @@
  *   release-runtime, shared-controls and the compiled-loopback proof build separately.
  * - **No retries.** A real-browser test that only passes on the second attempt
  *   is not evidence of anything; a flake here should be visible, not absorbed.
- * - **Bounded WebKit set.** @webkit runs on iPad and MacBook;
- *   @webkit-touch runs only on iPad. Chromium still runs every test, including its
- *   forced-width and forced-touch cases. Tagged WebKit tests use their project's
- *   viewport and input, or explicit paired desktop/iPad contexts.
+ *   A flaky test is quarantined instead (CONTRIBUTING.md, "CI").
+ * - **Bounded WebKit set.** @webkit and @webkit-touch run on iPad. Chromium runs
+ *   every test and covers the desktop, including its forced-width and forced-touch
+ *   cases. Tagged WebKit tests use the iPad viewport and input, or explicit paired
+ *   desktop/iPad contexts.
  * - **Workload isolation.** Timing probes run after all interactive projects
  *   locally. CI selects them without dependencies on a separate runner, so
  *   layout/GC cannot compete with interactive input on the same host.
@@ -47,17 +48,12 @@ export default defineConfig({
       use: { ...devices["iPad (gen 7)"] },
     },
     {
-      name: "webkit-macbook",
-      grep: /@webkit(?:\s|$)/,
-      use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 800 } },
-    },
-    {
       name: "chromium-workload",
       // Timing probes must not compete with one another on the same runner.
       workers: 1,
       // Focused workload probes use --project=chromium-workload --no-deps.
       grep: /@workload(?:\s|$)/,
-      dependencies: ["chromium", "webkit-ipad", "webkit-macbook"],
+      dependencies: ["chromium", "webkit-ipad"],
       use: { ...devices["Desktop Chrome"] },
     },
   ],

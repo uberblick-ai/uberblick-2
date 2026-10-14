@@ -137,7 +137,7 @@ describe("create_doc lifecycle arguments", () => {
 
     expect((await inputSchema(rig, "create_doc")).oneOf).toEqual([
       {
-        title: "A decision document (`kind: decision`)",
+        title: expect.stringMatching(/^A decision document \(`kind: decision`\)\. /),
         required: ["kind"],
         properties: { kind: { const: "decision" } },
       },
@@ -240,14 +240,15 @@ describe("annotate", () => {
       text: "the first thread",
     });
     const threadId = opened.annotation.id;
-    const logged = rig.instance.replicas.store.logSize();
+    const room = rig.instance.replicas.replica(doc.uuid).room;
+    const logged = rig.instance.replicas.store.updateCount(room);
     const replied = await rig.ok("annotate", {
       uuid: doc.uuid,
       thread_id: threadId,
       text: "and a reply",
       resolved: true,
     });
-    expect(rig.instance.replicas.store.logSize()).toBe(logged + 1);
+    expect(rig.instance.replicas.store.updateCount(room)).toBe(logged + 1);
     expect(replied.annotation.comments).toHaveLength(2);
     expect(replied.annotation.resolved).toBe(true);
 

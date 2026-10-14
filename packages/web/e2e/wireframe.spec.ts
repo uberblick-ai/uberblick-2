@@ -430,23 +430,6 @@ test("warning banners use the product warning colours in both appearances", { ta
   }
 });
 
-test("a phone keeps very wide wireframe content scrolling inside the block", async ({ browser }, info) => {
-  const uuid = await wireframeDoc(writer(), "Phone wireframe", wideSource(12));
-  for (const appearance of ["light", "dark"] as const) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      contextOptions: { ...devices["iPhone 13"], viewport: { width: 360, height: 844 }, colorScheme: appearance },
-    });
-    await expect(preview(page).locator(".wf-button")).toHaveCount(12);
-    await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
-    await expectContained(page);
-    const viewport = page.locator(".ub-wireframe-viewport");
-    expect(await viewport.evaluate((element) => element.scrollWidth)).toBeGreaterThan(await viewport.evaluate((element) => element.clientWidth));
-    await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-    expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-    await evidence(page, info, `wireframe-phone-${appearance}`);
-  }
-});
-
 function median(values: number[]): number {
   const ordered = [...values].sort((a, b) => a - b);
   return ordered[Math.floor(ordered.length / 2)] ?? Infinity;

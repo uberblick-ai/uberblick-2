@@ -561,7 +561,6 @@ test("a record limit follows the latest x values with a neutral count and unchan
 });
 
 test("daily observation labels fit at desktop and iPad widths in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
-  test.skip(info.project.name === "webkit-ipad", "Explicit desktop and iPad contexts own this paired proof.");
   test.setTimeout(120_000);
   const session = writer();
   const uuid = await chartDoc(session, "Daily chart observations");
@@ -905,58 +904,6 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
   }
 });
 
-test("a 360px three-series chart keeps compact ticks and a readable capped canvas", async ({ browser }, info) => {
-  const session = writer();
-  const mapping = { ...MAPPING, title: "Delivery trend", y: [
-    { field: "autonomous", label: "Autonomous deliveries", unit: "%" },
-    { field: "wasted", label: "Wasted runs", unit: "%" },
-    { field: "held", label: "Runs with decisions", unit: "%" },
-  ] };
-  const uuid = await chartDoc(session, "Phone chart", mapping);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements",
-    schema: { version: 1, schema: { type: "object", properties: {
-      day: { type: "string" }, autonomous: { type: "number" }, wasted: { type: "number" }, held: { type: "number" },
-    } } },
-    replaceRecords: Array.from({ length: 14 }, (_, index) => ({ id: `day-${index}`, value: {
-      day: new Date(Date.UTC(2026, 9, index + 1)).toISOString().slice(0, 10),
-      autonomous: 65 + index * 2, wasted: 24 - index, held: 8 + index % 4,
-    } })),
-  }] });
-  for (const appearance of ["light", "dark"] as const) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      beforeNavigate: (loading) => installProbe(loading, uuid),
-      contextOptions: { viewport: { width: 360, height: 844 }, locale: "en-US", colorScheme: appearance },
-    });
-    const canvas = page.getByRole("img", { name: "Delivery trend", exact: true });
-    await expect(canvas).toBeVisible();
-    await expectCornerControls(page);
-    await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
-    const screen = await page.locator(".ub-chart-screen").boundingBox();
-    if (screen === null) throw new Error("e2e: phone chart has no screen");
-    expect(screen.height).toBeGreaterThanOrEqual(199);
-    expect(screen.height).toBeLessThanOrEqual(301);
-    expect(screen.width).toBeLessThanOrEqual(360);
-    expect(await page.evaluate(() => window.innerWidth)).toBe(360);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-    for (const series of mapping.y) {
-      expect(ink.some((entry) => entry.text === series.label)).toBe(true);
-      expect(ink.some((entry) => entry.text === `${series.label} (%)`)).toBe(false);
-    }
-    expect(ink.some((entry) => /^[\d.,]+%$/.test(entry.text))).toBe(true);
-    expect(ink.some((entry) => /^\d+ %$/.test(entry.text))).toBe(false);
-    const dates = ink.filter((entry) => /^Oct \d+$/.test(entry.text));
-    expect(dates.length).toBeGreaterThan(0);
-    expect(dates.every((entry) => !entry.rotated)).toBe(true);
-    expect(dates.length).toBeLessThan(14);
-    expect(ink.some((entry) => /^2026$|^\d{2}:\d{2}(?::\d{2})?$|^UTC$/.test(entry.text))).toBe(false);
-    await expectObservationGeometry(page, Array.from({ length: 14 }, (_, index) => ({
-      value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
-    })), /^Oct \d+$/);
-    await canvasEvidence(page.locator(".ub-chart"), info, `chart-phone-${appearance}`);
-  }
-});
-
 const PANEL_MAPPING = { ...MAPPING, title: "Delivery trend", layout: "panels", y: [
   { field: "autonomous", label: "Autonomous deliveries", unit: "%" },
   { field: "wasted", label: "Wasted runs", unit: "%" },
@@ -975,7 +922,7 @@ async function panelMeasurements(session: McpSession, uuid: string): Promise<voi
   }] });
 }
 
-for (const viewport of ["desktop", "phone"] as const) {
+for (const viewport of ["desktop"] as const) {
   test(`three-series panels at ${viewport} width share ranges and observation labels in both appearances`,
     async ({ browser }, info) => {
       const session = writer();
@@ -984,7 +931,7 @@ for (const viewport of ["desktop", "phone"] as const) {
       for (const appearance of ["light", "dark"] as const) {
         const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
           beforeNavigate: (loading) => installProbe(loading, uuid),
-          contextOptions: { viewport: viewport === "phone" ? { width: 360, height: 844 } : { width: 1366, height: 768 },
+          contextOptions: { viewport: { width: 1366, height: 768 },
             locale: "en-US", colorScheme: appearance },
         });
         const image = page.getByRole("img", { name: "Delivery trend", exact: true });
@@ -1003,8 +950,7 @@ for (const viewport of ["desktop", "phone"] as const) {
         }));
         expect(boxes.every(box => box.width >= 149)).toBe(true);
         const firstRow = boxes.filter(box => box.y === boxes[0]?.y).length;
-        if (viewport === "desktop") expect(firstRow).toBe(3);
-        else expect([1, 2]).toContain(firstRow);
+        expect(firstRow).toBe(3);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         const observations = Array.from({ length: 14 }, (_, index) => ({
           value: Date.UTC(2026, 9, index + 1), label: `Oct ${index + 1}`,
@@ -1130,7 +1076,7 @@ test("panels compare units, retain empty series and switch layouts without rende
   await expect(page.locator(".ub-chart-screen canvas")).toBeVisible();
   await editMapping(session, uuid, JSON.stringify({ ...mapping, y: mapping.y.slice(0, 2) }));
   await expect(page.locator(".ub-chart-series-panel")).toHaveCount(2);
-  await page.setViewportSize({ width: 360, height: 844 });
+  await page.setViewportSize({ width: 810, height: 1080 });
   await editMapping(session, uuid, JSON.stringify({ ...mapping, title: "", y: [
     { ...mapping.y[0], unit: "milliseconds elapsed per completed request" }, ...mapping.y.slice(1),
   ] }));

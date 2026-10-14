@@ -35,6 +35,7 @@ interface StoredEntry {
   description?: string;
   kind?: DocumentKind;
   status?: DocumentStatus;
+  openThreadCount?: number;
   governs?: string;
   topic?: string;
   supersedes?: string;
@@ -60,13 +61,13 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 /**
  * Repair from the hydrated document even when it lags the stub; tag order and
  * empty descriptions do not differ. Callers preserve ordinary tombstones,
- * repair decision caches, and backfill createdAt. They own clocks, authorship,
+ * repair document caches, and backfill createdAt. They own clocks, authorship,
  * timestamp coarseness and write gates; cache-only repairs may omit updatedAt.
  */
 export function directoryStubDiffers(
   stub: DirectoryEntry | null,
   meta: DocMeta,
-  fields?: DecisionDirectoryFields,
+  fields?: Partial<DocumentDirectoryFields>,
 ): boolean {
   return (
     stub === null ||
@@ -75,6 +76,7 @@ export function directoryStubDiffers(
     (stub.description ?? "") !== (meta.description ?? "") ||
     stub.kind !== meta.kind ||
     stub.status !== meta.status ||
+    (fields?.openThreadCount !== undefined && stub.openThreadCount !== fields.openThreadCount) ||
     (meta.kind === "decision" && (
       stub.governs !== meta.governs ||
       stub.topic !== meta.topic ||
@@ -103,6 +105,12 @@ function readStamp(value: unknown): number | undefined {
  */
 function readDescription(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+function readCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
@@ -187,9 +195,8 @@ function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry
   }
   if (typeof value.agentStance === "boolean") fields.agentStance = value.agentStance;
   if (typeof value.approvalChanged === "boolean") fields.approvalChanged = value.approvalChanged;
-  if (typeof value.commentCount === "number" && Number.isSafeInteger(value.commentCount) && value.commentCount >= 0) {
-    fields.commentCount = value.commentCount;
-  }
+  const commentCount = readCount(value.commentCount);
+  if (commentCount !== undefined) fields.commentCount = commentCount;
   return fields;
 }
 
@@ -204,6 +211,7 @@ function readStored(value: unknown): StoredEntry | null {
   const updatedAt = readStamp(candidate.updatedAt);
   const description = readDescription(candidate.description);
   const lifecycle = readDocumentLifecycle(candidate.kind, candidate.status);
+  const openThreadCount = readCount(candidate.openThreadCount);
   return {
     title,
     tags,
@@ -212,6 +220,7 @@ function readStored(value: unknown): StoredEntry | null {
     ...(updatedAt === undefined ? {} : { updatedAt }),
     ...(description === undefined ? {} : { description }),
     ...lifecycle,
+    ...(openThreadCount === undefined ? {} : { openThreadCount }),
     ...(lifecycle.kind === "decision" ? readDecisionFields(value as Record<string, unknown>) : {}),
   };
 }
@@ -230,6 +239,7 @@ function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry 
       : { description: from.description }),
     ...(from?.kind === undefined ? {} : { kind: from.kind }),
     ...(from?.status === undefined ? {} : { status: from.status }),
+    ...(from?.openThreadCount === undefined ? {} : { openThreadCount: from.openThreadCount }),
     ...(from?.kind === "decision" ? readDecisionFields(from as unknown as Record<string, unknown>) : {}),
   };
 }
@@ -264,6 +274,8 @@ export interface DirectoryUpsert {
    * string clears only status. Pair validation belongs to the document setters.
    */
   status?: DocumentStatus | "";
+  /** Omission preserves the cache; null clears it to unknown. */
+  openThreadCount?: number | null;
   /** Decision-only fields: omission preserves, null/empty clears. */
   governs?: string | null;
   topic?: string | null;
@@ -281,6 +293,16 @@ export interface DirectoryUpsert {
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
   "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
+
+export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number };
+
+/** Hydrated writers recompute every document cache instead of carrying stale values. */
+export function documentDirectoryFields(doc: Y.Doc): DocumentDirectoryFields {
+  return {
+    ...decisionDirectoryFields(doc),
+    openThreadCount: listAnnotations(doc).filter((thread) => thread.resolved !== true).length,
+  };
+}
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
 export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
@@ -337,6 +359,9 @@ export function upsertDirectoryEntry(
       entry.kind === "" || entry.status === ""
         ? undefined
         : (entry.status ?? existing?.status);
+    const openThreadCount = readCount(
+      entry.openThreadCount === undefined ? existing?.openThreadCount : entry.openThreadCount,
+    );
     const cache: Record<string, unknown> = {};
     for (const key of DECISION_CACHE_KEYS) cache[key] = entry[key] === undefined ? existing?.[key] : entry[key];
     const next: StoredEntry = {
@@ -348,6 +373,7 @@ export function upsertDirectoryEntry(
       ...(description === undefined ? {} : { description }),
       ...(kind === undefined ? {} : { kind }),
       ...(status === undefined ? {} : { status }),
+      ...(openThreadCount === undefined ? {} : { openThreadCount }),
       ...(kind === "decision" ? readDecisionFields(cache) : {}),
     };
     docs.set(entry.uuid, next);
@@ -457,6 +483,7 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
       : { description: stored.description }),
     ...(stored.kind === undefined ? {} : { kind: stored.kind }),
     ...(stored.status === undefined ? {} : { status: stored.status }),
+    ...(stored.openThreadCount === undefined ? {} : { openThreadCount: stored.openThreadCount }),
     ...(stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {}),
   };
 }
