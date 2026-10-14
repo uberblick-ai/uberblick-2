@@ -8,8 +8,9 @@ const { harness } = setupHarness();
 
 const TARGET = "https://example.invalid/external-link";
 const TEXT = "before external target after";
+const PILL_TARGET = "https://github.com/Example/SomeRepo/pull/12/files#diff-abc";
 
-async function openDoc(page: Page): Promise<void> {
+async function openDoc(page: Page, withPill = false): Promise<void> {
   // Every target is fulfilled locally, including the first request in a new
   // tab (a page route cannot catch that request).
   await page.context().route("https://example.invalid/**", async (route) => {
@@ -21,11 +22,14 @@ async function openDoc(page: Page): Promise<void> {
   }
   await createDoc(page, "External link activation");
   await placeCaret(page);
-  await page.keyboard.type(`before [external target](${TARGET}) after`);
-  await expect(editor(page)).toHaveText(TEXT);
+  await page.keyboard.type(`before [external target](${TARGET}) after${withPill ? ` and [#12](${PILL_TARGET})` : ""}`);
+  if (withPill) {
+    await expect(editor(page)).toContainText(TEXT);
+    await expect(page.locator(".ub-github-pill")).toBeVisible();
+  } else await expect(editor(page)).toHaveText(TEXT);
 }
 
-async function expectPopup(page: Page, activate: () => Promise<unknown>): Promise<void> {
+async function expectPopup(page: Page, activate: () => Promise<unknown>, target = TARGET): Promise<void> {
   const pagesBefore = page.context().pages().length;
   const [popup] = await Promise.all([
     page.context().waitForEvent("page", { timeout: 5_000 }),
@@ -33,7 +37,7 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>): Promis
   ]);
   try {
     await popup.waitForLoadState();
-    await expect(popup).toHaveURL(TARGET);
+    await expect(popup).toHaveURL(target);
     expect(await popup.evaluate(() => window.opener)).toBeNull();
     expect(await popup.evaluate(() => document.referrer)).toBe("");
     expect(page.context().pages()).toHaveLength(pagesBefore + 1);
@@ -43,7 +47,7 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>): Promis
   }
 }
 
-test("editable primary, Ctrl and Cmd clicks open an isolated tab without changing the document", { tag: "@webkit" }, async ({ page }) => {
+test("primary, Ctrl and Cmd clicks open isolated tabs while Shift-click extends selection", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
   const link = page.locator(".ub-editor a.ub-link");
   for (const modifiers of [[], ["Control"], ["Meta"]] as const) {
@@ -59,6 +63,11 @@ test("editable primary, Ctrl and Cmd clicks open an isolated tab without changin
   await page.reload();
   await expect(editor(page)).toHaveText(TEXT);
   await expect(link).toHaveAttribute("href", TARGET);
+  await placeCaret(page, "start");
+  await link.click({ modifiers: ["Shift"] });
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
+  await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
+  expect(page.context().pages()).toHaveLength(1);
 
   // In read-only prose, Shift extends an existing native range; a fresh pane
   // has no caret or range to extend. Select outside the anchor first.
@@ -89,17 +98,6 @@ async function textPoint(target: Locator, offset: number): Promise<{ x: number; 
     return { x: box.x + 1, y: box.y + box.height / 2 };
   }, offset);
 }
-
-test("Shift-clicking a link extends the selection and opens the toolbar without following it", { tag: "@webkit" }, async ({ page }) => {
-  await openDoc(page);
-  const link = page.locator(".ub-editor a.ub-link");
-  const toolbar = page.getByRole("toolbar", { name: "Text formatting and comment" });
-  await placeCaret(page, "start");
-  await link.click({ modifiers: ["Shift"] });
-  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
-  await expect(toolbar).toBeVisible();
-  expect(page.context().pages()).toHaveLength(1);
-});
 
 test("dragging a link selects text and the toolbar still edits its URL", { tag: "@webkit" }, async ({ page }) => {
   await openDoc(page);
@@ -137,7 +135,7 @@ async function commentSentence(page: Page): Promise<void> {
   // anchor proves the comment exists without opening the drawer over the link.
   await expect(page.locator(".ub-editor [data-comment-thread]").first()).toBeVisible();
   await page.reload();
-  await expect(page.locator(".ub-editor a.ub-link")).toBeVisible();
+  await expect(page.locator(".ub-editor a.ub-link").first()).toBeVisible();
 }
 
 async function expectNoSelectedThread(page: Page): Promise<void> {
@@ -183,11 +181,26 @@ test("a link inside a comment wins in editable and read-only panes; other thread
   await expect(editor(page)).toHaveText(TEXT);
 });
 
-test("a touch tap follows a highlighted external link without opening its thread", { tag: "@webkit-touch" }, async ({ page }, testInfo) => {
+test("touch taps follow a commented plain link and GitHub pill without opening either thread", { tag: "@webkit-touch" }, async ({ page }, testInfo) => {
   test.skip(testInfo.project.use.hasTouch !== true, "A touch-capable device supplies this input path.");
-  await openDoc(page);
+  await page.context().route("https://github.com/**", route => route.fulfill({
+    contentType: "text/html", body: "<p>GitHub destination</p>",
+  }));
+  await openDoc(page, true);
   await commentSentence(page);
-  await expectPopup(page, () => page.locator(".ub-editor a.ub-link").tap());
-  await expectNoSelectedThread(page);
-  await expect(editor(page)).toHaveText(TEXT);
+  for (const target of [TARGET, PILL_TARGET]) {
+    await page.reload();
+    const link = target === PILL_TARGET
+      ? page.locator(".ub-github-pill")
+      : page.locator(`.ub-editor a.ub-link[href="${target}"]`);
+    await expect.poll(() => link.evaluate(element => element.closest("[data-comment-thread]") !== null || element.querySelector("[data-comment-thread]") !== null)).toBe(true);
+    await expectPopup(page, () => link.tap(), target);
+    await expectNoSelectedThread(page);
+    await expect.poll(() => editor(page).evaluate(element => {
+      const prose = element.cloneNode(true) as HTMLElement;
+      for (const pill of prose.querySelectorAll(".ub-github-pill")) pill.remove();
+      return prose.textContent;
+    })).toBe(`${TEXT} and #12`);
+    await expect(page.locator(".ub-github-pill")).toBeVisible();
+  }
 });

@@ -9,11 +9,9 @@ import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
-import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
-const peers: Array<{ close: () => void }> = [];
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -24,7 +22,6 @@ test.beforeAll(() => {
   });
 });
 test.afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.close();
   await agent?.closeSessions();
 });
 test.afterAll(async () => { await agent?.close(); agent = null; });
@@ -206,9 +203,9 @@ async function chartDoc(session: McpSession, title: string, mapping: unknown = M
   return result.uuid;
 }
 
-async function editMapping(session: McpSession, uuid: string, text: string): Promise<void> {
+async function editMapping(session: McpSession, uuid: string, text: string, index = 0): Promise<void> {
   const doc = await session.call<DocPayload>("get_doc", { uuid });
-  const block = doc.blocks.find((entry) => entry.type === "chart");
+  const block = doc.blocks.filter((entry) => entry.type === "chart")[index];
   if (block === undefined) throw new Error("e2e: no chart block in get_doc");
   await session.call("edit_block", {
     uuid, block_id: block.id, old_text: block.text, new_text: text, rev: block.rev,
@@ -457,44 +454,99 @@ test("editor insertion and the source control work by pointer and keyboard in bo
   }
 });
 
-test("MCP updates and remote mapping edits redraw through ub open, preserve data and survive reopen", async ({ browser }) => {
+test("MCP updates and mapping edits redraw charts and tables, preserve data and survive reload and reopen", async ({ browser }) => {
   const session = writer();
-  const uuid = await chartDoc(session, "Live line chart");
+  const target = "https://example.invalid/table-evidence";
+  const tableMapping = {
+    version: 1, type: "table", collection: "evidence", title: "Delivery evidence", pageSize: 2,
+    columns: [
+      { field: "name", label: "Name" },
+      { field: "value", label: "Autonomous", format: "number", unit: "%", decimals: 2 },
+      { field: "day", label: "Day", format: "date" },
+      { field: "url", label: "Evidence", format: "link" },
+    ],
+  };
+  const records = [
+    { id: "a", value: { name: "<strong>kept as text</strong>", value: 12.5, day: "2026-01-01", url: target } },
+    { id: "b", value: {} },
+    { id: "c", value: { name: null, value: null, day: null, url: null } },
+    { id: "d", value: { name: "Invalid values", value: "12", day: "2026-02-31", url: "javascript:alert(1)" } },
+    { id: "e", value: { name: { compact: true }, value: 20, day: "2026-01-02T12:30:00Z", url: "data:text/html,<script>alert(1)</script>" } },
+    { id: "f", value: { name: "Relative link", value: 0, day: "2026-01-03", url: "/relative" } },
+  ];
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Live chart and data table", description: "Two generated views receive document data and mapping updates.",
+    blocks: [
+      { type: "paragraph", text: "Read the live measurements and evidence below." },
+      { type: "chart", text: JSON.stringify(MAPPING) },
+      { type: "chart", text: JSON.stringify(tableMapping) },
+    ],
+  });
   await measurements(session, uuid);
+  await session.call("update_data", { uuid, operations: [{ collection: "evidence", schema: { version: 1, schema: { type: "object" } }, replaceRecords: records }] });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
-  await expectReady(page);
+  await expect(page.locator(".ub-chart-panel").first()).toHaveAttribute("data-state", "ready");
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
+  await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAccessibleDescription(/Latency.*125.*ms/);
   await expect(canvas).toHaveAccessibleDescription(/Errors.*4.*requests/);
-  await expect(page.locator(".ub-chart-diagnostics")).toContainText(/1.*(?:date|x)/i);
-  await expect(page.locator(".ub-chart-description")).not.toHaveAttribute("aria-live", /.*/);
+  const chart = page.locator(".ub-chart").first();
+  await expect(chart.locator(".ub-chart-diagnostics")).toContainText(/1.*(?:date|x)/i);
+  await expect(chart.locator(".ub-chart-description")).not.toHaveAttribute("aria-live", /.*/);
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  await expect(table).toBeVisible();
+  await expect(table.locator("tbody tr")).toHaveCount(records.length);
   let navigations = 0;
   page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
   await session.call("update_data", {
-    uuid, operations: [{ collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 250, errors: 9 } }] }],
+    uuid, operations: [
+      { collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 250, errors: 9 } }] },
+      { collection: "evidence", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: target } }] },
+    ],
   });
   await expect(canvas).toHaveAccessibleDescription(/Latency.*250.*ms/);
   await expect(canvas).toHaveAccessibleDescription(/Errors.*9.*requests/);
-  const beforeMapping = await session.call("get_data", { uuid, collection: "measurements" });
+  await expect(table).toContainText("Arriving update");
+  await expect(table.locator("tbody tr")).toHaveCount(records.length);
+  const beforeMapping = await session.call("get_data", { uuid });
+  const beforeMeasurements = await session.call("get_data", { uuid, collection: "measurements" });
   const updatedMapping = { ...MAPPING, title: "Live API health", y: [{ field: "latency", label: "Response time", unit: "ms" }] };
   await editMapping(session, uuid, JSON.stringify(updatedMapping));
+  const updatedTableMapping = { ...tableMapping, title: "Live evidence", pageSize: 5, sort: { field: "value", direction: "desc" },
+    columns: tableMapping.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
+  await editMapping(session, uuid, JSON.stringify(updatedTableMapping), 1);
   const renamed = page.getByRole("img", { name: "Live API health", exact: true });
+  const renamedTable = page.getByRole("table", { name: "Live evidence", exact: true });
   await expect(renamed).toBeVisible();
   await expect(renamed).toHaveAccessibleDescription(/Response time.*250.*ms/);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMapping);
+  await expect(renamedTable.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(records.length);
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Arriving update");
+  expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
+  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMeasurements);
   await session.call("update_data", {
-    uuid, operations: [{ collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 375, errors: 11 } }] }],
+    uuid, operations: [
+      { collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 375, errors: 11 } }] },
+      { collection: "evidence", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: target } }] },
+    ],
   });
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  await expect(renamedTable).toContainText("Later update");
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
+  await session.call("update_data", { uuid, operations: [{ collection: "evidence", deleteRecords: ["e", "f"] }] });
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(renamedTable).toContainText("Later update");
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
   const lightCanvas = await renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const lightInk = await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1));
+  const lightTableInk = await renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
   await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(() => renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(lightCanvas);
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1))).not.toBe(lightInk);
+  await expect.poll(() => renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightTableInk);
   const paintedText = await page.evaluate(() => (window as unknown as { chartProbe: { texts: string[] } }).chartProbe.texts);
   expect(paintedText).toContain("Latency (ms)");
   expect(paintedText).toContain("Errors (requests)");
@@ -504,10 +556,19 @@ test("MCP updates and remote mapping edits redraw through ub open, preserve data
   expect(navigations).toBe(0);
   await page.reload();
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  await expect(renamedTable).toBeVisible();
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
   const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(reopened.getByRole("img", { name: "Live API health", exact: true })).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  const reopenedTable = reopened.getByRole("table", { name: "Live evidence", exact: true });
+  await expect(reopenedTable).toBeVisible();
+  await expect(reopenedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(reopenedTable).toContainText("Later update");
   const stored = await session.call<DocPayload>("get_doc", { uuid });
-  expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(JSON.stringify(updatedMapping));
+  expect(stored.blocks.filter((entry) => entry.type === "chart").map((entry) => entry.text)).toEqual([
+    JSON.stringify(updatedMapping), JSON.stringify(updatedTableMapping),
+  ]);
   const data = await session.call<{ records: { id: string; value: unknown }[] }>("get_data", { uuid, collection: "measurements" });
   expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
 });
@@ -1006,38 +1067,6 @@ test("panels compare units, retain empty series and switch layouts without rende
   await expect(page.locator(".ub-chart-message")).toContainText("No plottable records");
   await expect(page.locator(".ub-chart-screen")).toBeHidden();
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
-});
-
-test("problem states clear automatically and locked content still renders without changing stored source", async ({ browser }) => {
-  const session = writer();
-  const uuid = await chartDoc(session, "Chart problems");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  await expect(page.locator(".ub-chart-message")).toContainText(/collection.*(?:absent|not found|missing)/i);
-  await editMapping(session, uuid, "{invalid JSON");
-  await expect(page.locator(".ub-chart-message")).toContainText(/invalid.*(?:configuration|JSON)/i);
-  await editMapping(session, uuid, JSON.stringify(MAPPING));
-  await measurements(session, uuid);
-  await expectReady(page);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
-  await expect(page.locator(".ub-chart-message")).toContainText(/no plottable records/i);
-  await measurements(session, uuid);
-  await expectReady(page);
-  const data = await session.call("get_data", { uuid, collection: "measurements" });
-  const stored = await session.call<DocPayload>("get_doc", { uuid });
-  const peer = await legacyDecisionPeer(harness(), uuid);
-  peers.push(peer);
-  peer.decide("decided");
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expectReady(page);
-  await expect(session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] })).rejects.toThrow(/decision_read_only/);
-  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(data);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
-  await session.call("archive_doc", { uuid });
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expectReady(page);
-  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
 });
 
 interface Timings {

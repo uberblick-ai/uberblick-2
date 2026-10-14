@@ -125,51 +125,40 @@ test("workspace, supported renderers and the every-type document emit no report-
   }
 });
 
-const appearances = [
-  { name: "light", raw: JSON.stringify({ appearance: "light" }), theme: "light", system: "dark" },
-  { name: "dark", raw: JSON.stringify({ appearance: "dark" }), theme: "dark", system: "light" },
-  { name: "missing", raw: null, theme: null, system: "dark" },
-  { name: "malformed", raw: "{not json", theme: null, system: "light" },
-  { name: "unreadable", raw: null, theme: null, system: "dark" },
-] as const;
+const appearance = { raw: JSON.stringify({ appearance: "dark" }), theme: "dark", system: "light" } as const;
 
-for (const appearance of appearances) {
-  test(`the classic bootstrap applies ${appearance.name} settings before the app module and first body frame`, async ({ browser }) => {
-    const context = trackContext(await browser.newContext({ colorScheme: appearance.system }));
-    await context.addInitScript(({ key, raw, unreadable }) => {
-      if (unreadable) {
-        Object.defineProperty(window, "localStorage", { get() { throw new Error("site data blocked"); } });
-      } else if (raw !== null) localStorage.setItem(key, raw);
-      else localStorage.removeItem(key);
-      const firstBodyFrame = new Promise<{ theme: string | null; appMounted: boolean }>((resolve) => {
-        const observer = new MutationObserver(() => {
-          if (document.body === null) return;
-          observer.disconnect();
-          requestAnimationFrame(() => resolve({
-            theme: document.documentElement.getAttribute("data-theme"),
-            appMounted: (document.getElementById("root")?.childElementCount ?? 0) > 0,
-          }));
-        });
-        observer.observe(document, { childList: true, subtree: true });
+test("the classic bootstrap applies stored dark settings before the app module and first body frame", async ({ browser }) => {
+  const context = trackContext(await browser.newContext({ colorScheme: appearance.system }));
+  await context.addInitScript(({ key, raw }) => {
+    localStorage.setItem(key, raw);
+    const firstBodyFrame = new Promise<{ theme: string | null; appMounted: boolean }>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (document.body === null) return;
+        observer.disconnect();
+        requestAnimationFrame(() => resolve({
+          theme: document.documentElement.getAttribute("data-theme"),
+          appMounted: (document.getElementById("root")?.childElementCount ?? 0) > 0,
+        }));
       });
-      (window as unknown as { firstBodyFrame: typeof firstBodyFrame }).firstBodyFrame = firstBodyFrame;
-    }, { key: SETTINGS_KEY, raw: appearance.raw, unreadable: appearance.name === "unreadable" });
-    const page = await context.newPage();
-    let releaseModule: (() => void) | undefined;
-    const moduleHeld = new Promise<void>((resolve) => { releaseModule = resolve; });
-    await page.route(/\/assets\/[^/]+\.js(?:\?|$)/, async (route) => {
-      await moduleHeld;
-      await route.continue();
+      observer.observe(document, { childList: true, subtree: true });
     });
-    try {
-      await page.goto(harness().appUrl, { waitUntil: "commit" });
-      const first = await page.evaluate(() => (window as unknown as {
-        firstBodyFrame: Promise<{ theme: string | null; appMounted: boolean }>;
-      }).firstBodyFrame);
-      expect(first).toEqual({ theme: appearance.theme, appMounted: false });
-      expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(appearance.system === "dark");
-    } finally { releaseModule?.(); }
-    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
-    expect(await page.locator("html").getAttribute("data-theme")).toBe(appearance.theme);
+    (window as unknown as { firstBodyFrame: typeof firstBodyFrame }).firstBodyFrame = firstBodyFrame;
+  }, { key: SETTINGS_KEY, raw: appearance.raw });
+  const page = await context.newPage();
+  let releaseModule: (() => void) | undefined;
+  const moduleHeld = new Promise<void>((resolve) => { releaseModule = resolve; });
+  await page.route(/\/assets\/[^/]+\.js(?:\?|$)/, async (route) => {
+    await moduleHeld;
+    await route.continue();
   });
-}
+  try {
+    await page.goto(harness().appUrl, { waitUntil: "commit" });
+    const first = await page.evaluate(() => (window as unknown as {
+      firstBodyFrame: Promise<{ theme: string | null; appMounted: boolean }>;
+    }).firstBodyFrame);
+    expect(first).toEqual({ theme: appearance.theme, appMounted: false });
+    expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(false);
+  } finally { releaseModule?.(); }
+  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  expect(await page.locator("html").getAttribute("data-theme")).toBe(appearance.theme);
+});

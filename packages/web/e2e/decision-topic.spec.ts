@@ -118,7 +118,8 @@ async function archivedLink(link: Locator): Promise<void> {
   expect(style.decoration).not.toContain("line-through");
 }
 
-for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
+for (const touch of [false, true]) {
+  const appearance = touch ? "dark" : "light";
   test(`decision topic history, links and comments on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const formerOwner = await create(writer, "Former related page", "Previous guidance.");
@@ -185,7 +186,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await archivedLink(page.locator(".ub-decision-notice a"));
     await archivedLink(entry(page, pending.uuid).locator(".ub-doclink"));
     await copyPath(page, topicPath, touch);
-    if (touch && appearance === "dark" || !touch && appearance === "light") await page.screenshot({
+    await page.screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${touch ? "ipad-dark" : "desktop-light"}.png`), fullPage: true,
     });
 

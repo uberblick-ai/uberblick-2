@@ -1,7 +1,8 @@
 # Compact table controls
 
-Synthetic editable-table screenshots from `table-controls.spec.ts`, at the
-Chromium laptop viewport in light and dark appearance. The caret is in the
+Synthetic editable-table reference screenshots at the Chromium laptop viewport
+in light and dark appearance. `table-controls.spec.ts` reproduces the light
+appearance interaction proof. The caret is in the
 neighbouring paragraph; only the hovered second row reveals its row controls.
 The owner's example document was read through MCP and was not edited.
 
