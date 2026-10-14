@@ -71,12 +71,12 @@ async function expectNavigationGeometry(page: Page, controls: Locator[], coarse:
 }
 
 for (const { coarse, width } of [
-  { coarse: true, width: 375 },
+  { coarse: true, width: 810 },
   { coarse: true, width: 1366 },
   { coarse: false, width: 1280 },
 ]) {
   test(`sidebar navigation rows meet the ${coarse ? "touch" : "compact pointer"} floor at ${width}px`,
-    { tag: coarse && width === 375 ? "@webkit-touch" : [] }, async ({ browser }, info) => {
+    { tag: coarse && width === 810 ? "@webkit-touch" : [] }, async ({ browser }, info) => {
       const page = await openApp(browser, "/", {
         upstream: true,
         // WebKit keeps its actual iPad input and viewport; Chromium proves
@@ -231,9 +231,9 @@ async function devicePage(browser: Browser, info: TestInfo, touch = false, upstr
   return openApp(browser, "/", {
     upstream,
     // WebKit inherits its project's actual device and input. Chromium supplies
-    // the existing synthetic phone proof or a docked pointer surface.
+    // a synthetic iPad touch proof or a docked pointer surface.
     contextOptions: info.project.name === "chromium"
-      ? { hasTouch: touch, viewport: touch ? { width: 390, height: 844 } : { width: 1280, height: 800 } }
+      ? { hasTouch: touch, viewport: touch ? { width: 810, height: 1080 } : { width: 1280, height: 800 } }
       : {},
     beforeNavigate: (page) => page.emulateMedia({ reducedMotion: "reduce" }),
     readySelector: ".ub-docs",

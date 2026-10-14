@@ -54,7 +54,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
   await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
   expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
-  for (const width of [320]) {
+  for (const width of [810]) {
     await page.setViewportSize({ width, height: 844 });
     await expect(reason).toBeInViewport({ ratio: 1 });
     const trigger = page.locator(".ub-sync-toggle");
@@ -111,7 +111,7 @@ test("local-only status answers leave the readings and prose in place", async ({
   await seed.close();
   await harness().restartOpen({ authenticated: false });
 
-  for (const width of [1280, 820, 320]) {
+  for (const width of [1280, 820]) {
     // Withhold usable API answers until after the local room has settled. A
     // fresh page has no earlier serving reason to keep through this blank.
     let blankAnswers = true;
@@ -180,15 +180,7 @@ test("local-only status answers leave the readings and prose in place", async ({
       await page.keyboard.press("Enter");
     }
     const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
-    if (width === 320) {
-      // The temporary lower-right corner covers this narrow sidebar footer.
-      // Keep the notice active through native keyboard navigation so leaving
-      // the document still has to resolve it. Desktop/iPad retain pointer proof.
-      await settings.focus();
-      await page.keyboard.press("Enter");
-    } else {
-      await settings.click();
-    }
+    await settings.click();
     await expect(page.locator(".ub-status")).toHaveCount(0);
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await page.close();

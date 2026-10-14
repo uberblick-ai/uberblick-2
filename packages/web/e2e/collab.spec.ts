@@ -171,7 +171,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   const a = await openApp(browser, "/", {
     readySelector: ".ub-body",
     contextOptions: info.project.name === "chromium"
-      ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+      ? { hasTouch: true, viewport: { width: 810, height: 1080 } }
       : {},
   });
   if ((a.viewportSize()?.width ?? 1280) < 1280) {

@@ -10,9 +10,7 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Two independently scaled units | ![Light chart](light.png) | ![Dark chart](dark.png) |
 | Seven daily observations, desktop | ![Light daily desktop chart](daily-desktop-light.png) | ![Dark daily desktop chart](daily-desktop-dark.png) |
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
-| 360 px, three percentage series | ![Light phone chart](phone-light.png) | ![Dark phone chart](phone-dark.png) |
 | Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
-| Three percentage panels, 360 px | ![Light phone panels](panels-phone-light.png) | ![Dark phone panels](panels-phone-dark.png) |
 
 The browser suite covers source insertion and keyboard/pointer access, live
 data and mapping updates, canvas names/descriptions, appearance changes, reopen,
@@ -66,19 +64,17 @@ mise run e2e -- chart.spec.ts data-table.spec.ts --project=chromium
 
 The tests attach cropped blocks named `chart-light.png`, `chart-dark.png`,
 `chart-daily-desktop-light.png`, `chart-daily-desktop-dark.png`,
-`chart-daily-ipad-light.png`, `chart-daily-ipad-dark.png`,
-`chart-phone-light.png` and `chart-phone-dark.png`. Copy the fresh Chromium
+`chart-daily-ipad-light.png` and `chart-daily-ipad-dark.png`. Copy the fresh Chromium
 attachments into the committed evidence (the command refuses missing or
 ambiguous matches):
 
 ```sh
-python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); files = {"chart-light.png": "light.png", "chart-dark.png": "dark.png", "chart-daily-desktop-light.png": "daily-desktop-light.png", "chart-daily-desktop-dark.png": "daily-desktop-dark.png", "chart-daily-ipad-light.png": "daily-ipad-light.png", "chart-daily-ipad-dark.png": "daily-ipad-dark.png", "chart-phone-light.png": "phone-light.png", "chart-phone-dark.png": "phone-dark.png"}; matches = {name: [path for path in source.rglob(name) if path.parent.name.endswith("-chromium")] for name in files}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / destination) for name, destination in files.items()]'
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); files = {"chart-light.png": "light.png", "chart-dark.png": "dark.png", "chart-daily-desktop-light.png": "daily-desktop-light.png", "chart-daily-desktop-dark.png": "daily-desktop-dark.png", "chart-daily-ipad-light.png": "daily-ipad-light.png", "chart-daily-ipad-dark.png": "daily-ipad-dark.png"}; matches = {name: [path for path in source.rglob(name) if path.parent.name.endswith("-chromium")] for name in files}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / destination) for name, destination in files.items()]'
 ```
 
 The paired desktop/iPad test is tagged for WebKit; it explicitly creates the
 iPad context instead of treating a narrow desktop viewport as a touch device.
-Phone-size screenshots retain design evidence through Chromium; phone WebKit
-coverage is deferred. Run the WebKit project; the paired test opens both contexts:
+Run the WebKit project; the paired test opens both contexts:
 `mise run e2e -- chart.spec.ts --project=webkit-ipad`.
 Copy the Chromium evidence before this second run, because Playwright clears
 its prior output directory.
@@ -99,10 +95,10 @@ within 250 ms, plus bounded first draw, median and every redraw within 1,000 ms.
 The panels variant enforces the same bounded budget for the complete block,
 including all eight Chart.js instances.
 
-Regenerate and copy the four panel screenshots with the chart suite above:
+Regenerate and copy the two panel screenshots with the chart suite above:
 
 ```sh
-python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["panels-desktop-light", "panels-desktop-dark", "panels-phone-light", "panels-phone-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["panels-desktop-light", "panels-desktop-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
 ```
 
 The timing test also attaches `chart-timing-bound-panels.json`; its ten live

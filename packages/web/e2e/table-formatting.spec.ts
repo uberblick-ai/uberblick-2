@@ -282,7 +282,7 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
 
 test("touch cell ranges keep their text when tapped, suspend during IME and dismiss independently per cell", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const context = trackContext(await browser.newContext(info.project.name === "chromium"
-    ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+    ? { hasTouch: true, viewport: { width: 810, height: 1080 } }
     : {}));
   const page = await context.newPage();
   const table = await openTable(page);

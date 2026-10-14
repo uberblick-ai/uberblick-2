@@ -126,7 +126,7 @@ async function keyboardMove(page: Page, name: "Move row up" | "Move row down"): 
 }
 
 async function nativeTouchPage(browser: Browser): Promise<Page> {
-  const context = trackContext(await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 844 } }));
+  const context = trackContext(await browser.newContext({ hasTouch: true, viewport: { width: 810, height: 1080 } }));
   return context.newPage();
 }
 
@@ -377,7 +377,7 @@ test("pane edge scrolling reaches the gap after a tall table's last row", async 
 
 test("touch tap exposes Move entries and reopens the moved caret row", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const context = trackContext(await browser.newContext(info.project.name === "chromium"
-    ? { hasTouch: true, viewport: { width: 390, height: 844 } } : {}));
+    ? { hasTouch: true, viewport: { width: 810, height: 1080 } } : {}));
   const page = await context.newPage();
   const fixture = await publishTable();
   try {

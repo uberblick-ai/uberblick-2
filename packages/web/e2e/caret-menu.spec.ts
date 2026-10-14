@@ -185,17 +185,20 @@ async function paneCards(page: Page, browserName: string, width?: number): Promi
   expect(rect?.x ?? 0).toBeLessThan(anchor.x);
 }
 
-for (const width of [375, 1280]) {
+for (const width of [1280]) {
   test(`the slash, gutter and @ cards fit the pane at ${width}px`, async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "Chromium covers one narrow and one docked pane");
+    test.skip(browserName !== "chromium", "Chromium covers the docked pane");
     await paneCards(page, browserName, width);
   });
 }
 
 test("the slash, gutter and @ cards fit the supported device pane", { tag: "@webkit" }, async ({ page, browserName }) => {
-  test.skip(browserName !== "webkit", "Chromium has separate narrow and docked cases");
+  test.skip(browserName !== "webkit", "Chromium has a separate docked case");
   await paneCards(page, browserName);
 });
+
+test.describe("touch menus in a short pane", () => {
+test.use({ hasTouch: true });
 
 test("a short pane bounds all three cards and scrolls their lists internally", { tag: "@webkit-touch" }, async ({ page, browserName }) => {
   await openDoc(page, browserName);
@@ -207,7 +210,7 @@ test("a short pane bounds all three cards and scrolls their lists internally", {
   // keyboard while the taller iPad layout viewport stays unchanged.
   const target = await longDocument(page, 15, 30);
   if (browserName === "chromium") {
-    await page.setViewportSize({ width: 375, height: 320 });
+    await page.setViewportSize({ width: 810, height: 320 });
   } else {
     // An on-screen keyboard shortens the visual viewport while the device's
     // layout viewport stays fixed. This proves clipping, not the native keyboard.
@@ -248,6 +251,8 @@ test("a short pane bounds all three cards and scrolls their lists internally", {
     await expect(menu(page, name)).toHaveCount(0);
     if (surface === "slash") await page.keyboard.press("Backspace");
   }
+});
+
 });
 
 test("composing Escape stays native on slash, gutter search and @; ordinary Escape closes and focuses prose", { tag: "@webkit" }, async ({ page, browserName }) => {
@@ -299,14 +304,14 @@ test("outside touch scroll preserves menus; taps and clicks dismiss, and fresh t
   browser, browserName,
 }) => {
   test.skip(browserName !== "chromium", "native touch-move automation requires Chromium's input protocol");
-  const context = await browser.newContext({ hasTouch: true, viewport: { width: 375, height: 667 } });
+  const context = await browser.newContext({ hasTouch: true, viewport: { width: 810, height: 1080 } });
   try {
     const page = await context.newPage();
     await openDoc(page, browserName);
     await createDoc(page, "touch-target1067");
     await createDoc(page, "touch writing");
     const target = await longDocument(page);
-    await page.setViewportSize({ width: 375, height: 667 });
+    await page.setViewportSize({ width: 810, height: 1080 });
     await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
     await focusBlock(target);
     await page.keyboard.type("/");

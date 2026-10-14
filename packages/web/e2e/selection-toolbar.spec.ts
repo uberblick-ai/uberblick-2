@@ -150,13 +150,13 @@ test("a human selection keeps its range through pointer, keyboard, link and comm
   await expect(toolbar).toHaveCount(0);
 });
 
-test("the iPhone sidebar drawer covers a selected toolbar and receives its pointer hits", async ({
+test("the iPad sidebar drawer covers a selected toolbar and receives its pointer hits", async ({
   browser,
 }) => {
   const context = trackContext(await browser.newContext({
     hasTouch: true,
     isMobile: true,
-    viewport: { width: 390, height: 844 },
+    viewport: { width: 810, height: 1080 },
   }));
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: "reduce" });

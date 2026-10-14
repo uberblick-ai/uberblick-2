@@ -171,7 +171,7 @@ test("touch selection on a decided record starts a thread and its highlight open
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     upstream: true,
     contextOptions: info.project.name === "chromium"
-      ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+      ? { hasTouch: true, viewport: { width: 810, height: 1080 } }
       : {},
   });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");

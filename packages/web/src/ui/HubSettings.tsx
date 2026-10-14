@@ -7,7 +7,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { formatExactTimestamp, formatTimestamp, useTimestampClock } from "./timestamps.js";
 
 const CELL = "border-b border-(--border) px-2 py-3 text-left text-sm";
-const SECONDARY_CELL = `${CELL} hidden sm:table-cell`;
 const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] text-sm text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
 
 function failure(status: string): string {
@@ -47,11 +46,10 @@ function AdminRow({ admin, now, disabled, remove }: {
 }): ReactElement {
   return <tr>
     <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">@{admin.githubUsername}{admin.current && <span className="ub-muted ml-2">you</span>}
-      <span className="ub-muted mt-1 block text-xs sm:hidden">Workspaces: {admin.workspaces} · Last signed in: <SignedIn at={admin.lastSignedInAt} now={now} /></span>
     </th>
-    <td className={SECONDARY_CELL}>{admin.workspaces}</td>
-    <td className={SECONDARY_CELL}><SignedIn at={admin.lastSignedInAt} now={now} /></td>
-    <td className={`${CELL} w-20 sm:w-auto`}>{!admin.current && <AlertDialog>
+    <td className={CELL}>{admin.workspaces}</td>
+    <td className={CELL}><SignedIn at={admin.lastSignedInAt} now={now} /></td>
+    <td className={CELL}>{!admin.current && <AlertDialog>
       <AlertDialogTrigger asChild><button type="button" className={ROW_ACTION} disabled={disabled}
         aria-label={`Remove ${admin.githubUsername}`}>Remove</button></AlertDialogTrigger>
       <AlertDialogContent>
@@ -74,12 +72,11 @@ function WorkspaceRow({ workspace, disabled, changeStatus }: {
   const name = workspace.name ?? `Unnamed workspace (${workspace.workspaceId.slice(0, 8)})`;
   return <tr>
     <th className={`${CELL} font-normal [overflow-wrap:anywhere]`} scope="row">{workspace.name ?? <span className="ub-muted">Unnamed workspace</span>}<span className="ub-muted mt-1 block font-(family-name:--font-mono) text-xs" title={workspace.workspaceId}>{workspace.workspaceId.slice(0, 8)}</span>
-      <span className="ub-muted mt-1 block text-xs sm:hidden">Members: {workspace.members} · Admins: {workspace.admins.length === 0 ? "—" : workspace.admins.map((name) => `@${name}`).join(", ")}</span>
     </th>
-    <td className={SECONDARY_CELL}>{workspace.members}</td>
-    <td className={SECONDARY_CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
-    <td className={`${CELL} w-24 sm:w-auto`}>{suspended ? "Suspended" : "Active"}</td>
-    <td className={`${CELL} w-20 sm:w-auto`}><AlertDialog>
+    <td className={CELL}>{workspace.members}</td>
+    <td className={CELL}>{workspace.admins.length === 0 ? <span className="ub-muted">—</span> : workspace.admins.map((name) => `@${name}`).join(", ")}</td>
+    <td className={CELL}>{suspended ? "Suspended" : "Active"}</td>
+    <td className={CELL}><AlertDialog>
       <AlertDialogTrigger asChild><button type="button" className={ROW_ACTION} disabled={disabled}
         aria-label={`${action} ${name}`}>{action}</button></AlertDialogTrigger>
       <AlertDialogContent>
@@ -177,12 +174,12 @@ export function HubSettings({ page, administration }: {
         list === null ? <p className="m-0 text-sm" role="status">Reading from the hub…</p> :
         list.status !== "ok" ? <p className="m-0 text-sm" role="alert">{failure(list.status)}</p> : null}
       {feedback !== null && <p className="m-0 text-sm" role={feedback.ok ? "status" : "alert"}>{feedback.text}</p>}
-      {ready && <table className="w-full table-fixed border-collapse sm:table-auto" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
+      {ready && <table className="w-full table-auto border-collapse" aria-label={page === "hub-admins" ? "Hub admins" : "Hub workspaces"}>
         {page === "hub-admins" ? <>
-          <thead><tr><th className={CELL} scope="col">Account</th><th className={SECONDARY_CELL} scope="col">Workspaces</th><th className={SECONDARY_CELL} scope="col">Last signed in</th><th className={`${CELL} w-20 sm:w-auto`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th className={CELL} scope="col">Account</th><th className={CELL} scope="col">Workspaces</th><th className={CELL} scope="col">Last signed in</th><th className={CELL} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
           <tbody>{list.admins?.map((person) => <AdminRow key={person.principalId} admin={person} now={now} disabled={busy} remove={(person) => { void remove(person); }} />)}</tbody>
         </> : <>
-          <thead><tr><th className={CELL} scope="col">Workspace</th><th className={SECONDARY_CELL} scope="col">Members</th><th className={SECONDARY_CELL} scope="col">Admins</th><th className={`${CELL} w-24 sm:w-auto`} scope="col">Status</th><th className={`${CELL} w-20 sm:w-auto`} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
+          <thead><tr><th className={CELL} scope="col">Workspace</th><th className={CELL} scope="col">Members</th><th className={CELL} scope="col">Admins</th><th className={CELL} scope="col">Status</th><th className={CELL} scope="col"><span className="ub-sr-only">Actions</span></th></tr></thead>
           <tbody>{list.workspaces?.map((workspace) => <WorkspaceRow key={workspace.workspaceId} workspace={workspace} disabled={busy} changeStatus={(workspace) => { void changeStatus(workspace); }} />)}</tbody>
         </>}
       </table>}

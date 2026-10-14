@@ -134,7 +134,7 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
       await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
-    for (const width of webkit ? [projectWidth] : [320, 1280]) {
+    for (const width of webkit ? [projectWidth] : [810, 1280]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {
         if (!webkit) await page.setViewportSize({ width, height: 832 });
         if (width < 1280) {
