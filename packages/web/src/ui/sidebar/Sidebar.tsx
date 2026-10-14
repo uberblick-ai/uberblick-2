@@ -89,6 +89,7 @@ type SidebarProps = {
   /** The workspace the address names, or null when it names none. */
   workspace: Workspace | null;
   workspaceNames?: ReadonlyMap<string, string | null>;
+  workspaceLocation?: string | null;
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
@@ -125,7 +126,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   return (
     <SidebarFrame
       ref={sidebarRoot}
-      className="ub-list group/sidebar overflow-clip [overflow-clip-margin:1.25rem]"
+      className="ub-list group/sidebar overflow-clip"
       aria-label="Sidebar"
       data-mode={props.settingsOpen ? "settings" : "documents"}
       onEscapeKeyDown={(event) => {
@@ -162,6 +163,7 @@ function SidebarContent({
   workspaces,
   workspace,
   workspaceNames,
+  workspaceLocation,
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   identity,
@@ -249,7 +251,7 @@ function SidebarContent({
       <button
         ref={collapseButtonRef}
         type="button"
-        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 border-transparent bg-(--sidebar-accent) text-sidebar-foreground ${drawer ? "right-2" : "-right-4"}`}
+        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 right-2 [@media(any-pointer:coarse)]:size-11 border-transparent bg-(--sidebar-accent) text-sidebar-foreground`}
         aria-expanded="true"
         aria-label={collapseLabel}
         title={collapseLabel}
@@ -262,18 +264,19 @@ function SidebarContent({
         onDraggingChange={onDraggingChange}
         active={!collapsed && !settingsOpen && sidebarWritable}
       >
-      <div className={`ub-sidebar-stack grid min-w-0 min-h-0 flex-1 ${drawer ? "pt-10" : ""}`}>
+      <div className="ub-sidebar-stack grid min-w-0 min-h-0 flex-1">
         <nav
           className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
           aria-label="Documents"
           aria-hidden={settingsOpen || collapsed}
           inert={settingsOpen || collapsed}
         >
-          <SidebarHeader className={drawer ? undefined : "pr-6"}>
+          <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
             <WorkspaceSwitcher
               workspaces={workspaces}
               current={workspace}
               names={workspaceNames}
+              workspaceLocation={workspaceLocation}
               onOpenChange={onWorkspaceMenuOpenChange}
               onSwitch={onSwitchWorkspace}
               active={!settingsOpen && !collapsed}
@@ -358,7 +361,6 @@ function SidebarContent({
           </SidebarScrollContent>
         </nav>
         <SettingsNavigation
-          drawer={drawer}
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           active={settingsOpen && !collapsed}
           page={settingsPage}
@@ -388,7 +390,6 @@ function SidebarContent({
 
 /** The navigation pane that replaces the document sidebar in settings mode. */
 function SettingsNavigation({
-  drawer,
   workspaceLabel: label,
   active,
   page,
@@ -396,7 +397,6 @@ function SettingsNavigation({
   onSelect,
   onBack,
 }: {
-  drawer: boolean;
   workspaceLabel: string;
   active: boolean;
   page: SettingsPage | null;
@@ -411,7 +411,7 @@ function SettingsNavigation({
       aria-hidden={!active}
       inert={!active}
     >
-      <SidebarHeader className={drawer ? undefined : "pr-6"}>
+      <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
         <button
           type="button"
           className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"

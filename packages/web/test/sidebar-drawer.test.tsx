@@ -15,6 +15,8 @@ import {
   pinDoc,
   readSidebar,
   roomForDoc,
+  setWorkspaceName,
+  settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -157,7 +159,7 @@ function labelledButton(label: string): HTMLButtonElement {
   return screen.getByRole<HTMLButtonElement>("button", { name: label });
 }
 
-function sidebarButton(name: string): HTMLButtonElement {
+function sidebarButton(name: string | RegExp): HTMLButtonElement {
   const sidebar = drawer();
   if (sidebar === null) throw new Error("Missing sidebar drawer");
   return within(sidebar).getByRole<HTMLButtonElement>("button", { name });
@@ -180,7 +182,7 @@ async function openDrawer(settings = false): Promise<void> {
 }
 
 async function openWorkspaceMenu(): Promise<void> {
-  const button = sidebarButton(`Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
+  const button = sidebarButton(/^Unnamed workspace(?: · 6f4c8a51)? 127\.0\.0\.1:4321$/);
   await act(async () => {
     button.focus();
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -252,7 +254,7 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
   await click(sidebarButton("Workspace settings"));
   await openDrawer(true);
   expectMode(true);
-  await click(sidebarButton(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`));
+  await click(sidebarButton("Back to Unnamed workspace"));
   await openDrawer();
   expectMode(false);
 });
@@ -275,6 +277,38 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
   expect(stored.get(COLLAPSED_KEY)).toBe("true");
   expect(writes).not.toContain(COLLAPSED_KEY);
   expect(window.location.pathname).toBe(destination.path);
+});
+
+it.each([
+  { remoteHubUrl: "wss://notes.example:8443/rooms/ws", location: "notes.example:8443" },
+  { remoteHubUrl: null, location: "This device" },
+])("names the routed workspace's own location: $location", async ({ remoteHubUrl, location }) => {
+  vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
+    hubUrl: "ws://127.0.0.1:4321",
+    workspaces: [WORKSPACE, OTHER_WORKSPACE],
+    servedWorkspaces: {
+      [WORKSPACE]: { name: "Product", remoteHubUrl: "wss://hub.example/rooms/ws" },
+      [OTHER_WORKSPACE]: { name: "Notes", remoteHubUrl },
+    },
+  })));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Product");
+  setWorkspaceName(room(settingsRoom(OTHER_WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+
+  const firstHeader = sidebarButton("Product hub.example");
+  expect(firstHeader.textContent).not.toContain("127.0.0.1");
+  await act(async () => {
+    firstHeader.focus();
+    firstHeader.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await click(menuItem("Notes"));
+  expect(window.location.pathname).toBe(`/${OTHER_WORKSPACE}`);
+  await openDrawer();
+
+  const nextHeader = sidebarButton(`Notes ${location}`);
+  expect(nextHeader.textContent).not.toContain("127.0.0.1");
+  expect(nextHeader.textContent).not.toContain("hub.example");
 });
 
 // Safari's order: compositionend lands before the Escape keydown, which then

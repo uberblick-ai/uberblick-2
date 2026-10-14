@@ -982,6 +982,7 @@ export function App(): ReactElement {
           workspaces={workspaces}
           workspace={workspace}
           workspaceNames={workspaceNames}
+          workspaceLocation={statusEndpoint?.url ?? null}
           onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
           identity={identity}

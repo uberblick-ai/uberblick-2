@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
-import { setWorkspaceName, settingsRoom } from "@uberblick/schema";
+import { setWorkspaceName, settingsRoom, WORKSPACE_SETTINGS_KEY } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
 import { useWorkspaceNames, workspaceLabel } from "../src/ui/workspace-names.js";
@@ -82,8 +82,8 @@ it("reads other workspace names silently while offered, and keeps duplicate name
   const onSwitch = vi.fn();
   const host = mount(<Probe current={ONE} connection={one} menuOpen onSwitch={onSwitch} />);
   expect(held.acquire).toHaveBeenCalledWith(settingsRoom(TWO.uuid), IDENTITY, { presence: false });
-  open(host, "Product Research");
-  expect(entryNames()).toEqual(["Product Research", "Product Research"]);
+  open(host, "Product Research · 6f4c8a51");
+  expect(entryNames()).toEqual(["Product Research · 6f4c8a51", "Product Research · b2d9e4c7"]);
   act(() => setWorkspaceName(two.ydoc, "Field Notes"));
   expect(entryNames()).toEqual(["Product Research", "Field Notes"]);
   act(() => setWorkspaceName(two.ydoc, "Changed elsewhere"));
@@ -96,25 +96,68 @@ it("reads other workspace names silently while offered, and keeps duplicate name
   one.ydoc.destroy();
 });
 
-it("uses distinct neutral labels while names are absent or unreadable, including colliding UUID prefixes", () => {
+it.each([
+  ["different names", "Product", "Research", "Product", "Research"],
+  ["one unnamed workspace", null, "Research", "Unnamed workspace", "Research"],
+  ["equal names", "Product", "Product", "Product · 6f4c8a51", "Product · b2d9e4c7"],
+  ["two unnamed workspaces", null, null, "Unnamed workspace · 6f4c8a51", "Unnamed workspace · b2d9e4c7"],
+  ["a name equal to the unnamed reading", null, "Unnamed workspace", "Unnamed workspace · 6f4c8a51", "Unnamed workspace · b2d9e4c7"],
+])("labels %s using only necessary fragments", (_case, first, second, firstLabel, secondLabel) => {
+  const names = new Map([[ONE.uuid, first], [TWO.uuid, second]]);
+  const labels = [ONE, TWO].map((workspace) => workspaceLabel(workspace, names, [ONE, TWO]));
+  expect(labels).toEqual([firstLabel, secondLabel]);
+  for (const workspace of [ONE, TWO]) {
+    expect(labels.join(" ")).not.toContain(workspace.uuid);
+    expect(labels.join(" ")).not.toContain(workspace.segment);
+  }
+});
+
+it("disambiguates equal labels with colliding UUID prefixes", () => {
   const colliding: Workspace = { uuid: `${ONE.uuid.slice(0, -1)}5`, segment: `${ONE.uuid.slice(0, -1)}5` };
-  const names = new Map<string, string | null>();
+  const names = new Map<string, string | null>([[ONE.uuid, null], [colliding.uuid, null]]);
   const labels = [ONE, colliding].map((workspace) => workspaceLabel(workspace, names, [ONE, colliding]));
   expect(labels).toEqual(["Unnamed workspace · 6f4c8a51 (1)", "Unnamed workspace · 6f4c8a51 (2)"]);
   for (const [index, label] of labels.entries()) expect(label).not.toContain([ONE, colliding][index]?.uuid);
+});
+
+it("does not treat unread or unoffered workspaces as unnamed duplicates", () => {
+  const names = new Map<string, string | null>([[ONE.uuid, null]]);
+  expect(workspaceLabel(ONE, names, [ONE, TWO])).toBe("Unnamed workspace");
+  expect(workspaceLabel(TWO, names, [ONE, TWO])).toBe("Unnamed workspace");
+  names.set(TWO.uuid, null);
+  expect(workspaceLabel(ONE, names, [ONE])).toBe("Unnamed workspace");
+});
+
+it("keeps unread names distinct from known unnamed workspaces", () => {
   const one = room(ONE, "This name has not arrived", false);
   const two = room(TWO, null, false);
   held.rooms.set(two.room, two);
   const host = mount(<Probe current={ONE} connection={one} menuOpen />);
-  expect(within(host).getByText("Unnamed workspace · 6f4c8a51").textContent).toBe("Unnamed workspace · 6f4c8a51");
+  expect(within(host).getByText("Unnamed workspace").textContent).toBe("Unnamed workspace");
   expect(host.textContent).not.toContain(ONE.uuid);
   expect(host.textContent).not.toContain(ONE.segment);
-  open(host, "Unnamed workspace · 6f4c8a51");
+  open(host, "Unnamed workspace");
+  expect(entryNames()).toEqual(["Unnamed workspace", "Unnamed workspace"]);
+  act(() => {
+    one.status.hasReceivedServerState = true;
+    two.status.hasReceivedServerState = true;
+    one.ydoc.getMap(WORKSPACE_SETTINGS_KEY).delete("name");
+  });
+  mount(<Probe current={ONE} connection={one} />);
+  mount(<Probe current={ONE} connection={one} menuOpen />);
   expect(entryNames()).toEqual(["Unnamed workspace · 6f4c8a51", "Unnamed workspace · b2d9e4c7"]);
   for (const workspace of [ONE, TWO]) {
     expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.uuid);
     expect(entries().map((entry) => entry.textContent).join(" ")).not.toContain(workspace.segment);
   }
+  one.ydoc.destroy();
+});
+
+it("keeps a current name already read when its connection is unavailable", () => {
+  const one = room(ONE, "Known workspace");
+  const host = mount(<Probe current={ONE} connection={one} />);
+  mount(<Probe current={ONE} connection={null} />);
+  expect(within(host).getByText("Known workspace").textContent).toBe("Known workspace");
   one.ydoc.destroy();
 });
 
@@ -139,7 +182,7 @@ it("never reuses the previous workspace's name when a route switches before its 
   const host = mount(<Probe current={ONE} connection={one} />);
   expect(within(host).getByText("Original workspace").textContent).toBe("Original workspace");
   mount(<Probe current={TWO} connection={one} />);
-  expect(within(host).getByText("Unnamed workspace · b2d9e4c7").textContent).toBe("Unnamed workspace · b2d9e4c7");
+  expect(within(host).getByText("Unnamed workspace").textContent).toBe("Unnamed workspace");
   expect(host.textContent).not.toContain("Original workspace");
   one.ydoc.destroy();
 });
