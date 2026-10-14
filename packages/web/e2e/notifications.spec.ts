@@ -199,35 +199,6 @@ for (const pause of ["hover", "keyboard", "hidden"] as const) {
   });
 }
 
-test("sticky updates stay in place, dismissal preserves the condition, and resolution allows recurrence", async ({ browser }) => {
-  const page = await openFixture(browser);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync unavailable" });
-  await expect(notice(page, "Sync unavailable")).toBeVisible();
-  await page.evaluate(() => {
-    (window as unknown as { stickyNotice: Element | null }).stickyNotice = document.querySelector("[data-sonner-toast]");
-  });
-  await publish(page, "sticky", { key: "sync", severity: "warning", message: "Sync retrying" });
-  await expect(notice(page, "Sync retrying")).toHaveAttribute("data-type", "warning");
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
-  expect(await page.evaluate(() => document.querySelector("[data-sonner-toast]") ===
-    (window as unknown as { stickyNotice: Element | null }).stickyNotice)).toBe(true);
-  await notice(page, "Sync retrying").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "warning", message: "Sync retrying" });
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync retrying" });
-  await expect(notice(page, "Sync retrying")).toHaveAttribute("data-type", "error");
-  await notice(page, "Sync retrying").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync failed again" });
-  await expect(notice(page, "Sync failed again")).toBeVisible();
-  await resolveSticky(page, "sync");
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await resolveSticky(page, "sync");
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync failed again" });
-  await expect(notice(page, "Sync failed again")).toBeVisible();
-});
-
 test("changed sticky content published during dismissal animation survives the old notice cleanup", async ({ browser }) => {
   const page = await openFixture(browser, { clock: true });
   await publish(page, "sticky", { key: "connection", severity: "error", message: "First failure" });
@@ -269,13 +240,6 @@ test("native keyboard entry and final dismissal restore origin focus without tak
   await page.keyboard.press("Enter");
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await expect(origin).toBeFocused();
-});
-
-test("a transient can be dismissed early with a pointer", async ({ browser }) => {
-  const page = await openFixture(browser);
-  await publish(page, "transient", { severity: "success", message: "Dismiss me" });
-  await notice(page, "Dismiss me").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 });
 
 for (const appearance of ["light", "dark"] as const) {

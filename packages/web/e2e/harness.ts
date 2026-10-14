@@ -169,8 +169,6 @@ export interface Harness {
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
-  /** Populate enough real membership-backed workspaces to require inventory pages. */
-  seedHubInventory(count: number): { workspaceIds: string[]; unpagedBytes: number };
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /**
@@ -544,19 +542,6 @@ export async function startHarness(options: {
         const { principals, hubAdmins } = hub ?? {};
         if (principals === undefined || hubAdmins === undefined) throw new Error("Hub admin fixture is missing");
         hubAdmins.remove(principals.identify("5678", "other-admin").id, principals.identify("1234", "browser-person").id);
-      },
-      seedHubInventory(count) {
-        const { principals, memberships } = hub ?? {};
-        if (principals === undefined || memberships === undefined) throw new Error("Hub inventory fixture is missing");
-        const admins = [principals.identify("9012", "inventory-alpha".padEnd(39, "a")),
-          principals.identify("3456", "inventory-beta".padEnd(39, "b"))];
-        const workspaceIds = Array.from({ length: count }, () => randomUUID());
-        for (const workspaceId of workspaceIds) {
-          for (const principal of admins) memberships.grant({ workspaceId, principalId: principal.id, role: "admin" });
-        }
-        const workspaces = workspaceIds.map((workspaceId) => ({ workspaceId, members: 2,
-          admins: admins.map((principal) => principal.githubUsername) }));
-        return { workspaceIds, unpagedBytes: Buffer.byteLength(JSON.stringify({ status: "ok", workspaces })) };
       },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       hubText(room, secondary = false) {

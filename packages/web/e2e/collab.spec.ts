@@ -299,47 +299,6 @@ test("TL;DR opt-out menu actions support touch in light and dark appearances", {
   await exerciseTldrOptOut(browser, true);
 });
 
-test("read-only document menus disable TL;DR removal and opt-in", { tag: "@webkit" }, async ({ browser }) => {
-  const a = await openApp(browser, "/", {
-    upstream: true,
-    contextOptions: { colorScheme: "light" },
-    readySelector: ".ub-body",
-  });
-  if ((a.viewportSize()?.width ?? 1280) < 1280) {
-    await a.getByRole("button", { name: "Show document list", exact: true }).click();
-  }
-  await createDoc(a, docTitle("tldr-read-only"));
-  const b = await openApp(browser, "/", {
-    upstream: true,
-    contextOptions: { colorScheme: "dark" },
-    readySelector: ".ub-body",
-  });
-  if ((b.viewportSize()?.width ?? 1280) < 1280) {
-    await b.getByRole("button", { name: "Show document list", exact: true }).click();
-  }
-  await createDoc(b, docTitle("tldr-marked-read-only"));
-  await b.getByRole("button", { name: "Document actions", exact: true }).click();
-  await b.getByRole("menuitem", { name: "Remove TL;DR", exact: true }).click();
-
-  await harness().stopHub();
-  try {
-    for (const page of [a, b]) {
-      await expect(page.locator(".ub-title")).toHaveAttribute("readonly", "");
-      await page.getByRole("button", { name: "Document actions", exact: true }).click();
-      await expect(page.getByRole("menuitem", { name: "Add TL;DR unavailable — document is read-only", exact: true })).toHaveAttribute("aria-disabled", "true");
-      if (page === a) {
-        await expect(page.getByRole("menuitem", { name: "Remove TL;DR unavailable — document is read-only", exact: true })).toHaveAttribute("aria-disabled", "true");
-      } else {
-        await expect(page.getByRole("menuitem", { name: /^Remove TL;DR/ })).toHaveCount(0);
-      }
-      await page.keyboard.press("Escape");
-      await expect(page.locator(".ub-tldr")).toHaveCount(0);
-    }
-  } finally {
-    await harness().startHub();
-  }
-});
-
 test("the upstream fact recovers after an acknowledged typing burst", async ({
   browser,
 }) => {

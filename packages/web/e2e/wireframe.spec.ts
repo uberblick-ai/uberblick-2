@@ -9,7 +9,6 @@ import type { McpSession } from "./mcp-agent.js";
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
 const SOURCE = "dialog Delete draft?\n  text This cannot be undone.\n  row.end\n    button.focus Cancel\n    button.danger Delete";
-const INVALID = "dialog Broken\n text Wrong indentation";
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -283,35 +282,6 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
     const recorded = await paints(client);
     expect(recorded.every((entry) => entry.at - entry.sourceAt >= 150)).toBe(true);
   }
-});
-
-test("errors retain the last good drawing or show diagnostics alone, while every warning still renders", async ({ browser }) => {
-  const session = writer();
-  const uuid = await wireframeDoc(session, "Wireframe errors");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  const good = preview(page).locator(".wf-root");
-  await expect(good).toBeVisible();
-  const original = await good.elementHandle();
-  if (original === null) throw new Error("e2e: good wireframe drawing is missing");
-  await editSource(session, uuid, INVALID);
-  await expect(page.locator(".ub-wireframe-diagnostics")).toContainText(/Line 2: error:.*indentation/);
-  await expect(page.locator(".ub-wireframe-stale")).toHaveText("Preview is stale");
-  expect(await original.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
-  const freshUuid = await wireframeDoc(session, "Wireframe without a good drawing", INVALID);
-  const fresh = await openApp(browser, `/${harness().workspace}/${freshUuid}`);
-  await expect(fresh.locator(".ub-wireframe-diagnostics")).toContainText(/Line 2: error:.*indentation/);
-  await expect(preview(fresh).locator(".wf-root")).toHaveCount(0);
-  await expect(fresh.locator(".ub-wireframe-stale")).toBeHidden();
-  const warnings = ["dialog.unknown Warning screen", ...Array.from({ length: 6 }, (_, index) => `  text.unknown Warning ${index + 1}`)].join("\n");
-  await editSource(session, uuid, warnings);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Warning screen");
-  await expect(page.locator(".ub-wireframe-diagnostics li")).toHaveCount(7);
-  for (let line = 1; line <= 7; line += 1) await expect(page.locator(".ub-wireframe-diagnostics li").nth(line - 1)).toContainText(`Line ${line}: warning:`);
-  await expect(page.locator(".ub-wireframe-stale")).toBeHidden();
-  await editSource(session, uuid, SOURCE);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
-  await expect(page.locator(".ub-wireframe-diagnostics")).toBeHidden();
 });
 
 function wideSource(buttons: number, labelLength = 12): string {

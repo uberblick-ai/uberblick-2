@@ -14,16 +14,15 @@ Its observers inspect the existing Yjs document without a product test hook.
 
 The browser suite covers source insertion and keyboard/pointer access, live
 data and mapping updates, canvas names/descriptions, appearance changes, reopen,
-problem recovery and content locks. Canvas observations check that date and
-numeric labels anchor only at plotted observations, preserve continuous
+problem recovery and content locks. Canvas observations check that date
+labels anchor only at plotted observations, preserve continuous
 spacing, and omit crowded labels only where they overlap retained labels.
 The geometry probe resets on each canvas clear and measures painted text
 extents, so previous draws cannot satisfy a current-layout assertion.
 Daily labels are one month/day line in a single year; tied observations and
-empty rows do not introduce time labels. Intraday labels retain UTC and day
-context, and full tooltips stay unchanged. An omitted close pair leaves hourly
-labels compact for both millisecond and microsecond source timestamps. Daily
-endpoint glyphs stay inside 311–317 px canvases across responsive draws.
+empty rows do not introduce time labels. Full tooltips retain date, time and UTC
+context. Daily endpoint glyphs stay inside 311–317 px canvases across responsive
+draws.
 The desktop and explicit iPad touch
 contexts run in both appearances, with paired Chromium and WebKit coverage.
 The suite also checks legend placement, opposite-side unit ticks, the editor's

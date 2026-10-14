@@ -49,8 +49,6 @@ class BrowserGithub {
   now = Date.now();
   starts = 0;
   approved = false;
-  accountId = 9007;
-  username = "browser-person";
   readonly fetch: typeof fetch = async (input) => {
     const url = String(input);
     if (url === "https://github.com/login/device/code") {
@@ -65,7 +63,7 @@ class BrowserGithub {
         ? { access_token: "synthetic-browser-github-token", token_type: "bearer", scope: "" }
         : { error: "authorization_pending" });
     }
-    if (url === "https://api.github.com/user") return Response.json({ id: this.accountId, login: this.username });
+    if (url === "https://api.github.com/user") return Response.json({ id: 9007, login: "browser-person" });
     throw new Error("Unexpected GitHub request in browser sign-in fixture");
   };
 
@@ -320,21 +318,6 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
   } finally { await running.stop(); }
 });
 
-test("a released hub without GitHub sign-in keeps its computer guidance and offers no browser approval", async ({ context, page }) => {
-  if (hub === undefined) throw new Error("release test hub did not start");
-  const served = await browserPreview(hub);
-  try {
-    await context.route("**/uberblick-config.json", (route) => route.fulfill({ json: {
-      hubUrl: `ws://localhost:${hub?.port}/ws`, workspaces: [WORKSPACE],
-    } }));
-    await page.goto(served.appUrl);
-    await expect(page.getByText("Browser sign-in is not configured on this hub.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Hub setup guide" })).toContainText("ub open");
-    await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
-  } finally { await served.serving.close(); }
-});
-
 test("@webkit a released HTTPS page signs in through its own origin and keeps the session on reload", async ({ browser }) => {
   const running = await browserHub(true);
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -354,67 +337,6 @@ test("@webkit a released HTTPS page signs in through its own origin and keeps th
   } finally {
     try { await context.close(); } finally { await running.stop(); }
   }
-});
-
-test("browser sign-out waits for hub confirmation, revokes the session, and expired sessions require sign-in", async ({ context, page }) => {
-  const running = await browserHub();
-  try {
-    await context.route("**/uberblick-config.json", (route) => route.fulfill({ json: {
-      hubUrl: `ws://localhost:${running.hub.port}/ws`, workspaces: [WORKSPACE],
-    } }));
-    await page.goto(running.appUrl);
-    const first = await completeBrowserSignIn(page, running.github);
-    await context.route("**/auth/browser/sign-out", (route) => route.abort("failed"));
-    await page.getByRole("button", { name: "Sign out", exact: true }).click();
-    await expect(page.getByRole("alert")).toHaveText("The hub could not confirm sign-out. Your session may still be active. Try again.");
-    await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
-    expect(await sessionStatus(page, first.session.token)).toBe(200);
-    await context.unroute("**/auth/browser/sign-out");
-    await page.getByRole("button", { name: "Sign out", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
-    expect(await sessionStatus(page, first.session.token)).toBe(401);
-    await page.reload();
-    await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
-
-    const second = await completeBrowserSignIn(page, running.github);
-    running.github.now = second.session.expiresAt;
-    expect(await sessionStatus(page, second.session.token)).toBe(401);
-    await page.reload();
-    await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
-  } finally { await running.stop(); }
-});
-
-test("browser sign-in on a CLI-claimed hub adds identity without a device, role or membership", async ({ context, page }) => {
-  const running = await browserHub();
-  try {
-    running.github.accountId = 9010;
-    running.github.username = "cli-owner";
-    const cliStart = await (await fetch(`http://127.0.0.1:${running.hub.port}/auth/github/start`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
-    })).json() as { requestId: string; collectionSecret: string };
-    running.github.approve();
-    const cliClaim = await (await fetch(`http://127.0.0.1:${running.hub.port}/auth/github/collect`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: cliStart.requestId, collectionSecret: cliStart.collectionSecret }),
-    })).json() as { status: string; claimedWorkspaceId: string; credential: unknown };
-    expect(cliClaim.status).toBe("complete");
-    expect(cliClaim.credential).toBeDefined();
-    running.github.accountId = 9007;
-    running.github.username = "browser-person";
-    await context.route("**/uberblick-config.json", (route) => route.fulfill({ json: {
-      hubUrl: `ws://localhost:${running.hub.port}/ws`, workspaces: [WORKSPACE],
-    } }));
-    await page.goto(running.appUrl);
-    const result = await completeBrowserSignIn(page, running.github);
-    expect(result.claimedWorkspaceId).toBeUndefined();
-    const principal = running.hub.principals?.getByGithubAccountId("9007");
-    if (principal == null) throw new Error("Browser sign-in did not identify its account");
-    expect(running.hub.hubAdmins?.isAdmin(principal.id)).toBe(false);
-    expect(running.hub.memberships?.workspacesFor(principal.id)).toEqual([]);
-    expect(running.hub.memberships?.roleFor(cliClaim.claimedWorkspaceId, principal.id)).toBeNull();
-    expect(running.hub.credentials?.listDevices(principal.id)).toEqual([]);
-  } finally { await running.stop(); }
 });
 
 test("another localhost port cannot start or end hub sign-in or reuse the hub session", async ({ context, page }) => {

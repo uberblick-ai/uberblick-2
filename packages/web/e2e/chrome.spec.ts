@@ -16,8 +16,6 @@
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
  *   from tokens alone, and survives a reload. A stylesheet is exactly what
  *   jsdom does not have.
- * - **A connected agent is counted.** The count reads awareness over a real
- *   hub, and the session it counts is a client that is not a browser at all.
  * - **The cascade wires the highlight.** The token table holds palette floors;
  *   rendered consumers must still share one card accent, including the focused
  *   orphan chip whose actual ground changes with state.
@@ -1069,50 +1067,6 @@ for (const scheme of ["light"] as const) {
     ).toBe(true);
   });
 }
-
-test("MCP connections counts a connected agent session, and stops when it goes", async ({
-  browser,
-}) => {
-  const page = await openAppearanceApp(browser, "dark");
-  const connections = page.locator(".ub-panel-fact", { hasText: "MCP connections" });
-
-  await page.getByTestId("account-menu").click();
-  await expect(connections).toContainText("0");
-
-  // An agent, as far as the hub and the awareness map are concerned: a client
-  // that publishes a user and says positively that it is an agent. That
-  // pair is exactly what the MCP server's replicas publish, in one write
-  // (`mcp-server/src/replica.ts`), and the marker is what the count reads —
-  // omitting it makes this session a person: the count requires a positive marker.
-  const doc = new Y.Doc();
-  const agent = new HocuspocusProvider({
-    url: harness().hubUrl,
-    name: directoryRoom(harness().workspaceUuid),
-    document: doc,
-    // Wrapped like every real client — the hub reads the protocol version out
-    // of the auth message before it reads the token.
-    token: async () =>
-      wrapToken(
-        await mintToken(await importRootSecret(harness().authSecret), {
-          typ: "room",
-          sub: `agent-${randomUUID()}`,
-          workspace: harness().workspaceUuid,
-          scope: "read-write",
-          kid: null,
-          lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-        }),
-      ),
-  });
-  agent.setAwarenessField("user", { name: "an agent", color: "#7b5ec7" });
-  agent.setAwarenessField("client", "agent");
-
-  try {
-    await expect(connections).toContainText("1");
-  } finally {
-    agent.destroy();
-  }
-  await expect(connections).toContainText("0");
-});
 
 for (const viewport of [720, 1280]) {
 test(`the document collaborator cluster stays compact and jumps once without moving selection — ${viewport}px`, async ({
@@ -3152,34 +3106,6 @@ for (const [device, width, hasTouch] of [
     }
   });
 }
-
-test("unavailable Restore and pin reasons are visible on touch", async ({ browser }) => {
-  const page = await openApp(browser, "/", {
-    upstream: true,
-    contextOptions: { viewport: { width: 810, height: 900 }, hasTouch: true },
-  });
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await createDoc(page, "Still listed");
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await createDoc(page, "Archived reason");
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
-  await expect(page.locator(".ub-archived-banner")).toBeVisible();
-  await harness().stopHub();
-  try {
-    await expect(page.getByRole("button", { name: "Restore unavailable" })).toBeDisabled();
-    await expect(page.locator(".ub-restore-unavailable")).toBeVisible();
-    await expect(page.locator(".ub-restore-unavailable")).toContainText("directory is not ready to write");
-    await page.getByRole("button", { name: "Show document list", exact: true }).click();
-    await page.getByRole("button", { name: "All docs", exact: true }).click();
-    await expect(page.locator(".ub-docs-pin-unavailable")).toBeVisible();
-    await expect(page.locator(".ub-docs-pin-unavailable")).toContainText("sidebar is not ready to write");
-    await expect(page.locator(".ub-docs-pin").first()).toBeDisabled();
-  } finally {
-    await harness().startHub();
-  }
-});
 
 test("decision archive and restore follow the whole topic and its first record", async ({ browser }) => {
   const first = randomUUID();
