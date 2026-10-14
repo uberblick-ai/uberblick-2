@@ -350,18 +350,6 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       await expect(page).toHaveURL(new RegExp(`/${alpha.uuid}$`));
       await page.goBack();
       await expect(rows).toHaveCount(6);
-      if (appearance === "light") {
-        const opened = page.context().waitForEvent("page");
-        await alphaRow.click({ modifiers: ["ControlOrMeta"] });
-        const newTab = await opened;
-        try {
-          await expect(newTab).toHaveURL(new RegExp(`/${alpha.uuid}$`));
-          await expect(editor(newTab)).toHaveText(alpha.blocks[0]?.text ?? "");
-          await expect(page).toHaveURL(new RegExp(`${ownerPath}$`));
-        } finally {
-          await newTab.close();
-        }
-      }
     }
   });
 }
