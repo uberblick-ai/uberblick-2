@@ -67,6 +67,31 @@ export class HubAdminRegistry {
     this.database.connection.prepare("INSERT INTO hub_admins (principal_id) VALUES (?) ON CONFLICT DO NOTHING").run(principalId);
   }
 
+  /** Startup grant for a hub with no administrator: its oldest account that
+   * belongs to a workspace, in principal creation order. Once one exists the
+   * last-admin refusal keeps this from ever choosing again. */
+  adoptOldestMember(): { principalId: string; githubUsername: string } | undefined {
+    const db = this.database.connection;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      let adopted: { principalId: string; githubUsername: string } | undefined;
+      if (db.prepare("SELECT 1 FROM hub_admins LIMIT 1").get() === undefined) {
+        const row = db.prepare(`SELECT principal.id, principal.github_username FROM hub_principals AS principal
+          WHERE EXISTS (SELECT 1 FROM hub_memberships WHERE principal_id = principal.id)
+          ORDER BY principal.rowid LIMIT 1`).get();
+        if (row !== undefined) {
+          adopted = { principalId: row.id as string, githubUsername: row.github_username as string };
+          this.grant(adopted.principalId);
+        }
+      }
+      db.exec("COMMIT");
+      return adopted;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   isAdmin(principalId: string): boolean {
     return this.database.connection.prepare("SELECT 1 FROM hub_admins WHERE principal_id = ?").get(principalId) !== undefined;
   }

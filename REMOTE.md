@@ -909,8 +909,13 @@ leave while another admin remains.
 Hub operations require current hub administration, independently of workspace
 membership and credential workspace scope. Hub administrators live only in the
 hub-private `hub_admins` table; synchronized settings grant no hub authority.
-Claiming a fresh hub grants this role once. Existing deployments receive no
-automatic appointment, and there is no product route to add or restore it.
+Claiming a fresh hub grants this role once. A deployed hub that cannot be
+claimed and has no hub administrator appoints one when it starts: the oldest
+GitHub account, in the order the hub first recorded accounts, that belongs to
+any workspace. The hub logs `hub.admin.adopted` with that account. A hub with
+no workspace members waits until one exists and restarts. Once an administrator
+exists, startup appoints no one, and there is no product route to restore the
+role.
 Administrator rows contain `principalId`, `githubAccountId`, `githubUsername`,
 `workspaces` (membership count), `lastSignedInAt` (epoch milliseconds or null)
 and `current` (the requesting account). The last sign-in comes from the newest
@@ -1515,7 +1520,8 @@ ub workspace promote http://localhost:8080
 starter documents/sidebar. Sign in first with `ub auth login <hub>`; `promote`
 reuses this hub's stored login and refuses if sign-in is required. Your account
 must currently be a hub administrator. The login that claims a fresh hub also
-grants hub administration and qualifies. Signing in otherwise, workspace
+grants hub administration and qualifies, as does the account an existing
+deployment appoints at startup. Signing in otherwise, workspace
 membership and workspace administration do not qualify. A refusal uploads
 nothing and leaves the workspace local; ask a hub administrator.
 
