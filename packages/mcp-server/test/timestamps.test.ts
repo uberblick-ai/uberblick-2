@@ -152,6 +152,28 @@ describe("directory timestamps", () => {
     });
   });
 
+  it("stamps a regular document immediately when its open-thread count changes", async () => {
+    const rig = await localRig();
+    const doc = await rig.ok("create_doc", {
+      title: "Discussed", description: "A test document.",
+      blocks: [{ type: "paragraph", text: "one two three" }],
+    });
+    vi.setSystemTime(T0 + 1_000);
+    const opened = await rig.ok("annotate", {
+      uuid: doc.uuid, block_id: doc.blocks[0].id, start: 0, end: 3, text: "Question",
+    });
+    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 1_000 });
+    vi.setSystemTime(T0 + 2_000);
+    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Reply" });
+    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 1_000 });
+    vi.setSystemTime(T0 + 3_000);
+    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Done", resolved: true });
+    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 0, updatedAt: T0 + 3_000 });
+    vi.setSystemTime(T0 + 4_000);
+    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Reconsider", resolved: false });
+    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 4_000 });
+  });
+
   it("backfills createdAt on a stub that predates the field", async () => {
     const rig = await localRig();
     const doc = await rig.ok("create_doc", { title: "Old", description: "A test document." });

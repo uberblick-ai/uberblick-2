@@ -170,6 +170,7 @@ export {
   decisionDirectoryFields,
   decisionTopicArchived,
   directoryStubDiffers,
+  documentDirectoryFields,
   getDirectoryEntry,
   getDirectoryMap,
   listDirectory,
@@ -177,7 +178,7 @@ export {
   tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "./directory.js";
-export type { DecisionDirectoryFields, DirectoryUpsert, ListDirectoryOptions } from "./directory.js";
+export type { DecisionDirectoryFields, DirectoryUpsert, DocumentDirectoryFields, ListDirectoryOptions } from "./directory.js";
 
 export {
   EXAMPLE_TAGS,
