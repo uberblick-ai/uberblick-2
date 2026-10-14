@@ -9,6 +9,8 @@ const osSensitive = [
   "dev-hub-config",
   "device-login",
   "device-shutdown",
+  "device-sync-refusal",
+  "document-data",
   "durability",
   "log",
   "pending-shutdown",
