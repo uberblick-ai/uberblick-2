@@ -21,8 +21,11 @@ const stylesheet = readFileSync(new URL("../src/ui/styles.css", import.meta.url)
 function declarations(source: string): Tokens {
   const clean = source.replace(/\/\*[\s\S]*?\*\//g, "");
   const tokens: Tokens = new Map();
-  for (const selector of [":root", ".ub-terminal"]) {
-    const blocks = [...clean.matchAll(new RegExp(`(?:^|\\n)${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`, "g"))];
+  for (const [selector, pattern] of [
+    [":root", /(?:^|\n):root\s*\{([^}]*)\}/g],
+    [".ub-terminal", /(?:^|\n)\.ub-terminal\s*\{([^}]*)\}/g],
+  ] as const) {
+    const blocks = [...clean.matchAll(pattern)];
     if (blocks.length === 0) throw new Error(`missing token source ${selector}`);
     for (const block of blocks) {
       for (const match of (block[1] ?? "").matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {

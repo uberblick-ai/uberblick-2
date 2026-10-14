@@ -176,6 +176,31 @@ describe("importMarkdown", () => {
     ]);
   });
 
+  it.each(["````", "~~~~"])(
+    "closes %s only with a trimmed line of the same character at least as long",
+    (marker) => {
+      const body = [
+        "body",
+        marker.slice(1),
+        marker.startsWith("~") ? "````" : "~~~~",
+        `${marker} trailing text`,
+        `${marker.slice(0, 2)} ${marker.slice(2)}`,
+      ].join("\n");
+
+      expect(
+        importMarkdown(
+          `${marker}ts\n${body}\n \t${marker}${marker[0]}\t \nafter`,
+        ).blocks,
+      ).toEqual([
+        { type: "code", text: body, language: "ts" },
+        { type: "paragraph", text: "after" },
+      ]);
+      expect(importMarkdown(`${marker}ts\n${body}\n`).blocks).toEqual([
+        { type: "code", text: body, language: "ts" },
+      ]);
+    },
+  );
+
 });
 
 describe("the terminal fence", () => {

@@ -262,6 +262,11 @@ On `main` the same run records whether `main` itself is clean. A pull
 request's run uses that pull request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
 
+Merging also requires CodeQL code scanning results: a pull request that introduces
+a security alert at high or above cannot merge. Lower-severity and non-security
+alerts do not block merging. CodeQL runs on GitHub, outside `ci.yml` and
+`mise run ci`. Only a maintainer decides whether to dismiss an alert.
+
 `mise run ci` runs the same commands locally, in the workflow's order, under
 `CI=true`, and names every check that failed. It is a convenience, not a
 substitute for the required checks. Its tests are the full suite on every
