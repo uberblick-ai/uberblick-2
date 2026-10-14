@@ -1751,6 +1751,18 @@ h3.ub-heading {
 /* Keep the existing thread highlight visible above the neutral pill ground. */
 .ub-comment .ub-github-pill { background: transparent; }
 
+/* Hover and keyboard focus mark the pill as a link without changing its size. */
+.ub-link:is(:hover, :focus-visible) .ub-github-pill {
+  border-color: color-mix(in oklab, var(--foreground) 22%, var(--border));
+}
+.ub-link:is(:hover, :focus-visible) .ub-github-pill:not(.ub-comment *) {
+  background: color-mix(in oklab, var(--foreground) 6%, var(--muted));
+}
+.ub-link:is(:hover, :focus-visible) :is(.ub-github-pill-repo, .ub-github-pill-number) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 /* Document references use dotted underlines; external links use solid ones. */
 .ub-doclink {
   text-decoration: underline dotted;

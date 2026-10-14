@@ -414,3 +414,32 @@ test("light and dark pills keep the same typography in prose, table headers and 
     }
   }
 });
+
+test("hovering a pill underlines its text and lifts its fill; the issue icon is a ring around a dot", { tag: "@webkit" }, async ({ page }, info) => {
+  test.skip(info.project.use.hasTouch === true, "Hover needs a pointer.");
+  await newDoc(page);
+  await page.keyboard.type(`[${STORED}](${TARGET}) and [#7](https://github.com/Example/SomeRepo/issues/7)`);
+  await page.locator(".ub-title").click();
+  const pills = page.locator(".ub-github-pill");
+  await expect(pills).toHaveCount(2);
+  await expect(pills.nth(0).locator("svg circle")).toHaveCount(0);
+  await expect(pills.nth(1).locator("svg circle")).toHaveCount(1);
+  const pill = pills.first();
+  const number = pill.locator(".ub-github-pill-number");
+  await expect(number).toHaveCSS("text-decoration-line", "none");
+  const resting = await pill.evaluate(element => getComputedStyle(element).backgroundColor);
+  await pill.hover();
+  await expect(number).toHaveCSS("text-decoration-line", "underline");
+  await expect(pill.locator(".ub-github-pill-repo")).toHaveCSS("text-decoration-line", "underline");
+  await expect.poll(() => pill.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(resting);
+  if (process.env.UB_AGENTS_SCRATCH !== undefined) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await editor(page).locator(":scope > p").first().screenshot({
+        path: join(process.env.UB_AGENTS_SCRATCH, `github-pill-hover-${info.project.name}-${colorScheme}.png`),
+      });
+    }
+  }
+  await page.mouse.move(0, 0);
+  await expect(number).toHaveCSS("text-decoration-line", "none");
+});
