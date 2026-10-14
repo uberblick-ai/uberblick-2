@@ -175,6 +175,31 @@ describe("fresh deployed hub initialization", () => {
     },
   );
 
+  it("makes the oldest identity hub admin on a claimed hub with none, and only once", () => {
+    const old = rig(undefined, false);
+    const first = old.principals.identify("1234", "first-identity");
+    old.principals.identify("5678", "second-identity");
+    old.memberships.grant({ workspaceId: WORKSPACE, principalId: first.id, role: "admin" });
+    const path = old.database.databasePath;
+    old.database.close();
+    const upgraded = rig(path);
+    expect(upgraded.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
+    expect(rows(upgraded).hub_admins).toEqual([{ principal_id: first.id }]);
+    const second = upgraded.principals.getByGithubAccountId("5678")!;
+    upgraded.hubAdmins.grant(second.id);
+    upgraded.database.connection.prepare("DELETE FROM hub_admins WHERE principal_id = ?").run(first.id);
+    upgraded.database.close();
+    expect(rows(rig(path)).hub_admins).toEqual([{ principal_id: second.id }]);
+  });
+
+  it("leaves admins to the claim on a fresh hub", () => {
+    const fresh = rig();
+    fresh.principals.identify("1234", "early-identity");
+    const path = fresh.database.databasePath;
+    fresh.database.close();
+    expect(rows(rig(path)).hub_admins).toEqual([]);
+  });
+
   it("rolls back an interrupted initialization and retries without a partial workspace", () => {
     const testRig = rig(undefined, false);
     testRig.database.connection.exec(`CREATE TABLE hub_claim_state (

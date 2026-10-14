@@ -40,11 +40,21 @@ export class HubClaimState {
         db.prepare("INSERT INTO hub_claim_state (id, default_workspace_id, unclaimed) VALUES (1, ?, ?)")
           .run(workspaceId, existing ? 0 : 1);
       }
+      this.adoptOldestAdmin();
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /** Hubs claimed before hub administration have no admin; their oldest identity inherits it. */
+  private adoptOldestAdmin(): void {
+    const db = this.database.connection;
+    if (this.state(false).unclaimed || db.prepare("SELECT 1 FROM hub_admins LIMIT 1").get() !== undefined) return;
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hub_principals'").get() === undefined) return;
+    const oldest = db.prepare("SELECT id FROM hub_principals ORDER BY rowid LIMIT 1").get();
+    if (oldest !== undefined) this.admins.grant(oldest.id as string);
   }
 
   state(githubConfigured: boolean): { unclaimed: boolean; canClaim: boolean } {
