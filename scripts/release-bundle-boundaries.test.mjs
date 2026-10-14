@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -76,6 +76,13 @@ test("the actual release bundles keep team code in the hub and client code in Ho
 				}
 			}
 			if (name === "ub-hub.mjs") {
+				const alias = join(scratch, "operator-alias.mjs");
+				symlinkSync(output, alias);
+				const aliased = spawnSync(process.execPath, [alias, "admin-setup", "00000000-0000-4000-8000-000000001387"], {
+					cwd: scratch, env: { ...process.env, HUB_DB_PATH: "" }, encoding: "utf8", timeout: 10_000,
+				});
+				assert.equal(aliased.status, 1, "a symlinked command executes and refuses the missing database setting");
+				assert.match(aliased.stderr, /HUB_DB_PATH/);
 				for (const args of [[], ["--help"]]) {
 					const result = spawnSync(process.execPath, [output, ...args], {
 						cwd: scratch, encoding: "utf8", timeout: 10_000,

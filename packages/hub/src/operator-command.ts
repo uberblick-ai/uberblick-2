@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runAdminSetup } from "./admin-setup-command.js";
 import { requestOperator } from "./operator-client.js";
@@ -118,7 +117,8 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node resolves the main module through symlinks, including macOS's temporary directory.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   runOperatorCommand(process.argv.slice(2)).catch(error => {
     console.error(`ub-hub: ${String(error)}`);
     process.exitCode = 1;
