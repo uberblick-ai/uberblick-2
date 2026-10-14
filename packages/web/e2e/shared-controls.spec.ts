@@ -74,7 +74,7 @@ async function openFixture(browser: Browser, coarse: boolean, width: number): Pr
 }
 
 for (const { coarse, widths } of [
-  { coarse: true, widths: [375, 1366] },
+  { coarse: true, widths: [1366] },
   { coarse: false, widths: [1280] },
 ]) {
   for (const width of widths) {
@@ -151,7 +151,7 @@ test("regular and invalid controls keep the browser's keyboard outline", async (
 
 for (const coarse of [false, true]) {
   test(`Button hover follows hover capability — ${coarse ? "touch" : "pointer"}`, async ({ browser }) => {
-    const page = await openFixture(browser, coarse, coarse ? 375 : 1280);
+    const page = await openFixture(browser, coarse, coarse ? 810 : 1280);
     expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(!coarse);
     for (const variant of ["default", "secondary", "outline"] as const) {
       const control = page.getByRole("button", { name: `${variant} default`, exact: true });

@@ -369,7 +369,7 @@ for (const hasTouch of [false, true]) {
   });
 }
 
-for (const width of [390]) {
+for (const width of [810]) {
   test(`the threads sheet closes by touch without selecting covered prose at ${width}px`, async ({
     browser,
   }) => {

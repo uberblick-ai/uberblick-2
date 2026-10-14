@@ -2060,7 +2060,7 @@ h3.ub-heading {
   position: relative;
   overflow: hidden;
   margin: 0 0 0.85rem;
-  padding: 0.75rem 1.25rem;
+  padding: 0.875rem 1.5rem;
   border: 1px solid color-mix(in oklab, var(--brand) 22%, var(--border));
   border-radius: 1rem;
   background: linear-gradient(
@@ -2132,7 +2132,7 @@ h3.ub-heading {
   margin: 0;
   color: var(--foreground);
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 500;
   line-height: 1.25;
 }
@@ -2143,16 +2143,6 @@ h3.ub-heading {
   font-size: 1rem;
   line-height: 1.75;
   overflow-wrap: anywhere;
-}
-
-@media (min-width: 640px) {
-  .ub-tldr {
-    padding: 0.875rem 1.5rem;
-  }
-
-  .ub-tldr h2 {
-    font-size: 1.5rem;
-  }
 }
 
 .ub-tldr-form {

@@ -23,7 +23,7 @@ async function touchPage(browser: Browser, info: TestInfo): Promise<Page> {
   // Playwright's browser fixture supplies the project's context options. Keep
   // Chromium's existing synthetic touch proof; WebKit uses its actual device.
   const context = trackContext(await browser.newContext(info.project.name === "chromium"
-    ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+    ? { hasTouch: true, viewport: { width: 810, height: 1080 } }
     : {}));
   const page = await context.newPage();
   await page.emulateMedia({ reducedMotion: "reduce" });

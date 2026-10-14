@@ -26,7 +26,6 @@ export function NotificationToaster(): ReactElement {
       // timers remain native.
       visibleToasts={Infinity}
       offset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))" }}
-      mobileOffset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))", left: "max(16px, env(safe-area-inset-left))" }}
       className={[
         "[font-family:var(--font-sans)]! w-(--width)! h-[calc(100dvh-max(16px,env(safe-area-inset-top))-max(16px,env(safe-area-inset-bottom)))]",
         "flex flex-col-reverse gap-(--gap) overflow-x-hidden overflow-y-auto pointer-events-none [&>[data-sonner-toast]]:pointer-events-auto",

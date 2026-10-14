@@ -279,7 +279,7 @@ test("a transient can be dismissed early with a pointer", async ({ browser }) =>
 });
 
 for (const appearance of ["light", "dark"] as const) {
-  for (const width of [1280, 375]) {
+  for (const width of [1280]) {
     test(`${appearance} notices are accessible and stay above chrome within ${width}px`, async ({ browser }) => {
       const page = await openFixture(browser, { width });
       await page.evaluate((appearance) =>
@@ -359,8 +359,8 @@ for (const appearance of ["light", "dark"] as const) {
   }
 }
 
-test("an active sticky notice stays reachable through a burst of transients in a narrow viewport @webkit", async ({ browser, browserName }) => {
-  const page = await openFixture(browser, { width: 375, height: 400, clock: true });
+test("an active sticky notice stays reachable through a burst of transients in a short iPad-width viewport @webkit", async ({ browser, browserName }) => {
+  const page = await openFixture(browser, { width: 810, height: 400, clock: true });
   await publish(page, "sticky", { key: "ongoing", severity: "error", message: "Ongoing failure" });
   for (let index = 0; index < 18; index += 1) {
     await publish(page, "transient", { severity: "info", message: `Burst notice ${index}` });
