@@ -175,11 +175,15 @@ test.describe("document and workspace typography", () => {
         await expect(page.getByRole("menu", { name: /^Contents \d+$/ })).toBeVisible();
         await expectScale(page, `contents ${viewport.width}px`);
         await page.keyboard.press("Escape");
+        await expect(page.getByRole("menu", { name: /^Contents \d+$/ })).toHaveCount(0);
         if (viewport.width < 1280) await activateControl(page.locator(".ub-threads-toggle"));
         await expect(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." })).toBeVisible();
         await expectStep(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." }), 14, 20);
         await expectScale(page, `comments ${viewport.width}px`);
-        if (viewport.width < 1280) await activateControl(page.getByRole("button", { name: "Close threads", exact: true }));
+        if (viewport.width < 1280) {
+          await activateControl(page.getByRole("button", { name: "Close threads", exact: true }));
+          await expect(page.getByRole("dialog", { name: "Threads", exact: true })).toHaveCount(0);
+        }
 
         for (const [surface, suffix, ready] of [
           ["decision", decisionUuid, ".ub-editor .ProseMirror"],
@@ -214,7 +218,11 @@ test.describe("document and workspace typography", () => {
         const settingsImage = info.outputPath(`settings-${viewport.width}.png`);
         await page.screenshot({ path: settingsImage });
         await info.attach(`settings-${viewport.width}`, { path: settingsImage, contentType: "image/png" });
-        if (viewport.width < 1280) await page.keyboard.press("Escape");
+        if (viewport.width < 1280) {
+          await page.keyboard.press("Escape");
+          await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+          await expect(page.getByRole("button", { name: "Show sidebar", exact: true })).toBeFocused();
+        }
       }
     });
   }
