@@ -155,7 +155,7 @@ export function CaretMenu({
           {options.map((option, index) => (
             <Fragment key={option.id}>
               {option.group && options[index - 1]?.group !== option.group && (
-                <p role="presentation" className="mt-[0.35rem] mb-[0.15rem] px-[0.4rem] text-[0.65rem] tracking-[0.06em] text-(--muted-foreground) uppercase">
+                <p role="presentation" className="mt-[0.35rem] mb-[0.15rem] px-[0.4rem] ub-type-caption tracking-[0.06em] text-(--muted-foreground) uppercase">
                   {option.group}
                 </p>
               )}
@@ -166,7 +166,7 @@ export function CaretMenu({
                 tabIndex={-1}
                 aria-label={option.label}
                 aria-selected={index === active}
-                className={`flex min-h-6 w-full cursor-pointer items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left text-[0.9rem] [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
+                className={`flex min-h-6 w-full cursor-pointer items-center gap-2 rounded-(--radius-sm) border px-[0.4rem] py-[0.3rem] text-left ub-type-ui [font-family:inherit] [@media(pointer:coarse)]:min-h-11 ${index === active ? "border-(--border) bg-(--card-accent) text-(--accent-foreground)" : "border-transparent bg-transparent text-card-foreground"}`}
                 // A pick must run against the prose selection, before focus
                 // can leave it. Touch clicks still reach the same command.
                 onMouseDown={(event) => event.preventDefault()}
@@ -174,7 +174,7 @@ export function CaretMenu({
                 onClick={() => choose(index)}
               >
                 <span className="min-w-0 flex-1">{option.label}</span>
-                {option.hint && <span className="text-xs text-(--muted-foreground)">{option.hint}</span>}
+                {option.hint && <span className="ub-type-small text-(--muted-foreground)">{option.hint}</span>}
               </button>
             </Fragment>
           ))}

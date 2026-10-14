@@ -225,7 +225,7 @@ function TagStrip({
           <span className="ub-tag-selected">
             {labels.length > 0 ? labels : <span className="ub-tag-placeholder">Add tags</span>}
           </span>
-          <span className="ub-tag-chevron flex-none text-[0.65rem] opacity-55 group-hover/tags:opacity-100" aria-hidden="true">
+          <span className="ub-tag-chevron flex-none ub-type-caption opacity-55 group-hover/tags:opacity-100" aria-hidden="true">
             ▾
           </span>
         </button>
@@ -249,7 +249,7 @@ function TagStrip({
               <input
                 ref={search}
                 type="search"
-                className="ub-tag-search min-h-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:text-base min-w-0 flex-auto border-0 bg-transparent p-0 text-inherit [font:inherit] placeholder:text-muted-foreground placeholder:opacity-100 focus-visible:outline-none"
+                className="ub-tag-search min-h-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:ub-type-body min-w-0 flex-auto border-0 bg-transparent p-0 text-inherit [font:inherit] placeholder:text-muted-foreground placeholder:opacity-100 focus-visible:outline-none"
                 value={query}
                 placeholder="Search tags"
                 aria-label="Search tags"
@@ -484,7 +484,7 @@ function DocumentActions({
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="ub-actions-trigger size-11 cursor-pointer rounded-(--radius-sm) border border-transparent bg-transparent font-[inherit] [font-style:inherit] [font-weight:inherit] text-xl leading-none text-(--muted-foreground) hover:border-(--border) hover:bg-(--secondary) hover:text-(--foreground) data-[state=open]:border-(--border) data-[state=open]:bg-(--secondary) data-[state=open]:text-(--foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
+                className="ub-actions-trigger size-11 cursor-pointer rounded-(--radius-sm) border border-transparent bg-transparent font-[inherit] [font-style:inherit] [font-weight:inherit] ub-type-h2 text-(--muted-foreground) hover:border-(--border) hover:bg-(--secondary) hover:text-(--foreground) data-[state=open]:border-(--border) data-[state=open]:bg-(--secondary) data-[state=open]:text-(--foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
                 aria-label="Document actions"
                 title="Document actions"
               >

@@ -419,7 +419,7 @@ export function DocumentList({
           </div>
         </fieldset>
         <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
-        {mode === "decision" && <label className="flex items-center gap-2 text-sm text-(--muted-foreground)">
+        {mode === "decision" && <label className="flex items-center gap-2 ub-type-ui text-(--muted-foreground)">
           State
           <select
             aria-label="Decision state"
@@ -436,7 +436,7 @@ export function DocumentList({
         </div>
         {searchClient === null && searchText === "" && <p className="ub-docs-search-status ub-muted">Search is unavailable. Open this workspace with ub open to use local search.</p>}
         {onTogglePin === null && rows.length > 0 && (
-          <p id={pinUnavailableId} className="ub-docs-pin-unavailable mb-2 mt-0 text-xs text-(--muted-foreground)">
+          <p id={pinUnavailableId} className="ub-docs-pin-unavailable mb-2 mt-0 ub-type-small text-(--muted-foreground)">
             Pin changes unavailable while the sidebar is not ready to write.
           </p>
         )}
@@ -518,9 +518,9 @@ export function DocumentList({
                       </span>
                       {entry.topicState === undefined
                         ? <LifecycleBadge kind={entry.kind} status={entry.status} />
-                        : <span className="text-sm text-(--muted-foreground)">{TOPIC_STATES[entry.topicState]}</span>}
+                        : <span className="ub-type-ui text-(--muted-foreground)">{TOPIC_STATES[entry.topicState]}</span>}
                       {entry.topicState !== undefined && entry.approvalChanged && (
-                        <span className="text-sm text-(--muted-foreground)">Changed after approval</span>
+                        <span className="ub-type-ui text-(--muted-foreground)">Changed after approval</span>
                       )}
                     </button>
                     {entry.topicState !== undefined && <div className="ub-docs-topic-detail">

@@ -32,11 +32,11 @@ function Fact({
 }): ReactElement {
   return (
     <div className="ub-sync-fact flex items-baseline gap-2 py-[0.15rem]">
-      <dt className="w-[4.5rem] flex-none text-xs/[1.5] text-(--muted-foreground)">
+      <dt className="w-[4.5rem] flex-none ub-type-caption text-(--muted-foreground)">
         {label}
       </dt>
       {/* Identifiers and exact timestamps wrap inside the panel. */}
-      <dd className={`m-0 min-w-0 text-xs/[1.5] [overflow-wrap:anywhere]${mono ? " font-mono" : ""}`}>
+      <dd className={`m-0 min-w-0 ub-type-caption [overflow-wrap:anywhere]${mono ? " font-mono" : ""}`}>
         {value}
       </dd>
     </div>
@@ -84,7 +84,7 @@ export function SyncPanel({
 
   return (
     <div>
-      <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
+      <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Sync</h2>
       <dl className="ub-sync-facts m-0 mb-5">
         <Fact label="Hub" value={namedEndpoint?.url ?? UNKNOWN} mono />
         {/* Always name the configuration source beside its hub endpoint. */}
@@ -126,7 +126,7 @@ export function SyncPanel({
           />
         )}
       </dl>
-      <h2 className="m-0 mb-[0.4rem] text-[0.7rem] tracking-[0.06em] uppercase text-muted-foreground">Present now</h2>
+      <h2 className="m-0 mb-[0.4rem] ub-type-caption tracking-[0.06em] uppercase text-muted-foreground">Present now</h2>
       {presence.length === 0 ? (
         <p className="ub-muted">Nobody else is in this room.</p>
       ) : (

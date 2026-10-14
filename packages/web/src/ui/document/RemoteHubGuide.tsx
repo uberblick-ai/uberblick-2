@@ -80,12 +80,12 @@ export function RemoteHubGuide(): ReactElement {
   const claimable = state !== null && state !== "checking" && state.canClaim;
   const closed = state !== null && state !== "checking" && !state.unclaimed;
   const origin = window.location.origin;
-  const commandClass = "mt-2 block select-text break-all rounded-md bg-(--muted) p-3 font-mono text-sm text-(--foreground)";
+  const commandClass = "mt-2 block select-text break-all rounded-md bg-(--muted) p-3 font-mono ub-type-ui text-(--foreground)";
   return (
     <PaneNotice>
       <section className="mx-auto w-full max-w-xl p-6 text-(--foreground)" aria-label="Hub setup guide">
         <div role="status">
-          <h1 className="m-0 text-xl font-semibold">
+          <h1 className="m-0 ub-type-h2 font-semibold">
             {state === "checking" ? "Checking this hub’s setup state…" :
               state === null ? "This hub’s setup state could not be confirmed" :
                 closed ? "This hub can no longer be claimed" :
@@ -122,7 +122,7 @@ export function RemoteHubGuide(): ReactElement {
         )}
         {(claimable || closed) && (
           <>
-            <h2 className="mt-6 text-base font-semibold">
+            <h2 className="mt-6 ub-type-body font-semibold">
               {claimable ? "Claim from your computer" : "Work from your computer"}
             </h2>
             <p className="mt-2">
@@ -144,7 +144,7 @@ export function RemoteHubGuide(): ReactElement {
                 <code className={commandClass}>ub open</code>
               </li>
             </ol>
-            <p className="mt-4 text-sm text-(--muted-foreground)">
+            <p className="mt-4 ub-type-small text-(--muted-foreground)">
               These steps do not sign this browser in or open documents to visitors here.
             </p>
           </>

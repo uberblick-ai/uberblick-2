@@ -43,8 +43,8 @@ function Fact({ label, children, mono = false, tabular = false }: {
 }): ReactElement {
   return (
     <div className="flex items-baseline justify-between gap-2 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
-      <dt className="text-sm">{label}</dt>
-      <dd className={`m-0 max-w-[70%] text-sm text-right wrap-anywhere${mono ? " font-(family-name:--font-mono)" : ""}${tabular ? " tabular-nums" : ""}`}>
+      <dt className="ub-type-ui">{label}</dt>
+      <dd className={`m-0 max-w-[70%] ub-type-ui text-right wrap-anywhere${mono ? " font-(family-name:--font-mono)" : ""}${tabular ? " tabular-nums" : ""}`}>
         {children}
       </dd>
     </div>
@@ -81,7 +81,7 @@ function GeneralSettings({
   return (
     <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
       <div className="mx-auto w-full max-w-3xl">
-        <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+        <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
           General
         </h1>
         <WorkspaceNameForm key={workspace.uuid} workspace={workspace} connection={catalogConnection} />
@@ -158,7 +158,7 @@ function WorkspaceNameForm({
   return (
     <div className="mb-4 flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
       <form className="flex flex-col gap-2" onSubmit={save}>
-        <label htmlFor="ub-workspace-name" className="text-sm font-medium">Workspace name</label>
+        <label htmlFor="ub-workspace-name" className="ub-type-ui font-medium">Workspace name</label>
         <div className="flex gap-2">
           <Input
             id="ub-workspace-name"
@@ -175,14 +175,14 @@ function WorkspaceNameForm({
           />
           <Button type="submit" disabled={!writable}>Save</Button>
         </div>
-        <p id="ub-workspace-name-help" className="m-0 text-sm">
+        <p id="ub-workspace-name-help" className="m-0 ub-type-small">
           Use 1–64 characters, with no control or format characters. Spaces at the ends are removed.
         </p>
       </form>
-      {!writable && <p className="m-0 text-sm" role="status">
+      {!writable && <p className="m-0 ub-type-ui" role="status">
         {arrived ? "Workspace renaming is unavailable while this page is disconnected." : "Waiting for workspace settings…"}
       </p>}
-      {error !== null && <p className="m-0 text-sm" role="alert">{error}</p>}
+      {error !== null && <p className="m-0 ub-type-ui" role="alert">{error}</p>}
     </div>
   );
 }
@@ -238,7 +238,7 @@ function MainRepositoryForm({
   return (
     <div className="mb-4 flex flex-col gap-3">
       <form className="flex flex-col gap-2" onSubmit={save}>
-        <label htmlFor="ub-main-repository" className="text-sm font-medium">Main repository</label>
+        <label htmlFor="ub-main-repository" className="ub-type-ui font-medium">Main repository</label>
         <div className="flex gap-2">
           <Input
             id="ub-main-repository"
@@ -255,10 +255,10 @@ function MainRepositoryForm({
           <Button type="submit" variant="outline" aria-label="Save main repository" disabled={!writable}>Save</Button>
         </div>
       </form>
-      {!writable && <p className="m-0 text-sm" role="status">
+      {!writable && <p className="m-0 ub-type-ui" role="status">
         {arrived ? "Main repository changes are unavailable while this page is disconnected." : "Waiting for workspace settings…"}
       </p>}
-      {error !== null && <p id="ub-main-repository-error" className="m-0 text-sm" role="alert">{error}</p>}
+      {error !== null && <p id="ub-main-repository-error" className="m-0 ub-type-ui" role="alert">{error}</p>}
     </div>
   );
 }
@@ -329,11 +329,11 @@ function TagSettings({
     return (
       <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
         <div className="mx-auto w-full max-w-3xl">
-          <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+          <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
             Tags
           </h1>
           <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
-            <p className="m-0 text-sm" role="status">
+            <p className="m-0 ub-type-ui" role="status">
               Waiting for the tag catalog…
             </p>
           </div>
@@ -386,17 +386,17 @@ function TagSettings({
 
   const list = (state: "active" | "retired", items: TagCatalogEntry[]) => (
     <section className="min-w-0" aria-labelledby={`ub-${state}-tags`}>
-      <h2 id={`ub-${state}-tags`} className="mt-0 mb-2 text-base font-medium">
+      <h2 id={`ub-${state}-tags`} className="mt-0 mb-2 ub-type-h2 font-semibold">
         {state === "active" ? "Active" : "Retired"}
       </h2>
       {items.length === 0 ? (
-        <p className="m-0 text-sm">No {state} tags.</p>
+        <p className="m-0 ub-type-ui">No {state} tags.</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tag-list>
           {items.map((entry, at) => (
             <li
               key={entry.id}
-              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 text-sm"
+              className="flex items-center justify-between gap-3 rounded-(--radius-sm) border border-(--border) p-2 ub-type-body"
             >
               <span className="min-w-0 wrap-anywhere">{entry.name}</span>
               <Button
@@ -420,12 +420,12 @@ function TagSettings({
   return (
     <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
       <div className="mx-auto w-full max-w-3xl">
-        <h1 id="ub-settings-title" className="mt-0 mb-4 text-2xl font-medium">
+        <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
           Tags
         </h1>
         <div className="flex flex-col gap-4 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
           <form className="flex flex-col gap-2" onSubmit={create}>
-            <label htmlFor="ub-new-tag" className="text-sm font-medium">Create a tag</label>
+            <label htmlFor="ub-new-tag" className="ub-type-ui font-medium">Create a tag</label>
             <div className="flex gap-2">
               <Input
                 className="flex-1"
@@ -442,18 +442,18 @@ function TagSettings({
                 Create
               </Button>
             </div>
-            <p id="ub-tag-name-help" className="m-0 text-sm">
+            <p id="ub-tag-name-help" className="m-0 ub-type-small">
               Lowercase letters and numbers, separated by hyphens; 30 characters
               maximum.
             </p>
           </form>
           {!writable && (
-            <p className="m-0 text-sm" role="status">
+            <p className="m-0 ub-type-ui" role="status">
               Tag changes are unavailable while this page is disconnected.
             </p>
           )}
           {error !== null && (
-            <p className="m-0 rounded-(--radius-sm) border border-destructive p-2 text-sm" role="alert">
+            <p className="m-0 rounded-(--radius-sm) border border-destructive p-2 ub-type-ui" role="alert">
               {error}
             </p>
           )}
