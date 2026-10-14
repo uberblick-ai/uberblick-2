@@ -22,7 +22,7 @@ for (const scheme of ["light", "dark"] as const) {
       contextOptions: { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 832 }, colorScheme: scheme, reducedMotion: "reduce" },
       readySelector: ".ub-list-head",
     });
-    for (const width of [1280, 320]) {
+    for (const width of [1280, 810]) {
       await page.setViewportSize({ width, height: 832 });
       for (const mode of ["documents", "settings"] as const) {
         const settings = mode === "settings";

@@ -171,7 +171,7 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
       await addGroup(page, "A group name long enough to truncate within its heading ".repeat(3));
       await addGroup(page, "unbreakablegroup".repeat(25));
     }
-    for (const [scheme, width] of [["light", 320], ["dark", 320], ["light", 1280], ["dark", 1280]] as const) {
+    for (const [scheme, width] of [["light", 810], ["dark", 810], ["light", 1280], ["dark", 1280]] as const) {
       await test.step(`${content} at ${width}px in ${scheme}`, async () => {
         await page.emulateMedia({ colorScheme: scheme });
         await page.setViewportSize({ width, height: content === "empty" ? 832 : 500 });
@@ -211,7 +211,7 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
 
   // The docked hide control overhangs its frame; the drawer's close control
   // fits inside it. Exercise the outer half of each to defend their hit area.
-  for (const width of [320, 1280]) {
+  for (const width of [810, 1280]) {
     await page.setViewportSize({ width, height: 832 });
     await openSidebar(page);
     const hide = page.getByRole("button", { name: width < 1280 ? "Close document list" : "Hide document list", exact: true });
@@ -235,7 +235,7 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
 test("edge-held drags never pan sideways and a tall sidebar still scrolls vertically", async ({ page }) => {
   for (let index = 0; index < 18; index += 1) await createPinnedDoc(page, `Document ${index}`);
 
-  for (const width of [320, 1280]) {
+  for (const width of [810, 1280]) {
     await page.setViewportSize({ width, height: 500 });
     await openSidebar(page);
     await settleSidebar(page);

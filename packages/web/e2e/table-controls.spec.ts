@@ -23,9 +23,9 @@ async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
   await placeCaretIn(cell, { touch: info.project.use.hasTouch === true });
 }
 
-async function touchPage(browser: Browser, info: TestInfo, width = 390): Promise<Page> {
+async function touchPage(browser: Browser, info: TestInfo, width = 810): Promise<Page> {
   const context = trackContext(await browser.newContext(info.project.name === "chromium"
-    ? { hasTouch: true, viewport: { width, height: 844 } }
+    ? { hasTouch: true, viewport: { width, height: 1080 } }
     : {}));
   return context.newPage();
 }

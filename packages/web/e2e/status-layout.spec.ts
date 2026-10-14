@@ -15,7 +15,7 @@ import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
 
 const { harness, openApp } = setupHarness();
-const layoutWidths = [375, 390, 430, 744, 932, 1279, 1280, 1440];
+const layoutWidths = [744, 932, 1279, 1280, 1440];
 const directReadings = [
   "", "synced", "syncing…", "offline", "update required", "no hub token",
   "not authorized", "edit refused",

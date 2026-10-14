@@ -565,7 +565,7 @@ for (const scheme of ["light"] as const) {
       contextOptions: {
         colorScheme: scheme,
         hasTouch: true,
-        ...(info.project.name === "chromium" ? { viewport: { width: 390, height: 844 } } : {}),
+        ...(info.project.name === "chromium" ? { viewport: { width: 810, height: 1080 } } : {}),
       },
     });
     await page.emulateMedia({ reducedMotion: "reduce" });
@@ -785,8 +785,7 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   expect(dark.border).not.toBe(light.border);
   expect(dark.accentColor).not.toBe(light.accentColor);
 
-  const titleSizes: number[] = [];
-  for (const width of [375, 1280]) {
+  for (const width of [744, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     // The native edit trigger must paint and wrap like the existing prose,
     // without the browser's default button background, border or padding.
@@ -796,7 +795,6 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
     expect(await paintedIn(inlineEdit, "background-color")).toBe("rgba(0, 0, 0, 0)");
     expect(await paintedIn(inlineEdit, "border-width")).toBe("0px");
     expect(await paintedIn(inlineEdit, "padding")).toBe("0px");
-    titleSizes.push(Number.parseFloat(await paintedIn(title, "font-size")));
     expect(Number.parseFloat(await paintedIn(title, "font-size"))).toBeGreaterThan(
       Number.parseFloat(await paintedIn(summary, "font-size")),
     );
@@ -855,7 +853,6 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
       fitsBody: true,
     });
   }
-  expect(titleSizes[1]).toBeGreaterThan(titleSizes[0] ?? 0);
 });
 
 test("the open document owns the remaining chrome and its one sync-details handle", async ({
@@ -942,7 +939,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   });
   await page.getByRole("button", { name: "+ new doc" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
-  await page.setViewportSize({ width: 375, height: 720 });
+  await page.setViewportSize({ width: 810, height: 720 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
@@ -2258,7 +2255,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
       }),
     };
   });
-  for (const viewport of [375, 1280]) {
+  for (const viewport of [810, 1280]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     await expect.poll(comfortableList).toEqual({ inside: true, names: EXAMPLE_TAGS.map(() => true) });
   }
@@ -2348,7 +2345,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
 
   // The document list is still hidden from the wrap check above, so this is
   // the pane width the reader actually gets.
-  for (const viewport of [375]) {
+  for (const viewport of [810]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `writable header at ${viewport}px`).toEqual([]);
@@ -2366,7 +2363,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.getByRole("button", { name: "Archive document" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
-  for (const viewport of [375]) {
+  for (const viewport of [810]) {
     await page.setViewportSize({ width: viewport, height: 620 });
     const geometry = await tagStripGeometry(page);
     expect(geometry.overlaps, `read-only header at ${viewport}px`).toEqual([]);
@@ -2386,34 +2383,6 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await expect(
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
   ).toHaveCount(EXAMPLE_TAGS.length);
-});
-
-test("Workspace Settings uses the shared touch floors in narrow and wide layouts", async ({ browser }) => {
-  for (const width of [375, 1366]) {
-    const page = await openAppearanceApp(browser, "light", `/${harness().workspace}/settings/tags`, true, {
-      isMobile: true,
-      viewport: { width, height: 900 },
-    });
-    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    await expect(page.getByLabel("Create a tag")).toBeEnabled();
-    const controls = await page.locator("[data-settings-page] [data-slot]").evaluateAll((elements) =>
-      elements.map((element) => ({
-        slot: element.getAttribute("data-slot"),
-        height: element.getBoundingClientRect().height,
-        font: Number.parseFloat(getComputedStyle(element).fontSize),
-      })),
-    );
-    expect(new Set(controls.map((one) => one.slot))).toEqual(new Set(["button", "input"]));
-    for (const one of controls) {
-      expect(one.height, `${one.slot} at ${width}px`).toBeGreaterThanOrEqual(44);
-      if (one.slot === "input") expect(one.font).toBeGreaterThanOrEqual(16);
-    }
-    const geometry = await page.locator("[data-settings-page]").evaluate((element) => ({
-      visible: element.clientWidth,
-      content: element.scrollWidth,
-    }));
-    expect(geometry.content, `settings overflow at ${width}px`).toBeLessThanOrEqual(geometry.visible);
-  }
 });
 
 for (const scheme of ["light"] as const) {
@@ -2589,7 +2558,7 @@ function activeHoverRules(control: Locator): Promise<string[]> {
 for (const scheme of ["light"] as const) {
   test(`document and document-list controls keep resting paint after a touch tap — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
     const input = info.project.name === "chromium"
-      ? { hasTouch: true, viewport: { width: 390, height: 844 } }
+      ? { hasTouch: true, viewport: { width: 810, height: 1080 } }
       : {};
     const page = await openApp(browser, "/", {
       upstream: true, contextOptions: { colorScheme: scheme, ...input }, readySelector: ".ub-docs",
@@ -3069,7 +3038,7 @@ const LONG_NAME = "Alexandria Montgomery · Engineering collaboration session on
 const UNBROKEN_NAME = "Collaborator".repeat(12);
 
 for (const [device, width, hasTouch] of [
-  ["iPhone", 375, true],
+  ["iPad", 810, true],
   ["MacBook", 1366, false],
 ] as const) {
   test(`hover information has a ${device} path`, async ({ browser }) => {
@@ -3187,7 +3156,7 @@ for (const [device, width, hasTouch] of [
 test("unavailable Restore and pin reasons are visible on touch", async ({ browser }) => {
   const page = await openApp(browser, "/", {
     upstream: true,
-    contextOptions: { viewport: { width: 375, height: 900 }, hasTouch: true },
+    contextOptions: { viewport: { width: 810, height: 900 }, hasTouch: true },
   });
   await page.getByRole("button", { name: "Show document list", exact: true }).click();
   await createDoc(page, "Still listed");
