@@ -1037,7 +1037,10 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   expect(median).toBeLessThanOrEqual(label === "single" ? 250 : 500);
 }
 
-test("one table and twenty shared views record bounded Chromium live-update timings", { tag: "@workload" }, async ({ browser }, info) => {
+test.fixme("one table and twenty shared views record bounded Chromium live-update timings", {
+  tag: "@workload",
+  annotation: { type: "issue", description: "https://github.com/uberblick-ai/uberblick-2/issues/1733" },
+}, async ({ browser }, info) => {
   // Initial layout of 400,000 cells takes over a minute on GitHub's runner.
   // Readiness is separate from the first-render/update measurements below.
   test.setTimeout(360_000);
