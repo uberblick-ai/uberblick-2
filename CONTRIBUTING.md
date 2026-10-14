@@ -165,9 +165,9 @@ system packages, and a missing library fails the full run. Use
 for keyboard, native selection menu and composition are in the
 [manual input checklist](packages/web/e2e/device-input.md).
 
-CI runs two Chromium shards, the WebKit iPad project and the workload project
+CI runs two Chromium shards, two WebKit iPad shards and the workload project
 on separate Linux runners. The required `browser e2e` aggregate succeeds only
-when every job succeeds, including both shards. The workload job uses
+when every job succeeds, including every shard. The workload job uses
 `--project=chromium-workload --no-deps` so it cannot rerun interactive tests.
 A local `mise run e2e` runs all projects, with workload probes after the
 interactive projects. Retries stay disabled, and sharding keeps each file's
