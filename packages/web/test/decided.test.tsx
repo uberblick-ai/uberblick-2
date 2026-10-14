@@ -31,8 +31,8 @@ import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import * as guardedBinding from "../src/editor/guarded-binding.js";
 import { findLinkConflicts } from "../src/editor/palette.js";
 import { plainText } from "../src/editor/ytext.js";
-import { EditorPane } from "../src/ui/EditorPane.js";
-import { threadCardId } from "../src/ui/threads.js";
+import { EditorPane } from "../src/ui/document/EditorPane.js";
+import { threadCardId } from "../src/ui/comments/threads.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const UUID = "d4ee98ac-9a9c-4a81-a68d-d8ecc09ca509";

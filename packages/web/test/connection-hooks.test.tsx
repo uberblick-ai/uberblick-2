@@ -25,7 +25,7 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { AGENT_CLIENT, AWARENESS_FALLBACK_COLOR } from "../src/collab/identity.js";
-import { presenceKey, readPresence } from "../src/ui/doc-chrome.js";
+import { presenceKey, readPresence } from "../src/ui/status/doc-chrome.js";
 import { AGENT_CURSOR_GRACE_MS, agentCursorAwareness } from "../src/editor/collaboration.js";
 import {
   useAgentSessions,

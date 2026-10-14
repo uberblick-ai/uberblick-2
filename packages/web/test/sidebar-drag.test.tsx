@@ -9,7 +9,7 @@ import { Feedback } from "@dnd-kit/dom";
 import * as Y from "yjs";
 import { createGroup, pinDoc, readSidebar, sidebarRoom } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import { SidebarDragProvider } from "../src/ui/sidebar-drag.js";
+import { SidebarDragProvider } from "../src/ui/sidebar/sidebar-drag.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";

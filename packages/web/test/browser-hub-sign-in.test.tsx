@@ -1,7 +1,7 @@
 import { fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "./react-render.js";
-import { BROWSER_SESSION_POLL_MS, BROWSER_SESSION_STORAGE_KEY, BrowserHubSignIn } from "../src/ui/BrowserHubSignIn.js";
+import { BROWSER_SESSION_POLL_MS, BROWSER_SESSION_STORAGE_KEY, BrowserHubSignIn } from "../src/ui/document/BrowserHubSignIn.js";
 
 const fetchMock = vi.fn<typeof fetch>();
 const token = "a".repeat(43);

@@ -27,7 +27,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import type { ReactElement } from "react";
-import { WorkspaceSwitcher } from "../src/ui/WorkspaceSwitcher.js";
+import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
 import { parseRoute, useRoutePath, workspaceList } from "../src/ui/route.js";
 import type { Workspace } from "../src/ui/route.js";
 

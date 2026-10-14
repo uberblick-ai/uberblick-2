@@ -12,7 +12,7 @@ import { findForeignBlocks, findLinkConflicts, LINK_CONFLICT } from "../src/edit
 import { retypeSelectedBlock } from "../src/editor/retype.js";
 import { commentTargetOf } from "../src/editor/selection.js";
 import { bindGuardedEditor } from "../src/editor/guarded-binding.js";
-import { threadsFromDoc } from "../src/ui/threads.js";
+import { threadsFromDoc } from "../src/ui/comments/threads.js";
 import { mountEditor } from "./helpers.js";
 import { onTestCleanup } from "./test-cleanup.js";
 

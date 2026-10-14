@@ -1,9 +1,9 @@
 import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocalServing } from "../src/config.js";
-import { useHubAdministration } from "../src/ui/hub-administration.js";
+import { useHubAdministration } from "../src/ui/settings/hub-administration.js";
 import type { AccessAction, AccessAnswer } from "../src/shell/workspace-access.js";
-import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/serving-status.js";
+import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/status/serving-status.js";
 
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
 const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };

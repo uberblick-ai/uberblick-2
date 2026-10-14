@@ -32,11 +32,11 @@ import {
 } from "y-protocols/awareness";
 import { appendBlock, initDoc } from "@uberblick/schema";
 import type { ReactElement } from "react";
-import { StatusLine } from "../src/ui/EditorPane.js";
-import { PeerCluster } from "../src/ui/PeerCluster.js";
+import { StatusLine } from "../src/ui/document/EditorPane.js";
+import { PeerCluster } from "../src/ui/status/PeerCluster.js";
 import { usePresence } from "../src/ui/hooks.js";
-import { groupAgentPresence, presenceLabel, samePresence } from "../src/ui/doc-chrome.js";
-import type { RemotePresence } from "../src/ui/doc-chrome.js";
+import { groupAgentPresence, presenceLabel, samePresence } from "../src/ui/status/doc-chrome.js";
+import type { RemotePresence } from "../src/ui/status/doc-chrome.js";
 import { AGENT_CLIENT, WEB_CLIENT } from "../src/collab/identity.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 

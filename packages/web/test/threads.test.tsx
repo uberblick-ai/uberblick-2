@@ -38,7 +38,7 @@ import {
   tableCellText,
   tableRows,
 } from "@uberblick/schema";
-import { ThreadsPane } from "../src/ui/ThreadsPane.js";
+import { ThreadsPane } from "../src/ui/comments/ThreadsPane.js";
 import {
   blockRefLabel,
   commentTimestamp,
@@ -46,8 +46,8 @@ import {
   observeThreads,
   threadIdFromTarget,
   threadsFromDoc,
-} from "../src/ui/threads.js";
-import type { ThreadFocus, ThreadView } from "../src/ui/threads.js";
+} from "../src/ui/comments/threads.js";
+import type { ThreadFocus, ThreadView } from "../src/ui/comments/threads.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { mountEditor } from "./helpers.js";
 import { useThreads } from "../src/ui/hooks.js";

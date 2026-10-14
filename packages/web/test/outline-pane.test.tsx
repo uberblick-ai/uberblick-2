@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import * as Y from "yjs";
 import { appendBlock, initDoc, setBlockLevel } from "@uberblick/schema";
 import type { RoomConnection } from "../src/collab/rooms.js";
-import { OutlinePane } from "../src/ui/OutlinePane.js";
+import { OutlinePane } from "../src/ui/document/OutlinePane.js";
 
 it("closes when the last eligible heading disappears and stays closed when it returns", async () => {
   const ydoc = new Y.Doc();

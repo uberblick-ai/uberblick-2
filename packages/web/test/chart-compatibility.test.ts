@@ -15,7 +15,7 @@ import {
   describeForeignBlocks,
   findForeignBlocks,
 } from "../src/editor/palette.js";
-import { EditorPane } from "../src/ui/EditorPane.js";
+import { EditorPane } from "../src/ui/document/EditorPane.js";
 import { act, render } from "./react-render.js";
 import { onTestCleanup } from "./test-cleanup.js";
 

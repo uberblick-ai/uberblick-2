@@ -3,7 +3,7 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import { fireEvent, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "./react-render.js";
-import { DecisionsBlock, DecisionsLink, decisionsSummary } from "../src/ui/DecisionsBlock.js";
+import { DecisionsBlock, DecisionsLink, decisionsSummary } from "../src/ui/document/DecisionsBlock.js";
 
 const NOW = Date.parse("2026-10-12T12:00:00Z");
 const FIRST = "00000000-0000-4000-8000-000000000001";

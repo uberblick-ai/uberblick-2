@@ -7,7 +7,7 @@ import { common, createLowlight } from "lowlight";
 import { redo, undo } from "y-prosemirror";
 import * as Y from "yjs";
 import { appendBlock, deleteBlock, insertBlock, setBlockType } from "@uberblick/schema";
-import { CodeLanguageControl } from "../src/ui/CodeLanguageControl.js";
+import { CodeLanguageControl } from "../src/ui/editor-controls/CodeLanguageControl.js";
 import { mountEditor, snapshotFragment } from "./helpers.js";
 import { act, renderSettled } from "./react-render.js";
 

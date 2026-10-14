@@ -1666,7 +1666,7 @@ h3.ub-heading {
 
 /* Annotations retain an amber underline as well as their tinted ground.
    Resolved ranges instead use a dotted neutral line with no ground, emitted
-   per thread by resolvedHighlightCss in ui/threads.ts. */
+   per thread by resolvedHighlightCss in ui/comments/threads.ts. */
 .ub-comment {
   background: var(--brand-subtle);
   border-bottom: 2px solid var(--brand);

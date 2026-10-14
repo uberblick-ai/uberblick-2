@@ -27,7 +27,7 @@ import {
   agentCursorAwareness,
   withDepartedAgentCursors,
 } from "../src/editor/collaboration.js";
-import { readPresence } from "../src/ui/doc-chrome.js";
+import { readPresence } from "../src/ui/status/doc-chrome.js";
 
 const AGENT_NAME = "Uberblick Coordinator Agent";
 

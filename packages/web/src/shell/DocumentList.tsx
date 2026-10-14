@@ -6,8 +6,8 @@ import { decisionCurrentRecord, decisionTopicState, readDirectoryTags, resolveDe
 import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
-import { LifecycleBadge } from "../ui/LifecycleBadge.js";
-import { TOPIC_STATES } from "../ui/decision-state.js";
+import { LifecycleBadge } from "../ui/document/LifecycleBadge.js";
+import { TOPIC_STATES } from "../ui/document/decision-state.js";
 import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { PickerList } from "../ui/PickerList.js";
 import { useTagCatalog } from "../ui/tags.js";

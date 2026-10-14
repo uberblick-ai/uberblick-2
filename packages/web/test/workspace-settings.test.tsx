@@ -17,7 +17,7 @@ import {
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
 import { notifyTransient } from "../src/notifications.js";
-import { WorkspaceSettings } from "../src/ui/WorkspaceSettings.js";
+import { WorkspaceSettings } from "../src/ui/settings/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
 import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
 
