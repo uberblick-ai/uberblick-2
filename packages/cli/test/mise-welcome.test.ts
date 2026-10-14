@@ -28,6 +28,7 @@ const EXPECTED = `uberblick
   check        mise run lint
                mise run typecheck
                mise run test
+  full CI      mise run ci
   all commands mise tasks
 `;
 
