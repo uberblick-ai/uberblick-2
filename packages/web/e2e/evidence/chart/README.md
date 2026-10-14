@@ -78,8 +78,8 @@ python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path
 The paired desktop/iPad test is tagged for WebKit; it explicitly creates the
 iPad context instead of treating a narrow desktop viewport as a touch device.
 Phone-size screenshots retain design evidence through Chromium; phone WebKit
-coverage is deferred. Run the supported desktop and iPad WebKit projects:
-`mise run e2e -- chart.spec.ts --project=webkit-macbook --project=webkit-ipad`.
+coverage is deferred. Run the WebKit project; the paired test opens both contexts:
+`mise run e2e -- chart.spec.ts --project=webkit-ipad`.
 Copy the Chromium evidence before this second run, because Playwright clears
 its prior output directory.
 

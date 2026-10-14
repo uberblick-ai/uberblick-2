@@ -10,10 +10,11 @@ name: CI
 #
 # Linux runs everything. Browser coverage uses independent interactive runners
 # and a separate workload runner, all behind one required aggregate check.
-# macOS runs the tests again, because contributors and
-# the loop work on Macs and some failures show up on only one of the two; lint
-# and typecheck do not depend on the platform. Browser e2e stays Linux-only
-# until its specs hold on GitHub's macOS runners.
+# WebKit runs on iPad only; Chromium covers the desktop.
+# macOS reruns only the suites whose behaviour can differ by OS (`mise run
+# test-os`): contributors and the loop work on Macs and run the full suite
+# there, and lint, typecheck and pure logic do not depend on the platform.
+# Browser e2e stays Linux-only until its specs hold on GitHub's macOS runners.
 #
 # No secrets: `install`, `lint`, `typecheck`, `test`, `site` and `e2e` need none.
 
@@ -76,8 +77,10 @@ jobs:
         run: mise run lint
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run typecheck
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run test
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'macOS' }}
+        run: mise run test-os
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
@@ -188,7 +191,7 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
-        run: mise run e2e --project=webkit-ipad --project=webkit-macbook
+        run: mise run e2e --project=webkit-ipad
 
   e2e-workload:
     name: browser workload
