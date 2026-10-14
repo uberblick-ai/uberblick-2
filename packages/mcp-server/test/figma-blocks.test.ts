@@ -99,16 +99,16 @@ describe("Figma blocks through MCP", () => {
   });
 
   it.each([
-    "title: No URL\n\nCaption",
-    "url: https://example.com/design/key\n\nCaption",
-    "url: http://www.figma.com/design/key\n\nCaption",
-    "url: https://www.figma.com/deck/key\n\nCaption",
-    "url: https://www.figma.com/design/key/branch/other\n\nCaption",
-    `url: ${LINK}\nunknown: value\n\nCaption`,
-    `url: ${LINK}\nurl: ${LINK}\n\nCaption`,
-    `url: ${LINK}\nNot a key\n\nCaption`,
-    ...["239", "961", "480.5", "pixels", ""].map(height => `url: ${LINK}\nheight: ${height}\n\nCaption`),
-  ])("refuses invalid create, insert and edit content before any write: %s", async (invalid) => {
+    ["title: No URL\n\nCaption", false],
+    ["url: https://example.com/design/key\n\nCaption", true],
+    ["url: http://www.figma.com/design/key\n\nCaption", true],
+    ["url: https://www.figma.com/deck/key\n\nCaption", false],
+    ["url: https://www.figma.com/design/key/branch/other\n\nCaption", false],
+    [`url: ${LINK}\nunknown: value\n\nCaption`, false],
+    [`url: ${LINK}\nurl: ${LINK}\n\nCaption`, false],
+    [`url: ${LINK}\nNot a key\n\nCaption`, false],
+    ...["239", "961", "480.5", "pixels", ""].map(height => [`url: ${LINK}\nheight: ${height}\n\nCaption`, false] as const),
+  ] as const)("refuses invalid create, insert and edit content before any write: %s", async (invalid, expectsHostError) => {
     const rig = await localRig();
     const created = await rig.ok("create_doc", { title: "Figma refusals", description: "Invalid content cannot make a partial write.",
       blocks: [{ type: "figma", text: SOURCE }] });
@@ -129,7 +129,7 @@ describe("Figma blocks through MCP", () => {
       expect(refused).toMatchObject({ isError: true, payload: { error: "invalid_figma", recoveryClass: "manual",
         applied: false, partial: false, synced: false } });
       expect(refused.payload.recovery).toContain("url");
-      if (invalid.includes("example.com") || invalid.includes("http://")) {
+      if (expectsHostError) {
         expect(refused.payload.message).toBe("figma blocks take figma.com links only; use a plain link for other sites");
       }
       if (invalid.includes("/deck/") || invalid.includes("/branch/")) {
