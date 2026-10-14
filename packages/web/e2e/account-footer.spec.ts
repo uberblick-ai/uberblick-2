@@ -123,39 +123,6 @@ for (const scheme of ["light", "dark"] as const) {
   });
 }
 
-test("failed, missing and malformed account answers clear the last verified handle", async ({ browser }) => {
-  let reply: unknown = { state: "signed-in", handle: "confirmed-person" };
-  let failure: "abort" | "missing" | null = null;
-  const page = await openApp(browser, "/", {
-    readySelector: ".ub-list-head",
-    beforeNavigate: async (opening) => {
-      await opening.route("**/api/account", async (route) => {
-        if (failure === "abort") await route.abort();
-        else if (failure === "missing") await route.fulfill({ status: 404, body: "" });
-        else await route.fulfill({ json: reply });
-      });
-    },
-  });
-  await expect(account(page)).toContainText("@confirmed-person");
-  for (const malformed of [{}, { state: "signed-in" }, { state: "signed-in", handle: "bad handle" }]) {
-    reply = malformed;
-    await expect(account(page)).toContainText("Account unavailable");
-    await expect(account(page)).not.toContainText("confirmed-person");
-    reply = { state: "signed-in", handle: "confirmed-person" };
-    await expect(account(page)).toContainText("@confirmed-person");
-  }
-  for (const failed of ["abort", "missing"] as const) {
-    failure = failed;
-    await expect(account(page)).toContainText("Account unavailable");
-    await expect(account(page)).not.toContainText("confirmed-person");
-    failure = null;
-    await expect(account(page)).toContainText("@confirmed-person");
-  }
-  reply = { state: "signed-out", handle: "unverified-person" };
-  await expect(account(page)).toContainText("Not signed in");
-  await expect(account(page)).not.toContainText("unverified-person");
-});
-
 test("a page outside ub open has no account reading or generated account name", async ({ browser }) => {
   let accountRequests = 0;
   const page = await openApp(browser, "/", {

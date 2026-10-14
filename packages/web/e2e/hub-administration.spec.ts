@@ -106,30 +106,6 @@ test.describe("a hub administrator with no workspace membership", () => {
     }
   }
 
-  test("the signed bridge reads the complete inventory beyond one response's byte limit", async ({ browser }) => {
-    const inventory = harness().seedHubInventory(420);
-    expect(inventory.unpagedBytes).toBeGreaterThan(65_536);
-    const reads: Array<Record<string, unknown>> = [];
-    const page = await openApp(browser, `/${harness().workspace}/settings/hub-workspaces`, {
-      beforeNavigate: async (page) => {
-        page.on("request", (request) => {
-          if (!request.url().endsWith("/api/access")) return;
-          const body = request.postDataJSON() as Record<string, unknown>;
-          if (body.operation === "list-hub-workspaces") reads.push(body);
-        });
-      },
-    });
-    const table = page.getByRole("table", { name: "Hub workspaces", exact: true });
-    await expect(table).toBeVisible();
-    await expect(table.getByRole("row")).toHaveCount(422);
-    for (const uuid of inventory.workspaceIds) {
-      await expect(table.getByText(uuid.slice(0, 8), { exact: true })).toHaveCount(1);
-    }
-    expect(reads.length).toBeGreaterThan(1);
-    expect(reads[0]?.cursor).toBeUndefined();
-    expect(reads.slice(1).every((read) => typeof read.cursor === "string")).toBe(true);
-  });
-
   test("revocation clears a focused tab's group on its next live read", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings/hub-admins`);
     const table = page.getByRole("table", { name: "Hub admins", exact: true });

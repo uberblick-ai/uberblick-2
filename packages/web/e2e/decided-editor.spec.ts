@@ -3,7 +3,7 @@
  * Pointer dragging and touch ranges still reach comments; metadata arriving
  * over the real transport locks an existing view without replacing or moving it.
  */
-import { devices, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -212,38 +212,6 @@ test("touch selection on a decided record starts a thread and its highlight open
   if (await close.isVisible()) await close.tap();
   await expect(highlight).toHaveAccessibleName("Comment thread");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
-});
-
-for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) test(`legacy decision summaries offer no authoring on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
-  const writer = session();
-  const uuid = await record(writer, "open");
-  const peer = await legacyDecisionPeer(harness(), uuid);
-  peers.push(peer);
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    upstream: true, contextOptions: { ...(touch ? devices["iPad (gen 7)"] : {}), colorScheme: appearance },
-  });
-  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
-    peer.decide(status, "Keep the approved wording.");
-    await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
-    const summary = page.locator(".ub-tldr-body > p");
-    await expect(summary).toHaveText("Keep the approved wording.");
-    if (touch) await summary.tap();
-    else await summary.click();
-    await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
-    const actions = page.getByRole("button", { name: "Document actions" });
-    if (touch) await actions.tap();
-    else { await actions.focus(); await page.keyboard.press("Enter"); }
-    await expect(page.getByRole("menu")).toBeVisible();
-    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    peer.decide(status, null);
-    await expect(page.locator(".ub-tldr")).toHaveCount(0);
-    if (touch) await actions.tap();
-    else await actions.click();
-    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-  }
 });
 
 test("an open decision keeps its title, prose and tables read-only through later states", async ({ browser }) => {

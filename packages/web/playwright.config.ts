@@ -5,8 +5,7 @@
  * no retries, no `webServer`:
  *
  * - **Parallel files, serial tests.** A spec's tests share one hub and one
- *   `ub open`; fresh-harness specs retain test scope. Two workers bound load,
- *   and separately started harnesses have a direct collision-free proof.
+ *   `ub open`; fresh-harness specs retain test scope. Two workers bound load.
  *   Global setup builds one run-owned bundle even for filtered runs. Only
  *   release-runtime, shared-controls and the compiled-loopback proof build separately.
  * - **No retries.** A real-browser test that only passes on the second attempt
