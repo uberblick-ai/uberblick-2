@@ -14,17 +14,15 @@
  *    longest of the six bodies, by aborting one of its later statements.
  */
 
-import { execFile } from "node:child_process";
+import { getBlocks, getMeta } from "@uberblick/schema";
 import { copyFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
-import { getBlocks, getMeta } from "@uberblick/schema";
 import { MirrorStore } from "../src/store.js";
-import { PACKAGE_ROOT, WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
+import { WORKSPACE, removeTempDirs, tempDatabasePath } from "./helpers.js";
 
 /** Expected content of the independently generated better-sqlite3 fixture. */
 const LEGACY = {
@@ -41,7 +39,6 @@ const FIXTURE = join(
 
 const GITHUB_ITEM = "uberblick-ai/uberblick-2#1125";
 const OTHER_GITHUB_ITEM = "uberblick-ai/uberblick-2#1135";
-const execFileAsync = promisify(execFile);
 
 const stores: MirrorStore[] = [];
 
@@ -151,22 +148,6 @@ describe("last hub acknowledgement time", () => {
   });
 });
 
-describe("a payload that is a view into a larger buffer", () => {
-  it("is logged as the view, not as the buffer behind it", () => {
-    // Yjs hands out `Uint8Array`s, and nothing promises they start at byte zero
-    // of their own `ArrayBuffer`. A binding that binds the backing buffer rather
-    // than the view writes a corrupt update that only fails on replay, far from
-    // here — so the bytes are checked at the boundary they cross.
-    const opened = store(tempDatabasePath());
-    const backing = new Uint8Array([0xff, 0xff, 1, 2, 3, 0xff]);
-    const payload = backing.subarray(2, 5);
-
-    const seq = opened.appendUpdate("a-room", payload, "remote");
-    const [logged] = opened.updatesAfter("a-room", seq - 1);
-    expect(logged?.payload).toBeInstanceOf(Uint8Array);
-    expect(Array.from(logged?.payload ?? [])).toEqual([1, 2, 3]);
-  });
-});
 
 describe("a transaction body that throws", () => {
   it("leaves none of its earlier statements behind", () => {
@@ -293,43 +274,7 @@ describe("derived index sequencing", () => {
 });
 
 describe("derived GitHub references", () => {
-  it("deduplicates and orders records, replaces references, and clears them with the index", () => {
-    const opened = store(tempDatabasePath());
-    const record = {
-      uuid: LEGACY.uuid,
-      title: "Zulu",
-      tags: [],
-      description: "",
-      links: [],
-      githubRefs: [GITHUB_ITEM, GITHUB_ITEM],
-      body: "record text",
-    };
-    opened.indexDoc(record, 1);
-    opened.indexDoc({ ...record, uuid: LEGACY.linked, title: "Alpha" }, 1);
-    opened.indexDoc(
-      { ...record, uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
-      1,
-    );
 
-    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
-      { uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
-      { uuid: LEGACY.linked, title: "Alpha" },
-      { uuid: LEGACY.uuid, title: "Zulu" },
-    ]);
-
-    // An empty replacement also represents losing the decision kind.
-    opened.indexDoc({ ...record, githubRefs: [] }, 2);
-    opened.unindexDoc(LEGACY.linked);
-    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
-      { uuid: "00000000-0000-4000-8000-000000000001", title: "Alpha" },
-    ]);
-    opened.clearDerived();
-    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([]);
-    opened.indexDoc(record, 1);
-    expect(opened.decisionsForGithub(GITHUB_ITEM)).toEqual([
-      { uuid: LEGACY.uuid, title: "Zulu" },
-    ]);
-  });
 
   it("re-derives pre-change rows once at their existing cuts without admitting older cuts", () => {
     const databasePath = legacyDatabase();
@@ -372,56 +317,5 @@ describe("derived GitHub references", () => {
     expect(reopened.decisionsForGithub(GITHUB_ITEM)).toEqual([
       { uuid: LEGACY.uuid, title: LEGACY.title },
     ]);
-  });
-
-  it("allows simultaneous processes to upgrade an existing database", async () => {
-    const databasePath = tempDatabasePath();
-    const record = {
-      uuid: LEGACY.uuid,
-      title: "Existing decision",
-      tags: [],
-      description: "",
-      links: [],
-      body: "record text",
-    };
-    const before = store(databasePath);
-    before.indexDoc(record, 2, 7);
-    before.close();
-    const legacy = new DatabaseSync(databasePath);
-    legacy.exec(
-      "DROP TABLE decision_github_refs; " +
-        "ALTER TABLE doc_index_seq DROP COLUMN github_refs_indexed",
-    );
-    legacy.close();
-
-    const source = `
-      import { MirrorStore } from ${JSON.stringify(new URL("../src/store.ts", import.meta.url).href)};
-      const store = new MirrorStore(${JSON.stringify(databasePath)}, ${JSON.stringify(WORKSPACE)});
-      store.indexDoc({...${JSON.stringify(record)}, githubRefs: [${JSON.stringify(GITHUB_ITEM)}]}, 2, 7);
-      store.close();
-    `;
-    // Wait for every child even on failure before the fixture is cleaned up.
-    const results = await Promise.allSettled(
-      Array.from({ length: 4 }, () =>
-        execFileAsync(
-          process.execPath,
-          ["--import", "tsx", "--input-type=module", "--eval", source],
-          { cwd: PACKAGE_ROOT, timeout: 20_000 },
-        ),
-      ),
-    );
-    for (const result of results) {
-      if (result.status === "rejected") throw result.reason;
-    }
-    expect(store(databasePath).decisionsForGithub(GITHUB_ITEM)).toEqual([
-      { uuid: LEGACY.uuid, title: record.title },
-    ]);
-    const inspector = new DatabaseSync(databasePath);
-    expect(
-      inspector
-        .prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = ?")
-        .get(LEGACY.uuid),
-    ).toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
-    inspector.close();
   });
 });

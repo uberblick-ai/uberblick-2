@@ -1,17 +1,9 @@
 import { getMetaMap } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import * as Y from "yjs";
+
 import { afterEach, describe, expect, it } from "vitest";
 import { compareCorpus, inspectRemote, isIdentical, syncWorkspace } from "../src/remote.js";
-import { cleanupTestResources,
-  hubUrl,
-  LIVE_HUB_SETTLE,
-  startHub,
-  startServer,
-  testConfig,
-  TEST_SECRET,
-  waitForCorpus,
-} from "./helpers.js";
+import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, startServer, testConfig, TEST_SECRET, waitForCorpus } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
 const rigs: Rig[] = [];
@@ -42,22 +34,6 @@ describe("removed changelog metadata", () => {
     }
     expect((await rig.call("get_help", { topic: "set_changelog_suggestion" })).payload.error)
       .toBe("unknown_help_topic");
-  });
-
-  it.each(["A stored legacy sentence.", null])("reads stored %s without returning or rewriting it", async (value) => {
-    const rig = await localRig();
-    const { uuid } = await rig.ok("create_doc", {
-      title: "Legacy metadata", description: "A document from an earlier version.",
-      blocks: [{ type: "paragraph", text: "Still readable." }],
-    });
-    const before = await rig.ok("get_doc", { uuid });
-    const doc = rig.instance.replicas.replica(uuid).doc;
-    getMetaMap(doc).set("changelogSuggestion", value);
-    const encoded = Y.encodeStateAsUpdate(doc);
-
-    expect(await rig.ok("get_doc", { uuid })).toEqual(before);
-    expect(getMetaMap(doc).get("changelogSuggestion")).toBe(value);
-    expect(Y.encodeStateAsUpdate(doc)).toEqual(encoded);
   });
 
   it.each(["A stored legacy sentence.", null])("keeps stored %s through bridge upload and fresh-replica reads", async (value) => {

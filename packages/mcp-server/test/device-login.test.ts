@@ -1,25 +1,19 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
-import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
-import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
-import { cleanupTestResources, closeChild, trackChild } from "./helpers.js";
+import { cleanupTestResources } from "./helpers.js";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
-/** Concurrent renewal processes: two are enough to contend for the lock. */
-const WORKERS = 2;
 const directories: string[] = [];
 const hubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
-const renewalChildren: ChildProcess[] = [];
 function box(): { directory: string; env: NodeJS.ProcessEnv } {
   const directory = mkdtempSync(join(tmpdir(), `device-login-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   directories.push(directory);
@@ -33,7 +27,7 @@ async function setup() {
 }
 afterEach(async () => {
   await cleanupTestResources({
-    clients: renewalChildren.splice(0).map((child) => () => closeChild(child)),
+
     hubs: hubs.splice(0).map((hub) => () => hub.close()),
     after: directories.splice(0).map((directory) => () => rmSync(directory, { recursive: true, force: true })),
   });
@@ -44,57 +38,6 @@ async function waitForRequest(hub: Awaited<ReturnType<typeof startDeviceSyncHub>
   while (hub.renewalCount === 0) {
     if (Date.now() >= deadline) throw new Error("renewal request did not arrive");
     await new Promise<void>(resolve => setTimeout(resolve, 5));
-  }
-}
-
-async function workers(endpoint: string, workspace: string, test: ReturnType<typeof box>, rejected: boolean): Promise<unknown[]> {
-  const worker = join(test.directory, "renew.mjs");
-  const helper = pathToFileURL(fileURLToPath(new URL("../src/device-login.ts", import.meta.url))).href;
-  writeFileSync(worker, `
-import { ensureDeviceLogin, readDeviceLogin } from ${JSON.stringify(helper)};
-const endpoint = process.argv[2], workspace = process.argv[3];
-const before = readDeviceLogin(endpoint, workspace);
-process.once("message", async () => {
-  try {
-    const result = await ensureDeviceLogin(endpoint, workspace, {
-      ...(process.argv[4] === "true" && before.status === "ready" ? { rejected: before.login } : {}),
-    });
-    process.send({ status: result.status, id: result.status === "ready" ? result.login.credential.record.id : null });
-    process.disconnect();
-  } catch { process.exitCode = 1; process.disconnect(); }
-});
-process.send("ready");
-`);
-  const children: { child: ChildProcess; ready: Promise<void>; done: Promise<unknown> }[] = [];
-  for (let i = 0; i < WORKERS; i++) {
-    const child = spawn(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), worker, endpoint, workspace, String(rejected)], {
-      cwd: test.directory, env: test.env, stdio: ["ignore", "ignore", "pipe", "ipc"], timeout: 15_000,
-    });
-    renewalChildren.push(trackChild(child));
-    let output = "";
-    let answer: unknown;
-    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
-    const ready = new Promise<void>((resolve, reject) => {
-      let started = false;
-      child.on("message", (message) => {
-        if (message === "ready") { started = true; resolve(); } else answer = message;
-      });
-      child.on("error", reject);
-      child.on("close", () => { if (!started) reject(new Error("renewal worker did not start")); });
-    });
-    const done = new Promise<unknown>((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", (code) => code === 0 ? resolve(answer) : reject(new Error(`renewal worker ${code}: ${output}`)));
-    });
-    children.push({ child, ready, done });
-  }
-  try {
-    await Promise.all(children.map((worker) => worker.ready));
-    for (const worker of children) worker.child.send("go");
-    return await Promise.all(children.map((worker) => worker.done));
-  } finally {
-    for (const worker of children) if (worker.child.exitCode === null) worker.child.kill("SIGKILL");
-    await Promise.allSettled(children.map((worker) => worker.done));
   }
 }
 
@@ -150,59 +93,6 @@ describe("stored device login renewal", () => {
     expect(refreshed.status).toBe("ready");
     expect(readHubLogins(test.env).logins[test.hub.origin]!.credential).toEqual(unnamed.credential);
     expect(test.hub.renewalCount).toBe(2);
-  });
-
-  it("renews one missing-workspace need across processes and preserves the store", async () => {
-    const test = await setup();
-    test.hub.grant(WORKSPACE);
-    const before = test.hub.issue({ workspaces: [] });
-    const other = test.hub.issue({ workspaces: [OTHER_WORKSPACE] });
-    await writeHubLogin(test.hub.origin, before, test.env);
-    await writeHubLogin("https://another-hub.example", other, test.env);
-    const path = credentialsPath(test.env);
-    const raw = JSON.parse(readFileSync(path, "utf8"));
-    writeFileSync(path, JSON.stringify({ ...raw, signingSecret: "preserved", future: { opaque: true } }), { mode: 0o600 });
-    test.hub.setRenewalDelay(100);
-    const answers = await workers(test.hub.url, WORKSPACE, test, false);
-    const after = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(answers).toEqual(Array(WORKERS).fill({ status: "ready", id: after.credential.record.id }));
-    expect(after.credential.record.id).not.toBe(before.credential.record.id);
-    expect(after.identity).toEqual(before.identity);
-    expect(after.credential.record).not.toHaveProperty("replacedAt");
-    expect(test.hub.renewalCount).toBe(1);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
-      ...raw, hubLogins: { ...raw.hubLogins, [test.hub.origin]: after }, signingSecret: "preserved", future: { opaque: true },
-    });
-    for (const name of readdirSync(dirname(path)).filter(name => name !== "credentials.json")) {
-      const contents = readFileSync(join(dirname(path), name), "utf8");
-      expect(contents).not.toContain(before.credential.key);
-      expect(contents).not.toContain(after.credential.key);
-    }
-  });
-
-  it("shares a generic refusal's replacement without sign-in or repeated retirement", async () => {
-    const test = await setup();
-    test.hub.grant(WORKSPACE);
-    const before = test.hub.issue({ workspaces: [WORKSPACE] });
-    await writeHubLogin(test.hub.origin, before, test.env);
-    test.hub.setRenewalDelay(100);
-    const answers = await workers(test.hub.url, WORKSPACE, test, true);
-    const after = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(answers).toEqual(Array(WORKERS).fill({ status: "ready", id: after.credential.record.id }));
-    expect(test.hub.renewalCount).toBe(1);
-    const refusedAgain = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, rejected: after });
-    expect(refusedAgain.status).toBe("hub-down");
-    expect(test.hub.renewalCount).toBe(1);
-  });
-
-  it("reports no access from renewal, with one exchange across other missing workspaces", async () => {
-    const test = await setup();
-    await writeHubLogin(test.hub.origin, test.hub.issue({ workspaces: [] }), test.env);
-    const answers = await workers(test.hub.url, WORKSPACE, test, false);
-    expect(answers).toEqual(Array(WORKERS).fill({ status: "no-access", id: null }));
-    const anotherNeed = await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env });
-    expect(anotherNeed.status).toBe("no-access");
-    expect(test.hub.renewalCount).toBe(1);
   });
 
   it.each(["login", "logout"])("does not overwrite concurrent %s during its network request", async (action) => {

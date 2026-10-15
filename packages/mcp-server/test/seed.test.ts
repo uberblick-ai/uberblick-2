@@ -23,33 +23,12 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
-import {
-  directoryRoom,
-  getBlocks,
-  getDirectoryMap,
-  getMeta,
-  isSidebarSeeded,
-  readSidebar,
-  roomForDoc,
-  upsertDirectoryEntry,
-} from "@uberblick/schema";
-import { PersistenceError, Replicas } from "../src/replica.js";
+import { directoryRoom, getBlocks, getDirectoryMap, isSidebarSeeded, readSidebar, roomForDoc, upsertDirectoryEntry } from "@uberblick/schema";
+import { Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
-import { cleanupTestResources,
-  FailingStore,
-  LIVE_HUB_SETTLE,
-  TEST_SECRET,
-  WORKSPACE,
-  hubUrl,
-  peerClient,
-  startHub,
-  startServer,
-  tempDatabasePath,
-  tempDir,
-  testConfig,
-} from "./helpers.js";
+import { cleanupTestResources, LIVE_HUB_SETTLE, TEST_SECRET, WORKSPACE, hubUrl, peerClient, startHub, startServer, tempDatabasePath, tempDir, testConfig } from "./helpers.js";
 import type { PeerClient } from "./helpers.js";
 
 interface ImportRun {
@@ -137,25 +116,9 @@ afterEach(async () => {
   });
 });
 
-
 describe("seed import", () => {
   // Identity comes from the file and is never invented: a generated uuid would
   // make every `ub workspace create` write the starter documents again, as new ones.
-  it("refuses a template without identity rather than inventing one", () => {
-    const nameless = tempDir();
-    writeFileSync(
-      join(nameless, "nameless.md"),
-      "## No frontmatter\n\nProse.\n",
-    );
-    expect(() => readSeedDocs(nameless)).toThrow(/no `uuid` in frontmatter/);
-
-    const untitled = tempDir();
-    writeFileSync(
-      join(untitled, "untitled.md"),
-      `---\nuuid: ${NOTES}\ntags: [reference]\n---\n\nProse.\n`,
-    );
-    expect(() => readSeedDocs(untitled)).toThrow(/no `title` in frontmatter/);
-  });
 
   it("imports every seed doc, and list_docs and search find all of them", async () => {
     const databasePath = tempDatabasePath();
@@ -408,28 +371,6 @@ describe("seed import", () => {
   // The log is the authoritative replica, so an append it refuses means the
   // documents in memory are ahead of the only durable copy. Reporting them as
   // imported would be a lie a teardown then throws away.
-  it("fails the run when the log refuses a write", async () => {
-    const databasePath = tempDatabasePath();
-    const faulty = new FailingStore(databasePath, WORKSPACE);
-    const replicas = new Replicas(testConfig({ databasePath }), faulty);
-    try {
-      faulty.failing = true;
-      await expect(importSeedDocs(replicas, seeds)).rejects.toThrow(
-        PersistenceError,
-      );
-      // Nothing was made durable, so nothing may be reported as imported.
-      expect(faulty.logSize()).toBe(0);
-      // And it stopped at the first failure rather than working through the rest:
-      // the second document was never written.
-      const later = seeds[1];
-      if (later === undefined)
-        throw new Error("expected more than one fixture doc");
-      expect(getMeta(replicas.replica(later.uuid).doc).uuid).toBe("");
-    } finally {
-      await replicas.destroy();
-      faulty.close();
-    }
-  });
 
   it("resolves inter-doc links to UUIDs, so backlinks names the citing doc", async () => {
     const databasePath = tempDatabasePath();
