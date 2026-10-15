@@ -190,7 +190,10 @@ describe("a hub that restarts under connected servers", () => {
     const first = await hub({ databasePath: database });
     const port = first.port;
 
-    const here = await serverOn(port);
+    // The refused room is never quiet, so any settle a rebuild leaves owed runs
+    // to the whole sync budget. The test waits for each condition itself, so
+    // keep the budget short rather than idle out the 10s live-hub settle.
+    const here = await serverOn(port, { syncTimeoutMs: 1_000 });
     const doomed = await here.ok("create_doc", {
       title: "The document the hub will not load",
       description: "A test document.",
@@ -245,7 +248,8 @@ describe("a hub that restarts under connected servers", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "the healthy rooms still carry writes" }],
     });
-    const there = await serverOn(port);
+    // This replica attaches the refused room too; the same short budget.
+    const there = await serverOn(port, { syncTimeoutMs: 1_000 });
     await waitForBlock(
       there,
       kept.uuid,

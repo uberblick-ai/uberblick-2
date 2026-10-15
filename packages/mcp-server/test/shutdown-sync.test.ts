@@ -206,11 +206,13 @@ it.each(["EOF", "SIGINT", "SIGTERM"] as const)("acknowledges the final write bef
     expect(getBlocks(pending.peer.doc)[0]?.text).toBe(WRITTEN);
     await waitUntil("the peer to remove the departed live session", () =>
       [...pending.peer.provider.awareness!.getStates().values()].every((state) => state.session !== SESSION));
+    // Presence has no acknowledgement: the final cursor can still be queued
+    // behind the acknowledged write when the writer leaves, so this proves the
+    // named departure, not the last cursor (awareness.test.ts owns the cursor).
     expect(pending.published.at(-1)).toMatchObject({
       user: { name: NAME, color: expect.any(String) },
       client: "agent",
       session: SESSION,
-      cursor: { anchor: expect.any(Object), head: expect.any(Object) },
     });
     const { status } = await offlineStatus(pending.writer.databasePath);
     expect(status.unsyncedChanges).toBe(0);

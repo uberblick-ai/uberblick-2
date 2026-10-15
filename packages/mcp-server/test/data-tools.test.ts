@@ -48,10 +48,12 @@ function document(rig: Rig, uuid: string): Y.Doc {
   return rig.instance.replicas.replica(uuid).doc;
 }
 
+/** Encoded as text: `toEqual` walks a byte array per element, ~1 s a megabyte. */
 function state(rig: Rig, uuid: string) {
+  const encoded = (doc: Y.Doc) => Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64");
   return {
-    document: Y.encodeStateAsUpdate(document(rig, uuid)),
-    directory: Y.encodeStateAsUpdate(rig.instance.replicas.directory().doc),
+    document: encoded(document(rig, uuid)),
+    directory: encoded(rig.instance.replicas.directory().doc),
     log: rig.instance.store.logSize(),
   };
 }

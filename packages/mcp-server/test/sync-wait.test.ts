@@ -19,12 +19,16 @@ afterEach(async () => {
 async function listener(open = false) {
   const server = createServer();
   const sockets = new Set<Socket>();
-  const fixture = { open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false };
+  const fixture = { open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false, upgrades: 0 };
   server.on("connection", (socket) => {
+    // An upgraded socket leaves the HTTP server without its error listener, so
+    // a client resetting it at teardown would otherwise be an uncaught ECONNRESET.
+    socket.on("error", () => {});
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
   });
   server.on("upgrade", (request, socket) => {
+    fixture.upgrades += 1;
     if (fixture.dropUpgrade) { socket.destroy(); return; }
     if (fixture.status) {
       socket.end(`HTTP/1.1 ${fixture.status} private-http-reason\r\nContent-Length: 12\r\n\r\nprivate-body`);
@@ -200,13 +204,19 @@ it("clears a classified failure when a later upgrade drops without a classified 
 it("attributes concurrent sockets and fetches to their own requests", async () => {
   const fixture = await listener();
   const first = sync(fixture.port, 1_500);
-  // This socket remains pending while the next socket receives a 502.
-  await waitUntil("first pending upgrade", () => fixture.sockets.size === 1);
+  // This socket remains pending while the next socket receives a 502. Wait for
+  // its upgrade request, not its TCP accept, or the 502 can answer it instead.
+  await waitUntil("first pending upgrade", () => fixture.upgrades === 1);
   fixture.status = 502;
   const second = sync(fixture.port);
   await waitUntil("second upgrade failure", () => second.state().cause === "http");
+  // The 502 answers only the second socket: once the first times out, its
+  // re-dial must not meet it.
+  const secondFailure = second.state();
+  second.destroy();
+  fixture.status = 0;
   await fetch(`http://127.0.0.1:${fixture.port}/unrelated`, { signal: AbortSignal.timeout(50) }).catch(() => {});
   await first.waitForQuiet();
   expect(first.state()).toMatchObject({ cause: "timeout", detail: `1.5 127.0.0.1:${fixture.port}` });
-  expect(second.state()).toMatchObject({ cause: "http", detail: "502 127.0.0.1" });
+  expect(secondFailure).toMatchObject({ cause: "http", detail: "502 127.0.0.1" });
 });
