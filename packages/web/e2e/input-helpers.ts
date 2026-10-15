@@ -14,9 +14,13 @@ export async function activateControl(target: Locator, options: { touch?: boolea
   } else await target.click();
 }
 
-/** Close an open drawer and wait until it unmounts, so its focus return lands before the next input. */
-export async function closeIfOpen(close: Locator, options: { touch?: boolean | undefined } = {}): Promise<void> {
+/**
+ * Close an open drawer and wait for its deferred focus return, which follows
+ * the unmount and would otherwise land on the next input.
+ */
+export async function closeIfOpen(close: Locator, returnTo: Locator, options: { touch?: boolean | undefined } = {}): Promise<void> {
   if (!await close.isVisible()) return;
   await activateControl(close, options);
   await expect(close).toBeHidden();
+  await expect(returnTo).toBeFocused();
 }

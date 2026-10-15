@@ -70,7 +70,7 @@ async function readThread(page: Page, text: string, touch: boolean): Promise<Loc
 }
 
 async function closeThreadDrawer(page: Page, touch: boolean): Promise<void> {
-  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), { touch });
+  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch });
 }
 
 async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
@@ -81,7 +81,7 @@ async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
   await expect(pin).toBeVisible();
   await expect(pin).toHaveText("Initial topic title");
   await expect(pin).toHaveAttribute("aria-current", "page");
-  await closeIfOpen(page.getByRole("button", { name: "Close document list", exact: true }), { touch });
+  await closeIfOpen(page.getByRole("button", { name: "Close document list", exact: true }), show, { touch });
 }
 
 async function topicPins(writer: McpSession, records: string[]): Promise<string[]> {

@@ -167,7 +167,7 @@ test("touch selection on a decided record starts a thread and its highlight open
   await addComment(page, "Touch readers can discuss the decided record.", true);
   const highlight = editor(page).locator("[data-comment-thread]");
   const close = page.getByRole("button", { name: "Close threads", exact: true });
-  await closeIfOpen(close, { touch: true });
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await highlight.tap();
   const rail = page.getByRole("region", { name: "Threads", exact: true });
   await expect(rail).toContainText("Touch readers can discuss the decided record.");
@@ -177,11 +177,11 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(rail).toContainText("Touch reply.");
   await rail.getByRole("button", { name: "Resolve", exact: true }).tap();
   // Dismissing the drawer exposes the text highlight for the touch route back.
-  await closeIfOpen(close, { touch: true });
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await expect(highlight).toHaveAccessibleName("Resolved comment thread");
   await highlight.tap();
   await rail.getByRole("button", { name: "Reopen", exact: true }).tap();
-  await closeIfOpen(close, { touch: true });
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await expect(highlight).toHaveAccessibleName("Comment thread");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });

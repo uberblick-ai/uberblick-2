@@ -110,7 +110,7 @@ test("all four prose parts take formatting and web comments and keep footer link
     await composer.getByRole("button", { name: "Comment", exact: true }).click();
     await expect(field.locator("[data-comment-thread]")).toHaveText(text);
     await expect(page.locator(".ub-thread-card").filter({ hasText: `Discuss ${part}` })).toContainText("Card 1");
-    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), { touch: false });
+    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch: false });
   }
   const footer = card.locator(".ub-card-footer p");
   await footer.click();
