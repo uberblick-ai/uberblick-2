@@ -11,11 +11,12 @@ test("all concurrent package pools share the declared machine budget", () => {
 	for (const [scope, cores, budget, concurrency, workers] of [
 		["all", 4, 12, 4, 3],
 		["os", 3, 9, 2, 4],
+		["hub-schema", 4, 12, 2, 6],
 	]) {
 		const plan = unitTestPlan(scope, cores);
 		assert.deepEqual([plan.budget, plan.concurrency, plan.workers], [budget, concurrency, workers]);
 	}
-	for (const scope of ["all", "os"]) {
+	for (const scope of ["all", "os", "hub-schema"]) {
 		for (const cores of [1, 2, 3, 4, 8, 32]) {
 			const plan = unitTestPlan(scope, cores);
 			assert.ok(plan.workers >= 1);
@@ -23,6 +24,26 @@ test("all concurrent package pools share the declared machine budget", () => {
 			assert.ok(plan.concurrency * plan.workers <= plan.budget);
 		}
 	}
+});
+
+test("the shared Linux job runs only hub and schema with the machine budget and full suites", () => {
+	const calls = [];
+	assert.equal(runUnitTests("hub-schema", {
+		cores: 4,
+		env: {},
+		log() {},
+		spawn(command, args, options) {
+			calls.push({ command, args, options });
+			return { status: 1 };
+		},
+	}), 1);
+	assert.equal(calls.length, 1);
+	assert.deepEqual(calls[0].args, [
+		"--filter", "@uberblick/hub", "--filter", "@uberblick/schema",
+		"--no-sort", "--no-bail", "--workspace-concurrency", "2", "test",
+	]);
+	assert.equal(calls[0].options.env.VITEST_MAX_WORKERS, "6");
+	assert.equal(calls[0].options.env.UB_TEST_SCOPE, undefined);
 });
 
 test("shared invocations preserve package failures and scope without changing the caller's worker setting", () => {
