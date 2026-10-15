@@ -4,7 +4,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
-import { expectMcp, proveMcpArrival } from "./settle.js";
+import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { alphaOf, contrast, oklab } from "../test/colour.js";
 
@@ -239,6 +239,7 @@ for (const touch of [false, true]) {
         contextOptions: { ...(touch ? devices["iPad Pro 11"] : { hasTouch: false, isMobile: false }),
           viewport: { width: touch ? 600 : 1366, height: 1100 }, colorScheme: appearance, reducedMotion: "reduce" },
       });
+      await waitForDocumentDraw(page, session, uuid, { index: "all" });
       await expect(page.locator(".ub-wireframe .wf-root")).toBeVisible();
       await expect(page.locator(".ub-mermaid")).toHaveAttribute("data-state", "ready");
       await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");

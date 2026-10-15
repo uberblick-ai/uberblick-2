@@ -589,7 +589,7 @@ test("a multi-author block survives upstream loss and converges back without dup
     await openDoc(a, title);
     await expect.poll(() => blockText(a)).toBe("before-peer");
     await waitForAcknowledged(a, { path: "relay" });
-  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
     await expect(a.locator(".ub-status-word--hub")).toHaveText(
       "not synced with hub",
     );
