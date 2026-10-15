@@ -130,13 +130,17 @@ test("CI=true outside GitHub Actions creates no report", () => {
 });
 
 const workflowPath = join(root, ".github/workflows/ci.yml");
+function workflowExpression(value) {
+  return ["$", `{{ ${value} }}`].join("");
+}
+
 test("report uploads isolate each Linux job and attempt without changing test conclusions", {
   skip: existsSync(workflowPath) ? undefined : ".github/workflows is absent from the isolated review context",
 }, () => {
   const workflow = readFileSync(workflowPath, "utf8");
   for (const [job, testId, artifact] of [
-    ["unit-tests", "test-packages", `vitest-Linux-\${{ matrix.id }}-\${{ github.run_id }}-attempt-\${{ github.run_attempt }}`],
-    ["macos", "test-macos", `vitest-\${{ runner.os }}-\${{ github.run_id }}-attempt-\${{ github.run_attempt }}`],
+    ["unit-tests", "test-packages", `vitest-Linux-${workflowExpression("matrix.id")}-${workflowExpression("github.run_id")}-attempt-${workflowExpression("github.run_attempt")}`],
+    ["macos", "test-macos", `vitest-${workflowExpression("runner.os")}-${workflowExpression("github.run_id")}-attempt-${workflowExpression("github.run_attempt")}`],
   ]) {
     const body = workflow.match(new RegExp(`^ {2}${job}:\\n((?: {4}.*\\n|\\n)*)`, "m"))?.[0];
     assert.ok(body, `${job} runs test suites`);
@@ -150,7 +154,7 @@ test("report uploads isolate each Linux job and attempt without changing test co
     assert.ok(steps.indexOf(step) < steps.indexOf(upload), "upload follows the package test step");
     assert.doesNotMatch(step, /continue-on-error:/, "package failures still fail their check");
     assert.equal(upload.match(/^ {8}if: (.+)$/m)?.[1],
-      `\${{ always() && (steps.${testId}.outcome == 'success' || steps.${testId}.outcome == 'failure') }}`,
+      workflowExpression(`always() && (steps.${testId}.outcome == 'success' || steps.${testId}.outcome == 'failure')`),
       "uploads remain eligible after a failed test step");
     assert.match(upload, /^ {8}continue-on-error: true$/m);
     assert.match(upload, /^ {8}timeout-minutes: 1$/m);
