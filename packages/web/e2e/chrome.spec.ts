@@ -172,7 +172,7 @@ function tagStripGeometry(page: Page): Promise<{
     if (strip === null || row === null) {
       throw new Error("e2e: no tag strip in the identity line");
     }
-    const neighbours = [".ub-doc-ids", ".ub-document-actions"].flatMap((selector) => {
+    const neighbours = [".ub-document-actions"].flatMap((selector) => {
       const element = document.querySelector(selector);
       return element === null ? [] : [[selector, element.getBoundingClientRect()] as const];
     });
@@ -857,8 +857,8 @@ test("the open document owns the remaining chrome and its one sync-details handl
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await expect(page.locator(".ub-title")).toBeVisible();
   await expect(page.locator(".ub-doc-meta")).toBeVisible();
-  await expect(page.locator(".ub-doc-ids")).toBeVisible();
-  await expect(page.locator(".ub-copy-link")).toBeVisible();
+  await expect(page.locator(".ub-doc-ids, .ub-doc-meta .ub-copy-link")).toHaveCount(0);
+  await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();
   await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
   await expect(page.locator(".ub-threads-toggle")).toHaveCount(0);
 
@@ -934,11 +934,9 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Document actions" });
-  const uuid = page.locator(".ub-doc-meta .ub-copy-link");
   const title = page.locator(".ub-title");
   for (const [name, control] of [
     ["title", title],
-    ["uuid", uuid],
     ["actions", trigger],
   ] as const) {
     await expect(control).toBeVisible();
@@ -947,7 +945,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(box.x, name).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, name).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
-  await expect(uuid).toHaveText(/^uuid [0-9a-f]{8}/);
+  await expect(page.locator(".ub-doc-meta")).not.toContainText(/uuid |rev /);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
   const layout = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
@@ -964,7 +962,8 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(scroll).toBeLessThanOrEqual(client ?? 0);
   }
 
-  await uuid.click();
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Copy link", exact: true }).click();
   await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
   // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
@@ -1003,7 +1002,12 @@ test("document actions stay reachable, close with the route, and archive into Re
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore).toBeVisible();
   await expect(restore).toBeFocused();
-  await expect(trigger).toHaveCount(0);
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Copy document id", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute(
     "contenteditable",
     "false",
@@ -1547,12 +1551,10 @@ for (const scheme of ["light", "dark"] as const) {
     await ui(page.locator(".ub-list-head .ub-muted"));
     await page.setViewportSize(viewport);
     await expect(page.locator(".ub-last-updated time")).toBeVisible();
-    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-ids", ".ub-copy-link", ".ub-doc-rev"]) {
+    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-rev"]) {
       for (const element of await page.locator(selector).all()) await ui(element);
     }
-    await expect(page.locator(".ub-doc-meta .ub-copy-link")).toHaveAccessibleName(
-      `uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`,
-    );
+    await expect(page.locator(".ub-doc-meta")).not.toContainText(uuid);
     for (const id of await page.locator(".ub-doc-id").all()) await mono(id);
     const revision = page.locator(".ub-doc-rev .ub-doc-id");
     await expect(revision).toHaveText(/^[0-9a-f]{8}$/);
@@ -1574,10 +1576,10 @@ for (const scheme of ["light", "dark"] as const) {
     for (const width of [767, 744]) {
       await page.setViewportSize({ width, height: viewport.height });
       await expect(page.locator(".ub-doc-rev")).toBeHidden();
-      await expect(page.locator(".ub-copy-link")).toBeVisible();
+      await expect(page.locator(".ub-last-updated")).toBeVisible();
     }
     await page.setViewportSize(viewport);
-    await page.getByRole("button", { name: /^Sync details/ }).click();
+    await page.locator(".ub-status-sync").click();
     const sync = page.getByRole("dialog", { name: "Sync and presence" });
     await expect(sync).toBeVisible();
     for (const fact of await sync.locator(".ub-sync-fact").all()) {
@@ -1638,14 +1640,14 @@ for (const scheme of ["light", "dark"] as const) {
 }
 
 /**
- * The copy-link control's touch target.
+ * The document-actions control's target.
  *
  * The control's own 44x44 box must take clicks at rest and after scrolling.
  * An overhanging target could steal taps from `.ub-title` below or borrow
  * `.ub-pane` padding above that scrolls away while the control stays visible.
  * Only browser layout can prove the full target at both offsets.
  */
-test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
+test("the document-actions control is a 44px target, at rest and once the pane has scrolled", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
@@ -1683,7 +1685,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     scrolled: number;
   }> =>
     page.evaluate((flush) => {
-      const control = document.querySelector(".ub-copy-link");
+      const control = document.querySelector(".ub-actions-trigger");
       const revision = document.querySelector(".ub-doc-rev");
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
@@ -1775,7 +1777,7 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
       receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
     };
   })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
-  for (const control of [page.locator(".ub-doc-meta .ub-copy-link"), page.getByRole("button", { name: "Document actions" })]) {
+  for (const control of [page.locator(".ub-status-sync"), page.getByRole("button", { name: "Document actions" })]) {
     expect(await control.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
@@ -1785,6 +1787,7 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
 
 /** Wait for native dismissal before inspecting the replacement's content. */
 async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
+  if (await control.count() === 0) await page.getByRole("button", { name: "Document actions" }).click();
   const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
   if (keyboard) await control.press("Enter");
   else await control.click();
@@ -1871,9 +1874,10 @@ for (const scheme of ["light"] as const) {
       for (const [, type, text] of sources) appendBlock(doc, { type, text });
       await expect(page.locator(".ub-copy")).toHaveCount(5);
       await clipboardMode(page, "modern");
-      const link = page.locator(".ub-doc-meta .ub-copy-link");
+      const link = page.getByRole("menuitem", { name: "Copy link", exact: true });
       const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href;
-      await expect(link).toHaveAccessibleName(`uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`);
+      await page.getByRole("button", { name: "Document actions" }).click();
+      await expect(link).toHaveAccessibleName("Copy link");
       await activateCopy(page, link);
       await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
       await activateCopy(page, link, true);
@@ -2314,7 +2318,7 @@ for (const scheme of ["light"] as const) {
           expect((await controlPaint(tap)).color).not.toBe(beforeFocus.color);
         }
       };
-      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger"]) {
+      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger"]) {
         await check(page.locator(selector));
       }
       await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
@@ -2354,7 +2358,7 @@ for (const scheme of ["light"] as const) {
     await contrastDocument(page, scheme, async () => {
       expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
       await page.addStyleTag({ content: "* { transition: none !important; }" });
-      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger", ".ub-tag-chevron"]) {
+      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger", ".ub-tag-chevron"]) {
         const control = page.locator(selector);
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);
@@ -2807,7 +2811,7 @@ for (const [device, width, hasTouch] of [
       await expect(updated).toBeVisible();
       const exact = await updated.getAttribute("title");
       const stamp = await updated.getAttribute("datetime");
-      const sync = page.getByRole("button", { name: /^Sync details/ });
+      const sync = page.locator(".ub-status-sync");
       if (hasTouch) await sync.tap();
       else { await sync.focus(); await page.keyboard.press("Enter"); }
       const panel = page.getByRole("dialog", { name: "Sync and presence" });

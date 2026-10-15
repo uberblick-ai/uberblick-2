@@ -65,6 +65,7 @@ export function PeerCluster({
       root
         .closest(".ub-status")
         ?.querySelector<HTMLButtonElement>(".ub-status-sync") ??
+      root.closest(".ub-document-pane")?.querySelector<HTMLButtonElement>('[aria-label="Document actions"]') ??
       null;
     fallback?.focus({ preventScroll: true });
   };

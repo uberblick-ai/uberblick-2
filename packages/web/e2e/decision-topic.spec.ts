@@ -103,7 +103,8 @@ async function captureClipboard(page: Page): Promise<void> {
 }
 
 async function copyPath(page: Page, expected: string, touch: boolean): Promise<string> {
-  await activateControl(page.locator(".ub-copy-link"), { touch });
+  await activateControl(page.getByRole("button", { name: "Document actions", exact: true }), { touch });
+  await activateControl(page.getByRole("menuitem", { name: "Copy link", exact: true }), { touch });
   await expect.poll(() => page.evaluate(() => (window as unknown as { copiedTexts: string[] }).copiedTexts.at(-1))).toBe(`${new URL(page.url()).origin}${expected}`);
   return `${new URL(page.url()).origin}${expected}`;
 }

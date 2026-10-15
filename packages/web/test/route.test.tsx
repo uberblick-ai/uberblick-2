@@ -24,7 +24,7 @@
  */
 
 import { act, render } from "./react-render.js";
-import { within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
@@ -732,7 +732,7 @@ describe("an address that resolves to no document says which one, and why", () =
 });
 
 /**
- * Click the copy control on a mounted identity line and return what it says.
+ * Select Copy link from a mounted document's actions and return what it says.
  *
  * `segment` is the workspace as the address spells it, which is what the app
  * hands the line — the room key is always the bare uuid.
@@ -743,7 +743,6 @@ async function clickCopy(
   label: string;
   ariaLabel: string;
   said: string;
-  revisionIsInsideControl: boolean;
 }> {
   const view = render(
     <DocMetaLine
@@ -755,16 +754,20 @@ async function clickCopy(
   );
   const host = view.container;
 
-  const button = within(host).getByRole<HTMLButtonElement>("button", { name: `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${segment}/${UUID}` });
+  act(() => {
+    const trigger = within(host).getByRole("button", { name: "Document actions" });
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  const button = screen.getByRole("menuitem", { name: "Copy link" });
   const label = button?.textContent ?? "";
-  const ariaLabel = button?.getAttribute("aria-label") ?? "";
-  const revision = host.querySelector(".ub-doc-rev");
-  expect(revision).not.toBeNull();
-  const revisionIsInsideControl = button.contains(revision);
+  const ariaLabel = button?.getAttribute("aria-label") ?? label;
   await act(async () => {
     button?.click();
   });
-  expect(within(button.parentElement!).queryByRole("status")).toBeNull();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
   expect(notifyTransient).toHaveBeenLastCalledWith({
     key: "clipboard",
     message: expect.any(String),
@@ -772,7 +775,7 @@ async function clickCopy(
   });
   const said = vi.mocked(notifyTransient).mock.lastCall![0].message;
 
-  return { label, ariaLabel, said, revisionIsInsideControl };
+  return { label, ariaLabel, said };
 }
 
 describe("the copy control hands back the document's canonical link", () => {
@@ -797,16 +800,10 @@ describe("the copy control hands back the document's canonical link", () => {
       },
     });
 
-    const { label, ariaLabel, said, revisionIsInsideControl } = await clickCopy();
+    const { label, ariaLabel, said } = await clickCopy();
 
-    // The short uuid is the action; the revision remains outside it.
-    expect(label).toBe(`uuid ${UUID.slice(0, 8)}`);
-    expect(revisionIsInsideControl).toBe(false);
-    // The accessible name adds the part a reader cannot see — the address that
-    // lands on the clipboard. `title` is not reliably announced.
-    expect(ariaLabel).toBe(
-      `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${WS}/${UUID}`,
-    );
+    expect(label).toBe("Copy link");
+    expect(ariaLabel).toBe("Copy link");
 
     // Exactly what `parseRoute` resolves back to this document.
     expect(written).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
@@ -838,12 +835,8 @@ describe("the copy control hands back the document's canonical link", () => {
     const { label, ariaLabel } = await clickCopy(DECORATED);
 
     expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
-    expect(label).toBe(`uuid ${UUID.slice(0, 8)}`);
-    // The accessible name announces what the click actually produces, so it
-    // follows the address rather than the room key the button no longer shows.
-    expect(ariaLabel).toBe(
-      `uuid ${UUID.slice(0, 8)} — copies the canonical document URL for ${DECORATED}/${UUID}`,
-    );
+    expect(label).toBe("Copy link");
+    expect(ariaLabel).toBe("Copy link");
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({
       kind: "doc",
@@ -894,7 +887,7 @@ describe("the copy control hands back the document's canonical link", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     const view = render(<>
-      <CopyLink room={`${WS}/${UUID}`} segment={DECORATED} shortUuid={UUID.slice(0, 8)} />
+      <CopyLink room={`${WS}/${UUID}`} segment={DECORATED} />
       <CopyLink room={`${WS}/${OTHER}`} segment={DECORATED} />
     </>);
     const buttons = within(view.container).getAllByRole("button");

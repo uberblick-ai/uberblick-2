@@ -1,6 +1,6 @@
 /** Bound-hub administration uses the real signed local bridge without membership. */
 import { expect, test } from "@playwright/test";
-import { activateControl, setupHarness } from "./app-helpers.js";
+import { activateControl, createDoc, setupHarness } from "./app-helpers.js";
 import { startHarness } from "./harness.js";
 
 test.describe("a hub administrator with no workspace membership", () => {
@@ -133,6 +133,14 @@ test.describe("a workspace administrator with no hub role", () => {
 
 test.describe("a local workspace with a stored hub-admin login", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true, localWorkspace: true });
+  test("a document on this device alone has Edited and revision without a sync dot", async ({ browser }) => {
+    const page = await openApp(browser);
+    await createDoc(page, "On this device");
+    await expect(page.locator(".ub-last-updated")).toContainText("Edited ");
+    await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();
+    await expect(page.locator(".ub-status-sync, .ub-sync-dot")).toHaveCount(0);
+    await expect(page.locator(".ub-status")).not.toContainText(/saved here|synced|Offline|uuid/);
+  });
   test("local workspace settings never fall back to the stored login", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();

@@ -4,7 +4,7 @@
  *
  * The rev shown in the doc chrome is a fold of the block revs, and the naive
  * shape of that — re-read the document whenever anything changes — hashes every
- * character of every block on every keystroke, for eight characters of chrome.
+ * character of every block on every keystroke, for the revision in the header.
  * That is what these tests defend against, and they defend it where it can be
  * observed rather than by timing anything: `getBlocks` is the only read that
  * touches the whole document, so it may run once, to seed, and never again;
@@ -59,6 +59,15 @@ function fixture(
 }
 
 describe("the document rev is recomputed incrementally", () => {
+  it("exposes the full 16-character revision for copying", () => {
+    const fix = fixture();
+    try {
+      expect(fix.revs[0]).toMatch(/^[0-9a-f]{16}$/);
+    } finally {
+      fix.stop();
+    }
+  });
+
   const tableText = "| Name | State |\n| --- | --- |\n| Alpha | Ready |";
   const tableEdits: Array<{ name: string; text: string; tableMapping?: TableMapping }> = [
     { name: "cell text", text: tableText.replace("Alpha", "Alpine") },

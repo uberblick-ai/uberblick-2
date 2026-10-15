@@ -113,7 +113,7 @@ test("all four prose parts take formatting and web comments and keep footer link
   await expect(link).toHaveText("issueLink");
   await expect(link).toHaveCSS("text-transform", "none");
   await expect(card.locator(".ub-card-footer")).toHaveCSS("text-transform", "uppercase");
-  await expect(page.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
   await page.reload();
   await expect(page.locator(".ub-card")).toHaveCount(1);
   await expect(page.locator(".ub-card [data-comment-thread]")).toHaveCount(4);

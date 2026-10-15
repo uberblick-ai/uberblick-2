@@ -150,6 +150,8 @@ export function RoutePane({
   presence,
   endpoint = null,
   hubAcked,
+  rawHubAcked,
+  sampledAt,
   notSharedReason = null,
   meta,
   author,
@@ -196,6 +198,8 @@ export function RoutePane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  rawHubAcked?: boolean | null | undefined;
+  sampledAt?: number | null | undefined;
   notSharedReason?: NotSharedReason | null;
   /**
    * Null metadata means unread. Empty metadata earns the waiting screen only
@@ -302,6 +306,8 @@ export function RoutePane({
               presence={presence}
               endpoint={endpoint}
               hubAcked={hubAcked}
+              rawHubAcked={rawHubAcked}
+              sampledAt={sampledAt}
               notSharedReason={notSharedReason}
               onLastUpdatedChange={onLastUpdatedChange}
               syncDetails={syncDetails}
@@ -322,7 +328,7 @@ export function RoutePane({
 
   const editorProps: ComponentProps<typeof EditorPane> = {
     connection, segment: route.workspace.segment, presence, endpoint,
-    hubAcked, notSharedReason, author, catalogConnection, archived, updatedAt,
+    hubAcked, rawHubAcked, sampledAt, notSharedReason, author, catalogConnection, archived, updatedAt,
     onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
     onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
     onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
@@ -1050,6 +1056,8 @@ export function App(): ReactElement {
               presence={titlePresence}
               endpoint={statusEndpoint}
               hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
+              rawHubAcked={serving === null ? undefined : servingStatus?.rawHubAcked ?? null}
+              sampledAt={servingStatus?.sampledAt}
               notSharedReason={servingStatus?.notSharedReason ?? null}
               meta={meta}
               author={identity.name}

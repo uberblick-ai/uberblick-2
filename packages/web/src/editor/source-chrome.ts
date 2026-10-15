@@ -17,7 +17,7 @@ import { codeLanguageLabel } from "./syntax-highlighting.js";
  * Try the secure-context Clipboard API, then selection copy for supported plain
  * HTTP deployments or denied transient activation. Report failure explicitly.
  */
-export async function writeToClipboard(text: string): Promise<boolean> {
+export async function writeToClipboard(text: string, fallbackReady?: Promise<void>): Promise<boolean> {
   if (navigator.clipboard !== undefined) {
     try {
       await navigator.clipboard.writeText(text);
@@ -26,6 +26,9 @@ export async function writeToClipboard(text: string): Promise<boolean> {
       // Permission or activation refusal still permits selection-copy fallback.
     }
   }
+  // Modal callers release their focus trap before the selection fallback.
+  // Start the native API above while the original user gesture is still active.
+  if (fallbackReady !== undefined) await fallbackReady;
   return copyViaSelection(text);
 }
 

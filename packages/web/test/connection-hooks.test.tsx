@@ -209,7 +209,7 @@ describe("connection-scoped readings", () => {
       expect(populated.agentSessions).toBe(1);
       expect(populated.presence).toHaveLength(1);
       expect(populated.titlePresence).toHaveLength(1);
-      expect(populated.rev).toMatch(/^[0-9a-f]{8}$/);
+      expect(populated.rev).toMatch(/^[0-9a-f]{16}$/);
       expect(populated.blocks).toHaveLength(3);
       expect(populated.outline).toHaveLength(1);
       expect(populated.threads).toHaveLength(1);

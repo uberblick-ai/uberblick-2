@@ -343,7 +343,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       screen.getByRole("button", { name: "Archive document" }).click();
     });
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBe(true);
-    expect(within(host).queryByRole("button", { name: "Document actions" })).toBeNull();
+    expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
     expect(document.activeElement).toBe(restoreButton(host));
     // Archiving removes the pin: a document that has left every
     // other listing is not an entry point, so it leaves the sidebar too.

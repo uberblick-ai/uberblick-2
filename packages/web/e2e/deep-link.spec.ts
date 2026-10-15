@@ -84,7 +84,7 @@ interface StatusClaim {
   words: string[];
 }
 
-/** Record every sync word painted during a navigation. */
+/** Record every visible sync claim and the dot's accessible reading. */
 async function watchStatusClaims(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
@@ -92,9 +92,10 @@ async function watchStatusClaims(page: Page): Promise<void> {
     const read = (): void => {
       claims.push({
         path: window.location.pathname,
-        words: [...document.querySelectorAll(".ub-status-word")].map(
-          (node) => node.textContent ?? "",
-        ),
+        words: [
+          ...[...document.querySelectorAll(".ub-status-word, .ub-status-offline, .ub-not-saved")].map((node) => node.textContent ?? ""),
+          document.querySelector(".ub-status-sync")?.getAttribute("aria-label") ?? "",
+        ],
       });
     };
     read();
@@ -103,6 +104,8 @@ async function watchStatusClaims(page: Page): Promise<void> {
       childList: true,
       characterData: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-label"],
     });
     w.__statusClaims = claims;
     w.__statusClaimsStop = () => {
@@ -189,11 +192,11 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   await docButton(author, firstTitle).click();
   await expect(author).toHaveURL(new RegExp(`/${ws()}/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
-  await expect(author.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await expect(author.locator(".ub-not-saved")).not.toBeVisible();
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
   const claims = await statusClaims(author);
-  expect(claims.flatMap(({ words }) => words)).not.toContain("offline");
+  expect(claims.flatMap(({ words }) => words).filter((word) => /^Offline|^not saved$/.test(word))).toEqual([]);
 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();
@@ -240,7 +243,8 @@ test("a reloaded document whose server is unreachable shows no prior content", a
   try {
     await page.reload();
 
-    await expect(page.locator(".ub-status-word")).toHaveText("offline");
+    await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
+    await expect(page.locator(".ub-status")).not.toContainText("Changes are saved on this device.");
     await expect(page.locator(".ub-notice")).toContainText("Waiting for sync");
     await expect(page.locator(".ub-title")).toHaveCount(0);
     await expect(editor(page)).toHaveCount(0);
