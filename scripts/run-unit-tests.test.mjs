@@ -10,19 +10,16 @@ import { runUnitTests, unitTestPlan } from "./run-unit-tests.mjs";
 test("all concurrent package pools share the declared machine budget", () => {
 	for (const scope of ["all", "os"]) {
 		for (const cores of [1, 2, 3, 4, 8, 32]) {
-			for (const setting of [undefined, "", "1", "2", "3"]) {
-				const plan = unitTestPlan(scope, cores, setting);
-				assert.ok(plan.workers >= 1);
-				assert.ok(plan.concurrency >= 1);
-				assert.ok(plan.concurrency * plan.workers <= plan.budget);
-				if (setting) assert.equal(plan.budget, cores * Number(setting));
-			}
+			const plan = unitTestPlan(scope, cores);
+			assert.ok(plan.workers >= 1);
+			assert.ok(plan.concurrency >= 2);
+			assert.ok(plan.concurrency * plan.workers <= plan.budget);
 		}
 	}
 });
 
 test("shared invocations preserve package failures and scope without changing the caller's worker setting", () => {
-	const env = { UB_TEST_WORKER_BUDGET: "3", VITEST_MAX_WORKERS: "99", EXISTING: "kept" };
+	const env = { VITEST_MAX_WORKERS: "99", EXISTING: "kept" };
 	const calls = [];
 	const result = runUnitTests("os", {
 		cores: 4,
@@ -45,24 +42,9 @@ test("shared invocations preserve package failures and scope without changing th
 	]);
 	assert.equal(options.stdio, "inherit");
 	assert.equal(options.env.UB_TEST_SCOPE, "os");
-	assert.equal(options.env.VITEST_MAX_WORKERS, "4");
+	assert.equal(options.env.VITEST_MAX_WORKERS, String(unitTestPlan("os", 4).workers));
 	assert.equal(options.env.EXISTING, "kept");
-	assert.deepEqual(env, { UB_TEST_WORKER_BUDGET: "3", VITEST_MAX_WORKERS: "99", EXISTING: "kept" });
-});
-
-test("baseline comparisons restore today's independent package pools", () => {
-	const result = runUnitTests("all", {
-		cores: 4,
-		env: { UB_TEST_WORKER_BUDGET: "baseline", VITEST_MAX_WORKERS: "99" },
-		log() {},
-		spawn(command, args, options) {
-			assert.equal(command, "pnpm");
-			assert.deepEqual(args, ["-r", "--no-sort", "--no-bail", "test"]);
-			assert.equal(options.env.VITEST_MAX_WORKERS, undefined);
-			return { status: 0 };
-		},
-	});
-	assert.equal(result, 0);
+	assert.deepEqual(env, { VITEST_MAX_WORKERS: "99", EXISTING: "kept" });
 });
 
 test("a killed package runner cannot report success", () => {
@@ -74,10 +56,7 @@ test("a killed package runner cannot report success", () => {
 	}), 128 + constants.signals.SIGTERM);
 });
 
-test("invalid comparison budgets fail before starting any suites", () => {
-	for (const setting of ["0", "-1", "1.5", "unknown", "Infinity"]) {
-		assert.throws(() => unitTestPlan("all", 4, setting), /positive integer/);
-	}
+test("an invalid scope fails before starting any suites", () => {
 	assert.throws(() => unitTestPlan("unknown", 4), /usage:/);
 });
 

@@ -266,8 +266,9 @@ The two unit-test jobs keep their dot logs and upload `vitest-Linux-<run>-attemp
 and `vitest-macOS-<run>-attempt-<n>` artifacts, including on test failure. Each
 package's JUnit XML gives the test file (the suite name), full test name, result,
 duration and failure details. `package-times.json` gives package wall times.
-Reruns retain earlier attempts' artifacts. A process killed before reporting,
-or a job timeout, can leave a missing report; check its log for the cause.
+Artifact names identify each attempt. A full workflow rerun removes the earlier
+artifacts. A process killed before reporting, or a job timeout, can leave a
+missing report; check its log for the cause.
 Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
 

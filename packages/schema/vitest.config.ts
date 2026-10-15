@@ -8,6 +8,8 @@ export default defineConfig({
     // test's console output only when it fails. Node 25+ enables Web Storage by
     // default and warns once per worker that no `--localstorage-file` was given;
     // no suite uses Node's localStorage, so the workers run without it.
+    // The suite name carries the file; omitting duplicate class names and
+    // console output keeps the full job's JUnit reports below 1 MB.
     reporters: [
       process.env.CI ? "dot" : "default",
       ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
