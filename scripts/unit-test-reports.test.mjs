@@ -130,7 +130,7 @@ test("CI=true outside GitHub Actions creates no report", () => {
 });
 
 const workflowPath = join(root, ".github/workflows/ci.yml");
-test("report uploads preserve attempts and cannot change either required check's conclusion", {
+test("report uploads use distinct attempt names and cannot change either required check's conclusion", {
   skip: existsSync(workflowPath) ? undefined : ".github/workflows is absent from the isolated review context",
 }, () => {
   const workflow = readFileSync(workflowPath, "utf8");
