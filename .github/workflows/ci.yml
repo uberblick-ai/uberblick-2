@@ -27,8 +27,9 @@ on:
 # On main, let a started run finish and keep only the newest push waiting behind
 # it, so a busy merge day still produces results. On a pull request only the
 # newest head matters, so a new push cancels the run in progress.
+# Manual timing samples each finish without replacing another queued sample.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
