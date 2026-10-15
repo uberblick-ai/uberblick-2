@@ -9,8 +9,8 @@ import { runUnitTests, unitTestPlan } from "./run-unit-tests.mjs";
 
 test("all concurrent package pools share the declared machine budget", () => {
 	for (const [scope, cores, budget, concurrency, workers] of [
-		["all", 4, 12, 3, 4],
-		["os", 3, 9, 3, 3],
+		["all", 4, 16, 3, 5],
+		["os", 3, 12, 3, 4],
 	]) {
 		const plan = unitTestPlan(scope, cores);
 		assert.deepEqual([plan.budget, plan.concurrency, plan.workers], [budget, concurrency, workers]);

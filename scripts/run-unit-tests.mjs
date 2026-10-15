@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { availableParallelism, constants } from "node:os";
 import { join } from "node:path";
 
-const WORKERS_PER_CORE = 3;
+const WORKERS_PER_CORE = 4;
 const OS_PACKAGES = ["@uberblick/cli", "@uberblick/mcp-server", "@uberblick/hub"];
 
 export function unitTestPlan(scope, cores, setting) {

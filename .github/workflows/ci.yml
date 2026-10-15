@@ -29,10 +29,6 @@ on:
         type: choice
         default: shared
         options: [baseline, shared]
-      retention-probe:
-        description: Fail Linux after collecting reports on attempt one
-        type: boolean
-        default: false
 
 # On main, let a started run finish and keep only the newest push waiting behind
 # it, so a busy merge day still produces results. On a pull request only the
@@ -104,9 +100,6 @@ jobs:
           name: vitest-${{ runner.os }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/vitest-results/
           if-no-files-found: warn
-      - name: Temporary failed-job retention probe
-        if: ${{ inputs.retention-probe && github.run_attempt == 1 && runner.os == 'Linux' }}
-        run: exit 1
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
