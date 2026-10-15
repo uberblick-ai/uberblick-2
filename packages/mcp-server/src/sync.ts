@@ -1,6 +1,5 @@
 /** Background transport for the authoritative local update log. */
 
-import { setTimeout as delay } from "node:timers/promises";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
@@ -57,6 +56,10 @@ export interface HubState {
   /** Validated integer from a protocol refusal; absent until the hub supplies it. */
   hubProtocolVersion?: number;
 }
+
+export type SyncWaitResult =
+  | { caughtUp: true; reason: "caught-up" }
+  | { caughtUp: false; reason: "deadline" | "unavailable" };
 
 /**
  * Room refusal can leave the socket open without another handshake. Rebuild
@@ -150,7 +153,7 @@ class UnqueuedHocuspocusProviderWebsocket extends HocuspocusProviderWebsocket {
 
 /**
  * Hocuspocus listeners can send before the async token resolves, bypassing the
- * room bound. Gate updates and presence until the admitted auth frame is sent;
+ * room bound. Gate updates and presence until the admitted handshake starts;
  * the handshake reconciles suppressed updates and closed-socket frames.
  * Explicit detach CLOSE frames on an open socket bypass this pre-token gate.
  */
@@ -158,6 +161,8 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
   private admittedGeneration: number | null = null;
 
   private tokenSent = false;
+
+  private syncStarted = false;
 
   private currentGeneration: () => number | null = () => null;
 
@@ -177,6 +182,20 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
   blockUntilToken(): void {
     this.admittedGeneration = null;
     this.tokenSent = false;
+    this.syncStarted = false;
+  }
+
+  hasCurrentSync(): boolean {
+    return this.syncStarted && this.hasCurrentAdmission();
+  }
+
+  override startSync(): void {
+    if (!this.tokenSent || !this.hasCurrentAdmission() || this.syncStarted) return;
+    // The parent resets its acknowledgement count before sending the handshake.
+    // Keep updates gated through sendToken's async continuation so that reset
+    // cannot discard the debt of an update already sent on this connection.
+    this.syncStarted = true;
+    super.startSync();
   }
 
   override send(
@@ -186,13 +205,13 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
     if (args.token === "") {
       return;
     }
-    if (this.tokenSent) {
+    if (this.hasCurrentSync()) {
       super.send(Message, args);
       return;
     }
 
     // Inspect the public frame type only before admission; ordinary updates
-    // avoid this allocation once the auth frame has opened the gate.
+    // avoid this allocation once the handshake has opened the gate.
     if (new Message().type !== MessageType.Auth) {
       return;
     }
@@ -229,6 +248,8 @@ export class HubSync {
   private readonly onConnected: () => void;
 
   private readonly roomQuietListeners = new Set<() => void>();
+
+  private readonly stateListeners = new Set<() => void>();
 
   private readonly socket: HocuspocusProviderWebsocket | null = null;
 
@@ -389,6 +410,7 @@ export class HubSync {
       WebSocketPolyfill: this.connection.websocket(),
       ...backoff,
       onStatus: ({ status }) => {
+        queueMicrotask(() => this.stateChanged());
         const previous = this.socketStatus;
         this.socketStatus = status as "connecting" | "connected" | "disconnected";
         if (status !== "connected") {
@@ -435,6 +457,7 @@ export class HubSync {
         // The configured close callback runs before the provider reports
         // disconnected. A close after open still deserves reconnect grace.
         if (this.socketStatus !== "connected") this.failedDial = true;
+        this.stateChanged();
       },
     });
 
@@ -468,6 +491,7 @@ export class HubSync {
     });
     this.waiting.set(room, { promise, admit });
     this.pumpAdmissions();
+    this.stateChanged();
     return promise;
   }
 
@@ -498,6 +522,7 @@ export class HubSync {
     if (this.attaching.delete(room)) {
       this.pumpAdmissions();
     }
+    this.stateChanged();
   }
 
   /**
@@ -510,6 +535,7 @@ export class HubSync {
       ticket.admit(this.socketGeneration);
     }
     this.attaching.clear();
+    this.stateChanged();
   }
 
   /**
@@ -535,6 +561,7 @@ export class HubSync {
       if (rejected !== undefined || this.offeredLogins.size === 0) this.checkingDeviceRefusal = false;
       if (result.status !== "ready") {
         this.deviceReading = this.deviceFailure(result);
+        this.stateChanged();
         if (result.status === "update-required" && result.hubVersion !== undefined) {
           this.stopForProtocolMismatch(result.hubVersion);
         } else {
@@ -543,6 +570,7 @@ export class HubSync {
         return null;
       }
       this.deviceReading = null;
+      this.stateChanged();
       this.rejectedLogin = undefined;
       this.offeredLogins.set(room, result.login);
       this.mintCount += 1;
@@ -760,11 +788,13 @@ export class HubSync {
         if (state) {
           this.syncedRooms.add(room);
         }
+        this.stateChanged();
       },
       onUnsyncedChanges: ({ number }) => {
         if (number === 0) {
           for (const listener of this.roomQuietListeners) listener();
         }
+        this.stateChanged();
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         provider.blockUntilToken();
@@ -821,6 +851,7 @@ export class HubSync {
     // Shared-socket providers require explicit attach to subscribe and authenticate.
     provider.attach();
     this.providers.set(room, provider);
+    this.stateChanged();
   }
 
   /**
@@ -846,6 +877,7 @@ export class HubSync {
       return;
     }
     this.quarantined = true;
+    this.stateChanged();
     this.stopDeviceWork();
     for (const provider of this.providers.values()) {
       provider.detach();
@@ -867,6 +899,7 @@ export class HubSync {
       return;
     }
     this.hubProtocolVersion = hubProtocol;
+    this.stateChanged();
     this.stopDeviceWork();
     if (!this.silent) {
       log.error("the hub speaks a different sync protocol: update required", {
@@ -964,7 +997,18 @@ export class HubSync {
     if (provider === undefined) {
       return false;
     }
-    return provider.isSynced && !provider.hasUnsyncedChanges;
+    return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
+  }
+
+  private stateChanged(): void {
+    for (const listener of this.stateListeners) listener();
+  }
+
+  /** Observe connection, admission and provider acknowledgement changes. */
+  onStateChange(listener: () => void): () => void {
+    if (this.destroyed) return () => {};
+    this.stateListeners.add(listener);
+    return () => { this.stateListeners.delete(listener); };
   }
 
   /** Wake work that can advance once a provider has no outstanding messages. */
@@ -996,8 +1040,8 @@ export class HubSync {
     if (this.waiting.size > 0 || this.attaching.size > 0) {
       return false;
     }
-    for (const provider of this.providers.values()) {
-      if (!provider.isSynced || provider.hasUnsyncedChanges) {
+    for (const room of this.providers.keys()) {
+      if (!this.isRoomQuiet(room)) {
         return false;
       }
     }
@@ -1025,39 +1069,82 @@ export class HubSync {
     isQuiet?: () => boolean;
     /** Absolute monotonic deadline shared with the caller's remaining work. */
     deadline?: number;
-  } = {}): Promise<void> {
+    /** Additional local state that can change the caller's acknowledgement condition. */
+    subscribe?: (wake: () => void) => () => void;
+  } = {}): Promise<SyncWaitResult> {
     if (this.socket === null || this.destroyed) {
-      return;
+      return { caughtUp: false, reason: "unavailable" };
     }
     const deadline = options.deadline ?? Infinity;
-
     const connectDeadline = Date.now() + this.config.connectTimeoutMs;
-    while (this.socketStatus !== "connected") {
-      if (
-        this.failedDial || this.refusedByHub() || Date.now() >= connectDeadline ||
-        performance.now() >= deadline
-      ) {
+    let syncDeadline: number | undefined;
+    return new Promise<SyncWaitResult>((resolve, reject) => {
+      let finished = false;
+      let queued = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribeLocal = () => {};
+      let unsubscribe = () => {};
+      const cleanup = () => {
+        finished = true;
+        clearTimeout(timer);
+        unsubscribe();
+        unsubscribeLocal();
+      };
+      const finish = (result: SyncWaitResult) => {
+        cleanup();
+        resolve(result);
+      };
+      const evaluate = () => {
+        queued = false;
+        if (finished) return;
+        clearTimeout(timer);
+        if (this.stopped || this.failedDial || this.refusedByHub() ||
+          (syncDeadline !== undefined && this.socketStatus !== "connected" && !this.checkingDeviceRefusal)) {
+          finish({ caughtUp: false, reason: "unavailable" });
+          return;
+        }
+        if (performance.now() >= deadline) {
+          finish({ caughtUp: false, reason: "deadline" });
+          return;
+        }
+        if (this.socketStatus === "connected") {
+          syncDeadline ??= Date.now() + this.config.syncTimeoutMs;
+          if (options.isQuiet?.() ?? this.allQuiet()) {
+            finish({ caughtUp: true, reason: "caught-up" });
+            return;
+          }
+        }
+        const phaseDeadline = syncDeadline ?? connectDeadline;
+        if (Date.now() >= phaseDeadline) {
+          finish({ caughtUp: false, reason: "deadline" });
+          return;
+        }
+        // One deadline timer, rearmed only by actual state changes. Subscribe
+        // before the first reading so an acknowledgement cannot fall between them.
+        timer = setTimeout(wake, Math.min(phaseDeadline - Date.now(), deadline - performance.now()));
+      };
+      const wake = () => {
+        if (finished || queued) return;
+        queued = true;
+        queueMicrotask(() => {
+          try {
+            evaluate();
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        });
+      };
+      unsubscribe = this.onStateChange(wake);
+      try {
+        unsubscribeLocal = options.subscribe?.(wake) ?? unsubscribeLocal;
+      } catch (error) {
+        cleanup();
+        reject(error);
         return;
       }
-      await delay(Math.min(25, Math.max(0, deadline - performance.now())));
-    }
-    if (this.refusedByHub()) {
-      return;
-    }
-
-    const syncDeadline = Date.now() + this.config.syncTimeoutMs;
-    while (!(options.isQuiet?.() ?? this.allQuiet())) {
-      if (
-        (this.socketStatus !== "connected" && !this.checkingDeviceRefusal) ||
-        this.failedDial ||
-        this.refusedByHub() ||
-        Date.now() >= syncDeadline ||
-        performance.now() >= deadline
-      ) {
-        return;
-      }
-      await delay(Math.min(25, Math.max(0, deadline - performance.now())));
-    }
+      wake();
+    });
   }
 
   destroy(): void {
@@ -1065,6 +1152,8 @@ export class HubSync {
       return;
     }
     this.destroyed = true;
+    this.stateChanged();
+    this.stateListeners.clear();
     this.stopDeviceWork();
     this.roomQuietListeners.clear();
     if (this.rebuildTimer !== null) {

@@ -37,7 +37,7 @@ import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
-import { HubSync } from "./sync.js";
+import { HubSync, type SyncWaitResult } from "./sync.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
 const LOG_ORIGIN = Symbol("uberblick/log");
@@ -181,6 +181,8 @@ export class Replicas {
 
   /** The settle currently in flight, so concurrent tool calls share one. */
   private settling: Promise<void> | null = null;
+
+  private readonly refreshListeners = new Set<() => void>();
 
   /** Monotonic process time of the last metadata write attempt. */
   private lastSyncWriteAt: number | null = null;
@@ -874,6 +876,11 @@ export class Replicas {
 
   /** Synchronous local settle work, safe on refresh ticks without waiting for the hub. */
   refresh(): void {
+    this.refreshLocal();
+    for (const listener of this.refreshListeners) listener();
+  }
+
+  private refreshLocal(): void {
     this.assertHealthy();
     if (this.destroyed || this.persistenceFailure !== null) {
       return;
@@ -887,6 +894,37 @@ export class Replicas {
     this.releaseQuietRooms();
     this.compactLargeLogs();
     this.recordLastSyncIfCaughtUp();
+  }
+
+  /** Await hub acknowledgement of the replica, never hub storage. */
+  async waitForSettled(options: {
+    /** Omitted requires acknowledgement of every attached room. */
+    rooms?: readonly string[];
+    /** Absolute monotonic deadline, also bounded by connect and sync budgets. */
+    deadline?: number;
+  } = {}): Promise<SyncWaitResult> {
+    return this.sync.waitForQuiet({
+      ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
+      subscribe: (wake) => {
+        const unsubscribeAppend = this.store.onAppend(wake);
+        this.refreshListeners.add(wake);
+        return () => {
+          unsubscribeAppend();
+          this.refreshListeners.delete(wake);
+        };
+      },
+      isQuiet: () => {
+        if (this.destroyed || this.persistenceFailure !== null) return false;
+        // Acknowledgement alone does not release local pending markers or
+        // discover rooms delivered through the directory handshake.
+        this.refreshLocal();
+        const state = collectReplicaSyncState(this);
+        if (options.rooms === undefined) return state.caughtUp;
+        return state.hub.status === "connected" &&
+          !this.sync.isDraining() && this.store.pendingRooms().length === 0 &&
+          options.rooms.every((room) => state.acknowledged.get(room) === true);
+      },
+    });
   }
 
   /** Await only durable local changes, leaving unrelated hydration out of shutdown. */

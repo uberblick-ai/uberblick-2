@@ -116,7 +116,10 @@ describe("ub open: sharing through the upstream hub", () => {
       const { replacedAt: _replaced, ...record } = issued.record;
       await writeHubLogin(origin, { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
       await waitUntil("loopback origin login resumes sharing", async () => (await status()).caughtUp);
-      await waitUntil("pending loopback browser edit reaches the hub", () => getBlocks(hub.hocuspocus.documents.get(room)!)[0]?.text === "kept here before login");
+      await waitUntil("pending loopback browser edit reaches the hub", () => {
+        const remote = hub.hocuspocus.documents.get(room);
+        return remote !== undefined && getBlocks(remote)[0]?.text === "kept here before login";
+      });
       expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
     } finally {
       browser.destroy(); document.destroy();
@@ -185,14 +188,21 @@ describe("ub open: sharing through the upstream hub", () => {
       outcome.retryAt = 0;
       writeFileSync(outcomePath, JSON.stringify(outcome), { mode: 0o600 });
       await waitUntil("later grant to sync without restart", async () => (await status()).caughtUp, 80_000);
-      await waitUntil("pending browser edit at remote hub", () => getBlocks(hub.hocuspocus.documents.get(room)!)[0]?.text === "pending before login");
+      await waitUntil("pending browser edit at remote hub", () => {
+        const remote = hub.hocuspocus.documents.get(room);
+        return remote !== undefined && getBlocks(remote)[0]?.text === "pending before login";
+      });
       expect(await (await get(`${app.url}uberblick-config.json`)).json()).not.toHaveProperty("rebound");
       const stored = readHubLogins(box.env).logins[origin]!;
       expect(await (await get(`${app.url}uberblick-config.json`)).text()).not.toContain(stored.credential.key);
       // Changes from another admitted client travel back through the serving replica.
-      const remote = hub.hocuspocus.documents.get(room)!;
-      const initial = getBlocks(remote)[0]!;
-      editBlock(remote, initial.id, initial.text, "other client edit", { rev: initial.rev });
+      await waitUntil("remote room available for another client's edit", () => {
+        const remote = hub.hocuspocus.documents.get(room);
+        const initial = remote === undefined ? undefined : getBlocks(remote)[0];
+        if (remote === undefined || initial === undefined) return false;
+        editBlock(remote, initial.id, initial.text, "other client edit", { rev: initial.rev });
+        return true;
+      });
       await waitUntil("remote change in browser", () => getBlocks(document)[0]?.text === "other client edit");
       expect((await app.interrupt()).status).toBe(0);
       app = await open(box, ["--port", String(webPort)], env);

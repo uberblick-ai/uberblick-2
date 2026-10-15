@@ -26,6 +26,7 @@ import type { Hub } from "@uberblick/hub";
 import { defaultWorkspaceDatabasePath } from "../src/config.js";
 import {
   hubUrl,
+  LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
   startHub,
@@ -34,6 +35,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -71,6 +73,7 @@ async function serverFor(
 ): Promise<Rig> {
   const rig = await startServer(
     testConfig({
+      ...LIVE_HUB_SETTLE,
       workspaceId: parseWorkspaceId(workspaceId).uuid,
       authSecret: TEST_SECRET,
       hubUrl: hubUrl(port),
@@ -79,18 +82,6 @@ async function serverFor(
   );
   rigs.push(rig);
   return rig;
-}
-
-/** Wait until the server reports everything it holds has reached the hub. */
-async function waitForQuiet(rig: Rig): Promise<void> {
-  await waitUntil(`${rig.config.workspaceId} to report itself in sync`, async () => {
-    const status = await rig.ok("sync_status", {});
-    return (
-      status.hub.status === "connected" &&
-      status.unsyncedChanges === 0 &&
-      status.pendingRooms.length === 0
-    );
-  });
 }
 
 describe("two workspaces on one hub", () => {
@@ -118,8 +109,8 @@ describe("two workspaces on one hub", () => {
     });
     await research.ok("set_metadata", { uuid: backlog.uuid, links: [kickoff.uuid] });
 
-    await waitForQuiet(uberblick);
-    await waitForQuiet(research);
+    expect(await uberblick.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    expect(await research.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // The hub holds *both* corpora — read by a client that is neither server,
     // once per workspace. So what follows is a corpus this hub could have
