@@ -2,10 +2,9 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import type { Server as HttpServer } from "node:http";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import type { Server, Socket } from "node:net";
+import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Hub } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
@@ -25,6 +24,7 @@ import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
+import { cleanUpResources, ownListener } from "./teardown.js";
 
 const WORKSPACE = "9f2c47a1-5b83-4e60-91d7-2a6c8b40e3f5";
 const PINNED = "3e8b1d09-47af-4c62-8f10-95d3c7b6a204";
@@ -32,7 +32,7 @@ const SECRET = "doctor-test-signing-secret-4b91c7";
 const NAMES = ["workspace", "login", "database", "hub", "clock", "local hub", "web server", "mcp"];
 const hubs: Hub[] = [];
 const deviceHubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
-const servers: { server: Server | HttpServer; sockets: Socket[] }[] = [];
+const servers: (() => Promise<void>)[] = [];
 
 beforeEach(() => {
   // The web listener uses one fixed port, which may already belong to the
@@ -47,13 +47,12 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  for (const hub of deviceHubs.splice(0)) await hub.close();
-  for (const { server, sockets } of servers.splice(0)) {
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-  removeTempDirs();
+  await cleanUpResources(
+    hubs.splice(0).map((hub) => () => hub.stop()),
+    deviceHubs.splice(0).map((hub) => () => hub.close()),
+    servers.splice(0),
+    [removeTempDirs],
+  );
 });
 
 async function startHub(box: Sandbox, protocolVersion = SYNC_PROTOCOL_VERSION, address = "127.0.0.1"): Promise<Hub> {
@@ -65,10 +64,9 @@ async function startHub(box: Sandbox, protocolVersion = SYNC_PROTOCOL_VERSION, a
 }
 
 async function foreignProcess(host = "127.0.0.1"): Promise<number> {
-  const sockets: Socket[] = [];
-  const server = createServer((socket) => sockets.push(socket));
+  const server = createServer();
+  servers.push(ownListener(server));
   await new Promise<void>((resolve) => server.listen(0, host, resolve));
-  servers.push({ server, sockets });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no foreign process port");
   return address.port;
@@ -76,7 +74,6 @@ async function foreignProcess(host = "127.0.0.1"): Promise<number> {
 
 /** A websocket handshake without any directory-room response. */
 async function silentServer(offsetSeconds: number | null = 0): Promise<{ port: number; clockRequests: number }> {
-  const sockets: Socket[] = [];
   const reading = { port: 0, clockRequests: 0 };
   const server = createHttpServer((_request, response) => {
     reading.clockRequests += 1;
@@ -85,13 +82,12 @@ async function silentServer(offsetSeconds: number | null = 0): Promise<{ port: n
     response.writeHead(200, { "Content-Type": "text/plain" });
     response.end("hub clock");
   });
-  server.on("connection", (socket: Socket) => sockets.push(socket));
+  servers.push(ownListener(server));
   server.on("upgrade", (request, socket: Socket) => {
     const accept = createHash("sha1").update(`${request.headers["sec-websocket-key"] ?? ""}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  servers.push({ server, sockets });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no silent server port");
   reading.port = address.port;

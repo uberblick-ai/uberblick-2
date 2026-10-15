@@ -11,13 +11,12 @@ import { dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   FailingStore,
   LIVE_HUB_SETTLE,
   mainTsProcess,
   PACKAGE_ROOT,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -25,6 +24,7 @@ import {
   TEST_SECRET,
   waitForCorpus,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { Rig, TestConfigOptions } from "./helpers.js";
@@ -34,13 +34,15 @@ const hubs = new Set<Hub>();
 const processes = new Set<ProcessClient>();
 
 afterEach(async () => {
-  for (const processClient of processes) await processClient.close();
+  const clients = [...processes, ...rigs];
+  const runningHubs = [...hubs];
   processes.clear();
-  for (const rig of rigs) await rig.close();
   rigs.clear();
-  for (const hub of hubs) await hub.stop();
   hubs.clear();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: clients.map((client) => () => client.close()),
+    hubs: runningHubs.map((hub) => () => hub.stop()),
+  });
 });
 
 async function server(options: TestConfigOptions = {}, store?: MirrorStore) {
@@ -146,17 +148,6 @@ function persistedData(databasePath: string, room: string) {
     rebuilt.destroy();
     reader.close();
   }
-}
-
-async function synced(rig: Rig) {
-  await waitUntil("document data to be acknowledged by the hub", async () => {
-    const status = await rig.ok("sync_status");
-    return (
-      status.hub.status === "connected" &&
-      status.pendingRooms.length === 0 &&
-      status.unsyncedChanges === 0
-    );
-  });
 }
 
 async function hydrated(rig: Rig, uuid: string) {
@@ -365,8 +356,8 @@ describe("document-owned data persistence", () => {
     });
     await waitForCorpus(human, [created.uuid]);
     await hydrated(human, created.uuid);
-    await synced(producer);
-    await synced(human);
+    expect(await producer.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    expect(await human.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const writes = await Promise.all([
       producer.ok("update_data", { uuid: created.uuid, operations: [{
@@ -412,8 +403,8 @@ describe("document-owned data persistence", () => {
     expect(await human.ok("get_data", {
       uuid: created.uuid, collection: "dispositions",
     })).toEqual(disposition);
-    await synced(producer);
-    await synced(human);
+    expect(await producer.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    expect(await human.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     expect(await producer.ok("update_data", { uuid: created.uuid, operations: refresh }))
       .toMatchObject({ changed: false, applied: true, synced: true });
     const expected = readDocData(doc(producer, created.uuid));

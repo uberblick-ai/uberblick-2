@@ -750,9 +750,9 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
     expect(within(host).getByLabelText(/; preferences$/)).toBe(accountControl);
     expect(document.activeElement).toBe(
-      within(settings).getByRole("button", { name: `Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}` }),
+      within(settings).getByRole("button", { name: "Back to Unnamed workspace" }),
     );
-    expect(settings.textContent).toContain(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
+    expect(settings.textContent).toContain("Back to Unnamed workspace");
     expect(within(settings).getByText("Workspace settings").textContent).toBe(
       "Workspace settings",
     );
@@ -773,7 +773,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
     expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
 
-    act(() => within(settings).getByRole("button", { name: `Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}` }).click());
+    act(() => within(settings).getByRole("button", { name: "Back to Unnamed workspace" }).click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}`);
     expectDead(settings);
     expectLive(documents);

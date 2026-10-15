@@ -3,12 +3,10 @@
  * and `open-remote.test.ts`. See `open.test.ts` for why the world is real.
  */
 
-import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createConnection, createServer } from "node:net";
-import type { Server, Socket } from "node:net";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -28,6 +26,7 @@ import {
   sandbox,
   waitUntil,
 } from "./helpers.js";
+import { cleanUpResources, ownChild, ownListener } from "./teardown.js";
 
 export { freePort } from "./helpers.js";
 
@@ -41,27 +40,20 @@ export const FIRST_REMOTE = "wss://first.example.ts.net/ws";
 export const SECOND_REMOTE = "wss://second.example.ts.net/ws";
 
 export const hubs: Hub[] = [];
-export const listeners: { server: Server; sockets: Socket[] }[] = [];
-export const children: ChildProcess[] = [];
+export const listeners: (() => Promise<void>)[] = [];
+export const children: (() => Promise<void>)[] = [];
 
 /**
  * Stop everything a test left running and remove its sandboxes. Every `ub
  * open` suite registers it with `afterEach`.
  */
 export async function cleanUp(): Promise<void> {
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  for (const { server, sockets } of listeners.splice(0)) {
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((done) => server.close(() => done()));
-  }
-  removeTempDirs();
+  await cleanUpResources(
+    children.splice(0),
+    hubs.splice(0).map((hub) => () => hub.stop()),
+    listeners.splice(0),
+    [removeTempDirs],
+  );
 }
 
 // --- fixtures ----------------------------------------------------------------
@@ -88,10 +80,9 @@ export function openStore(databasePath: string): DatabaseSync {
  * deadline: no ceiling makes this holder identifiable.
  */
 export async function silentListener(port: number): Promise<void> {
-  const sockets: Socket[] = [];
-  const server = createServer((socket) => sockets.push(socket));
+  const server = createServer();
+  listeners.push(ownListener(server));
   await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
-  listeners.push({ server, sockets });
 }
 
 /** A process holding a port and giving one complete HTTP answer to everything. */
@@ -100,14 +91,12 @@ export async function answeringListener(
   status: number,
   body: string,
 ): Promise<void> {
-  const sockets: Socket[] = [];
   const server = createHttpServer((_request, response) => {
     response.writeHead(status);
     response.end(body);
   });
-  server.on("connection", (socket) => sockets.push(socket));
+  listeners.push(ownListener(server));
   await new Promise<void>((done) => server.listen(port, "127.0.0.1", done));
-  listeners.push({ server, sockets });
 }
 
 export async function startHub(box: Sandbox, port = 0): Promise<Hub> {
@@ -204,7 +193,7 @@ export async function open(
     cwd: box.cwd,
     env: { ...box.env, ...extraEnv },
   });
-  children.push(child);
+  children.push(ownChild(child));
 
   let stdout = "";
   let stderr = "";
@@ -268,7 +257,7 @@ export async function interruptWhen(
     cwd: box.cwd,
     env: { ...box.env, ...extraEnv },
   });
-  children.push(child);
+  children.push(ownChild(child));
   let output = "";
   child.stdout.on("data", (chunk: Buffer) => {
     output += chunk.toString("utf8");

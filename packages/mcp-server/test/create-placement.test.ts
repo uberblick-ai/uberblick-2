@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   deleteGroup,
   getMeta,
@@ -20,16 +20,17 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   FailingStore,
+  LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
@@ -50,7 +51,7 @@ async function server(
       databasePath,
       ...(hubPort === undefined
         ? {}
-        : { authSecret: TEST_SECRET, hubUrl: `ws://127.0.0.1:${hubPort}` }),
+        : { ...LIVE_HUB_SETTLE, authSecret: TEST_SECRET, hubUrl: `ws://127.0.0.1:${hubPort}` }),
     }),
     store,
   );
@@ -109,13 +110,14 @@ function pinCount(sidebar: any, uuid: string): number {
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const store of stores.splice(0)) store.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [...stores.splice(0).map((store) => () => store.close())],
+  });
 });
 
-afterAll(removeTempDirs);
 
 describe("the placement input", () => {
   it("refuses everything but a group id and a position, creating nothing", async () => {
@@ -324,14 +326,7 @@ describe("with no hub", () => {
     );
 
     // And only then does the call's own claim become true for every room.
-    await waitUntil("every room this server holds to be acknowledged", async () => {
-      const status = await restarted.ok("sync_status", {});
-      return (
-        status.hub.status === "connected" &&
-        status.unsyncedChanges === 0 &&
-        status.pendingRooms.length === 0
-      );
-    });
+    expect(await restarted.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   });
 });
 

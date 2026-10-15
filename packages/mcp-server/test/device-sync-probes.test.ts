@@ -5,13 +5,12 @@ import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import type { McpConfig } from "../src/config.js";
 import { inspectRemote, syncWorkspace } from "../src/remote.js";
 import { deviceRetryDelayMs } from "../src/sync.js";
-import { removeTempDirs, tempDir, testConfig, WORKSPACE } from "./helpers.js";
+import { cleanupTestResources, tempDir, testConfig, WORKSPACE } from "./helpers.js";
 
 type DeviceHub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
 const hubs: DeviceHub[] = [];
 afterEach(async () => {
-  for (const fixture of hubs.splice(0)) await fixture.close();
-  removeTempDirs();
+  await cleanupTestResources({ hubs: hubs.splice(0).map((fixture) => () => fixture.close()) });
 });
 
 async function fixture(): Promise<{ hub: DeviceHub; env: NodeJS.ProcessEnv; config: McpConfig }> {

@@ -21,7 +21,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
 import {
   directoryRoom,
@@ -37,14 +37,13 @@ import { PersistenceError, Replicas } from "../src/replica.js";
 import { MirrorStore } from "../src/store.js";
 import { importSeedDir, importSeedDocs, readSeedDocs } from "../src/seed.js";
 import type { SeedImport } from "../src/seed.js";
-import {
+import { cleanupTestResources,
   FailingStore,
   LIVE_HUB_SETTLE,
   TEST_SECRET,
   WORKSPACE,
   hubUrl,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -84,7 +83,7 @@ async function runImport(
     const results = await importSeedDocs(replicas, readSeedDocs(dir));
     return { results, logEntries: store.logSize() };
   } finally {
-    replicas.destroy();
+    await replicas.destroy();
     store.close();
   }
 }
@@ -115,8 +114,12 @@ function writeCorpus(): string {
   return dir;
 }
 
-const corpusDir = writeCorpus();
-const seeds = readSeedDocs(corpusDir);
+let corpusDir: string;
+let seeds: ReturnType<typeof readSeedDocs>;
+beforeEach(() => {
+  corpusDir = writeCorpus();
+  seeds = readSeedDocs(corpusDir);
+});
 
 function seedUuid(file: string): string {
   const seed = seeds.find((candidate) => candidate.file === file);
@@ -128,17 +131,12 @@ const hubs: Hub[] = [];
 const peers: PeerClient[] = [];
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) {
-    peer.destroy();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
+  await cleanupTestResources({
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
-afterAll(() => {
-  removeTempDirs();
-});
 
 describe("seed import", () => {
   // Identity comes from the file and is never invented: a generated uuid would
@@ -335,7 +333,7 @@ describe("seed import", () => {
       // Nothing was written into the room it refused to touch.
       expect(getBlocks(replicas.replica(seed.uuid).doc)).toHaveLength(0);
     } finally {
-      replicas.destroy();
+      await replicas.destroy();
       store.close();
     }
   });
@@ -428,7 +426,7 @@ describe("seed import", () => {
         throw new Error("expected more than one fixture doc");
       expect(getMeta(replicas.replica(later.uuid).doc).uuid).toBe("");
     } finally {
-      replicas.destroy();
+      await replicas.destroy();
       faulty.close();
     }
   });

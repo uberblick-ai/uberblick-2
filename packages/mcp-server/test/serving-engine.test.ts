@@ -23,10 +23,9 @@ import {
 } from "../src/serving-role.js";
 import { MirrorStore } from "../src/store.js";
 import * as tagCatalog from "../src/tag-catalog.js";
-import {
+import { cleanupTestResources, closeChild, trackChild,
   hubUrl,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -64,7 +63,7 @@ function spawnWorker(databasePath: string, sessionId: string): Worker {
     execArgv: ["--import", "tsx"],
     stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
-  children.push(child);
+  children.push(trackChild(child));
   let stderr = "";
   child.stderr?.setEncoding("utf8");
   child.stderr?.on("data", (chunk: string) => {
@@ -119,17 +118,15 @@ async function killWorker(worker: Worker): Promise<void> {
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const engine of engines.splice(0)) await engine.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
-  for (const child of children.splice(0)) {
-    if (child.exitCode !== null || child.signalCode !== null) continue;
-    const exited = once(child, "exit");
-    child.kill("SIGKILL");
-    await exited;
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [
+      ...rigs.splice(0).map((rig) => () => rig.close()),
+      ...engines.splice(0).map((engine) => () => engine.close()),
+      ...children.splice(0).map((child) => () => closeChild(child)),
+    ],
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 function encodedDoc(uuid: string, text: string): Uint8Array {

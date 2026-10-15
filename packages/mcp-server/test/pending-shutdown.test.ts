@@ -5,10 +5,9 @@ import type { Hub } from "@uberblick/hub";
 import * as Y from "yjs";
 import { afterEach, expect, it, vi } from "vitest";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -26,11 +25,11 @@ const releases: (() => void)[] = [];
 
 afterEach(async () => {
   for (const release of releases.splice(0)) release();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const store of stores.splice(0)) store.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  vi.restoreAllMocks();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((rig) => () => rig.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [...stores.splice(0).map((store) => () => store.close()), () => vi.restoreAllMocks()],
+  });
 });
 
 function gate() {
@@ -121,10 +120,11 @@ it("retains a newer cross-process append between the final poll and marker relea
   let appendedSeq = 0;
   const waitForQuiet = rig.instance.replicas.sync.waitForQuiet.bind(rig.instance.replicas.sync);
   vi.spyOn(rig.instance.replicas.sync, "waitForQuiet").mockImplementation(async (options) => {
-    await waitForQuiet(options);
+    const result = await waitForQuiet(options);
     store.beforeNextPendingRead(() => {
       appendedSeq = outside.appendUpdate(replica.room, update, "local");
     });
+    return result;
   });
   appendBlock(replica.doc, { type: "paragraph", text: "The acknowledged write." });
   const pending = await rig.instance.replicas.waitForPendingChanges(performance.now() + 5_000);

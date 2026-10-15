@@ -34,9 +34,9 @@ function gate(): { entered: Promise<void>; release(): void; wait(): Promise<void
 function holdHubWait(replicas: Replicas) {
   const held = gate();
   const waitForQuiet = replicas.sync.waitForQuiet.bind(replicas.sync);
-  vi.spyOn(replicas.sync, "waitForQuiet").mockImplementation(async () => {
+  vi.spyOn(replicas.sync, "waitForQuiet").mockImplementation(async (options) => {
     await held.wait();
-    await waitForQuiet();
+    return waitForQuiet(options);
   });
   (replicas as unknown as { settleNeeded: boolean }).settleNeeded = true;
   return held;

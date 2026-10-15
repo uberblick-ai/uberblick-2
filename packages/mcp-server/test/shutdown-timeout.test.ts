@@ -5,10 +5,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Hub } from "@uberblick/hub";
 import { afterEach, expect, it } from "vitest";
-import {
+import { cleanupTestResources, closeChild, trackChild,
   hubUrl,
   PACKAGE_ROOT,
-  removeTempDirs,
   startHub,
   tempDir,
   TEST_SECRET,
@@ -20,21 +19,10 @@ const hubs: Hub[] = [];
 const releaseLoads: (() => void)[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    children.splice(0).map(async (child) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        return;
-      }
-      const exited = new Promise<void>((resolve) => {
-        child.once("close", () => resolve());
-      });
-      child.kill("SIGKILL");
-      await exited;
-    }),
-  );
-  for (const release of releaseLoads.splice(0)) release();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [...children.splice(0).map((child) => () => closeChild(child)), ...releaseLoads.splice(0)],
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 function moduleUrl(name: string): string {
@@ -79,7 +67,7 @@ async function shutdownProcess(deviceWork: string, timeoutMs = 50, options: {
       killSignal: "SIGKILL",
     },
   );
-  children.push(child);
+  children.push(trackChild(child));
   return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
@@ -146,9 +134,9 @@ it("uses only the budget left after draining admitted startup work and leaves ti
             first = false;
             enter();
             await new Promise((resolve) => setTimeout(resolve, 1_200));
-            return;
+            return { caughtUp: false, reason: "deadline" };
           }
-          await waitForQuiet(options);
+          return waitForQuiet(options);
         };
         const [, transport] = InMemoryTransport.createLinkedPair();
         void instance.connect(transport);

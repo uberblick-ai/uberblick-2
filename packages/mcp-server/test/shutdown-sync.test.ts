@@ -5,12 +5,12 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { getBlocks } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
 import { messageYjsUpdate } from "y-protocols/sync";
-import {
+import { cleanupTestResources, closeChild, trackChild,
   hubUrl,
+  LIVE_HUB_SETTLE,
   mainTsProcess,
   PACKAGE_ROOT,
   peerClient,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -18,6 +18,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
   type PeerClient,
   type Rig,
@@ -34,16 +35,14 @@ const peers: PeerClient[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
-  await Promise.all(children.splice(0).map(async (child) => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
-    child.kill("SIGKILL");
-    await closed;
-  }));
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [
+      ...rigs.splice(0).map((rig) => () => rig.close()),
+      ...children.splice(0).map((child) => () => closeChild(child)),
+    ],
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function startProcess(options: { hubUrl?: string; authSecret?: string } = {}) {
@@ -63,7 +62,7 @@ async function startProcess(options: { hubUrl?: string; authSecret?: string } = 
     timeout: 35_000,
     killSignal: "SIGKILL",
   });
-  children.push(child);
+  children.push(trackChild(child));
   const frames = new ReadBuffer();
   const replies = new Map<number, JSONRPCMessage>();
   let stdout = "";
@@ -138,14 +137,14 @@ async function offlineStatus(databasePath: string) {
 async function pendingWrite() {
   const hub = await startHub();
   hubs.push(hub);
-  const seed = await startServer(testConfig({ authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port) }));
+  const seed = await startServer(testConfig({ ...LIVE_HUB_SETTLE, authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port) }));
   rigs.push(seed);
   const created = await seed.ok("create_doc", {
     title: "The last write",
     description: "Shutdown must give this write a chance to reach its peer.",
     blocks: [{ type: "paragraph", text: ORIGINAL }],
   });
-  await waitUntil("the seed to be acknowledged", async () => (await seed.ok("sync_status")).unsyncedChanges === 0);
+  expect(await seed.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   await seed.close();
   rigs.splice(rigs.indexOf(seed), 1);
   const room = `${WORKSPACE}/${created.uuid}`;
@@ -154,9 +153,11 @@ async function pendingWrite() {
   await peer.synced;
   const writer = await startProcess({ hubUrl: hubUrl(hub.port), authSecret: TEST_SECRET });
   await writer.call("get_doc", { uuid: created.uuid });
-  const connection = hub.hocuspocus.documents.get(room)!.getConnections()
-    .find((candidate) => "sub" in candidate.context && candidate.context.sub === SESSION)!;
-  expect(connection).toBeDefined();
+  const writerConnection = () => hub.hocuspocus.documents.get(room)?.getConnections()
+    .find((candidate) => "sub" in candidate.context && candidate.context.sub === SESSION);
+  await waitUntil("the writer to join its hub room", () => writerConnection() !== undefined);
+  const connection = writerConnection();
+  if (connection === undefined) throw new Error("the writer left its hub room before the sync gate was armed");
   let release!: () => void;
   const withheld = new Promise<void>((resolve) => { release = resolve; });
   const beforeSync = connection.callbacks.beforeSync;

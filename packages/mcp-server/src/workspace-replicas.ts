@@ -1,4 +1,5 @@
 import { DEFAULT_HUB_URL, type McpConfig } from "./config.js";
+import { closeResources } from "./close-resources.js";
 import { Replicas } from "./replica.js";
 import {
   acquireServingReplicaRole,
@@ -70,10 +71,12 @@ export function openWorkspaceReplicas(
         return;
       }
       closing = Promise.resolve().then(async () => {
-        replicas.destroy();
-        await replicas.sync.waitForDeviceWork();
-        servingRole?.close();
-        store.close();
+        await closeResources([
+          () => replicas.destroy(),
+          () => replicas.sync.waitForDeviceWork(),
+          () => servingRole?.close(),
+          () => store.close(),
+        ], "workspace teardown failed");
       });
       return closing;
     },

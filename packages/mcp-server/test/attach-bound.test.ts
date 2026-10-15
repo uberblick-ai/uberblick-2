@@ -47,10 +47,9 @@ import type { Hub } from "@uberblick/hub";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { HubSync, MAX_CONCURRENT_ROOM_ATTACHES } from "../src/sync.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   tempDatabasePath,
   testConfig,
   TEST_SECRET,
@@ -168,14 +167,11 @@ const syncs: HubSync[] = [];
 
 afterEach(async () => {
   mints.releaseAll();
-  for (const sync of syncs.splice(0)) {
-    sync.destroy();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  removeTempDirs();
-  vi.restoreAllMocks();
+  await cleanupTestResources({
+    clients: syncs.splice(0).map((sync) => () => sync.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [() => { vi.restoreAllMocks(); }],
+  });
 });
 
 async function startHub(options: { port?: number; databasePath: string }) {
