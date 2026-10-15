@@ -98,7 +98,7 @@ jobs:
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run site
 
-  # Files stay serial internally; each shard gets its own bundle and harnesses.
+  # Files stay serial internally; each job gets its own bundle and harnesses.
   e2e-chromium-1:
     name: browser chromium (1/2)
     runs-on: ubuntu-latest
@@ -132,7 +132,7 @@ jobs:
 
       - name: Run browser suite
         id: browser-suite
-        run: mise run e2e --project=chromium --shard=1/2
+        run: mise run e2e --project=chromium --test-list=e2e/chromium-group-one.txt
 
       - name: Upload failed browser output
         if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
@@ -177,7 +177,7 @@ jobs:
 
       - name: Run browser suite
         id: browser-suite
-        run: mise run e2e --project=chromium --shard=2/2
+        run: mise run e2e --project=chromium --test-list-invert=e2e/chromium-group-one.txt
 
       - name: Upload failed browser output
         if: ${{ always() && steps.browser-suite.outcome == 'failure' }}

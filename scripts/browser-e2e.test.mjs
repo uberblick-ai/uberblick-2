@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -92,7 +93,7 @@ function list(arguments_) {
 			PLAYWRIGHT_JSON_OUTPUT_FILE: "",
 		},
 	});
-	assert.equal(result.status, 0, result.stderr || String(result.error));
+	assert.equal(result.status, 0, result.stderr || result.stdout || String(result.error));
 	return JSON.parse(result.stdout);
 }
 
@@ -126,7 +127,7 @@ test("CI selections partition the full browser suite exactly once without splitt
 		assert.ok(arguments_, `the browser job ${id} must execute its suite`);
 		return arguments_;
 	});
-	assert.equal(argumentsByJob[4], "--project=chromium-workload --no-deps");
+	assert.equal(argumentsByJob[browserJobs.indexOf("e2e-workload")], "--project=chromium-workload --no-deps");
 	const complete = list([]);
 	assert.equal(complete.config.fullyParallel, false);
 	assert.equal(complete.config.workers, 2);
@@ -136,8 +137,37 @@ test("CI selections partition the full browser suite exactly once without splitt
 	const selected = selections.flat().map(({ key }) => key);
 	assert.equal(new Set(selected).size, selected.length, "no project case may run in more than one job");
 	assert.deepEqual(selected.sort(), completeCases.map(({ key }) => key).sort(), "every retained case must run");
-	for (const [first, second] of [[0, 1], [2, 3]]) {
-		const firstShardFiles = new Set(selections[first].map(({ file }) => file));
-		assert.ok(selections[second].every(({ file }) => !firstShardFiles.has(file)), "shared-harness files stay on one shard");
+	const fileOwners = new Map();
+	for (const [index, selection] of selections.entries()) {
+		for (const { file } of selection) {
+			assert.ok(!fileOwners.has(file) || fileOwners.get(file) === index, `${file} must stay on one browser job`);
+			fileOwners.set(file, index);
+		}
+	}
+});
+
+test("a new spec runs on exactly one Chromium job without changing the workflow or file list", {
+	skip: absentWorkflow,
+	timeout: 120_000,
+}, () => {
+	const directory = mkdtempSync(join(tmpdir(), "browser-partition-"));
+	try {
+		const require = createRequire(join(root, "packages/web/package.json"));
+		const configPath = join(directory, "playwright.config.mjs");
+		writeFileSync(configPath, `import config from ${JSON.stringify(join(root, "packages/web/playwright.config.ts"))};
+export default { ...config, testDir: ${JSON.stringify(directory)}, globalSetup: undefined, reporter: "json" };\n`);
+		writeFileSync(join(directory, "new-unlisted.spec.mjs"), `import playwright from ${JSON.stringify(require.resolve("@playwright/test"))};
+const { test } = playwright;
+test("first new case", () => {});
+test("second new case", () => {});\n`);
+		const selections = browserJobs.filter((id) => id.startsWith("e2e-chromium-")).map((id) => {
+			const arguments_ = job(id).match(/^ {8}run: mise run e2e (.+)$/m)?.[1];
+			assert.ok(arguments_);
+			return cases(list([...arguments_.split(" "), `--config=${configPath}`, "--pass-with-no-tests"]));
+		});
+		assert.equal(selections.flat().length, 2, "both new cases run exactly once");
+		assert.equal(selections.filter((selection) => selection.length > 0).length, 1, "the new file stays on one job");
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
 	}
 });
