@@ -89,10 +89,13 @@ test("workspace, supported renderers and the every-type document emit no report-
     }],
   });
   const allTypes = await writer.call<{ uuid: string }>("create_doc", {
-    title: "CSP every block type", description: "Includes the currently unsupported Figma view.",
+    title: "CSP every block type", description: "Includes the live Figma view.",
     blocks: [...blocks, figma],
   });
-  const page = await openApp(browser, "/", { beforeNavigate: watchViolations });
+  const page = await openApp(browser, "/", { beforeNavigate: async (target) => {
+    await watchViolations(target);
+    await target.route("https://embed.figma.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" }));
+  } });
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
   await expectNoViolations(page);
 
@@ -116,10 +119,11 @@ test("workspace, supported renderers and the every-type document emit no report-
       await expect(page.getByRole("menu")).toBeVisible();
       await page.keyboard.press("Escape");
     } else {
-      // Figma's current safe fallback makes the entire document read-only.
-      await expect(page.locator(".ub-foreign-banner")).toContainText("unsupported type (figma)");
-      await expect(page.locator(".ub-foreign-list > li > code")).toHaveText([...blocks, figma].map((block) => block.type));
-      await expect(editor(page)).toHaveCount(0);
+      await expect(editor(page)).toBeVisible();
+      await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+      await expect(page.locator(".ub-figma")).toBeVisible();
+      await page.locator(".ub-figma").scrollIntoViewIfNeeded();
+      await expect(page.locator(".ub-figma iframe")).toHaveAttribute("src", /^https:\/\/embed\.figma\.com\//);
     }
     await expectNoViolations(page);
   }

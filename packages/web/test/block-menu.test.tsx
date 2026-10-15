@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { act, render } from "./react-render.js";
 import * as Y from "yjs";
 import {
@@ -191,6 +191,7 @@ describe("the registry", () => {
       "Heading 3",
       "Quote",
       "Card",
+      "Figma",
       "Bullet list",
       "Numbered list",
       "Code",
@@ -289,6 +290,53 @@ describe("the slash trigger", () => {
 });
 
 describe("the slash menu", () => {
+  it("opens a focused local Figma draft and discards an invalid Done without publishing a block", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/figma");
+      press("Enter");
+      const link = screen.getByRole<HTMLInputElement>("textbox", { name: "Figma link" });
+      expect(document.activeElement).toBe(link);
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([["paragraph", ""]]);
+      act(() => fireEvent.change(link, { target: { value: "https://figma.com/deck/refused" } }));
+      act(() => screen.getByRole("button", { name: "Done" }).click());
+      expect(screen.queryByRole("textbox", { name: "Figma link" })).toBeNull();
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([["paragraph", ""]]);
+    } finally { unmount(); }
+  });
+
+  it("publishes a Figma menu draft only after its link is valid", () => {
+    const { ydoc, ids } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/figma");
+      press("Enter");
+      const link = screen.getByRole<HTMLInputElement>("textbox", { name: "Figma link" });
+      act(() => fireEvent.change(link, { target: { value: "https://figma.com/design/abc123/File-name?t=tracking" } }));
+      expect(getBlocks(ydoc)[0]?.type).toBe("paragraph");
+      act(() => screen.getByRole("button", { name: "Done" }).click());
+      expect(getBlocks(ydoc)[0]).toMatchObject({ id: ids[0], type: "figma", text: "url: https://www.figma.com/design/abc123/File-name\n\n" });
+      expect(screen.queryByRole("textbox", { name: "Figma link" })).toBeNull();
+    } finally { unmount(); }
+  });
+
+  it("discards a local Figma draft when the mounted editor becomes read-only", () => {
+    const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
+    const { editor, press, unmount } = mountMenu(ydoc);
+    try {
+      caret(editor, 0, 0);
+      type(editor, "/figma");
+      press("Enter");
+      expect(screen.queryByRole("textbox", { name: "Figma link" })).not.toBeNull();
+      act(() => editor.setEditable(false));
+      expect(screen.queryByRole("textbox", { name: "Figma link" })).toBeNull();
+      expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([["paragraph", ""]]);
+    } finally { unmount(); }
+  });
+
   it("identifies the highlighted option, wrapping at both ends, until the menu closes", () => {
     const { ydoc } = docWith([{ type: "paragraph", text: "" }]);
     const { editor, press, unmount } = mountMenu(ydoc);

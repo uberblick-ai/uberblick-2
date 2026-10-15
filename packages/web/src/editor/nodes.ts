@@ -27,6 +27,7 @@ import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
 import { mermaidBlockView } from "./mermaid.js";
 import { Card, CardParts } from "./card.js";
+import { Figma, FigmaCaption } from "./figma.js";
 
 /**
  * BlockIds assigns null ids. y-prosemirror skips null attributes, so a transient
@@ -387,6 +388,8 @@ export const paletteExtensions = [
   ChartBlock,
   Card,
   ...CardParts,
+  Figma,
+  FigmaCaption,
   CommentMark,
   ...inlineMarkExtensions,
 ];

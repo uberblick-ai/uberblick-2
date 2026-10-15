@@ -22,6 +22,8 @@ import {
 import type { BlockMenuEntry, SlashTrigger } from "../../editor/block-menu.js";
 import { useCaretMenuKeys } from "./caret-menu.js";
 import { CaretMenu, useCaretMenuIds } from "./CaretMenu.js";
+import { FigmaDraft } from "./FigmaDraft.js";
+import { startFigmaDraft } from "../../editor/figma-creation.js";
 
 interface SlashSession {
   trigger: SlashTrigger;
@@ -338,13 +340,15 @@ export function BlockMenu({
       if (gutter !== null) {
         // A refusal means the block is gone; either way the menu has had its
         // answer and closes.
-        insertBlockBelow(editor, gutter.blockId, entry);
+        if (entry.type === "figma") startFigmaDraft(editor, gutter.blockId);
+        else insertBlockBelow(editor, gutter.blockId, entry);
         closeGutter();
         if (!gutter.touch) setHover(null);
         return;
       }
       if (slash !== null) {
-        convertBlockAtTrigger(editor, slash.trigger, entry);
+        if (entry.type === "figma") startFigmaDraft(editor, slash.trigger.blockId, slash.trigger);
+        else convertBlockAtTrigger(editor, slash.trigger, entry);
         setSlash(null);
       }
     },
@@ -404,6 +408,7 @@ export function BlockMenu({
   const visible = anchor !== null;
   return (
     <>
+      <FigmaDraft editor={editor} />
       {/*
           * Keep the button mounted for opacity-only reveal, but remove its invisible
           * Tab stop; slash is the keyboard entry route.
