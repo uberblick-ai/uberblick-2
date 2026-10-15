@@ -9,8 +9,8 @@ import { runUnitTests, unitTestPlan } from "./run-unit-tests.mjs";
 
 test("all concurrent package pools share the declared machine budget", () => {
 	for (const [scope, cores, budget, concurrency, workers] of [
-		["all", 4, 16, 3, 5],
-		["os", 3, 12, 3, 4],
+		["all", 4, 12, 4, 3],
+		["os", 3, 9, 2, 4],
 	]) {
 		const plan = unitTestPlan(scope, cores);
 		assert.deepEqual([plan.budget, plan.concurrency, plan.workers], [budget, concurrency, workers]);
@@ -45,7 +45,7 @@ test("shared invocations preserve package failures and scope without changing th
 		"--filter", "@uberblick/cli",
 		"--filter", "@uberblick/mcp-server",
 		"--filter", "@uberblick/hub",
-		"--no-sort", "--no-bail", "--workspace-concurrency", "3", "test",
+		"--no-sort", "--no-bail", "--workspace-concurrency", "2", "test",
 	]);
 	assert.equal(options.stdio, "inherit");
 	assert.equal(options.env.UB_TEST_SCOPE, "os");

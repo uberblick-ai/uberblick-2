@@ -274,9 +274,10 @@ Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
 
 `pnpm test` and `pnpm run test:os` share one worker budget across concurrent
-packages. The root runner divides four times the machine's available cores
-among at most three concurrent suites. `pnpm --filter <package> test` uses that
-package's standalone worker setting.
+packages. Each command divides a budget of three times the machine's available
+cores among its slots: up to four concurrent suites for `pnpm test`, and two for
+`pnpm run test:os`. `pnpm --filter <package> test` uses that package's standalone
+worker setting.
 
 Merging also requires CodeQL code scanning results: a pull request that introduces
 a security alert at high or above cannot merge. Lower-severity and non-security

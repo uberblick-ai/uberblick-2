@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { availableParallelism, constants } from "node:os";
 import { join } from "node:path";
 
-const WORKERS_PER_CORE = 4;
+const WORKERS_PER_CORE = 3;
 const OS_PACKAGES = ["@uberblick/cli", "@uberblick/mcp-server", "@uberblick/hub"];
 
 export function unitTestPlan(scope, cores, setting) {
@@ -21,7 +21,7 @@ export function unitTestPlan(scope, cores, setting) {
 	if (!Number.isSafeInteger(budget) || budget < 1) {
 		throw new Error("The worker budget must be a positive safe integer");
 	}
-	const concurrency = Math.min(3, budget, scope === "os" ? OS_PACKAGES.length : 5);
+	const concurrency = Math.min(scope === "os" ? 2 : 4, budget);
 	const workers = Math.floor(budget / concurrency);
 	args.push("--workspace-concurrency", String(concurrency), "test");
 	return { args, cores, budget, concurrency, workers };
