@@ -64,6 +64,10 @@ describe("Figma creation", () => {
     expect(editor.view.dom.querySelector('[data-figma-draft="true"]')).not.toBeNull();
     expect(getBlocks(ydoc)).toHaveLength(1);
     const draft = currentFigmaDraft(editor)!;
+    expect(startFigmaDraft(editor, id)).toBe(true);
+    expect(currentFigmaDraft(editor)).toBe(draft);
+    expect(draft.slot.isConnected).toBe(true);
+    expect(Y.encodeStateAsUpdate(ydoc)).toEqual(before);
     expect(commitFigmaDraft(editor, draft, { url: LINK, title: null, height: null })).toBe(true);
     expect(getBlocks(ydoc).map((block) => block.type)).toEqual(["paragraph", "figma"]);
     expect(getBlocks(ydoc)[1]?.text).toBe(`url: ${NORMALIZED}\n\n`);

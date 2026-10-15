@@ -27,6 +27,11 @@ export function startFigmaDraft(editor: Editor, blockId: string, trigger?: Slash
   if (found === null) return false;
   const live = trigger === undefined ? null : slashTriggerAt(editor);
   if (trigger !== undefined && (live?.blockId !== blockId || live.query !== trigger.query)) return false;
+  const existing = currentFigmaDraft(editor);
+  if (existing?.blockId === blockId && existing.mode === (trigger === undefined ? "below" : "replace")) {
+    existing.slot.querySelector("input")?.focus();
+    return true;
+  }
   const slot = editor.view.dom.ownerDocument.createElement("div");
   slot.className = "ub-figma ub-block-frame";
   slot.dataset.figmaDraft = "true";
