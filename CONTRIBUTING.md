@@ -268,8 +268,8 @@ package's JUnit XML gives the test file (the suite name), full test name, result
 duration and failure details. `package-times.json` gives package wall times.
 Rerunning failed or selected jobs (`gh run rerun <run> --failed` or `--job <job-id>`)
 keeps earlier attempts' reports beside the new reports. "Re-run all jobs" deletes
-earlier attempts' reports. A process killed before reporting, or a job timeout, can leave a
-missing report; check its log for the cause.
+earlier attempts' reports. A process killed before reporting, or a job timeout,
+can leave a missing report; check its log for the cause.
 Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
 

@@ -8,7 +8,7 @@ import { join } from "node:path";
 const WORKERS_PER_CORE = 3;
 const OS_PACKAGES = ["@uberblick/cli", "@uberblick/mcp-server", "@uberblick/hub"];
 
-export function unitTestPlan(scope, cores, setting) {
+export function unitTestPlan(scope, cores) {
 	if (scope !== "all" && scope !== "os") {
 		throw new Error("usage: node scripts/run-unit-tests.mjs [all|os]");
 	}
@@ -16,7 +16,6 @@ export function unitTestPlan(scope, cores, setting) {
 		? ["-r"]
 		: OS_PACKAGES.flatMap((name) => ["--filter", name]);
 	args.push("--no-sort", "--no-bail");
-	if (setting === "baseline") return { args: [...args, "test"], cores, budget: null };
 	const budget = WORKERS_PER_CORE * cores;
 	if (!Number.isSafeInteger(budget) || budget < 1) {
 		throw new Error("The worker budget must be a positive safe integer");
@@ -34,19 +33,16 @@ export function runUnitTests(scope, {
 	log = console.log,
 	warn = console.warn,
 } = {}) {
-	const plan = unitTestPlan(scope, cores, env.UB_TEST_WORKER_MODE);
+	const plan = unitTestPlan(scope, cores);
 	const childEnv = { ...env };
 	if (scope === "os") childEnv.UB_TEST_SCOPE = "os";
-	if (plan.budget === null) {
-		delete childEnv.VITEST_MAX_WORKERS;
-		log(`Unit tests: baseline package pools on ${plan.cores} available cores`);
-	} else {
-		childEnv.VITEST_MAX_WORKERS = String(plan.workers);
-		log(`Unit tests: ${plan.budget} worker budget on ${plan.cores} available cores; ${plan.concurrency} concurrent packages × ${plan.workers} workers`);
-	}
-	log(`Runner: ${env.ImageOS} ${env.ImageVersion} ${process.arch}; ${plan.cores} cores`);
+	childEnv.VITEST_MAX_WORKERS = String(plan.workers);
+	log(`Unit tests: ${plan.budget} worker budget on ${plan.cores} available cores; ${plan.concurrency} concurrent packages × ${plan.workers} workers`);
 	const reportTimes = env.GITHUB_ACTIONS === "true" && env.RUNNER_TEMP;
-	if (reportTimes) plan.args.splice(plan.args.length - 1, 0, "--report-summary");
+	if (reportTimes) {
+		log(`Runner: ${env.ImageOS} ${env.ImageVersion} ${process.arch}; ${plan.cores} cores`);
+		plan.args.splice(plan.args.length - 1, 0, "--report-summary");
+	}
 	const result = spawn("pnpm", plan.args, { env: childEnv, stdio: "inherit" });
 	if (reportTimes) {
 		try {

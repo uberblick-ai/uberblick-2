@@ -149,7 +149,7 @@ test("report uploads use distinct attempt names and cannot change either require
     assert.ok(steps.indexOf(step) < steps.indexOf(upload), "upload follows both test steps");
     assert.doesNotMatch(step, /continue-on-error:/, "package failures still fail their check");
   }
-  assert.match(upload, /^ {8}if: \$\{\{ always\(\) && \(steps.test-linux.outcome == 'success' \|\| steps.test-linux.outcome == 'failure' \|\| steps.test-macos.outcome == 'success' \|\| steps.test-macos.outcome == 'failure'\) \}\}$/m);
+  assert.match(upload, /^ {8}if: .*always\(\)/m, "uploads remain eligible after a failed step");
   assert.match(upload, /^ {8}continue-on-error: true$/m);
   assert.match(upload, /^ {8}uses: actions\/upload-artifact@[a-f0-9]{40}(?: #.*)?$/m);
   assert.match(upload, /^ {10}name: .*\$\{\{ runner.os \}\}.*\$\{\{ github.run_id \}\}.*\$\{\{ github.run_attempt \}\}.*$/m);

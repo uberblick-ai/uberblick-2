@@ -42,11 +42,8 @@ export default defineConfig({
     // timeout that fires first is the one that gets to explain itself, so the
     // anonymous one is kept out of the way.
     hookTimeout: 120_000,
-    // One worker per core rather than Vitest's cores-1 default. Workers spend
-    // most of their time starting jsdom and importing the editor, not idling
-    // on the main process, and measured on a 4-core box under load the extra
-    // worker took the suite from ~37s to ~32s. Root runs supply their shared
-    // budget through VITEST_MAX_WORKERS instead.
+    // Standalone runs use one worker per core for jsdom and editor imports.
+    // Root runs supply their shared budget through VITEST_MAX_WORKERS instead.
     maxWorkers: "100%",
   },
 });
