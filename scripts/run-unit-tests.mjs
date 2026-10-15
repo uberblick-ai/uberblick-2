@@ -5,10 +5,10 @@ import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { availableParallelism, constants } from "node:os";
 import { join } from "node:path";
 
-const WORKERS_PER_CORE = 4;
+const WORKERS_PER_CORE = 3;
 const OS_PACKAGES = ["@uberblick/cli", "@uberblick/mcp-server", "@uberblick/hub"];
 
-export function unitTestPlan(scope, cores) {
+export function unitTestPlan(scope, cores, setting) {
 	if (scope !== "all" && scope !== "os") {
 		throw new Error("usage: node scripts/run-unit-tests.mjs [all|os]");
 	}
@@ -16,11 +16,12 @@ export function unitTestPlan(scope, cores) {
 		? ["-r"]
 		: OS_PACKAGES.flatMap((name) => ["--filter", name]);
 	args.push("--no-sort", "--no-bail");
+	if (setting === "baseline") return { args: [...args, "test"], cores, budget: null };
 	const budget = WORKERS_PER_CORE * cores;
 	if (!Number.isSafeInteger(budget) || budget < 1) {
 		throw new Error("The worker budget must be a positive safe integer");
 	}
-	const concurrency = Math.min(4, budget, scope === "os" ? OS_PACKAGES.length : 5);
+	const concurrency = Math.min(3, budget, scope === "os" ? OS_PACKAGES.length : 5);
 	const workers = Math.floor(budget / concurrency);
 	args.push("--workspace-concurrency", String(concurrency), "test");
 	return { args, cores, budget, concurrency, workers };
@@ -33,11 +34,17 @@ export function runUnitTests(scope, {
 	log = console.log,
 	warn = console.warn,
 } = {}) {
-	const plan = unitTestPlan(scope, cores);
+	const plan = unitTestPlan(scope, cores, env.UB_TEST_WORKER_MODE);
 	const childEnv = { ...env };
 	if (scope === "os") childEnv.UB_TEST_SCOPE = "os";
-	childEnv.VITEST_MAX_WORKERS = String(plan.workers);
-	log(`Unit tests: ${plan.budget} worker budget on ${plan.cores} available cores; ${plan.concurrency} concurrent packages × ${plan.workers} workers`);
+	if (plan.budget === null) {
+		delete childEnv.VITEST_MAX_WORKERS;
+		log(`Unit tests: baseline package pools on ${plan.cores} available cores`);
+	} else {
+		childEnv.VITEST_MAX_WORKERS = String(plan.workers);
+		log(`Unit tests: ${plan.budget} worker budget on ${plan.cores} available cores; ${plan.concurrency} concurrent packages × ${plan.workers} workers`);
+	}
+	log(`Runner: ${env.ImageOS} ${env.ImageVersion} ${process.arch}; ${plan.cores} cores`);
 	const reportTimes = env.GITHUB_ACTIONS === "true" && env.RUNNER_TEMP;
 	if (reportTimes) plan.args.splice(plan.args.length - 1, 0, "--report-summary");
 	const result = spawn("pnpm", plan.args, { env: childEnv, stdio: "inherit" });

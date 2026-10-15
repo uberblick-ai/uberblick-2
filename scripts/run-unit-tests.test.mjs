@@ -8,6 +8,13 @@ import { fileURLToPath } from "node:url";
 import { runUnitTests, unitTestPlan } from "./run-unit-tests.mjs";
 
 test("all concurrent package pools share the declared machine budget", () => {
+	for (const [scope, cores, budget, concurrency, workers] of [
+		["all", 4, 12, 3, 4],
+		["os", 3, 9, 3, 3],
+	]) {
+		const plan = unitTestPlan(scope, cores);
+		assert.deepEqual([plan.budget, plan.concurrency, plan.workers], [budget, concurrency, workers]);
+	}
 	for (const scope of ["all", "os"]) {
 		for (const cores of [1, 2, 3, 4, 8, 32]) {
 			const plan = unitTestPlan(scope, cores);

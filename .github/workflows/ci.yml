@@ -23,12 +23,22 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      worker-mode:
+        description: Temporary controlled worker comparison
+        type: choice
+        default: shared
+        options: [baseline, shared]
+      retention-probe:
+        description: Fail Linux after collecting reports on attempt one
+        type: boolean
+        default: false
 
 # On main, let a started run finish and keep only the newest push waiting behind
 # it, so a busy merge day still produces results. On a pull request only the
 # newest head matters, so a new push cancels the run in progress.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ inputs.worker-mode || 'shared' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -39,6 +49,8 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      UB_TEST_WORKER_MODE: ${{ inputs.worker-mode }}
     strategy:
       # One platform failing must not cancel the other's run.
       fail-fast: false
@@ -92,6 +104,9 @@ jobs:
           name: vitest-${{ runner.os }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/vitest-results/
           if-no-files-found: warn
+      - name: Temporary failed-job retention probe
+        if: ${{ inputs.retention-probe && github.run_attempt == 1 && runner.os == 'Linux' }}
+        run: exit 1
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}

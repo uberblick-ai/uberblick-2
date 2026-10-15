@@ -266,15 +266,16 @@ The two unit-test jobs keep their dot logs and upload `vitest-Linux-<run>-attemp
 and `vitest-macOS-<run>-attempt-<n>` artifacts, including on test failure. Each
 package's JUnit XML gives the test file (the suite name), full test name, result,
 duration and failure details. `package-times.json` gives package wall times.
-Artifact names identify each attempt. A full workflow rerun removes the earlier
-artifacts. A process killed before reporting, or a job timeout, can leave a
+Rerunning failed or selected jobs (`gh run rerun <run> --failed` or `--job <job-id>`)
+keeps earlier attempts' reports beside the new reports. "Re-run all jobs" deletes
+earlier attempts' reports. A process killed before reporting, or a job timeout, can leave a
 missing report; check its log for the cause.
 Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
 
 `pnpm test` and `pnpm run test:os` share one worker budget across concurrent
-packages. The root runner divides four times the machine's available cores
-among at most four concurrent suites. `pnpm --filter <package> test` uses that
+packages. The root runner divides three times the machine's available cores
+among at most three concurrent suites. `pnpm --filter <package> test` uses that
 package's standalone worker setting.
 
 Merging also requires CodeQL code scanning results: a pull request that introduces
