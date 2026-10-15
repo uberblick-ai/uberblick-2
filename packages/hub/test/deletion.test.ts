@@ -6,9 +6,11 @@ import { messageYjsUpdate } from "y-protocols/sync";
 import {
   deleteDirectoryEntry,
   directoryRoom,
+  isDirectoryEntryDeleted,
   parseRoom,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
+import { HubDatabase } from "../src/persistence.js";
 import type { Hub, HubContext } from "../src/server.js";
 import {
   acknowledged,
@@ -45,6 +47,14 @@ async function client(started: Hub, room: string, doc?: Y.Doc): Promise<TestClie
   return created;
 }
 
+function storedDirectoryState(databasePath: string): Uint8Array {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return database.prepare("SELECT data FROM documents WHERE name = ?")
+      .get(directoryRoom(WORKSPACE))!.data as Uint8Array;
+  } finally { database.close(); }
+}
+
 afterEach(async () => {
   for (const created of clients.splice(0)) created.destroy();
   for (const started of hubs.splice(0)) await started.stop();
@@ -52,6 +62,73 @@ afterEach(async () => {
 });
 
 describe("permanent room deletion", () => {
+  it("persists fresh deletion before acknowledgement while later directory writes stay debounced", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await hub(databasePath);
+    const room = testRoom();
+    const survivorUuid = parseRoom(testRoom()).uuid;
+    const writer = await client(started, room);
+    const directory = await client(started, directoryRoom(WORKSPACE));
+    await Promise.all([writer.synced, directory.synced]);
+    writer.text.insert(0, "removed immediately");
+    await acknowledged(writer);
+    directory.doc.getMap("docs").set(survivorUuid, { title: "Before", tags: [] });
+    await acknowledged(directory, "surviving entry");
+    await started.flush();
+
+    deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
+    await acknowledged(directory, "deletion");
+    expect(storedText(databasePath, room)).toBeNull();
+    const deletionState = storedDirectoryState(databasePath);
+    const persisted = new Y.Doc();
+    try {
+      Y.applyUpdate(persisted, deletionState);
+      expect(isDirectoryEntryDeleted(persisted, parseRoom(room).uuid)).toBe(true);
+    } finally { persisted.destroy(); }
+
+    directory.doc.getMap("docs").set(survivorUuid, { title: "After", tags: [] });
+    await acknowledged(directory, "ordinary directory write");
+    expect(storedDirectoryState(databasePath)).toEqual(deletionState);
+    await started.flush();
+    expect(storedDirectoryState(databasePath)).not.toEqual(deletionState);
+  });
+
+  it("retries failed deletion persistence on a later directory transaction without losing the fence", async () => {
+    const databasePath = tempDatabasePath();
+    const started = await hub(databasePath);
+    const room = testRoom();
+    const writer = await client(started, room);
+    const directory = await client(started, directoryRoom(WORKSPACE));
+    await Promise.all([writer.synced, directory.synced]);
+    writer.text.insert(0, "awaiting removal");
+    await acknowledged(writer);
+    await started.flush();
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec("CREATE TRIGGER fail_store BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT, 'injected store failure'); END");
+      const loaded = started.hocuspocus.documents.get(directoryRoom(WORKSPACE))!;
+      expect(() => deleteDirectoryEntry(loaded, parseRoom(room).uuid)).toThrow("injected store failure");
+      const persistence = started.hocuspocus.configuration.extensions.find(extension => extension instanceof HubDatabase)!;
+      expect(persistence.isDeletedRoom(room)).toBe(true);
+      expect(storedText(databasePath, room)).toBe("awaiting removal");
+
+      database.exec("DROP TRIGGER fail_store");
+      loaded.getMap("docs").set(parseRoom(testRoom()).uuid, { title: "Later write", tags: [] });
+      expect(storedText(databasePath, room)).toBeNull();
+      const persisted = new Y.Doc();
+      try {
+        Y.applyUpdate(persisted, storedDirectoryState(databasePath));
+        expect(isDirectoryEntryDeleted(persisted, parseRoom(room).uuid)).toBe(true);
+      } finally { persisted.destroy(); }
+    } finally {
+      database.exec("DROP TRIGGER IF EXISTS fail_store");
+      database.close();
+      for (const created of clients.splice(0)) created.destroy();
+      hubs.splice(hubs.indexOf(started), 1);
+      await expect(started.stop()).rejects.toThrow(/not durable/);
+    }
+  });
+
   it.each(["during load", "after the final load guard"])("refuses a connection deleted %s", async (phase) => {
     const databasePath = tempDatabasePath();
     const started = await hub(databasePath);

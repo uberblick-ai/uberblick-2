@@ -17,7 +17,7 @@
 import { getBlocks, getMeta } from "@uberblick/schema";
 import { copyFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { constants, DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -60,6 +60,33 @@ afterEach(() => {
     opened.close();
   }
   removeTempDirs();
+});
+
+it("re-purges peer index rows without scanning unrelated FTS content for absent copies", () => {
+  const opened = store(tempDatabasePath());
+  const room = `${WORKSPACE}/deleted`;
+  const indexed = {
+    uuid: "deleted", title: "Private", description: "", body: "secret",
+    tags: [], links: [],
+  };
+  opened.indexDoc({ ...indexed, uuid: "survivor", title: "Survivor" }, 1);
+  opened.indexDoc(indexed, 1);
+  opened.purgeDoc(room, indexed.uuid);
+  // A stale process may rebuild only the disposable index, without a new log row.
+  opened.indexDoc(indexed, 1);
+  opened.purgeDoc(room, indexed.uuid);
+  const db = (opened as unknown as { db: DatabaseSync }).db;
+  expect(db.prepare("SELECT uuid FROM docs_fts").all()).toEqual([{ uuid: "survivor" }]);
+  db.setAuthorizer((action, table) =>
+    action === constants.SQLITE_READ && table?.startsWith("docs_fts")
+      ? constants.SQLITE_DENY : constants.SQLITE_OK,
+  );
+  try {
+    for (let pass = 0; pass < 50; pass++) opened.purgeDoc(room, indexed.uuid);
+  } finally {
+    db.setAuthorizer(null);
+  }
+  expect(opened.search("secret", 10).map(hit => hit.uuid)).toEqual(["survivor"]);
 });
 
 describe("a database written by the better-sqlite3 build", () => {

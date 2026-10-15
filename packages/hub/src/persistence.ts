@@ -18,6 +18,7 @@ import * as Y from "yjs";
 import {
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
+  isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   parseRoom,
   roomForDoc,
@@ -78,6 +79,7 @@ export class HubDatabase implements Extension {
   private db: DatabaseSync | undefined;
 
   private readonly deletedRooms = new Set<string>();
+  private readonly pendingDeletedRooms = new Set<string>();
   private readonly reconcilingDirectories = new WeakSet<Y.Doc>();
   private deletionHandler: (rooms: readonly string[]) => void = () => {};
 
@@ -216,6 +218,7 @@ export class HubDatabase implements Extension {
     this.db = undefined;
     this.statements = undefined;
     this.deletedRooms.clear();
+    this.pendingDeletedRooms.clear();
   }
 
   private reconcileDirectory(room: string, directory: Y.Doc): void {
@@ -227,7 +230,9 @@ export class HubDatabase implements Extension {
       // Never forget a mark because a later writer changed the directory.
       for (const deletedRoom of this.deletedRooms) {
         const parsed = parseRoom(deletedRoom);
-        if (parsed.workspaceId === workspaceId) deleteDirectoryEntry(directory, parsed.uuid);
+        if (parsed.workspaceId === workspaceId && !isDirectoryEntryDeleted(directory, parsed.uuid)) {
+          deleteDirectoryEntry(directory, parsed.uuid);
+        }
       }
       const deleted = listDeletedDirectoryUuids(directory).map(uuid => roomForDoc(workspaceId, uuid));
       if (deleted.length === 0) return;
@@ -236,7 +241,11 @@ export class HubDatabase implements Extension {
       // Retain the fence even if storage fails; the sticky failure forbids a
       // durability claim, and active clients still cannot republish the room.
       for (const name of deleted) this.deletedRooms.add(name);
+      for (const name of newlyDeleted) this.pendingDeletedRooms.add(name);
       this.deletionHandler(newlyDeleted);
+      // Ordinary directory writes use the debounced store. A failed mark must
+      // still retry synchronously even though its room is already fenced.
+      if (!deleted.some(name => this.pendingDeletedRooms.has(name))) return;
       const database = this.connection;
       database.exec("BEGIN IMMEDIATE");
       try {
@@ -244,6 +253,7 @@ export class HubDatabase implements Extension {
         const remove = database.prepare('DELETE FROM documents WHERE name = ?');
         for (const name of deleted) remove.run(name);
         database.exec("COMMIT");
+        for (const name of deleted) this.pendingDeletedRooms.delete(name);
       } catch (error) {
         database.exec("ROLLBACK");
         throw error;

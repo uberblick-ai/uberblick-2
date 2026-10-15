@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getMetaMap, isDirectoryEntryDeleted, pinDoc, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
+import { getMetaMap, isDirectoryEntryDeleted, pinDoc, readSidebar, tombstoneDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import { startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -48,6 +48,11 @@ describe("delete_doc", () => {
     const group = (await rig.ok("pin_doc", { uuid: source.uuid, group: "Reference" })).groups[0].id;
     pinDoc(sidebar.doc, group, target.uuid);
     expect((await rig.ok("get_sidebar")).groups.flatMap((entry: { docs: unknown[] }) => entry.docs)).not.toEqual(expect.arrayContaining([expect.objectContaining({ uuid: target.uuid })]));
+    expect((await rig.ok("unpin_doc", { uuid: target.uuid })).unpinned).toBe(true);
+    expect(readSidebar(sidebar.doc).flatMap(entry => entry.docs)).not.toContain(target.uuid);
+    expect((await rig.ok("unpin_doc", { uuid: target.uuid })).unpinned).toBe(false);
+    expect(replicas.known(target.uuid)).toBe(false);
+    expect(store.hasRoom(`${rig.config.workspaceId}/${target.uuid}`)).toBe(false);
     await rig.ok("set_metadata", { uuid: source.uuid, links: [target.uuid], description: "Existing target retained." });
   });
 
@@ -68,7 +73,7 @@ describe("delete_doc", () => {
       ["annotate", { uuid, block_id: block.id, start: 0, end: 1, text: "Return" }],
       ["link_range", { uuid, block_id: block.id, start: 0, end: 1, doc_id: source.uuid, rev: block.rev }],
       ["archive_doc", { uuid }], ["restore_doc", { uuid }], ["delete_doc", { uuid }],
-      ["pin_doc", { uuid, group: "Must not exist" }], ["unpin_doc", { uuid }],
+      ["pin_doc", { uuid, group: "Must not exist" }],
       ["set_metadata", { uuid: source.uuid, title: "Atomic refusal", links: [uuid] }],
       ["create_doc", { title: "Refused reference", description: "Must not be created.", kind: "decision", related: uuid }],
       ["create_doc", { title: "Refused predecessor", description: "Must not be created.", kind: "decision", supersedes: uuid }],

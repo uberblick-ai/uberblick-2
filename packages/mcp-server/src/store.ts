@@ -902,8 +902,9 @@ export class MirrorStore {
       ["pending_rooms", "room", room], ["doc_index", "uuid", uuid],
       ["doc_index_seq", "uuid", uuid], ["doc_tags", "uuid", uuid],
       ["doc_links", "source", uuid], ["decision_github_refs", "source", uuid],
-      ["docs_fts", "uuid", uuid],
     ] as const;
+    // FTS writers also commit doc_index; probing its unindexed UUID would scan
+    // the entire search corpus on every refresh after a permanent deletion.
     // Absent copies need no write lock, including repeated checks for older peers.
     if (!tables.some(([table, key, value]) => this.db.prepare(
       `SELECT 1 FROM ${table} WHERE ${key} = ? LIMIT 1`,
