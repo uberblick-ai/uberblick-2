@@ -18,7 +18,6 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import { DEAD_HUB_URL, UB_BIN, WAIT_TIMEOUT_MS, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
-import { signalDiagnostics } from "./signal-diagnostics.js";
 
 afterAll(removeTempDirs);
 
@@ -438,12 +437,9 @@ describe("ub mcp serve", () => {
   // them rather than exiting cleanly — which is what makes them the pair that
   // proves the wrapper's lifecycle. SIGHUP is what a vanished terminal sends;
   // SIGQUIT is Ctrl-\ and a supervisor escalating past SIGTERM.
-  it.concurrent.each(Array.from({ length: process.platform === "linux" && process.env.GITHUB_ACTIONS === "true" ? 100 : 2 }, (_, index) => ({
-    signal: index % 2 === 0 ? "SIGHUP" as const : "SIGQUIT" as const,
-    attempt: index,
-  })))(
-    "forwards $signal to the server, takes it down, and dies of it too ($attempt)",
-    async ({ signal }) => {
+  it.each(["SIGHUP", "SIGQUIT"] as const)(
+    "forwards %s to the server, takes it down, and dies of it too",
+    async (signal) => {
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
       const { childEnd, writer } = clientStdin(join(box.cwd, "client-stdin"));
       // Its own process group, so teardown can take a survivor down by group
@@ -458,7 +454,6 @@ describe("ub mcp serve", () => {
       // Both pipes have to be consumed or their EOF is never observed and
       // `close` could not fire at all. stderr is read by `whenServing`.
       child.stdout?.resume();
-      const diagnostic = signalDiagnostics(child, signal);
 
       // `close`, not `exit`: it waits for the inherited stdio to close as well,
       // so an orphaned server keeps it from firing. That is the forwarding half.
@@ -477,7 +472,6 @@ describe("ub mcp serve", () => {
         expect(await within(whenServing(child), WAIT_TIMEOUT_MS, "never started")).toBe(
           "serving",
         );
-        diagnostic.mark("signal sent", signal);
         child.kill(signal);
 
         // And the wrapper's own death is the signal, not a plain exit with
@@ -485,9 +479,9 @@ describe("ub mcp serve", () => {
         // spawn. That is the re-raise half.
         // SIGQUIT dumps core in the server and then in the wrapper. Allow both
         // dumps to finish on a loaded host before declaring stdio stuck.
-        const result = await within(closed, 60_000, "stdio did not close");
-        diagnostic.mark("60 second result", result);
-        expect(result).toBe(signal);
+        expect(
+          await within(closed, 60_000, "stdio did not close"),
+        ).toBe(signal);
       } finally {
         closeSync(writer);
         closeSync(childEnd);
@@ -502,7 +496,6 @@ describe("ub mcp serve", () => {
           // ESRCH: the group is already gone, which is the expected case.
         }
         expect(await within(closed, WAIT_TIMEOUT_MS, "not reaped")).not.toBe("not reaped");
-        diagnostic.finish();
       }
     },
   );
