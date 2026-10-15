@@ -417,7 +417,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await row(first).focus();
   await page.keyboard.press("Space");
   await expect(row(first).locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
-  const announcements = page.locator('body > [role="status"]');
+  const announcements = page.locator('body > div[role="status"]');
   await expect(announcements).not.toHaveAttribute("aria-hidden", "true");
   await expect(announcements).toContainText(`Moving ${first}.`);
   await page.keyboard.press("ArrowUp");

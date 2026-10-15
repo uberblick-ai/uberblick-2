@@ -370,10 +370,10 @@ test("the served configuration names the workspaces, and the build's define is o
   // itself *synced* is a hub that answered, not a socket that never opened.
   await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
 
-  // And the surfaces say *which* document decided it. This is the only
+  // Sync details says which document decided it. This is the only
   // place that can be shown end to end: `resolveClientConfig` memoises per
   // module, so a component test can hold one resolved endpoint, never the path
-  // from a served document through the shell to both surfaces. On a document
+  // from a served document through the shell to the panel. On a document
   // route, because that is where the status surfaces are.
   await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
@@ -385,12 +385,9 @@ test("the served configuration names the workspaces, and the build's define is o
   // `test/sync-panel.test.tsx` — matched loosely here so this test says only
   // what it is for.
   await expect(source).toHaveText(/^served\b/);
-  // The pill a reader glances at carries the panel's own answer. Read from one
-  // surface and matched against the other, because what breaks is one of them
-  // keeping the resolved endpoint while the other quietly falls back.
-  expect(await page.locator(".ub-sync-toggle").getAttribute("title")).toContain(
-    `(${(await source.innerText()).trim()})`,
-  );
+  await expect(page.getByRole("dialog", { name: "Sync and presence" })
+    .locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(harness().hubUrl);
+  await expect(page.locator(".ub-sync-toggle")).toHaveAccessibleName(/^(Sync details|Synced with hub .+)$/);
   await page.keyboard.press("Escape");
 
   // And the menu navigates, exactly as it does for a configured build.

@@ -133,14 +133,6 @@ test.describe("a workspace administrator with no hub role", () => {
 
 test.describe("a local workspace with a stored hub-admin login", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true, localWorkspace: true });
-  test("a document on this device alone has Edited and revision without a sync dot", async ({ browser }) => {
-    const page = await openApp(browser);
-    await createDoc(page, "On this device");
-    await expect(page.locator(".ub-last-updated")).toContainText("Edited ");
-    await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();
-    await expect(page.locator(".ub-status-sync, .ub-sync-dot")).toHaveCount(0);
-    await expect(page.locator(".ub-status")).not.toContainText(/saved here|synced|Offline|uuid/);
-  });
   test("local workspace settings never fall back to the stored login", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
@@ -149,6 +141,31 @@ test.describe("a local workspace with a stored hub-admin login", () => {
     await expect(page.getByText(/only from a workspace bound to that hub/i)).toBeVisible();
     await expect(page.getByRole("table", { name: "Hub admins", exact: true })).toHaveCount(0);
   });
+});
+
+test("a document on this device alone has Edited and revision without a sync dot", { tag: "@webkit" }, async ({
+  browser, contextOptions, viewport, hasTouch, isMobile, deviceScaleFactor, userAgent,
+}) => {
+  const local = await startHarness({ localReplica: true });
+  try {
+    const context = await browser.newContext({
+      ...contextOptions, viewport, hasTouch, isMobile,
+      ...(deviceScaleFactor === undefined ? {} : { deviceScaleFactor }),
+      ...(userAgent === undefined ? {} : { userAgent }),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(new URL(`/${local.secondWorkspace}`, local.appUrl).href);
+      const showList = page.getByRole("button", { name: "Show document list", exact: true });
+      if ((viewport?.width ?? 1280) < 1280) await activateControl(showList);
+      await expect(page.locator(".ub-list-head")).toBeVisible();
+      await createDoc(page, "On this device");
+      await expect(page.locator(".ub-last-updated")).toContainText("Edited ");
+      await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();
+      await expect(page.locator(".ub-status-sync, .ub-sync-dot")).toHaveCount(0);
+      await expect(page.locator(".ub-status")).not.toContainText(/saved here|synced|Offline|uuid/);
+    } finally { await context.close(); }
+  } finally { await local.stop(); }
 });
 
 test("a login for another hub never qualifies on the current workspace's bound hub", async ({ browser }) => {

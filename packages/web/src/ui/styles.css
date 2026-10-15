@@ -2138,7 +2138,6 @@ h6.ub-heading {
 }
 
 .ub-status-sync { cursor: pointer; }
-.ub-status-sync:hover { background: var(--card-accent); }
 .ub-status-sync:focus-visible,
 .ub-doc-rev:focus-visible {
   outline: 2px solid var(--ring);
@@ -2175,7 +2174,10 @@ h6.ub-heading {
   white-space: nowrap;
   cursor: pointer;
 }
-.ub-doc-rev:hover { color: var(--foreground); }
+@media (hover: hover) {
+  .ub-status-sync:hover { background: var(--card-accent); }
+  .ub-doc-rev:hover { color: var(--foreground); }
+}
 
 @media (any-pointer: coarse) {
   .ub-status-sync,
