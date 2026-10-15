@@ -6,10 +6,11 @@
  */
 
 import { expect, test } from "@playwright/test";
+import { installPageTimers, withPageTimers } from "./page-timers.js";
 import type { Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
-import { keys, placeCaret } from "./harness.js";
+import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, openApp } = setupHarness();
 const layoutWidths = [744, 932, 1279, 1280, 1440];
@@ -166,6 +167,7 @@ for (const upstream of [true, false]) {
       upstream,
       contextOptions: device,
       beforeNavigate: async (target) => {
+        await installPageTimers(target);
         // Delay real server acknowledgements after hydration. Browser writes
         // still reach the serving boundary; no status or markup is replaced.
         await target.routeWebSocket("**", (socket) => {
@@ -189,7 +191,7 @@ for (const upstream of [true, false]) {
     await expect(page.getByRole("button", { name: "Contents 1" })).toBeVisible();
     await expect(editor(page).locator("h1")).toHaveText("Overview");
     await expect(page.locator(".ub-last-updated")).toHaveCount(1);
-    await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
+    await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
     await expect(page.locator(".ub-peers [data-peer-id]")).toHaveCount(0);
     const waitingPath = new URL(page.url()).pathname.replace(/[^/]+$/, randomUUID());
     const calmWaiting = await openApp(browser, waitingPath, { upstream, contextOptions: device });
@@ -207,23 +209,14 @@ for (const upstream of [true, false]) {
     const empty = new Map<number, Awaited<ReturnType<typeof statusGeometry>>>();
     const queueUpdate = async () => {
       // Peer contexts and the waiting-screen proof have opened other tabs.
-      // Restore this tab before using the browser's native caret keys.
+      // Peer and waiting-screen proofs open other tabs. Target the first block
+      // explicitly after returning from a comment's retained paragraph selection.
       await page.bringToFront();
-      // placeCaret proves the first block's edge. Desktop retains the old
-      // paragraph selection, so move to the document start before using it.
-      if (browserName === "chromium") {
-        await editor(page).focus();
-        // Let ProseMirror's scheduled focus restoration finish before moving
-        // to the first block; otherwise it can restore the old paragraph after
-        // documentStart, leaving placeCaret on the wrong block indefinitely.
-        await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-        await page.keyboard.press(keys.documentStart);
-      }
-      await placeCaret(page);
+      await placeCaretIn(editor(page).locator(":scope > *").first());
       // Real whitespace update, without another rendered prose line.
       await page.keyboard.type(" ");
       await page.locator(".ub-title").focus();
-      await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", "Sync details");
+      await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", "Sync details"));
       await expectBacklog(page, true);
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     };
@@ -281,7 +274,7 @@ for (const upstream of [true, false]) {
       } finally {
         releaseReplies();
       }
-      await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
+      await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
       await expectBacklog(page, false);
       await expectStable("acknowledged update");
     } finally {
@@ -347,7 +340,7 @@ for (const upstream of [true, false]) {
       } finally {
         await harness().startHub();
       }
-      await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 });
+      await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 }));
       await expect(page.locator(".ub-not-saved:visible")).toHaveCount(0);
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
       await expectBacklog(page, false);
@@ -386,7 +379,7 @@ for (const upstream of [true, false]) {
       } finally {
         releaseReplies();
       }
-      await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
+      await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
       await expectBacklog(page, false);
       const recovered = await statusGeometry(page);
       expect(recovered.status, "threads rail / ack").toEqual(baseline.status);
@@ -404,7 +397,7 @@ for (const upstream of [true, false]) {
         } finally {
           await harness().startHub();
         }
-        await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 });
+        await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 }));
         await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
         const saved = await statusGeometry(page);
         expect(saved.status, "threads rail / reconnected").toEqual(baseline.status);
