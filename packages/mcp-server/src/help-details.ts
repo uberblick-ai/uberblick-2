@@ -144,7 +144,7 @@ export const toolHelpDetails = {
     "first record, and names all pending records and all conflicting maximal decided records. `inForce: null` " +
     "means no answer is in force. A status, tag or open-thread predicate matches a topic if any live record matches; each " +
     "predicate may match a different live record. Resolution still uses its whole graph. `include_superseded: " +
-    "true` returns every record with predicates applied per record. `include_deleted` admits archived topics " +
+    "true` returns every record with predicates applied per record. Permanently deleted UUIDs are always excluded. `include_deleted` admits archived topics " +
     "but is not a predicate and does not lift the default omission, so an archived decision needs it together " +
     "with a matching predicate. A fresh replica can list the whole corpus once the directory room has " +
     "synced. Decision answers use one to three short blocks with a brief reason, with guidance on their " +
@@ -421,7 +421,7 @@ export const toolHelpDetails = {
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +
     "erasure and not a delete. Every block, mark and annotation stays exactly where it was: get_doc still " +
     "serves the document by uuid, and list_docs with `include_deleted: true` still lists it, flagged " +
-    "`deleted`. There is no tool that erases content, by design.\n\n" +
+    "`deleted`. delete_doc permanently removes an archived regular document.\n\n" +
     "It also leaves the sidebar, because it is unpinned: a document that has left every other listing is not " +
     "an entry point. The unpin is unconditional — it does not first look for a pin, and it hides every pin " +
     "this replica can see — so `unpinned` says what the call asserted, not that a pin was found: it is true " +
@@ -438,6 +438,18 @@ export const toolHelpDetails = {
     "unlike restore_doc this does not depend on holding the document — it is false only if the index write " +
     "itself failed, and then the document stays queued and a later call retries it. The archive itself is " +
     "unaffected either way: `applied` is the durable half.",
+  delete_doc:
+    "Permanently remove an archived regular document's content, comments, structured data and history. " +
+    "Archive first: a live document refuses with doc_not_archived. Decision records and topics refuse with " +
+    "decision_delete_unsupported until their deletion operation is available. A repeated deletion refuses with doc_deleted.\n\n" +
+    "Only its UUID and permanent mark remain in the directory. The mark wins over concurrent or offline restores, " +
+    "renames, retags and stub repair. A missing directory entry never authorizes removing a copy. Hubs purge " +
+    "the room and refuse all later connections and updates; replicas remove stored and in-memory copies when " +
+    "they learn the mark or receive the deleted-room refusal, without an authentication error.\n\n" +
+    "Deleted UUIDs never appear in discovery, search or sidebar results, including include_deleted listings. " +
+    "Reads, writes and newly added references refuse with doc_deleted. Other documents keep their stored links. " +
+    "The result reports uuid, title, records: [uuid], deleted: true and independent directory/sidebar durability. " +
+    "Protocol 4 requires a matching hub and client. Freed SQLite pages and earlier backups are not overwritten.",
   restore_doc:
     "Lift a document's archive tombstone: it returns to the default list_docs listing unless it is a " +
     "decision, returns to matching filtered listings either way, and returns to the search index, with the " +

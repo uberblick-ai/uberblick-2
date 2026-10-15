@@ -25,7 +25,7 @@ import {
 } from "../src/local-browser-server.js";
 import type { HubLogRecord } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
@@ -706,6 +706,28 @@ describe("the ub open browser server", () => {
       cause: STORE_BUSY_REASON,
       error: "Error: database is locked",
     });
+  });
+
+  it("refuses deleted rooms and removes a loaded room without closing its shared socket", async () => {
+    const box = await fixture();
+    const room = `${WORKSPACE}/${randomUUID()}`;
+    const survivorRoom = `${WORKSPACE}/${randomUUID()}`;
+    const socket = sharedSocket(box);
+    const deleted = sharedClient(socket, room, await browserToken());
+    const survivor = sharedClient(socket, survivorRoom, await browserToken());
+    await socket.connect();
+    await Promise.all([deleted.synced, survivor.synced]);
+    box.failReadsFor(room, Object.assign(new Error("deleted document"), { reason: DOC_DELETED_REASON }));
+    const denied = new Promise<string>(resolve => deleted.provider.on("authenticationFailed", ({ reason }: { reason: string }) => resolve(reason)));
+    box.server.refresh();
+    await expect(denied).resolves.toBe(DOC_DELETED_REASON);
+    const later = await box.connect(room);
+    await expect(later.denied).resolves.toBe(DOC_DELETED_REASON);
+    survivor.text.insert(0, "survived deletion");
+    await waitUntil("the surviving browser room to keep writing", () =>
+      textFrom(box.updates.get(survivorRoom) ?? []) === "survived deletion",
+    );
+    expect(box.updates.get(room)).toBeUndefined();
   });
 
   it("names busy and failed appends, stores no refused update, and recovers per room", async () => {

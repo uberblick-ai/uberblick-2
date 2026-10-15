@@ -150,6 +150,9 @@ const EXPECTED: Record<
     detail: ["uuid", "inDirectory", "hub"],
   },
   doc_archived: { recoveryClass: "manual", detail: ["uuid", "archived"] },
+  doc_deleted: { recoveryClass: "manual", detail: ["uuid"] },
+  doc_not_archived: { recoveryClass: "manual", detail: ["uuid"] },
+  decision_delete_unsupported: { recoveryClass: "manual", detail: ["uuid"] },
   guidance_required: { recoveryClass: "reread", detail: ["unread"] },
   group_not_found: { recoveryClass: "reread", detail: ["group"] },
   invalid_document_lifecycle: {
@@ -492,11 +495,18 @@ describe("the failure contract", () => {
     record(optedOut.payload);
 
     const archived = await seeded(rig);
+    record((await rig.call("delete_doc", { uuid: archived.uuid })).payload);
     await rig.ok("archive_doc", { uuid: archived.uuid });
     record(
       (await rig.call("set_metadata", { uuid: archived.uuid, title: "Nope" }))
         .payload,
     );
+    await rig.ok("delete_doc", { uuid: archived.uuid });
+    record((await rig.call("get_doc", { uuid: archived.uuid })).payload);
+    const undeletableDecision = await rig.ok("create_doc", {
+      title: "Which deletion operations are available?", description: "A decision cannot be deleted yet.", kind: "decision",
+    });
+    record((await rig.call("delete_doc", { uuid: undeletableDecision.uuid })).payload);
     record(
       (
         await rig.call("set_metadata", {

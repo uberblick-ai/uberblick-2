@@ -1245,6 +1245,7 @@
                 "description": "Agent-facing document description; null when unwritten."
               },
               "deleted": {
+                "description": "Archived state. Permanently deleted documents never appear in directory results.",
                 "type": "boolean"
               },
               "createdAt": {
@@ -1405,6 +1406,7 @@
                         "description": "Agent-facing document description; null when unwritten."
                       },
                       "deleted": {
+                        "description": "Archived state. Permanently deleted documents never appear in directory results.",
                         "type": "boolean"
                       },
                       "createdAt": {
@@ -1579,6 +1581,7 @@
                       "description": "Agent-facing document description; null when unwritten."
                     },
                     "deleted": {
+                      "description": "Archived state. Permanently deleted documents never appear in directory results.",
                       "type": "boolean"
                     },
                     "createdAt": {
@@ -1748,6 +1751,7 @@
                       "description": "Agent-facing document description; null when unwritten."
                     },
                     "deleted": {
+                      "description": "Archived state. Permanently deleted documents never appear in directory results.",
                       "type": "boolean"
                     },
                     "createdAt": {
@@ -1944,6 +1948,7 @@
                 "description": "Agent-facing document description; null when unwritten."
               },
               "deleted": {
+                "description": "Archived state. Permanently deleted documents never appear in directory results.",
                 "type": "boolean"
               },
               "createdAt": {
@@ -2113,6 +2118,7 @@
                 "description": "Agent-facing document description; null when unwritten."
               },
               "deleted": {
+                "description": "Archived state. Permanently deleted documents never appear in directory results.",
                 "type": "boolean"
               },
               "createdAt": {
@@ -2282,6 +2288,7 @@
                   "description": "Agent-facing document description; null when unwritten."
                 },
                 "deleted": {
+                  "description": "Archived state. Permanently deleted documents never appear in directory results.",
                   "type": "boolean"
                 },
                 "createdAt": {
@@ -2442,6 +2449,7 @@
                           "description": "Agent-facing document description; null when unwritten."
                         },
                         "deleted": {
+                          "description": "Archived state. Permanently deleted documents never appear in directory results.",
                           "type": "boolean"
                         },
                         "createdAt": {
@@ -2616,6 +2624,7 @@
                         "description": "Agent-facing document description; null when unwritten."
                       },
                       "deleted": {
+                        "description": "Archived state. Permanently deleted documents never appear in directory results.",
                         "type": "boolean"
                       },
                       "createdAt": {
@@ -2785,6 +2794,7 @@
                         "description": "Agent-facing document description; null when unwritten."
                       },
                       "deleted": {
+                        "description": "Archived state. Permanently deleted documents never appear in directory results.",
                         "type": "boolean"
                       },
                       "createdAt": {
@@ -3945,6 +3955,7 @@
           "const": true
         },
         "include_deleted": {
+          "description": "Include archived documents. Permanently deleted UUIDs are always excluded.",
           "type": "boolean"
         },
         "include_superseded": {
@@ -4040,6 +4051,7 @@
                     "description": "Agent-facing document description; null when unwritten."
                   },
                   "deleted": {
+                    "description": "Archived state. Permanently deleted documents never appear in directory results.",
                     "type": "boolean"
                   },
                   "createdAt": {
@@ -4210,6 +4222,7 @@
                     "description": "Agent-facing document description; null when unwritten."
                   },
                   "deleted": {
+                    "description": "Archived state. Permanently deleted documents never appear in directory results.",
                     "type": "boolean"
                   },
                   "createdAt": {
@@ -4370,6 +4383,7 @@
                             "description": "Agent-facing document description; null when unwritten."
                           },
                           "deleted": {
+                            "description": "Archived state. Permanently deleted documents never appear in directory results.",
                             "type": "boolean"
                           },
                           "createdAt": {
@@ -4544,6 +4558,7 @@
                           "description": "Agent-facing document description; null when unwritten."
                         },
                         "deleted": {
+                          "description": "Archived state. Permanently deleted documents never appear in directory results.",
                           "type": "boolean"
                         },
                         "createdAt": {
@@ -4713,6 +4728,7 @@
                           "description": "Agent-facing document description; null when unwritten."
                         },
                         "deleted": {
+                          "description": "Archived state. Permanently deleted documents never appear in directory results.",
                           "type": "boolean"
                         },
                         "createdAt": {
@@ -4904,7 +4920,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the record in force, else pending, else first, plus pending/conflicting records. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived topics but is not a predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, including inForce, pending and conflicts, caches its document's openThreadCount: threads whose resolved is not true, including deleted anchors; absent means unknown. A matching topic's representative may have zero or unknown count. Use include_superseded: true with has_open_threads to find each matching document, then get_doc for threads and annotate to reply or resolve. Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional approximate timestamps. Decision answerPreview is legacy TL;DR or first paragraph/list, null for none; discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. Both are absent when unknown. get_doc marks related or linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "description": "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the record in force, else pending, else first, plus pending/conflicting records. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived entries, never permanently deleted UUIDs, and is not a predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, including inForce, pending and conflicts, caches its document's openThreadCount: threads whose resolved is not true, including deleted anchors; absent means unknown. A matching topic's representative may have zero or unknown count. Use include_superseded: true with has_open_threads to find each matching document, then get_doc for threads and annotate to reply or resolve. Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional approximate timestamps. Decision answerPreview is legacy TL;DR or first paragraph/list, null for none; discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. Both are absent when unknown. get_doc marks related or linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -7128,6 +7144,175 @@
     }
   },
   {
+    "name": "delete_doc",
+    "title": "Permanently delete an archived document",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+          "description": "Document UUID."
+        }
+      },
+      "required": [
+        "uuid"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "uuid": {
+          "type": "string",
+          "description": "Document identity; a UUID, never a title or path."
+        },
+        "title": {
+          "type": "string"
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deleted": {
+          "type": "boolean",
+          "const": true,
+          "description": "The archived regular document was permanently deleted; this UUID cannot be restored or reused."
+        },
+        "applied": {
+          "type": "boolean",
+          "const": true,
+          "description": "The write is durable in this replica's local update log."
+        },
+        "synced": {
+          "type": "boolean",
+          "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
+        },
+        "hub": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "disabled",
+                "connecting",
+                "connected",
+                "hub-down",
+                "auth-failed",
+                "update-required",
+                "quarantined"
+              ]
+            },
+            "url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Configured hub endpoint; null when synchronization is disabled."
+            },
+            "reason": {
+              "type": "string"
+            },
+            "recoveryClass": {
+              "type": "string",
+              "enum": [
+                "retry",
+                "manual"
+              ]
+            },
+            "authRecovery": {
+              "type": "string",
+              "enum": [
+                "sign-in-required",
+                "no-workspace-access",
+                "credential-store",
+                "renewal-unavailable"
+              ]
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "This client's sync protocol version, including while offline."
+            },
+            "hubProtocolVersion": {
+              "description": "Hub protocol version, learned from a protocol refusal.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "status",
+            "url",
+            "protocolVersion"
+          ],
+          "additionalProperties": false,
+          "description": "Current connection state; an acknowledgement does not claim hub storage."
+        },
+        "rooms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "purpose": {
+                "type": "string",
+                "description": "The independently written room's purpose."
+              },
+              "room": {
+                "type": "string"
+              },
+              "applied": {
+                "type": "boolean",
+                "const": true,
+                "description": "The write is durable in this replica's local update log."
+              },
+              "synced": {
+                "type": "boolean",
+                "description": "The hub acknowledged this write; acknowledgement does not mean hub storage."
+              }
+            },
+            "required": [
+              "purpose",
+              "room",
+              "applied",
+              "synced"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Each independently persisted room touched; top-level synced is their conjunction."
+        }
+      },
+      "required": [
+        "uuid",
+        "title",
+        "records",
+        "deleted",
+        "applied",
+        "synced",
+        "hub",
+        "rooms"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "additionalProperties": false
+    },
+    "description": "Permanently delete an archived regular document, including content, comments, data and history. Only its UUID and permanent deletion mark remain. Replicas remove their copies when they learn the mark; the hub refuses later room updates. This cannot be undone, including by an offline restore. Live documents refuse with doc_not_archived; deleted UUIDs refuse with doc_deleted; decision records refuse. Links stored in other documents stay unchanged. Directory and sidebar writes report independent durability.\n\nHelp: delete_doc, workspaces, lifecycle, tool-contracts.",
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "restore_doc",
     "title": "Restore an archived document",
     "inputSchema": {
@@ -8603,7 +8788,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a navigation act, not a delete — archive_doc is the one that tombstones a document.\n\nAn unpin beats a move made concurrently on another replica, so a document does not reappear because somebody was dragging it at the time. It takes no group: one pin per document means there is only ever one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\nHelp: unpin_doc, workspaces, lifecycle, tool-contracts.",
+    "description": "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a navigation act. archive_doc hides a document; delete_doc permanently deletes an archived regular document.\n\nAn unpin beats a move made concurrently on another replica, so a document does not reappear because somebody was dragging it at the time. It takes no group: one pin per document means there is only ever one place to remove it from. `unpinned` is false when the document was not pinned to begin with.\n\nHelp: unpin_doc, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

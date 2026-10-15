@@ -10,8 +10,16 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * 409 protocol-mismatch with reason protocol-mismatch:<hubVersion> on skew,
  * or 401 sign-in-required on equality.
  */
-// Structured table cells cannot synchronize with protocol-2 clients.
-export const SYNC_PROTOCOL_VERSION = 3;
+// Permanent document deletion requires every peer to retain its deletion marks.
+export const SYNC_PROTOCOL_VERSION = 4;
+
+/** Terminal, room-local refusal; the client must discard its copy and stop publishing. */
+export const DOC_DELETED_REASON = "uberblick:doc-deleted";
+
+/** Match only our bounded sentinel, never arbitrary server-chosen text. */
+export function isDocDeletedReason(reason: string): boolean {
+  return reason === DOC_DELETED_REASON;
+}
 
 /** Room for the JSON around the token — `{"protocolVersion":1,"token":""}` is 32 characters. */
 const ENVELOPE_ALLOWANCE = 128;

@@ -30,8 +30,8 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { STORE_BUSY_REASON, STORE_REFUSED_REASON } from "../../cli/src/local-browser-server.js";
 import type { Hub } from "@uberblick/hub";
-import { wrapToken } from "@uberblick/schema/protocol";
-import { getBlocks, getWorkspaceName, initDoc, insertBlock, setWorkspaceName, settingsRoom } from "@uberblick/schema";
+import { DOC_DELETED_REASON, wrapToken } from "@uberblick/schema/protocol";
+import { deleteDirectoryEntry, directoryRoom, getBlocks, getDirectoryMap, getWorkspaceName, initDoc, insertBlock, isDirectoryEntryDeleted, setWorkspaceName, settingsRoom, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { PacedRoomProvider, RoomAdmission } from "../src/collab/room-admission.js";
@@ -377,6 +377,55 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
   expect(reopened.latest().writable).toBe(false);
   expect(reopened.connection.provider.isAttached).toBe(false);
   expect(other.latest().writable).toBe(true);
+}, TEST_TIMEOUT_MS);
+
+it.each(["close", "authenticationFailed"] as const)("stops only the deleted room after a %s refusal", async (event) => {
+  const hub = await startHub(0, databasePath());
+  const uuid = randomUUID();
+  const room = `${WORKSPACE}/${uuid}`;
+  const otherUuid = randomUUID();
+  const otherRoom = `${WORKSPACE}/${otherUuid}`;
+  const tab = await openTab(room, hub.port);
+  const other = await openTab(otherRoom, hub.port);
+  const directory = await openTab(directoryRoom(WORKSPACE), hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await seedDocument(tab, uuid);
+  await seedDocument(other, otherUuid);
+  if (event === "close") closeRoom(hub, room, DOC_DELETED_REASON);
+  else {
+    const events = tab.connection.provider as unknown as {
+      emit(event: "authenticationFailed", payload: { reason: string }): void;
+    };
+    events.emit("authenticationFailed", { reason: DOC_DELETED_REASON });
+  }
+
+  await waitFor("the deleted room to detach", () => tab.latest().deleted === true);
+  expect(tab.latest().authFailed).toBe(false);
+  expect(tab.latest().storeRefused).toBe(false);
+  expect(tab.latest().writable).toBe(false);
+  expect(tab.connection.provider.isAttached).toBe(false);
+  expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(true);
+  await expectLiveWrite(other, hub.port, otherRoom, "unrelated room after deletion");
+  tab.release();
+  const reopened = await openTab(room, hub.port);
+  expect(reopened.latest().deleted).toBe(true);
+  expect(reopened.connection.provider.isAttached).toBe(false);
+}, TEST_TIMEOUT_MS);
+
+it("detaches an open room when its directory deletion arrives and scrubs late metadata", async () => {
+  const hub = await startHub(0, databasePath());
+  const uuid = randomUUID();
+  const room = `${WORKSPACE}/${uuid}`;
+  const tab = await openTab(room, hub.port);
+  const directory = await openTab(directoryRoom(WORKSPACE), hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await seedDocument(tab, uuid);
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid, title: "Private" });
+  deleteDirectoryEntry(directory.connection.ydoc, uuid);
+  expect(tab.latest().deleted).toBe(true);
+  expect(tab.connection.provider.isAttached).toBe(false);
+  getDirectoryMap(directory.connection.ydoc).set(uuid, { title: "Late", tags: ["private"] });
+  expect(getDirectoryMap(directory.connection.ydoc).has(uuid)).toBe(false);
 }, TEST_TIMEOUT_MS);
 
 /** The forced-drop window the cooldown test runs under; see that test. */

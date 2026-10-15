@@ -83,7 +83,9 @@ it("persists suspension through restart, preserves workspace data and commits be
   const workspaceId = randomUUID();
   memberships.grant({ workspaceId, principalId: owner.id, role: "admin" });
   const issued = credentials.issue({ principalId: owner.id, deviceId: randomUUID(), workspaces: [workspaceId] });
-  database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(`${workspaceId}/_directory`, new Uint8Array([0]));
+  const directory = new Y.Doc();
+  database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(`${workspaceId}/_directory`, Y.encodeStateAsUpdate(directory));
+  directory.destroy();
   const before = {
     documents: database.connection.prepare("SELECT * FROM documents").all(),
     members: database.connection.prepare("SELECT * FROM hub_memberships").all(),

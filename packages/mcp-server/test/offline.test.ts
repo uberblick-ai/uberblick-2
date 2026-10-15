@@ -53,6 +53,7 @@ describe("with the hub stopped", () => {
       "backlinks",
       "create_doc",
       "delete_block",
+      "delete_doc",
       "edit_block",
       "export_markdown",
       "find_decisions",

@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { deleteDirectoryEntry, directoryRoom, parseRoom } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveCoreHubConfig } from "../src/config.js";
 import type { IssuedCredential } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
-import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { isLoopbackHost } from "@uberblick/schema/loopback";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
 import { importCredentialKey, mintRequestProof, mintToken } from "@uberblick/schema/token";
-import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom, token,
+import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom, token, storedText,
   type TestClient, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
 const hubs: Hub[] = [];
@@ -60,6 +61,31 @@ describe("one local boundary", () => {
 });
 
 describe("remote createHub admission", () => {
+  it("purges and refuses a deleted room while the same device keeps its other rooms", async () => {
+    const { hub } = await remote();
+    const member = hub.principals!.identify("1234", "member");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "admin" });
+    const issued = hub.credentials!.issue({ principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const presented = await credentialToken(issued);
+    const room = testRoom();
+    const writer = connect(hub, room, presented);
+    const directory = connect(hub, directoryRoom(WORKSPACE), presented);
+    await Promise.all([writer.synced, directory.synced]);
+    writer.text.insert(0, "remote private content");
+    await waitUntil("the remote edit to be acknowledged", () => !writer.provider.hasUnsyncedChanges);
+    await hub.flush();
+    deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
+    await expect(writer.denied).resolves.toBe(DOC_DELETED_REASON);
+    await waitUntil("the remote deletion to be acknowledged", () => !directory.provider.hasUnsyncedChanges);
+    expect(storedText(hub.databasePath, room)).toBeNull();
+    await expect(connect(hub, room, presented).denied).resolves.toBe(DOC_DELETED_REASON);
+    const survivor = connect(hub, testRoom(), presented);
+    await survivor.synced;
+    survivor.text.insert(0, "the device remains authorized");
+    await waitUntil("the same device to keep writing", () => !survivor.provider.hasUnsyncedChanges);
+    expect(hub.credentials!.get(issued.record.id)?.revokedAt).toBeNull();
+  });
+
   it("a loopback test seam only tightens admission", async () => {
     const hub = await createHub({ address: "127.0.0.1", port: 0,
       databasePath: tempDatabasePath(), authSecret: TEST_SECRET,

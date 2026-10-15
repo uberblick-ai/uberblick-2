@@ -18,6 +18,7 @@ import type { HubLogger } from "./log.js";
 import type { CredentialContext } from "./credential-admission.js";
 import { stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
+import { DeletedRooms } from "./deleted-rooms.js";
 import {
   isProtocolVersion,
   protocolMismatchReason,
@@ -546,6 +547,7 @@ export async function createHub(config: HubConfig, options: {
     throw error;
   }
 
+  const deletedRooms: DeletedRooms = new DeletedRooms(database, () => server.hocuspocus);
   const server = new Server<HubContext>({
     port: config.port ?? DEFAULT_PORT,
     address,
@@ -586,6 +588,8 @@ export async function createHub(config: HubConfig, options: {
         : handleUnconfiguredAuthRequest(request, response)) return Promise.reject();
     },
 
+    ...deletedRooms.hooks(),
+
     /**
      * These hooks run per room; socketId groups multiplexed rooms and changes on reconnect.
      * connected has verified claims; Connection.onClose retains the close event
@@ -593,6 +597,7 @@ export async function createHub(config: HubConfig, options: {
      * hub resets/timeouts keep their supplied code/reason.
      */
     async connected({ documentName, context, socketId, connection }) {
+      deletedRooms.requireRoom(documentName, connection);
       log({
         event: "hub.room.connected",
         room: documentName,
@@ -612,6 +617,7 @@ export async function createHub(config: HubConfig, options: {
       });
     },
   });
+
 
   let hocuspocus: Hocuspocus<HubContext>;
   try {
@@ -645,6 +651,7 @@ export async function createHub(config: HubConfig, options: {
   }
 
   async function flush(): Promise<void> {
+    await deletedRooms.flush();
     await flushPendingStores(server.hocuspocus, log);
     const failed = storeError();
     if (failed !== undefined) {

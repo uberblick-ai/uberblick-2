@@ -3,6 +3,7 @@ import { inputSchema as archive_doc } from "../src/tools/archive-doc.js";
 import { inputSchema as backlinks } from "../src/tools/backlinks.js";
 import { inputSchema as create_doc } from "../src/tools/create-doc.js";
 import { inputSchema as delete_block } from "../src/tools/delete-block.js";
+import { inputSchema as delete_doc } from "../src/tools/delete-doc.js";
 import { inputSchema as edit_block } from "../src/tools/edit-block.js";
 import { inputSchema as export_markdown } from "../src/tools/export-markdown.js";
 import { inputSchema as find_decisions } from "../src/tools/find-decisions.js";
@@ -28,7 +29,7 @@ import {
 
 /** The same strict Zod objects passed to MCP registration, without the SDK. */
 export const toolInputs = {
-  annotate, archive_doc, backlinks, create_doc, delete_block, edit_block,
+  annotate, archive_doc, backlinks, create_doc, delete_block, delete_doc, edit_block,
   export_markdown, find_decisions, get_data, get_doc, get_help, insert_block,
   link_range, list_docs, list_tags, restore_doc, search, set_metadata, set_status,
   sync_status, update_data, get_sidebar, pin_doc, unpin_doc, sidebar_group,

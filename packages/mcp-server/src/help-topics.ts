@@ -111,11 +111,11 @@ Both content locks leave document-room access and structured-data reads availabl
 
 A decided decision record's title, answer blocks and legacy TL;DR or structured data are read-only: content-writing tools refuse with \`decision_read_only\` and change nothing. A \`set_metadata\` call naming title, tldr or discussion also refuses the whole call and names the locked field. Discussion changes on rejected or withdrawn records, or non-decision documents, refuse with \`discussion_not_writable\` and \`field: "discussion"\`. An open decision refuses non-null tldr with \`decision_tldr_unsupported\`; null clears a legacy TL;DR. \`update_data\` on other decision states refuses with \`decision_data_unsupported\`. Use a new superseding record for a decided content change. Comments, description, tags and curated links stay writable. This check runs on this replica at call time; an unseen offline edit can still merge later, detected as changed after approval.
 
-Archived documents are read-only. While a document's directory stub is tombstoned document mutations refuse with \`doc_archived\` and change nothing; restore_doc is the only mutation an archived document accepts, and the only way back. Reading is unaffected — get_doc, export_markdown, backlinks and \`list_docs\` with \`include_deleted: true\` all still answer for it; a decision additionally needs a matching \`kind\`, \`status\` or \`tag\` predicate in list_docs.
+Archived documents are read-only. While a document's directory stub is tombstoned ordinary document mutations refuse with \`doc_archived\` and change nothing. restore_doc is the only way back; delete_doc permanently removes an archived regular document. Reading is unaffected by archive — get_doc, export_markdown, backlinks and \`list_docs\` with \`include_deleted: true\` all still answer for it; a decision additionally needs a matching \`kind\`, \`status\` or \`tag\` predicate in list_docs.
 
 The honest scope, the same discipline \`rev\` has: the check runs against THIS replica's directory stub at the moment of the call. It is refusal-at-call, not a cross-replica lock — an edit made on a replica that has not seen the archive yet is an ordinary CRDT write and merges normally when the two replicas meet.
 
-## Archive and explicit restoration
+## Archive, restoration and permanent deletion
 
 \`archive_doc\` tombstones the directory entry and removes its sidebar pin. \`restore_doc\` is an explicit lifecycle action: it reactivates the document without changing its content, bypassing decided-content locks or changing workspace access. A generic content or metadata write cannot restore a document.
 
@@ -123,9 +123,13 @@ For a decision, archive_doc and restore_doc act on every record in its topic. On
 
 Concurrency: a directory entry is written as a whole object, so an archive_doc racing a restore_doc on another replica converges on whichever update Yjs orders last — not on whichever call happened later by the clock. The same applies to a plain rename or retag made on a replica that had not yet seen the archive: it is a whole-entry write too, so it can bring the document back with nobody calling restore_doc. An archive holds against writers that have seen it, which is not the same as holding against every concurrent one. When it matters which way it went, re-read with list_docs and \`include_deleted: true\`; for a decision, also pass a matching \`kind\`, \`status\` or \`tag\` predicate.
 
+\`delete_doc({uuid})\` permanently deletes an archived regular document, including its content, comments, data and history. Live documents refuse with \`doc_not_archived\`; decision records and topics refuse with \`decision_delete_unsupported\`. The directory keeps only the UUID and a permanent mark. Hubs purge and refuse that room; replicas drop their copy when they see the mark or receive the deleted-room refusal. Missing entries and incomplete directory sync never authorize deletion. The mark wins over concurrent or offline restore, rename, retag and stub repair. Protocol 4 fences clients and hubs that lack this support.
+
+Deleted documents leave all discovery and sidebar results, including \`include_deleted: true\`. Reads, writes and new references to a deleted UUID refuse with \`doc_deleted\`; existing inline and curated links in other documents stay stored as written. Delete never edits another document. Earlier backups and freed SQLite pages are outside the deletion guarantee.
+
 ## Related
 
-[Workspaces and documents](uberblick://help/workspaces) · [Tool contracts](uberblick://help/tool-contracts) · [set_status](uberblick://help/set_status) · [archive_doc](uberblick://help/archive_doc) · [restore_doc](uberblick://help/restore_doc)`;
+[Workspaces and documents](uberblick://help/workspaces) · [Tool contracts](uberblick://help/tool-contracts) · [set_status](uberblick://help/set_status) · [archive_doc](uberblick://help/archive_doc) · [restore_doc](uberblick://help/restore_doc) · [delete_doc](uberblick://help/delete_doc)`;
 
 const markdown = `# Supported Markdown
 

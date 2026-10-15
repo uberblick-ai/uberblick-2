@@ -20,9 +20,12 @@ import type {
 /** Whole-object per-uuid writes merge independently; same-key writes use Yjs order. */
 export const DIRECTORY_DOCS_KEY = "docs";
 
+/** Grow-only deletion evidence, independent of whole-entry metadata writes. */
+export const DIRECTORY_DELETED_KEY = "deleted-docs";
+
 /**
- * Per-client max candidates survive losing whole-stub writes. Never pruned:
- * one key per uuid/client; a single-entry resolution scans the full map.
+ * Per-client max candidates survive losing whole-stub writes. Retained until
+ * permanent deletion: one key per uuid/client; a resolution scans the map.
  */
 const DIRECTORY_UPDATED_AT_KEY = "updatedAt";
 
@@ -119,6 +122,46 @@ export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
 
 function getUpdatedAtMap(dirDoc: Y.Doc): Y.Map<unknown> {
   return dirDoc.getMap<unknown>(DIRECTORY_UPDATED_AT_KEY);
+}
+
+/** Absence is never deletion evidence; only an explicit permanent mark is. */
+export function isDirectoryEntryDeleted(dirDoc: Y.Doc, uuid: string): boolean {
+  return dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).get(uuid) === true;
+}
+
+/** Deleted UUIDs remain discoverable for physical replica and hub cleanup. */
+export function listDeletedDirectoryUuids(dirDoc: Y.Doc): string[] {
+  return [...dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).entries()]
+    .filter(([uuid, value]) => canonicalDocumentUuid(uuid) === uuid && value === true)
+    .map(([uuid]) => uuid)
+    .sort();
+}
+
+/** Remove metadata that an unseen whole-entry writer may have reintroduced. */
+export function enforceDeletedDirectoryEntries(dirDoc: Y.Doc): void {
+  const deleted = new Set(listDeletedDirectoryUuids(dirDoc));
+  if (deleted.size === 0) return;
+  dirDoc.transact(() => {
+    const docs = getDirectoryMap(dirDoc);
+    for (const uuid of deleted) {
+      if (docs.has(uuid)) docs.delete(uuid);
+    }
+    const stamps = getUpdatedAtMap(dirDoc);
+    for (const key of stamps.keys()) {
+      const separator = key.lastIndexOf(":");
+      if (separator > 0 && deleted.has(key.slice(0, separator))) stamps.delete(key);
+    }
+  });
+}
+
+/** The caller owns access and archive checks; permanent deletion applies to any UUID. */
+export function deleteDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+  dirDoc.transact(() => {
+    if (!isDirectoryEntryDeleted(dirDoc, uuid)) {
+      dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).set(uuid, true);
+    }
+    enforceDeletedDirectoryEntries(dirDoc);
+  });
 }
 
 function greaterStamp(
@@ -332,6 +375,7 @@ export function upsertDirectoryEntry(
   dirDoc: Y.Doc,
   entry: DirectoryUpsert,
 ): void {
+  if (isDirectoryEntryDeleted(dirDoc, entry.uuid)) return;
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = withResolvedUpdatedAt(
@@ -384,6 +428,7 @@ export function upsertDirectoryEntry(
  * Keep entries in the map so deletion replicates, even when it overtakes creation.
  */
 function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string): void {
+  if (isDirectoryEntryDeleted(dirDoc, uuid)) return;
   const docs = getDirectoryMap(dirDoc);
   dirDoc.transact(() => {
     const existing = withResolvedUpdatedAt(
@@ -412,6 +457,7 @@ function tombstoneOneDirectoryEntry(dirDoc: Y.Doc, uuid: string, topic?: string)
  * order, which does not represent the recency of a person's intent.
  */
 function restoreOneDirectoryEntry(dirDoc: Y.Doc, uuid: string): void {
+  if (isDirectoryEntryDeleted(dirDoc, uuid)) return;
   const docs = getDirectoryMap(dirDoc);
   const existing = withResolvedUpdatedAt(
     readStored(docs.get(uuid)),
@@ -488,11 +534,12 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
   };
 }
 
-/** One entry by uuid, or null when unknown. Tombstones are returned as-is. */
+/** One entry by uuid, or null when unknown or permanently deleted. Archives remain readable. */
 export function getDirectoryEntry(
   dirDoc: Y.Doc,
   uuid: string,
 ): DirectoryEntry | null {
+  if (isDirectoryEntryDeleted(dirDoc, uuid)) return null;
   const stored = withResolvedUpdatedAt(
     readStored(getDirectoryMap(dirDoc).get(uuid)),
     recordedUpdatedAt(dirDoc, uuid),
@@ -515,6 +562,7 @@ export function listDirectory(
   const out: DirectoryEntry[] = [];
   const updatedAts = recordedUpdatedAts(dirDoc);
   for (const [uuid, value] of getDirectoryMap(dirDoc).entries()) {
+    if (isDirectoryEntryDeleted(dirDoc, uuid)) continue;
     const stored = withResolvedUpdatedAt(
       readStored(value),
       updatedAts.get(uuid),

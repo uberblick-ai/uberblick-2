@@ -33,7 +33,7 @@ export function registerSidebarTools(server: ToolRegistrar, context: ToolContext
     title: "Unpin a document",
     description:
       "Remove a document from the sidebar, wherever it sits. The document itself is untouched: unpinning is a " +
-      "navigation act, not a delete — archive_doc is the one that tombstones a document.\n\n" +
+      "navigation act. archive_doc hides a document; delete_doc permanently deletes an archived regular document.\n\n" +
       "An unpin beats a move made concurrently on another replica, so a document does not reappear because " +
       "somebody was dragging it at the time. It takes no group: one pin per document means there is only ever " +
       "one place to remove it from. `unpinned` is false when the document was not pinned to begin with." +

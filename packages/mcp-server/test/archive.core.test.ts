@@ -458,8 +458,7 @@ describe("an archived document is read-only", () => {
         synced: false,
         message: `Document ${doc.uuid} is archived — restore_doc to edit`,
         recoveryClass: "manual",
-        recovery: "Archived documents are read-only. Call restore_doc for this uuid — the only mutation an archived document " +
-          "accepts — and then make this call again.",
+        recovery: "Archived documents are read-only. Call restore_doc for this uuid before editing, or delete_doc to permanently delete an archived regular document.",
       });
     }
 

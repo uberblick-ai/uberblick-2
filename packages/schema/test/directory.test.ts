@@ -5,13 +5,17 @@ import {
   appendBlock,
   createAnnotation,
   deleteBlock,
+  deleteDirectoryEntry,
   directoryStubDiffers,
   documentDirectoryFields,
+  enforceDeletedDirectoryEntries,
   getAnnotationsMap,
   getDirectoryEntry,
   getDirectoryMap,
   getMeta,
   initDoc,
+  isDirectoryEntryDeleted,
+  listDeletedDirectoryUuids,
   listDirectory,
   resolveAnnotationRange,
   restoreDirectoryEntry,
@@ -29,6 +33,74 @@ const GAMMA = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
 // The well-known room name itself is pinned once, in rooms.test.ts.
 describe("directory doc", () => {
+  it("keeps only permanent UUID evidence and refuses every later metadata write", () => {
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, {
+      uuid: ALPHA, title: "Secret", tags: ["private"], description: "Description",
+      createdAt: 10, updatedAt: 20, kind: "decision", topic: ALPHA, tldr: "Answer",
+    });
+    deleteDirectoryEntry(directory, ALPHA);
+    expect(isDirectoryEntryDeleted(directory, ALPHA)).toBe(true);
+    expect(listDeletedDirectoryUuids(directory)).toEqual([ALPHA]);
+    expect(getDirectoryEntry(directory, ALPHA)).toBeNull();
+    expect(getDirectoryMap(directory).has(ALPHA)).toBe(false);
+    expect(directory.getMap("updatedAt").size).toBe(0);
+    expect(listDirectory(directory, { includeDeleted: true })).toEqual([]);
+
+    const before = Y.encodeStateAsUpdate(directory);
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Repaired", tags: ["new"] });
+    restoreDirectoryEntry(directory, ALPHA);
+    tombstoneDirectoryEntry(directory, ALPHA);
+    deleteDirectoryEntry(directory, ALPHA);
+    expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+  });
+
+  it.each([1, 3])("permanent deletion wins unseen restores, metadata writes and repair with client id %i", (writerId) => {
+    const deleter = new Y.Doc();
+    deleter.clientID = 2;
+    const writer = new Y.Doc();
+    writer.clientID = writerId;
+    upsertDirectoryEntry(deleter, { uuid: ALPHA, title: "Private", tags: ["a"], updatedAt: 10 });
+    tombstoneDirectoryEntry(deleter, ALPHA);
+    syncDocs(deleter, writer);
+
+    deleteDirectoryEntry(deleter, ALPHA);
+    restoreDirectoryEntry(writer, ALPHA);
+    upsertDirectoryEntry(writer, { uuid: ALPHA, title: "Offline rename", tags: ["b"], description: "Offline", updatedAt: 30 });
+    syncDocs(deleter, writer);
+    for (const directory of [deleter, writer]) {
+      expect(isDirectoryEntryDeleted(directory, ALPHA)).toBe(true);
+      expect(getDirectoryEntry(directory, ALPHA)).toBeNull();
+      expect(listDirectory(directory, { includeDeleted: true })).toEqual([]);
+      enforceDeletedDirectoryEntries(directory);
+      expect(getDirectoryMap(directory).has(ALPHA)).toBe(false);
+      expect(directory.getMap("updatedAt").size).toBe(0);
+    }
+    syncDocs(deleter, writer);
+
+    // An older process may later append another whole entry to the shared log.
+    getDirectoryMap(writer).set(ALPHA, { title: "Late repair", tags: ["leaked"] });
+    expect(getDirectoryEntry(writer, ALPHA)).toBeNull();
+    enforceDeletedDirectoryEntries(writer);
+    syncDocs(deleter, writer);
+    expect(getDirectoryMap(deleter).has(ALPHA)).toBe(false);
+    expect(listDeletedDirectoryUuids(deleter)).toEqual([ALPHA]);
+
+    const restarted = new Y.Doc();
+    Y.applyUpdate(restarted, Y.encodeStateAsUpdate(deleter));
+    expect(isDirectoryEntryDeleted(restarted, ALPHA)).toBe(true);
+    expect(getDirectoryEntry(restarted, ALPHA)).toBeNull();
+  });
+
+  it("never infers deletion from missing or malformed directory entries", () => {
+    const directory = new Y.Doc();
+    expect(isDirectoryEntryDeleted(directory, ALPHA)).toBe(false);
+    getDirectoryMap(directory).set(ALPHA, null);
+    enforceDeletedDirectoryEntries(directory);
+    expect(listDeletedDirectoryUuids(directory)).toEqual([]);
+    expect(getDirectoryMap(directory).has(ALPHA)).toBe(true);
+  });
+
   it("upserts on create, rename and retag", () => {
     const dir = new Y.Doc();
     upsertDirectoryEntry(dir, { uuid: ALPHA, title: "Alpha", tags: ["draft"] });

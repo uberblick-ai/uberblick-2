@@ -167,12 +167,17 @@ export {
 
 export {
   DIRECTORY_DOCS_KEY,
+  DIRECTORY_DELETED_KEY,
+  deleteDirectoryEntry,
+  enforceDeletedDirectoryEntries,
   decisionDirectoryFields,
   decisionTopicArchived,
   directoryStubDiffers,
   documentDirectoryFields,
   getDirectoryEntry,
   getDirectoryMap,
+  isDirectoryEntryDeleted,
+  listDeletedDirectoryUuids,
   listDirectory,
   restoreDirectoryEntry,
   tombstoneDirectoryEntry,

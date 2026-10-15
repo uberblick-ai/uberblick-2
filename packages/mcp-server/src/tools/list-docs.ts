@@ -12,7 +12,7 @@ export const inputSchema = strictInput({
   kind: documentKindArg.optional().describe("Only documents of this kind."),
   status: documentStatusArg.optional().describe("Only documents at this lifecycle state."),
   has_open_threads: z.literal(true).optional().describe("Only documents with a known positive openThreadCount; topic rows match any live record. False refuses."),
-  include_deleted: z.boolean().optional(),
+  include_deleted: z.boolean().optional().describe("Include archived documents. Permanently deleted UUIDs are always excluded."),
   include_superseded: z.boolean().optional().describe("Return every decision record instead of one row per topic."),
 });
 

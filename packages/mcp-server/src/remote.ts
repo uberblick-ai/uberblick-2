@@ -17,6 +17,7 @@ import {
   getDocDataEntries,
   listAnnotationRanges,
   listDirectory,
+  listDeletedDirectoryUuids,
   roomForDoc,
 } from "@uberblick/schema";
 import { Awareness } from "y-protocols/awareness";
@@ -372,7 +373,7 @@ export async function inspectRemote(
       entries,
       missing,
       unsettled,
-      ...(settings !== null && sidebar !== null ? { workspace: workspaceSnapshot(settings, sidebar) } : {}),
+      ...(settings !== null && sidebar !== null ? { workspace: workspaceSnapshot(settings, sidebar, dirDoc) } : {}),
       complete: true,
     };
   } finally {
@@ -388,17 +389,18 @@ export async function inspectRemote(
 }
 
 /** The corpus a hydrated replica set holds, read out of its documents. */
-function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc): CorpusDoc[] {
+function workspaceSnapshot(settings: Y.Doc, sidebar: Y.Doc, directory: Y.Doc): CorpusDoc[] {
   return [
     { uuid: "_settings", doc: settings, content: {
       name: getWorkspaceName(settings), mainRepository: getWorkspaceMainRepository(settings),
       tags: listTagCatalog(settings),
     } },
     { uuid: "_sidebar", doc: sidebar, content: readSidebar(sidebar) },
+    { uuid: "_deleted", doc: directory, content: listDeletedDirectoryUuids(directory).sort() },
   ].map(({ uuid, doc, content }) => ({
     uuid, title: uuid, tags: [], deleted: false,
     fingerprint: createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex"),
-    stateVector: Y.encodeStateVector(doc),
+    stateVector: uuid === "_deleted" ? null : Y.encodeStateVector(doc),
   }));
 }
 
@@ -437,7 +439,7 @@ function readCorpus(replicas: Replicas): Corpus {
     });
   }
   return { hub: replicas.sync.state(), entries, missing, unsettled, complete: true,
-    workspace: workspaceSnapshot(replicas.settings().doc, replicas.sidebar().doc) };
+    workspace: workspaceSnapshot(replicas.settings().doc, replicas.sidebar().doc, replicas.directory().doc) };
 }
 
 /**

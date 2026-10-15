@@ -77,6 +77,7 @@ export function sidebarOperation<Args extends object, Payload extends object>(
     // New pins need a known stub, including archived stubs surfaced by get_sidebar.
     // Do not gate other operations: unknown pins must remain removable.
     if (tool === "pin_doc") context.requireStub((args as Args & { uuid: string }).uuid);
+    if (tool === "unpin_doc") context.requireNotDeleted((args as Args & { uuid: string }).uuid);
     const sidebar = context.replicas.sidebar();
     return { ...body(context, args, request, sidebar), ...context.durability(sidebar) };
   });

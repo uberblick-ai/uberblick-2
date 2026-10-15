@@ -50,6 +50,7 @@ it("refuses every document mutation before logging, teaches recovery, and leaves
     set_metadata: { uuid, title: "Changed" }, set_status: { uuid, status: "open" },
     update_data: { uuid, operations: [] },
     archive_doc: { uuid: first.uuid }, restore_doc: { uuid: archived.uuid },
+    delete_doc: { uuid: archived.uuid },
     annotate: { uuid, block_id: block.id, start: 0, end: 4, text: "Comment" },
     link_range: { uuid, block_id: block.id, start: 0, end: 4, doc_id: first.uuid, rev: block.rev },
   };

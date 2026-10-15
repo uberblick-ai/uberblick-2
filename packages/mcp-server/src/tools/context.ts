@@ -6,6 +6,7 @@ import {
   decisionTopicArchived,
   getBlocksWithInline,
   getDirectoryEntry,
+  isDirectoryEntryDeleted,
   getMeta,
   getMetaMap,
   isProseBlockType,
@@ -114,11 +115,18 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     );
   };
 
+  const requireNotDeleted = (uuid: string): void => {
+    if (isDirectoryEntryDeleted(replicas.directory().doc, uuid)) {
+      throw new ToolError("doc_deleted", `Document ${uuid} was permanently deleted`, { uuid });
+    }
+  };
+
   /**
    * Refuse unknown UUIDs before joining a room: a typo would create an empty
    * document on the hub. Known but unhydrated rooms get a separate refusal.
    */
   const requireDoc = (uuid: string): Replica => {
+    requireNotDeleted(uuid);
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (!replicas.known(uuid) && stub === null && !replicas.hasLog(uuid)) {
       throw notKnownLocally(uuid, "document");
@@ -149,6 +157,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    * Refuse unknown UUIDs to avoid publishing sticky tombstones for typos.
    */
   const requireStub = (uuid: string): DirectoryEntry => {
+    requireNotDeleted(uuid);
     const stub = getDirectoryEntry(replicas.directory().doc, uuid);
     if (stub === null) {
       throw notKnownLocally(uuid, "directory");
@@ -162,6 +171,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    * local state at call time; they do not lock out concurrent remote edits.
    */
   const requireWritableDoc = (uuid: string, contentMutation = false): Replica => {
+    requireNotDeleted(uuid);
     if (decisionTopicArchived(replicas.directory().doc, uuid)) {
       throw new ToolError(
         "doc_archived",
@@ -242,6 +252,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
    * and hub state. Archived targets still resolve through their stubs.
    */
   const linkTitle = (docId: string): string => {
+    requireNotDeleted(docId);
     const stub = getDirectoryEntry(replicas.directory().doc, docId);
     if (stub === null) {
       throw notKnownLocally(docId, "doclink");
@@ -430,6 +441,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     briefing,
     work,
     requireStub,
+    requireNotDeleted,
     durability,
     tagCatalog,
     requireWritableDoc,
