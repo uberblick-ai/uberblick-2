@@ -27,8 +27,9 @@ on:
 # On main, let a started run finish and keep only the newest push waiting behind
 # it, so a busy merge day still produces results. On a pull request only the
 # newest head matters, so a new push cancels the run in progress.
+# Manual timing samples each finish without replacing another queued sample.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -78,15 +79,26 @@ jobs:
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run typecheck
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
+        id: test-linux
         run: mise run test
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'macOS' }}
+        id: test-macos
         run: mise run test-os
+      - name: Upload per-test results
+        if: ${{ always() && (steps.test-linux.outcome == 'success' || steps.test-linux.outcome == 'failure' || steps.test-macos.outcome == 'success' || steps.test-macos.outcome == 'failure') }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-${{ runner.os }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vitest-results/
+          if-no-files-found: warn
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run site
 
-  # Files stay serial internally; each shard gets its own bundle and harnesses.
+  # Files stay serial internally; each job gets its own bundle and harnesses.
   e2e-chromium-1:
     name: browser chromium (1/2)
     runs-on: ubuntu-latest
@@ -119,7 +131,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
-        run: mise run e2e --project=chromium --shard=1/2
+        id: browser-suite
+        run: mise run e2e --project=chromium --test-list=e2e/chromium-group-one.txt
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-chromium-2:
     name: browser chromium (2/2)
@@ -153,7 +176,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
-        run: mise run e2e --project=chromium --shard=2/2
+        id: browser-suite
+        run: mise run e2e --project=chromium --test-list-invert=e2e/chromium-group-one.txt
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-webkit-1:
     name: browser webkit (1/2)
@@ -191,7 +225,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=webkit-ipad --shard=1/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-webkit-2:
     name: browser webkit (2/2)
@@ -229,7 +274,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=webkit-ipad --shard=2/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-workload:
     name: browser workload
@@ -263,7 +319,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=chromium-workload --no-deps
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   # The workload project retains dependencies locally; --no-deps above puts
   # probes on separate hardware while interactive CI jobs execute in parallel.

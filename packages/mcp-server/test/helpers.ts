@@ -1,23 +1,10 @@
-/**
- * Test rig.
- *
- * Tests here talk to a real MCP server over a real transport, with a real
- * SQLite file and — where the hub is part of the story — a real hub on an
- * ephemeral port. The interesting behaviour is durability, hydration order and
- * what happens when the network is absent, so mocking any of those three would
- * test nothing.
- *
- * Temp databases and ephemeral ports keep suites independent and parallel-safe.
- */
+/** Integration rigs use a real MCP transport, file-backed store and optional hub. */
 
-import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { JsonSchemaValidator, jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { Hub, HubLogger, HubLogRecord } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
@@ -27,186 +14,15 @@ import * as Y from "yjs";
 import type { McpConfig } from "../src/config.js";
 import { createMcpServer } from "../src/server.js";
 import type { UberblickMcpServer } from "../src/server.js";
-import { MirrorStore } from "../src/store.js";
-import type { UpdateOrigin } from "../src/store.js";
+import type { MirrorStore } from "../src/store.js";
+import { HubConnection } from "../src/hub-connection.js";
+import { waitUntil } from "./lifecycle.js";
 
-/**
- * A store whose appends can be made to fail, as a full or read-only disk would.
- *
- * The seam every "the log refused a write" test drives: real store, real code
- * path, one failure injected where the failure actually happens.
- */
-export class FailingStore extends MirrorStore {
-  failing = false;
+export { drainWaits, waitUntil } from "./lifecycle.js";
 
-  /**
-   * Which rooms the failure applies to. Null — the default — is every room; a
-   * predicate is how a test fails one room of a call that writes several.
-   */
-  failRoom: ((room: string) => boolean) | null = null;
-
-  override appendUpdate(
-    room: string,
-    payload: Uint8Array,
-    origin: UpdateOrigin,
-  ): number {
-    if (this.failing && (this.failRoom === null || this.failRoom(room))) {
-      throw new Error("simulated disk failure");
-    }
-    return super.appendUpdate(room, payload, origin);
-  }
-}
-
-/** The hub's HMAC secret in tests. Never a valid token itself. */
-export const TEST_SECRET = "test-hmac-secret-for-the-mcp-server";
-/** The workspace under test. A uuid, like every real workspace id. */
-export const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
-
-/** The package root, so a test can spawn `src/main.ts` the way a client would. */
-export const PACKAGE_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-
-/**
- * How to run a package's `src/main.ts` as exactly one process, from that
- * package's directory.
- *
- * `node --import tsx`, never the `tsx` binary: tsx's CLI runs the script in a
- * grandchild process, so a `SIGKILL` to the child kills the launcher and leaves
- * the server itself running — which would quietly hollow out every test that
- * kills one.
- */
-export function mainTsProcess(): { command: string; args: string[] } {
-  return {
-    command: process.execPath,
-    args: ["--import", "tsx", join("src", "main.ts")],
-  };
-}
-
-const tempDirs: string[] = [];
-
-export function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "uberblick-mcp-"));
-  tempDirs.push(dir);
-  return dir;
-}
-
-/** A fresh database path. Its directory is removed by {@link removeTempDirs}. */
-export function tempDatabasePath(): string {
-  return join(tempDir(), "mirror.sqlite");
-}
-
-export function removeTempDirs(): void {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * How long one awaited condition gets before the wait gives up.
- *
- * Generous rather than tight, and deliberately so: these suites run real hubs,
- * real sockets and real SQLite files, and the review container runs every
- * package's suite at once on whatever cores are left. A deadline sized for a
- * quiet machine turns load into a red gate, which trains everyone to re-run —
- * and a re-run habit is how a real regression eventually walks through. What
- * has to stay sharp is the *message*, not the clock: a wait that expires still
- * names the condition it was waiting for, so a genuine hang is still reported
- * as one, just later.
- */
-export const WAIT_TIMEOUT_MS = 20_000;
-
-/** Wait for `predicate`, polling. Throws with `label` on timeout. */
-export async function waitUntil(
-  label: string,
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = WAIT_TIMEOUT_MS,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await sleep(25);
-  }
-}
-
-export interface TestConfigOptions {
-  databasePath?: string;
-  /** Null (the default) disables hub sync entirely: local-only. */
-  authSecret?: string | null;
-  hubUrl?: string;
-  workspaceId?: string;
-  compactAfter?: number;
-  reconcileRetryMs?: number;
-  cursorTtlMs?: number;
-  updatedAtCoarsenessMs?: number;
-  /** See {@link LIVE_HUB_SETTLE}. */
-  connectTimeoutMs?: number;
-  /** See {@link LIVE_HUB_SETTLE}. */
-  syncTimeoutMs?: number;
-}
-
-/**
- * Settle bounds for a rig whose *first* tool call must answer from the hub.
- *
- * A tool call's settle is bounded on purpose — no tool blocks on the network —
- * and the defaults below are sized for the opposite case: a port nothing
- * answers, where the whole grace is pure waiting. That makes the connect grace
- * a race for a rig pointed at a hub that really is listening: on a loaded
- * machine it expires while the socket is still handshaking, the settle gives
- * up, and the call answers — correctly, as an offline-first server must —
- * from an empty replica. A test reads that as a lost corpus.
- *
- * So a suite that cannot wait for hydration itself, because waiting would
- * destroy what it is testing, spreads these instead. Nothing waits on them
- * when the hub answers promptly.
- */
-export const LIVE_HUB_SETTLE = {
-  connectTimeoutMs: 10_000,
-  syncTimeoutMs: 10_000,
-} as const;
-
-/**
- * A config with test-scale timings.
- *
- * The default `hubUrl` is a port nothing listens on, and the default secret is
- * null — so a test that says nothing about the hub is testing the offline path,
- * which is the one that must always work.
- */
-export function testConfig(options: TestConfigOptions = {}): McpConfig {
-  return {
-    workspaceId: options.workspaceId ?? WORKSPACE,
-    hubUrl: options.hubUrl ?? "ws://127.0.0.1:1",
-    authSecret: options.authSecret === undefined ? null : options.authSecret,
-    databasePath: options.databasePath ?? tempDatabasePath(),
-    sessionId: `agent-test-${randomUUID()}`,
-    color: "#7b5ec7",
-    // Short on purpose: the offline tests dial a port nothing listens on, where
-    // the connect fails immediately and the timeout is pure waiting. A rig on a
-    // hub that answers wants the opposite — see LIVE_HUB_SETTLE.
-    connectTimeoutMs: options.connectTimeoutMs ?? 150,
-    syncTimeoutMs: options.syncTimeoutMs ?? 2_000,
-    reconnectMaxDelayMs: 250,
-    cursorTtlMs: options.cursorTtlMs ?? 30_000,
-    compactAfter: options.compactAfter ?? 500,
-    // No cooldown by default: a suite that wants to watch a retry happen should
-    // not wait out a production pause for it. Tests about the pacing itself set
-    // this deliberately.
-    reconcileRetryMs: options.reconcileRetryMs ?? 0,
-    // The production window, on purpose: the coarseness is the contract, and a
-    // suite that wants to cross it moves the clock rather than shrinking it.
-    updatedAtCoarsenessMs: options.updatedAtCoarsenessMs ?? 5 * 60_000,
-  };
-}
-
-export interface ToolCall {
-  isError: boolean;
-  // Tool payloads are JSON by contract; tests assert on their fields.
-  payload: any;
-}
+export * from "./shared.js";
+import { CLIENT_NAME, TEST_SECRET, tempDatabasePath, testConfig } from "./shared.js";
+import type { ToolCall } from "./shared.js";
 
 export interface Rig {
   readonly instance: UberblickMcpServer;
@@ -220,8 +36,24 @@ export interface Rig {
   close(): Promise<void>;
 }
 
-/** The name the test client identifies itself with over MCP. */
-export const CLIENT_NAME = "uberblick-tests";
+/**
+ * Output validators shared by every rig's client. `listTools` otherwise compiles
+ * every output schema with Ajv, about 55 ms a rig; a compiled validator depends
+ * only on its schema, so sharing it checks exactly what a fresh client would.
+ */
+const outputSchemaCompiler = new AjvJsonSchemaValidator();
+const compiledOutputSchemas = new Map<string, JsonSchemaValidator<unknown>>();
+const sharedOutputValidators: jsonSchemaValidator = {
+  getValidator<T>(schema: Parameters<jsonSchemaValidator["getValidator"]>[0]) {
+    const key = JSON.stringify(schema);
+    let validator = compiledOutputSchemas.get(key);
+    if (validator === undefined) {
+      validator = outputSchemaCompiler.getValidator(schema);
+      compiledOutputSchemas.set(key, validator);
+    }
+    return validator as JsonSchemaValidator<T>;
+  },
+};
 
 /**
  * Start a server and an MCP client joined by an in-memory transport pair.
@@ -246,7 +78,9 @@ export async function startServer(
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client(clientInfo);
+  const client = new Client(clientInfo, {
+    jsonSchemaValidator: sharedOutputValidators,
+  });
   await Promise.all([
     instance.connect(serverTransport),
     client.connect(clientTransport),
@@ -276,6 +110,7 @@ export async function startServer(
     }
   };
 
+  let closing: Promise<void> | undefined;
   return {
     instance,
     client,
@@ -291,9 +126,14 @@ export async function startServer(
       }
       return result.payload;
     },
-    async close() {
-      await client.close();
-      await instance.close();
+    close() {
+      closing ??= (async () => {
+        const errors: unknown[] = [];
+        try { await client.close(); } catch (error) { errors.push(error); }
+        try { await instance.close(); } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, "MCP rig close failed");
+      })();
+      return closing;
     },
   };
 }
@@ -381,7 +221,7 @@ export interface PeerClient {
   readonly doc: Y.Doc;
   readonly provider: HocuspocusProvider;
   readonly synced: Promise<void>;
-  destroy(): void;
+  destroy(): Promise<void>;
 }
 
 /**
@@ -411,8 +251,12 @@ export async function peerClient(
       lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     }),
   );
+  const connection = new HubConnection(1_500);
   const provider = new HocuspocusProvider({
-    url: hubUrl(port),
+    websocketProvider: new HocuspocusProviderWebsocket({
+      url: hubUrl(port),
+      WebSocketPolyfill: connection.websocket(),
+    }),
     name: room,
     token,
     document: doc,
@@ -420,12 +264,18 @@ export async function peerClient(
   const synced = new Promise<void>((resolve) => {
     provider.on("synced", () => resolve());
   });
+  provider.attach();
+  let closing: Promise<void> | undefined;
   return {
     doc,
     provider,
     synced,
     destroy() {
-      provider.destroy();
+      closing ??= connection.close(() => {
+          provider.destroy();
+          provider.configuration.websocketProvider.destroy();
+        });
+      return closing;
     },
   };
 }

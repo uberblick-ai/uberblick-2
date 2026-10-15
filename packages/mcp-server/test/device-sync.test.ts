@@ -7,7 +7,7 @@ import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
 import { createMcpEngine } from "../src/engine.js";
 import { inspectRemote, syncWorkspace } from "../src/remote.js";
-import { caughtUp, client, closeClient, closeDeviceSync, config, environment, expireRenewalCooldown, hub } from "./device-sync-fixture.js";
+import { client, closeClient, closeDeviceSync, config, environment, expireRenewalCooldown, hub } from "./device-sync-fixture.js";
 import { testConfig, waitUntil, WORKSPACE } from "./helpers.js";
 
 afterEach(closeDeviceSync);
@@ -25,8 +25,10 @@ describe("stored-login sync", () => {
     const written = await rig.ok("create_doc", { title: "Login after local proxy admission", description: "Retains pending local edits." });
     expect(written.synced).toBe(false);
     await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
-    await caughtUp(rig);
-    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe("Login after local proxy admission");
+    await waitUntil("the hub to apply the local proxy admission edit", () =>
+      fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "Login after local proxy admission",
+    70_000);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
   });
 
   it.each(["missing", "revoked"] as const)("resumes a running refused process after later login (%s)", async kind => {
@@ -53,8 +55,10 @@ describe("stored-login sync", () => {
     const written = await rig.ok("create_doc", { title: `Pending ${kind}`, description: "Local edits survive sign-in." });
     expect(written.synced).toBe(false);
     await writeHubLogin(fixture.origin, fixture.issue({ workspaces: [WORKSPACE] }), env);
-    await caughtUp(rig);
-    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe(`Pending ${kind}`);
+    await waitUntil("the hub to apply the edit after login", () =>
+      fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === `Pending ${kind}`,
+    70_000);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
   });
 
   it("discovers a grant after a confirmed denial without login or restart", async () => {
@@ -67,8 +71,10 @@ describe("stored-login sync", () => {
     await rig.instance.replicas.sync.waitForDeviceWork();
     fixture.grant(WORKSPACE);
     expireRenewalCooldown(env);
-    await caughtUp(rig);
-    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe("Granted later");
+    await waitUntil("the hub to apply the edit after granting access", () =>
+      fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "Granted later",
+    70_000);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
   });
 
   it.each(["revoke", "membership"] as const)("ends live sync and retains downloaded documents (%s)", async kind => {
@@ -79,14 +85,14 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, login, env);
     const rig = await client(config(fixture, env));
     const written = await rig.ok("create_doc", { title: "Downloaded stays", description: "Access cannot erase local data." });
-    await caughtUp(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
     if (kind === "revoke") fixture.revoke(login.credential.record.id);
     else fixture.removeMembership(WORKSPACE);
     await waitUntil("live access ended", () => rig.instance.replicas.sync.state().authRecovery === (kind === "revoke" ? "sign-in-required" : "no-workspace-access"));
     expect((await rig.ok("get_doc", { uuid: written.uuid })).title).toBe("Downloaded stays");
     const next = await rig.ok("create_doc", { title: "After removal", description: "Still editable locally." });
     expect(next).toMatchObject({ applied: true, synced: false });
-    expect(fixture.readRoom(roomForDoc(WORKSPACE, next.uuid))).toBeUndefined();
+    expect(fixture.readRoom(roomForDoc(WORKSPACE, next.uuid), getMeta)).toBeUndefined();
   });
 
   it("syncs every workspace room, reads fresh logins on reconnect and resumes after restart", async () => {
@@ -98,8 +104,10 @@ describe("stored-login sync", () => {
     const cfg = config(fixture, env);
     const rig = await client(cfg);
     const created = await rig.ok("create_doc", { title: "Device document", description: "Private local replica." });
-    await caughtUp(rig);
-    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, created.uuid))!).title).toBe("Device document");
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
+    await waitUntil("the hub to apply the device document", () =>
+      fixture.readRoom(roomForDoc(WORKSPACE, created.uuid), getMeta)?.title === "Device document",
+    );
     const rooms = rig.instance.replicas.attachedReplicas().map(({ room }) => room);
     expect(new Set(fixture.authentications.map(({ room }) => room))).toEqual(new Set(rooms));
     for (const { claims, protocolVersion } of fixture.authentications) {
@@ -112,16 +120,19 @@ describe("stored-login sync", () => {
     await writeHubLogin(fixture.origin, replacement, env);
     fixture.closeConnections();
     await waitUntil("new login to reach the running server", () => fixture.authentications.some(({ claims }) => claims?.kid === replacement.credential.record.id));
-    await caughtUp(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
     expect(rig.instance.replicas.sync.mintCount).toBeGreaterThan(count);
     expect(fixture.renewalCount).toBe(0);
     const output = JSON.stringify(await rig.ok("sync_status"));
     expect(output).not.toContain(login.credential.key);
     expect(output).not.toContain(replacement.credential.key);
     await closeClient(rig);
+    await fixture.pause();
+    expect(fixture.readRoom(roomForDoc(WORKSPACE, created.uuid), getMeta)?.title).toBe("Device document");
+    await fixture.resume();
     const restarted = await client(cfg);
     expect((await restarted.ok("get_doc", { uuid: created.uuid })).title).toBe("Device document");
-    await caughtUp(restarted);
+    expect(await restarted.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
     expect(fixture.renewalCount).toBe(0);
   });
 
@@ -133,7 +144,7 @@ describe("stored-login sync", () => {
     const cfg = config(fixture, env);
     const engine = await createMcpEngine(cfg);
     try {
-      await waitUntil("serving engine rooms to sync", () => engine.replicas.attachedReplicas().every(({ room }) => engine.replicas.isRoomQuiet(room)));
+      expect(await engine.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
     } finally { await engine.close(); }
     const probe = await inspectRemote(cfg);
     expect(probe.hub.status).toBe("connected");
@@ -150,7 +161,15 @@ describe("stored-login sync", () => {
     const login = fixture.issue({ workspaces: [] });
     await writeHubLogin(fixture.origin, login, env);
     const [first, second] = await Promise.all([client(config(fixture, env)), client(config(fixture, env))]);
-    await Promise.all([caughtUp(first), caughtUp(second)]);
+    await waitUntil("both clients to finish workspace renewal", () =>
+      first.instance.replicas.sync.state().status === "connected" &&
+      second.instance.replicas.sync.state().status === "connected",
+    70_000);
+    const settled = await Promise.all([
+      first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+      second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+    ]);
+    expect(settled).toMatchObject([{ caughtUp: true }, { caughtUp: true }]);
     expect(fixture.renewalCount).toBe(1);
     const stored = readHubLogins(env).logins[fixture.origin]!;
     expect(stored.identity).toEqual(login.identity);

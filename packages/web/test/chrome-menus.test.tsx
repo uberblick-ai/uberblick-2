@@ -120,6 +120,7 @@ describe("the workspace switcher renders configuration", () => {
     current: Workspace | null = WORKSPACE,
     active = true,
     onOpenChange?: (open: boolean) => void,
+    workspaceLocation?: string | null,
   ): ReactElement {
     return (
       <WorkspaceSwitcher
@@ -129,6 +130,7 @@ describe("the workspace switcher renders configuration", () => {
         onSwitch={() => {}}
         active={active}
         onOpenChange={onOpenChange}
+        workspaceLocation={workspaceLocation}
       />
     );
   }
@@ -168,7 +170,7 @@ describe("the workspace switcher renders configuration", () => {
       expect(marker?.getAttribute("aria-hidden")).toBe("true");
       expect(marker?.textContent).toBe("");
       expect(trigger.querySelectorAll('[aria-hidden="true"]')).toHaveLength(2);
-      expect(trigger.textContent).toBe("Uberblick▾");
+      expect(trigger.textContent?.trim()).toBe("Uberblick");
       // The name truncates, so its whole value is available on the title.
       expect(within(trigger).getByText("Uberblick").getAttribute("title")).toBe(
         "Uberblick",
@@ -176,10 +178,11 @@ describe("the workspace switcher renders configuration", () => {
       view.unmount();
     }
 
-    const none = mount(switcher(null));
+    const none = mount(switcher(null, true, undefined, "local"));
     const trigger = within(none.host).getByRole("button", { name: "no workspace" });
     // The same marker selector was proved present for both routed spellings.
     expect(trigger.querySelector(".ub-workspace-marker")).toBe(null);
+    expect(trigger.querySelector(".ub-workspace-location")).toBe(null);
     expect(within(trigger).queryByText(/\d+ docs?/)).toBe(null);
     expect(within(trigger).getByText("no workspace").textContent).toBe("no workspace");
     expect(within(trigger).getByText("no workspace").hasAttribute("title")).toBe(false);
@@ -189,6 +192,28 @@ describe("the workspace switcher renders configuration", () => {
     open(none);
     expect(within(screen.getByRole("menu")).queryAllByRole("menuitem", { current: true, hidden: true })).toHaveLength(0);
     none.unmount();
+  });
+
+  it.each([
+    ["wss://user:secret@hub.uberblick.ai/private/path?token=hidden#fragment", "hub.uberblick.ai"],
+    ["ws://localhost:1234/ws", "localhost:1234"],
+    ["local", "This device"],
+    [null, null],
+    ["not an address", null],
+    ["javascript:secret", null],
+  ])("names the workspace's location from %s without exposing address details", (address, location) => {
+    const view = mount(switcher(WORKSPACE, true, undefined, address));
+    const trigger = within(view.host).getByRole("button", {
+      name: location === null ? "Uberblick" : `Uberblick ${location}`,
+    });
+    expect(trigger.hasAttribute("aria-label")).toBe(false);
+    expect(trigger.hasAttribute("aria-labelledby")).toBe(false);
+    expect(trigger.querySelector(".ub-workspace-location")?.textContent ?? null).toBe(location);
+    expect(trigger.textContent).not.toMatch(/secret|private|token|fragment/);
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Uberblick", current: true })).toBeTruthy();
+    expect(screen.getByRole("menu").querySelector(".ub-workspace-location")).toBeNull();
+    view.unmount();
   });
 
   it("closes its portalled menu when the document pane becomes inactive", () => {

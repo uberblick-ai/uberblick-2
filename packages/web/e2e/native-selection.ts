@@ -4,7 +4,10 @@ import type { Editor } from "@tiptap/core";
 
 type SelectionTarget = { anchor: number; head: number };
 
-/** Focus reconciliation can overwrite a native range before the editor imports it. */
+/**
+ * Focus reconciliation can overwrite a native range before the editor imports it.
+ * A scripted range returns its positions; only real pointer input may return none.
+ */
 export async function setNativeSelection(target: Locator, select: () => Promise<void> | Promise<SelectionTarget>): Promise<void> {
   await expect.poll(async () => {
     const expected = await select();

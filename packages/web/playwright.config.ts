@@ -28,6 +28,7 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: false,
   retries: 0,
+  use: { trace: "retain-on-failure" },
   forbidOnly: process.env.CI !== undefined,
   reporter: [["list"], ["./e2e/timing-reporter.ts"]],
   // Generous per test, not per run: the whole file is meant to finish in well
@@ -53,7 +54,7 @@ export default defineConfig({
       // Focused workload probes use --project=chromium-workload --no-deps.
       grep: /@workload(?:\s|$)/,
       dependencies: ["chromium", "webkit-ipad"],
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], trace: "off" },
     },
   ],
 });

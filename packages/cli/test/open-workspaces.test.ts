@@ -227,12 +227,18 @@ describe("ub open: this machine's workspaces", () => {
         const block = getBlocks(tab.document)[0]!;
         editBlock(tab.document, block.id, block.text, `edit from tab ${index}`, { rev: block.rev });
       }
-      await waitUntil("both tabs' edits at their own hubs", () => targets.every((target, index) =>
-        getBlocks(target.hub.hocuspocus.documents.get(roomForDoc(workspaces[index]!, DOC))!)[0]?.text === `edit from tab ${index}`));
+      await waitUntil("both tabs' edits at their own hubs", () => targets.every((target, index) => {
+        const remote = target.hub.hocuspocus.documents.get(roomForDoc(workspaces[index]!, DOC));
+        return remote !== undefined && getBlocks(remote)[0]?.text === `edit from tab ${index}`;
+      }));
       for (const [index, target] of targets.entries()) {
-        const remote = target.hub.hocuspocus.documents.get(roomForDoc(workspaces[index]!, DOC))!;
-        const block = getBlocks(remote)[0]!;
-        editBlock(remote, block.id, block.text, `remote edit ${index}`, { rev: block.rev });
+        await waitUntil(`hub ${index} room available for a remote edit`, () => {
+          const remote = target.hub.hocuspocus.documents.get(roomForDoc(workspaces[index]!, DOC));
+          const block = remote === undefined ? undefined : getBlocks(remote)[0];
+          if (remote === undefined || block === undefined) return false;
+          editBlock(remote, block.id, block.text, `remote edit ${index}`, { rev: block.rev });
+          return true;
+        });
         expect(target.hub.hocuspocus.documents.has(roomForDoc(workspaces[1 - index]!, DOC))).toBe(false);
       }
       await waitUntil("each remote edit back at its own tab", () => tabs.every((tab, index) =>
@@ -314,15 +320,21 @@ describe("ub open: this machine's workspaces", () => {
         (await (await readStatus()).json() as ServingSyncStatus).caughtUp);
       database = openStore(defaultWorkspaceDatabasePath(SECOND, box.env));
       database.exec("CREATE TRIGGER refuse_replica_append BEFORE INSERT ON updates BEGIN SELECT RAISE(ABORT, 'simulated disk refusal'); END");
-      const remote = secondary.hub.hocuspocus.documents.get(roomForDoc(SECOND, DOC))!;
-      const remoteBlock = getBlocks(remote)[0]!;
-      editBlock(remote, remoteBlock.id, remoteBlock.text, "ahead of refused log", { rev: remoteBlock.rev });
+      await waitUntil("secondary hub room available for an edit before quarantine", () => {
+        const remote = secondary.hub.hocuspocus.documents.get(roomForDoc(SECOND, DOC));
+        const block = remote === undefined ? undefined : getBlocks(remote)[0];
+        if (remote === undefined || block === undefined) return false;
+        editBlock(remote, block.id, block.text, "ahead of refused log", { rev: block.rev });
+        return true;
+      });
       await waitUntil("secondary quarantine reading", async () => (await readStatus()).status === 503);
       expect(await (await readStatus()).json()).toEqual({ error: "replica_unavailable", reason: "replica-quarantined" });
       const block = getBlocks(tabs[0]!.document)[0]!;
       editBlock(tabs[0]!.document, block.id, block.text, "primary still sharing", { rev: block.rev });
-      await waitUntil("healthy primary hub edit after secondary quarantine", () =>
-        getBlocks(primary.hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, DOC))!)[0]?.text === "primary still sharing");
+      await waitUntil("healthy primary hub edit after secondary quarantine", () => {
+        const remote = primary.hub.hocuspocus.documents.get(roomForDoc(WORKSPACE, DOC));
+        return remote !== undefined && getBlocks(remote)[0]?.text === "primary still sharing";
+      });
       expect((await fetch(`${app.url}api/status`, { headers: await headers(box, WORKSPACE) })).status).toBe(200);
     } finally {
       database?.exec("DROP TRIGGER IF EXISTS refuse_replica_append"); database?.close();

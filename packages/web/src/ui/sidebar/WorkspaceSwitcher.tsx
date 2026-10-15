@@ -19,10 +19,22 @@ import { workspaceLabel } from "../workspace-names.js";
 
 const NO_NAMES: ReadonlyMap<string, string | null> = new Map();
 
+function locationLabel(address: string | null): string | null {
+  if (address === "local") return "This device";
+  if (address === null) return null;
+  try {
+    const url = new URL(address);
+    return url.protocol === "ws:" || url.protocol === "wss:" ? url.host || null : null;
+  } catch {
+    return null;
+  }
+}
+
 export function WorkspaceSwitcher({
   workspaces,
   current,
   names = NO_NAMES,
+  workspaceLocation = null,
   onSwitch,
   active = true,
   onOpenChange,
@@ -33,6 +45,8 @@ export function WorkspaceSwitcher({
   current: Workspace | null;
   /** Names from local replicas or live shared settings, keyed by workspace. */
   names?: ReadonlyMap<string, string | null> | undefined;
+  /** The route's reported upstream address, or `local` for this device. */
+  workspaceLocation?: string | null | undefined;
   /** Go there. The value is a segment, spelled as the list spells it. */
   onSwitch: (segment: string) => void;
   /** Whether the document-sidebar pane that owns this portalled menu is live. */
@@ -52,6 +66,7 @@ export function WorkspaceSwitcher({
     return () => onOpenChange?.(false);
   }, [active, open, onOpenChange]);
   const currentLabel = current === null ? "no workspace" : workspaceLabel(current, names, workspaces);
+  const location = current === null ? null : locationLabel(workspaceLocation);
 
   return (
     <SidebarMenu>
@@ -60,14 +75,21 @@ export function WorkspaceSwitcher({
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton className="ub-workspace">
               {current !== null && (
-                <span className="ub-workspace-marker size-2 shrink-0 rounded-full bg-(--brand)" aria-hidden="true" />
+                <span className="ub-workspace-marker size-8 shrink-0 rounded-(--radius-sm) bg-(--brand)" aria-hidden="true" />
               )}
-              <span className="ub-workspace-name min-w-0 flex-1 truncate" title={current === null ? undefined : currentLabel}>
-                {currentLabel}
+              <span className="min-w-0 flex-1 ub-type-ui">
+                <span className="ub-workspace-name block truncate" title={current === null ? undefined : currentLabel}>
+                  {currentLabel}
+                </span>{" "}
+                {location !== null && (
+                  <span className="ub-workspace-location block truncate ub-type-small font-normal text-(--sidebar-muted-foreground)" title={location}>
+                    {location}
+                  </span>
+                )}
               </span>
-              <span className="ub-workspace-caret shrink-0 ub-type-caption text-(--sidebar-muted-foreground)" aria-hidden="true">
-                ▾
-              </span>
+              <svg className="ub-workspace-caret text-(--sidebar-muted-foreground)" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                <path d="m8 9 4-4 4 4m-8 6 4 4 4-4" />
+              </svg>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="ub-workspace-menu w-(--radix-dropdown-menu-trigger-width)">

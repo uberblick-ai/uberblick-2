@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { activateControl, editor, setupHarness } from "./app-helpers.js";
+import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 
@@ -70,8 +70,7 @@ async function readThread(page: Page, text: string, touch: boolean): Promise<Loc
 }
 
 async function closeThreadDrawer(page: Page, touch: boolean): Promise<void> {
-  const close = page.getByRole("button", { name: "Close threads", exact: true });
-  if (await close.isVisible()) await activateControl(close, { touch });
+  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch });
 }
 
 async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
@@ -82,8 +81,7 @@ async function selectedTopicPin(page: Page, touch: boolean): Promise<void> {
   await expect(pin).toBeVisible();
   await expect(pin).toHaveText("Initial topic title");
   await expect(pin).toHaveAttribute("aria-current", "page");
-  const close = page.getByRole("button", { name: "Close document list", exact: true });
-  if (await close.isVisible()) await activateControl(close, { touch });
+  await closeIfOpen(page.getByRole("button", { name: "Close document list", exact: true }), show, { touch });
 }
 
 async function topicPins(writer: McpSession, records: string[]): Promise<string[]> {

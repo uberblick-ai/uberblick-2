@@ -1,30 +1,29 @@
 /** Settle distinguishes a failed dial, a pending upgrade and a lost open socket. */
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import type { Socket } from "node:net";
+import { createServer as createTcpServer } from "node:net";
 import { afterEach, expect, it } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { HubSync } from "../src/sync.js";
 import { formatHubFailure } from "../src/hub-failure.js";
-import { hubUrl, removeTempDirs, startHub, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
+import { cleanupTestResources, hubUrl, trackListener, startHub, testConfig, TEST_SECRET, waitUntil, WORKSPACE } from "./helpers.js";
 
 const cleanup: (() => void | Promise<void>)[] = [];
+const listeners: (() => Promise<void>)[] = [];
+const documents: (() => void)[] = [];
 afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
-  removeTempDirs();
+  await cleanupTestResources({ clients: cleanup.splice(0), hubs: listeners.splice(0), after: documents.splice(0) });
 });
 
 /** An HTTP listener whose upgrade can stall or open without answering rooms. */
 async function listener(open = false) {
   const server = createServer();
-  const sockets = new Set<Socket>();
-  const fixture = { open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false };
-  server.on("connection", (socket) => {
-    sockets.add(socket);
-    socket.on("close", () => sockets.delete(socket));
-  });
+  const tracked = trackListener(server);
+  const { sockets } = tracked;
+  const fixture = { open, port: 0, sockets, close, status: 0, closeCode: 0, dropUpgrade: false, upgrades: 0 };
   server.on("upgrade", (request, socket) => {
+    fixture.upgrades += 1;
     if (fixture.dropUpgrade) { socket.destroy(); return; }
     if (fixture.status) {
       socket.end(`HTTP/1.1 ${fixture.status} private-http-reason\r\nContent-Length: 12\r\n\r\nprivate-body`);
@@ -45,10 +44,9 @@ async function listener(open = false) {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   fixture.port = (server.address() as { port: number }).port;
   async function close() {
-    for (const socket of sockets) socket.destroy();
-    if (server.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await tracked.close();
   }
-  cleanup.push(close);
+  listeners.push(close);
   return fixture;
 }
 
@@ -63,7 +61,7 @@ function sync(port: number, connectTimeoutMs = 500, syncTimeoutMs = 750) {
 function room(instance: HubSync) {
   const doc = new Y.Doc();
   const awareness = new Awareness(doc);
-  cleanup.push(() => { awareness.destroy(); doc.destroy(); });
+  documents.push(() => { awareness.destroy(); doc.destroy(); });
   const name = `${WORKSPACE}/_directory`;
   instance.attach({ room: name, doc, awareness });
   return name;
@@ -86,7 +84,7 @@ it("ends the first and later settles on a failed dial, then syncs when the hub o
   }
 
   const hub = await startHub({ port: endpoint.port });
-  cleanup.push(() => hub.stop());
+  listeners.push(() => hub.stop());
   await waitUntil("the retry to open", () => instance.state().status === "connected");
   await instance.waitForQuiet();
   expect(instance.isRoomQuiet(name)).toBe(true);
@@ -152,8 +150,14 @@ it("records only the DNS code and dialled host", async () => {
 });
 
 it("records a TLS failure without claiming a certificate problem", async () => {
-  const fixture = await listener();
-  const instance = new HubSync(testConfig({ hubUrl: `wss://127.0.0.1:${fixture.port}`, authSecret: TEST_SECRET }), () => {});
+  const server = createTcpServer((socket) => {
+    socket.once("data", () => socket.end("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+  });
+  const tracked = trackListener(server);
+  listeners.push(() => tracked.close());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  const instance = new HubSync(testConfig({ hubUrl: `wss://127.0.0.1:${port}`, authSecret: TEST_SECRET }), () => {});
   cleanup.push(() => instance.destroy());
   await waitUntil("TLS failure", () => instance.state().cause === "tls");
   expect(instance.state().detail).toBe("ERR_SSL_WRONG_VERSION_NUMBER 127.0.0.1");
@@ -200,13 +204,19 @@ it("clears a classified failure when a later upgrade drops without a classified 
 it("attributes concurrent sockets and fetches to their own requests", async () => {
   const fixture = await listener();
   const first = sync(fixture.port, 1_500);
-  // This socket remains pending while the next socket receives a 502.
-  await waitUntil("first pending upgrade", () => fixture.sockets.size === 1);
+  // This socket remains pending while the next socket receives a 502. Wait for
+  // its upgrade request, not its TCP accept, or the 502 can answer it instead.
+  await waitUntil("first pending upgrade", () => fixture.upgrades === 1);
   fixture.status = 502;
   const second = sync(fixture.port);
   await waitUntil("second upgrade failure", () => second.state().cause === "http");
+  // The 502 answers only the second socket: once the first times out, its
+  // re-dial must not meet it.
+  const secondFailure = second.state();
+  await second.destroy();
+  fixture.status = 0;
   await fetch(`http://127.0.0.1:${fixture.port}/unrelated`, { signal: AbortSignal.timeout(50) }).catch(() => {});
   await first.waitForQuiet();
   expect(first.state()).toMatchObject({ cause: "timeout", detail: `1.5 127.0.0.1:${fixture.port}` });
-  expect(second.state()).toMatchObject({ cause: "http", detail: "502 127.0.0.1" });
+  expect(secondFailure).toMatchObject({ cause: "http", detail: "502 127.0.0.1" });
 });

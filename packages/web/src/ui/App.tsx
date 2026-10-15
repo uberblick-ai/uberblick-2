@@ -408,6 +408,18 @@ export function App(): ReactElement {
   );
   const account = useServingAccount(accountClient);
   const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
+  // Startup configuration may name an implicit loopback hub for a local-only
+  // binding. The existing access reading distinguishes it from an upstream.
+  let workspaceLocation: string | null = null;
+  if (serving === null) {
+    if (startupServing === null) workspaceLocation = endpoint?.url ?? null;
+  } else if (serving.remoteHubUrl === null) {
+    workspaceLocation = "local";
+  } else if (!serving.rebound) {
+    const authority = hubAdministration.authority;
+    if (authority?.status === "local-only") workspaceLocation = "local";
+    else if (authority?.hub != null) workspaceLocation = statusEndpoint?.url ?? null;
+  }
   const routedSelection = route.kind === "doc" ? route.uuid : route.kind === "decision" ? route.record : null;
   const settings = route.kind === "settings";
   // Both addresses that name the workspace render the document list, so the
@@ -988,6 +1000,7 @@ export function App(): ReactElement {
           workspaces={workspaces}
           workspace={workspace}
           workspaceNames={workspaceNames}
+          workspaceLocation={workspaceLocation}
           onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
           identity={identity}

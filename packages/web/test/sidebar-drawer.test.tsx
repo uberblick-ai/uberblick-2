@@ -15,6 +15,8 @@ import {
   pinDoc,
   readSidebar,
   roomForDoc,
+  setWorkspaceName,
+  settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
@@ -61,6 +63,7 @@ function room(name: string): RoomConnection {
 
 vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
+  mintHubAuthMessage: async (workspace: string) => workspace,
 }));
 
 const { App } = await import("../src/ui/App.js");
@@ -157,7 +160,7 @@ function labelledButton(label: string): HTMLButtonElement {
   return screen.getByRole<HTMLButtonElement>("button", { name: label });
 }
 
-function sidebarButton(name: string): HTMLButtonElement {
+function sidebarButton(name: string | RegExp): HTMLButtonElement {
   const sidebar = drawer();
   if (sidebar === null) throw new Error("Missing sidebar drawer");
   return within(sidebar).getByRole<HTMLButtonElement>("button", { name });
@@ -180,7 +183,7 @@ async function openDrawer(settings = false): Promise<void> {
 }
 
 async function openWorkspaceMenu(): Promise<void> {
-  const button = sidebarButton(`Unnamed workspace · ${WORKSPACE.slice(0, 8)}`);
+  const button = sidebarButton(/^Unnamed workspace(?: · 6f4c8a51)? 127\.0\.0\.1:4321$/);
   await act(async () => {
     button.focus();
     button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -252,7 +255,7 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
   await click(sidebarButton("Workspace settings"));
   await openDrawer(true);
   expectMode(true);
-  await click(sidebarButton(`Back to Unnamed workspace · ${WORKSPACE.slice(0, 8)}`));
+  await click(sidebarButton("Back to Unnamed workspace"));
   await openDrawer();
   expectMode(false);
 });
@@ -275,6 +278,82 @@ it.each(destinations)("closes and restores focus after choosing $choice", async 
   expect(stored.get(COLLAPSED_KEY)).toBe("true");
   expect(writes).not.toContain(COLLAPSED_KEY);
   expect(window.location.pathname).toBe(destination.path);
+});
+
+it.each([
+  { remoteHubUrl: "wss://notes.example:8443/rooms/ws", location: "notes.example:8443" },
+  { remoteHubUrl: null, location: "This device" },
+])("names the routed workspace's own location: $location", async ({ remoteHubUrl, location }) => {
+  vi.mocked(fetch).mockImplementation(async (input, init) => new Response(JSON.stringify(input === "/api/access"
+    ? { status: "forbidden", hub: init?.headers && new Headers(init.headers).get("Authorization") === `Bearer ${OTHER_WORKSPACE}`
+      ? "https://notes.example:8443" : "https://hub.example" }
+    : {
+    hubUrl: "ws://127.0.0.1:4321",
+    workspaces: [WORKSPACE, OTHER_WORKSPACE],
+    servedWorkspaces: {
+      [WORKSPACE]: { name: "Product", remoteHubUrl: "wss://hub.example/rooms/ws" },
+      [OTHER_WORKSPACE]: { name: "Notes", remoteHubUrl },
+    },
+  })));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Product");
+  setWorkspaceName(room(settingsRoom(OTHER_WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+
+  const firstHeader = sidebarButton("Product hub.example");
+  expect(firstHeader.textContent).not.toContain("127.0.0.1");
+  await act(async () => {
+    firstHeader.focus();
+    firstHeader.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  await click(menuItem("Notes"));
+  expect(window.location.pathname).toBe(`/${OTHER_WORKSPACE}`);
+  await openDrawer();
+
+  const nextHeader = sidebarButton(`Notes ${location}`);
+  expect(nextHeader.textContent).not.toContain("127.0.0.1");
+  expect(nextHeader.textContent).not.toContain("hub.example");
+});
+
+it.each([
+  { answer: { status: "local-only", hub: null }, location: "This device", rebound: false },
+  { answer: { status: "not-configured", hub: "http://localhost:1234" }, location: "localhost:1234", rebound: false },
+  { answer: { status: "hub-down", hub: null }, location: null, rebound: false },
+  { answer: { status: "local-only", hub: null }, location: null, rebound: true },
+])("names the startup binding from its access reading: $answer.status, rebound=$rebound", async ({ answer, location, rebound }) => {
+  vi.mocked(fetch).mockImplementation(async (input) => Response.json(input === "/api/access" ? answer : {
+    hubUrl: "ws://127.0.0.1:4321",
+    workspaces: [WORKSPACE],
+    rebound,
+    servedWorkspaces: { [WORKSPACE]: { name: "Notes", remoteHubUrl: "ws://localhost:1234" } },
+  }));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+  const header = sidebarButton(location === null ? "Notes" : `Notes ${location}`);
+  expect(header.querySelector(".ub-workspace-location")?.textContent ?? null).toBe(location);
+});
+
+it("omits an unconfirmed startup location and retires its answer on an unserved route", async () => {
+  let finishAccess: ((response: Response) => void) | undefined;
+  vi.mocked(fetch).mockImplementation(async (input) => input === "/api/access"
+    ? new Promise<Response>((resolve) => { finishAccess = resolve; })
+    : Response.json({
+      hubUrl: "ws://127.0.0.1:4321",
+      workspaces: [WORKSPACE],
+      servedWorkspaces: { [WORKSPACE]: { name: "Notes", remoteHubUrl: "ws://localhost:1234" } },
+    }));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+  expect(sidebarButton("Notes").querySelector(".ub-workspace-location")).toBeNull();
+
+  await act(async () => {
+    window.history.pushState(null, "", `/${OTHER_WORKSPACE}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await act(async () => finishAccess?.(Response.json({ status: "local-only", hub: null })));
+  expect(sidebarButton("Unnamed workspace").querySelector(".ub-workspace-location")).toBeNull();
 });
 
 // Safari's order: compositionend lands before the Escape keydown, which then

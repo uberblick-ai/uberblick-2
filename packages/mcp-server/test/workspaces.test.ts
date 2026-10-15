@@ -24,16 +24,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { directoryRoom, listDirectory, parseWorkspaceId } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import { defaultWorkspaceDatabasePath } from "../src/config.js";
-import {
+import { cleanupTestResources,
   hubUrl,
+  LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDir,
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -48,10 +49,11 @@ const rigs: Rig[] = [];
 const peers: PeerClient[] = [];
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 /**
@@ -71,6 +73,7 @@ async function serverFor(
 ): Promise<Rig> {
   const rig = await startServer(
     testConfig({
+      ...LIVE_HUB_SETTLE,
       workspaceId: parseWorkspaceId(workspaceId).uuid,
       authSecret: TEST_SECRET,
       hubUrl: hubUrl(port),
@@ -79,18 +82,6 @@ async function serverFor(
   );
   rigs.push(rig);
   return rig;
-}
-
-/** Wait until the server reports everything it holds has reached the hub. */
-async function waitForQuiet(rig: Rig): Promise<void> {
-  await waitUntil(`${rig.config.workspaceId} to report itself in sync`, async () => {
-    const status = await rig.ok("sync_status", {});
-    return (
-      status.hub.status === "connected" &&
-      status.unsyncedChanges === 0 &&
-      status.pendingRooms.length === 0
-    );
-  });
 }
 
 describe("two workspaces on one hub", () => {
@@ -118,8 +109,8 @@ describe("two workspaces on one hub", () => {
     });
     await research.ok("set_metadata", { uuid: backlog.uuid, links: [kickoff.uuid] });
 
-    await waitForQuiet(uberblick);
-    await waitForQuiet(research);
+    expect(await uberblick.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    expect(await research.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // The hub holds *both* corpora — read by a client that is neither server,
     // once per workspace. So what follows is a corpus this hub could have

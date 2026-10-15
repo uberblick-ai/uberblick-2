@@ -25,11 +25,10 @@ import type { Hub } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -38,6 +37,7 @@ import {
   TEST_SECRET,
   waitForCorpus,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { HubOptions, PeerClient, Rig, TestConfigOptions } from "./helpers.js";
@@ -73,16 +73,11 @@ function encodedDoc(uuid: string, title: string): Uint8Array {
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) {
-    peer.destroy();
-  }
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function hub(options: HubOptions = {}) {
@@ -97,6 +92,7 @@ async function serverOn(
 ): Promise<Rig> {
   const rig = await startServer(
     testConfig({
+      ...LIVE_HUB_SETTLE,
       ...options,
       authSecret: options.authSecret ?? TEST_SECRET,
       hubUrl: hubUrl(port),
@@ -110,18 +106,6 @@ async function peer(port: number, room: string): Promise<PeerClient> {
   const client = await peerClient(port, room);
   peers.push(client);
   return client;
-}
-
-/** Wait until the server reports everything it holds has reached the hub. */
-async function waitForQuiet(rig: Rig): Promise<void> {
-  await waitUntil("the server to report itself in sync", async () => {
-    const status = await rig.ok("sync_status", {});
-    return (
-      status.hub.status === "connected" &&
-      status.unsyncedChanges === 0 &&
-      status.pendingRooms.length === 0
-    );
-  });
 }
 
 describe("hub sync", () => {
@@ -166,13 +150,10 @@ describe("hub sync", () => {
       title: "Acknowledged after retry",
     });
     expect(written.applied).toBe(true);
-    await waitUntil("the retried room's write to be acknowledged", async () => {
-      const status = await rig.ok("sync_status", {});
-      return status.rooms.some(
-        (entry: { room: string; synced: boolean }) =>
-          entry.room === directRoom && entry.synced,
-      );
-    });
+    expect(await rig.instance.replicas.waitForSettled({
+      rooms: [directRoom],
+      deadline: performance.now() + WAIT_TIMEOUT_MS,
+    })).toMatchObject({ caughtUp: true });
     const observer = await peer(running.port, directRoom);
     await waitUntil("a second client to receive the retried room's write", () =>
       getMeta(observer.doc).title === "Acknowledged after retry",
@@ -217,7 +198,7 @@ describe("hub sync", () => {
     legacy.destroy();
 
     const draining = await serverOn(running.port, { databasePath });
-    await waitForQuiet(draining);
+    expect(await draining.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     expect(
       (await draining.ok("sync_status", {})).rooms.map(
         (entry: { room: string }) => entry.room,
@@ -323,7 +304,7 @@ describe("hub sync", () => {
       ),
     );
 
-    await waitForQuiet(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
     const synced = await rig.ok("sync_status", {});
     expect(synced.hub.status).toBe("connected");
     expect(synced.pendingRooms).toEqual([]);
@@ -344,7 +325,7 @@ describe("hub sync", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "an entirely different marmot" }],
     });
-    await waitForQuiet(author);
+    expect(await author.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // Empty local state, same hub. Everything it knows, it learns by syncing —
     // and everything it learns, it logs.
@@ -399,7 +380,7 @@ describe("hub sync", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "a glossary of pangolin terms" }],
     });
-    await waitForQuiet(author);
+    expect(await author.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const observer = await serverOn(running.port, {
       databasePath: tempDatabasePath(),
@@ -437,7 +418,7 @@ describe("hub sync", () => {
       blocks: [{ type: "paragraph", text: "a wandering wombat" }],
     });
     const second = await author.ok("create_doc", { title: "Delta", description: "A test document." });
-    await waitForQuiet(author);
+    expect(await author.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // Every one of these is a *first* call on an empty replica set: they all
     // trigger the boot settle at once. Each must answer from the hydrated
@@ -479,7 +460,7 @@ describe("hub sync", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "written by the agent" }],
     });
-    await waitForQuiet(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // The web UI's side of the story: a second client appends a block.
     const room = `${WORKSPACE}/${created.uuid}`;
@@ -522,7 +503,7 @@ describe("hub sync", () => {
       title: "Shared summary",
       description: "A document used to prove metadata convergence.",
     });
-    await waitForQuiet(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);
     await other.synced;
@@ -558,7 +539,7 @@ describe("hub sync", () => {
     });
     const stamped = (await rig.ok("list_docs", {})).docs[0].updatedAt;
     expect(stamped).toEqual(expect.any(Number));
-    await waitForQuiet(rig);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const other = await peer(running.port, `${WORKSPACE}/${created.uuid}`);
     await other.synced;
@@ -581,10 +562,9 @@ describe("hub sync", () => {
     const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + offset });
     const rig = await serverOn(running.port);
 
-    await waitUntil("the hub to refuse the protocol version", async () => {
-      const status = await rig.ok("sync_status", {});
-      return status.hub.status === "update-required";
-    });
+    await waitUntil("the hub to refuse the protocol version", () =>
+      rig.instance.replicas.sync.state().status === "update-required",
+    );
 
     const status = await rig.ok("sync_status", {});
     // Both integers and, in words, which side is old: a person who can only see
@@ -618,10 +598,9 @@ describe("hub sync", () => {
     const port = first.port;
     const rig = await serverOn(port);
 
-    await waitUntil("the hub to refuse the protocol version", async () => {
-      const seen = await rig.ok("sync_status", {});
-      return seen.hub.status === "update-required";
-    });
+    await waitUntil("the hub to refuse the protocol version", () =>
+      rig.instance.replicas.sync.state().status === "update-required",
+    );
     const session = (await rig.ok("sync_status", {})).session;
     // Minting is the thing being claimed about, so it is what is counted. The
     // hub's log alone cannot carry this claim: a hub that logged nothing cannot
@@ -684,10 +663,9 @@ describe("hub sync", () => {
     const running = await hub({ protocolVersion: SYNC_PROTOCOL_VERSION + 1 });
     const rig = await serverOn(running.port, { syncTimeoutMs: 30_000 });
 
-    await waitUntil("the hub to refuse the protocol version", async () => {
-      const seen = await rig.ok("sync_status", {});
-      return seen.hub.status === "update-required";
-    });
+    await waitUntil("the hub to refuse the protocol version", () =>
+      rig.instance.replicas.sync.state().status === "update-required",
+    );
 
     const started = Date.now();
     await rig.ok("sync_status", {});
@@ -700,10 +678,9 @@ describe("hub sync", () => {
     // Nothing to compare against, and the number is still the one a person has
     // to quote when they ask why two machines disagree.
     const rig = await serverOn(1, {});
-    await waitUntil("the hub to be given up on", async () => {
-      const seen = await rig.ok("sync_status", {});
-      return seen.hub.status === "hub-down";
-    });
+    await waitUntil("the hub to be given up on", () =>
+      rig.instance.replicas.sync.state().status === "hub-down",
+    );
 
     const status = await rig.ok("sync_status", {});
 
@@ -718,10 +695,9 @@ describe("hub sync", () => {
     const wrongSecret = "a-different-secret-the-hub-will-not-accept";
     const rig = await serverOn(running.port, { authSecret: wrongSecret });
 
-    await waitUntil("the hub to reject the token", async () => {
-      const status = await rig.ok("sync_status", {});
-      return status.hub.status === "auth-failed";
-    });
+    await waitUntil("the hub to reject the token", () =>
+      rig.instance.replicas.sync.state().status === "auth-failed",
+    );
 
     const status = await rig.ok("sync_status", {});
     expect(status.hub.status).toBe("auth-failed");

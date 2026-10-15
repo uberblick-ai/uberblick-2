@@ -27,6 +27,7 @@ import type { Replicas } from "./replica.js";
 import { openWorkspaceReplicas } from "./workspace-replicas.js";
 import type { HubState } from "./sync.js";
 import { HubSync } from "./sync.js";
+import { closeResources } from "./close-resources.js";
 
 /**
  * Bridges move a whole corpus over potentially slow links, so their finite
@@ -375,12 +376,14 @@ export async function inspectRemote(
       complete: true,
     };
   } finally {
-    sync.destroy();
-    await sync.waitForDeviceWork();
-    for (const { doc, awareness } of opened.values()) {
-      awareness.destroy();
-      doc.destroy();
-    }
+    await closeResources([
+      () => sync.destroy(),
+      () => sync.waitForDeviceWork(),
+      ...[...opened.values()].flatMap(({ doc, awareness }) => [
+        () => awareness.destroy(),
+        () => doc.destroy(),
+      ]),
+    ], "remote inspection teardown failed");
   }
 }
 

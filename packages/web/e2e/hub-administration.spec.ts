@@ -133,6 +133,13 @@ test.describe("a workspace administrator with no hub role", () => {
 
 test.describe("a local workspace with a stored hub-admin login", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin", hubAdmin: true, localWorkspace: true });
+  test("the local-only startup workspace names this device despite its implicit hub", async ({ browser }) => {
+    const page = await openApp(browser);
+    const config = await (await page.request.get(new URL("uberblick-config.json", harness().appUrl).href)).json();
+    expect(harness().projectBinding().hubUrl).toBeNull();
+    expect(config.servedWorkspaces[harness().workspaceUuid].remoteHubUrl).toBe("ws://localhost:1234");
+    await expect(page.locator(".ub-workspace-location")).toHaveText("This device");
+  });
   test("local workspace settings never fall back to the stored login", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
