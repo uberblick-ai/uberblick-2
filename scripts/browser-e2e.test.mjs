@@ -45,6 +45,38 @@ test("the one required browser gate rejects failure, cancellation and skips", { 
 	}
 });
 
+test("failed browser suites upload isolated attempt output without changing their result", { skip: absentWorkflow }, () => {
+	for (const id of browserJobs) {
+		const body = job(id);
+		assert.doesNotMatch(body, /^ {4}(?:if|continue-on-error):/m);
+		const steps = body.split(/^ {6}- /m).slice(1);
+		const suite = steps.find((step) => /^ {8}run: mise run e2e /m.test(step));
+		assert.ok(suite, `${id} executes a browser suite`);
+		assert.match(suite, /^ {8}id: browser-suite$/m);
+		assert.doesNotMatch(suite, /continue-on-error:/);
+		const uploads = steps.filter((step) => step.includes("uses: actions/upload-artifact@"));
+		assert.equal(uploads.length, 1, `${id} has one output upload`);
+		const [upload] = uploads;
+		assert.ok(steps.indexOf(upload) > steps.indexOf(suite));
+		assert.match(upload, /^ {8}if: \$\{\{ always\(\) && steps\.browser-suite\.outcome == 'failure' \}\}$/m);
+		assert.match(upload, /^ {8}continue-on-error: true$/m);
+		assert.match(upload, /^ {8}timeout-minutes: 1$/m);
+		assert.match(upload, /^ {8}uses: actions\/upload-artifact@[a-f0-9]{40}(?: #.*)?$/m);
+		assert.match(upload, /^ {10}name: playwright-\$\{\{ github\.job \}\}-\$\{\{ github\.run_id \}\}-attempt-\$\{\{ github\.run_attempt \}\}$/m);
+		assert.match(upload, /^ {10}path: packages\/web\/test-results\/$/m);
+		assert.doesNotMatch(upload, /^ {10}overwrite: true$/m);
+	}
+});
+
+test("interactive projects retain first-failure traces while workload timings stay untraced", async () => {
+	const { default: config } = await import("../packages/web/playwright.config.ts");
+	assert.equal(config.retries, 0);
+	for (const project of config.projects) {
+		const use = { ...config.use, ...project.use };
+		assert.equal(use.trace, project.name === "chromium-workload" ? "off" : "retain-on-failure", project.name);
+	}
+});
+
 function list(arguments_) {
 	const web = join(root, "packages/web");
 	const require = createRequire(join(web, "package.json"));

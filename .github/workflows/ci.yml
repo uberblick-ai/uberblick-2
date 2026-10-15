@@ -130,7 +130,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=chromium --shard=1/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-chromium-2:
     name: browser chromium (2/2)
@@ -164,7 +175,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=chromium --shard=2/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-webkit-1:
     name: browser webkit (1/2)
@@ -202,7 +224,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=webkit-ipad --shard=1/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-webkit-2:
     name: browser webkit (2/2)
@@ -240,7 +273,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=webkit-ipad --shard=2/2
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   e2e-workload:
     name: browser workload
@@ -274,7 +318,18 @@ jobs:
         run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
 
       - name: Run browser suite
+        id: browser-suite
         run: mise run e2e --project=chromium-workload --no-deps
+
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
 
   # The workload project retains dependencies locally; --no-deps above puts
   # probes on separate hardware while interactive CI jobs execute in parallel.

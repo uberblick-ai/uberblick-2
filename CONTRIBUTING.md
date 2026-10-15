@@ -171,7 +171,10 @@ when every job succeeds, including every shard. The workload job uses
 `--project=chromium-workload --no-deps` so it cannot rerun interactive tests.
 A local `mise run e2e` runs all projects, with workload probes after the
 interactive projects. Retries stay disabled, and sharding keeps each file's
-tests together. A flaky test is quarantined instead: when a test fails on
+tests together. Interactive projects retain a Playwright trace only for failed
+tests, including browser contexts a test creates itself; passing tests discard
+their recordings. Workload probes stay untraced so recording does not distort
+their timings. A flaky test is quarantined instead: when a test fails on
 `main` and no change explains the failure, mark it `test.fixme` (Playwright)
 or `it.skip` (Vitest) in its own pull request, linking a new issue that fixes
 or deletes it. `main` stays green, and the skip records the coverage it lost.
@@ -272,6 +275,14 @@ earlier attempts' reports. A process killed before reporting, or a job timeout,
 can leave a missing report; check its log for the cause.
 Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
+
+Each failed browser suite uploads `packages/web/test-results/` as
+`playwright-<job>-<run>-attempt-<n>`, with its failure traces and other test output.
+This includes the workload job's output, without traces. Green browser jobs
+upload nothing. Uploads are best effort and cannot change the job's result or
+the required `browser e2e` result. Rerunning failed or selected jobs keeps earlier
+attempts' artifacts beside the new ones; "Re-run all jobs" deletes earlier
+attempts' artifacts. A job timeout or cancellation can prevent an upload.
 
 `pnpm test` and `pnpm run test:os` share one worker budget across concurrent
 packages. Each command divides a budget of three times the machine's available

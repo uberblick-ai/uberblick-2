@@ -1,0 +1,123 @@
+name: Issue 1766 evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: intentional failure trace probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: mise run install
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install chromium webkit
+      - name: Intentional pass and fail with explicit contexts in each engine
+        id: browser-suite
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright test --config=issue-1766-probe/playwright.config.ts --reporter=line
+      - name: Verify failed contexts and passing trace disposal
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        run: python3 scripts/issue-1766-verify-probe.py
+      - name: Upload failed browser output
+        if: ${{ always() && steps.browser-suite.outcome == 'failure' }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: playwright-${{ github.job }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
+          if-no-files-found: warn
+
+  capture:
+    name: capture (${{ matrix.batch }}/8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+      - run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+      - name: Capture five affected tests, thirteen executions each
+        run: mise run e2e mermaid.spec.ts wireframe.spec.ts github-link.spec.ts --project=webkit-ipad --no-deps --workers=2 --repeat-each=13 --grep 'locked and archived documents draw|strict rendering prevents source callbacks|desktop and iPad diagrams fit|desktop and iPad wireframes fit|comment highlights stay visible' --reporter=list,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/issue-1766/results.json
+      - name: Keep capture evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: issue-1766-capture-${{ matrix.batch }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/issue-1766/
+            packages/web/test-results/
+
+  timing:
+    name: timing ${{ matrix.selection.id }} ${{ matrix.trace }} (${{ matrix.repetition }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        selection:
+          - id: chromium-1
+            args: --project=chromium --shard=1/2
+          - id: chromium-2
+            args: --project=chromium --shard=2/2
+          - id: webkit-1
+            args: --project=webkit-ipad --shard=1/2
+          - id: webkit-2
+            args: --project=webkit-ipad --shard=2/2
+        trace: ['off', retain-on-failure]
+        repetition: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: playwright-
+      - run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+      - if: ${{ startsWith(matrix.selection.id, 'webkit') }}
+        run: mise exec -- pnpm --filter @uberblick/web exec playwright install-deps webkit
+      - name: Measured suite
+        run: mise run e2e ${{ matrix.selection.args }} --trace=${{ matrix.trace }}
+      - name: Keep failed measurement output
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: issue-1766-timing-${{ matrix.selection.id }}-${{ matrix.trace }}-${{ matrix.repetition }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: packages/web/test-results/
