@@ -267,24 +267,33 @@ test("Expand enters browser fullscreen with the same iframe and browser exit pre
 });
 
 test("the nested document scroller loads at most three nearby viewers and releases distant ones", async ({ browser }) => {
-  const created = await create(writer(), Array.from({ length: 9 }, (_, index) => ({ type: "figma", text: source(`budget${index}`) })));
+  const created = await create(writer(), [
+    ...Array.from({ length: 4 }, (_, index) => ({ type: "figma", text: source(`budget${index}`) })),
+    { type: "code", text: Array.from({ length: 100 }, (_, index) => `Separation line ${index + 1}`).join("\n") },
+    { type: "figma", text: source("distant") },
+  ]);
   const visits: string[] = [];
   const page = await open(browser, created.uuid, visits);
   const frames = page.locator(".ub-figma");
-  await expect(frames).toHaveCount(9);
+  const groupFrames = page.locator('.ub-figma:has(a[href*="/budget"])');
+  await expect(frames).toHaveCount(5);
   await expect(page.locator(".ub-figma iframe")).toHaveCount(3);
   await expect(frames.last().locator("iframe")).toHaveCount(0);
   await expect(frames.last().getByRole("button", { name: "Expand", exact: true })).toBeDisabled();
-  expect(visits.every((url) => !url.includes("budget8"))).toBe(true);
+  for (const iframe of await groupFrames.locator("iframe").all()) await expect(iframe.contentFrame().locator("#canvas")).toBeAttached();
+  await settle(frames.first());
+  expect(visits.every((url) => !url.includes("/distant/"))).toBe(true);
+  const initial = new Set(visits);
   await frames.last().scrollIntoViewIfNeeded();
-  await expect(frames.first().locator("iframe")).toHaveCount(0);
-  await expect.poll(() => frames.evaluateAll((elements) => elements.some((element, index) => index >= 3 && element.querySelector("iframe") !== null))).toBe(true);
-  expect(await page.locator(".ub-figma iframe").count()).toBeLessThanOrEqual(3);
+  await expect(groupFrames.locator("iframe")).toHaveCount(0);
+  await expect(frames.last().locator("iframe")).toHaveCount(1);
+  await expect(page.locator(".ub-figma iframe")).toHaveCount(1);
   expect(await page.evaluate(() => window.scrollY)).toBe(0);
   await frames.first().scrollIntoViewIfNeeded();
-  await expect(frames.first().locator("iframe")).toHaveCount(1);
   await expect(frames.last().locator("iframe")).toHaveCount(0);
-  expect(await page.locator(".ub-figma iframe").count()).toBeLessThanOrEqual(3);
+  await expect(groupFrames.locator("iframe")).toHaveCount(3);
+  await expect(page.locator(".ub-figma iframe")).toHaveCount(3);
+  await expect.poll(() => [...initial].some((url) => visits.filter((visited) => visited === url).length > 1)).toBe(true);
 });
 
 test("offline placeholders and print output keep the title, caption and link without loading", { tag: "@webkit" }, async ({ browser }) => {
