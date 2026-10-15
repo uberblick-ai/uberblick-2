@@ -63,6 +63,7 @@ function room(name: string): RoomConnection {
 
 vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
+  mintHubAuthMessage: async (workspace: string) => workspace,
 }));
 
 const { App } = await import("../src/ui/App.js");
@@ -283,7 +284,10 @@ it.each([
   { remoteHubUrl: "wss://notes.example:8443/rooms/ws", location: "notes.example:8443" },
   { remoteHubUrl: null, location: "This device" },
 ])("names the routed workspace's own location: $location", async ({ remoteHubUrl, location }) => {
-  vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({
+  vi.mocked(fetch).mockImplementation(async (input, init) => new Response(JSON.stringify(input === "/api/access"
+    ? { status: "forbidden", hub: init?.headers && new Headers(init.headers).get("Authorization") === `Bearer ${OTHER_WORKSPACE}`
+      ? "https://notes.example:8443" : "https://hub.example" }
+    : {
     hubUrl: "ws://127.0.0.1:4321",
     workspaces: [WORKSPACE, OTHER_WORKSPACE],
     servedWorkspaces: {
@@ -309,6 +313,47 @@ it.each([
   const nextHeader = sidebarButton(`Notes ${location}`);
   expect(nextHeader.textContent).not.toContain("127.0.0.1");
   expect(nextHeader.textContent).not.toContain("hub.example");
+});
+
+it.each([
+  { answer: { status: "local-only", hub: null }, location: "This device", rebound: false },
+  { answer: { status: "not-configured", hub: "http://localhost:1234" }, location: "localhost:1234", rebound: false },
+  { answer: { status: "hub-down", hub: null }, location: null, rebound: false },
+  { answer: { status: "local-only", hub: null }, location: null, rebound: true },
+])("names the startup binding from its access reading: $answer.status, rebound=$rebound", async ({ answer, location, rebound }) => {
+  vi.mocked(fetch).mockImplementation(async (input) => Response.json(input === "/api/access" ? answer : {
+    hubUrl: "ws://127.0.0.1:4321",
+    workspaces: [WORKSPACE],
+    rebound,
+    servedWorkspaces: { [WORKSPACE]: { name: "Notes", remoteHubUrl: "ws://localhost:1234" } },
+  }));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+  const header = sidebarButton(location === null ? "Notes" : `Notes ${location}`);
+  expect(header.querySelector(".ub-workspace-location")?.textContent ?? null).toBe(location);
+});
+
+it("omits an unconfirmed startup location and retires its answer on an unserved route", async () => {
+  let finishAccess: ((response: Response) => void) | undefined;
+  vi.mocked(fetch).mockImplementation(async (input) => input === "/api/access"
+    ? new Promise<Response>((resolve) => { finishAccess = resolve; })
+    : Response.json({
+      hubUrl: "ws://127.0.0.1:4321",
+      workspaces: [WORKSPACE],
+      servedWorkspaces: { [WORKSPACE]: { name: "Notes", remoteHubUrl: "ws://localhost:1234" } },
+    }));
+  setWorkspaceName(room(settingsRoom(WORKSPACE)).ydoc, "Notes");
+  await openApp();
+  await openDrawer();
+  expect(sidebarButton("Notes").querySelector(".ub-workspace-location")).toBeNull();
+
+  await act(async () => {
+    window.history.pushState(null, "", `/${OTHER_WORKSPACE}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await act(async () => finishAccess?.(Response.json({ status: "local-only", hub: null })));
+  expect(sidebarButton("Unnamed workspace").querySelector(".ub-workspace-location")).toBeNull();
 });
 
 // Safari's order: compositionend lands before the Escape keydown, which then
