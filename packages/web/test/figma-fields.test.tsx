@@ -5,11 +5,11 @@ import { act, render } from "./react-render.js";
 
 const URL = "https://www.figma.com/design/key/Checkout-flow";
 
-function fixture(options: { url?: string; title?: string; height?: string; discardInvalid?: boolean } = {}) {
+function fixture(options: { url?: string; title?: string; height?: string; discardInvalid?: boolean; saveOnBlur?: boolean } = {}) {
   const onSave = vi.fn();
   const onDone = vi.fn();
   render(<FigmaFields url={options.url ?? URL} title={options.title ?? "Payment"} height={options.height ?? "560"}
-    discardInvalid={options.discardInvalid ?? false} onSave={onSave} onDone={onDone} />);
+    discardInvalid={options.discardInvalid ?? false} saveOnBlur={options.saveOnBlur ?? true} onSave={onSave} onDone={onDone} />);
   const link = screen.getByRole<HTMLInputElement>("textbox", { name: "Figma link" });
   const title = screen.getByRole<HTMLInputElement>("textbox", { name: "Title" });
   const height = screen.getByRole<HTMLInputElement>("textbox", { name: "Height" });
@@ -104,6 +104,22 @@ describe("Figma fields", () => {
     expect(fields.onDone).not.toHaveBeenCalled();
     fields.submit();
     expect(fields.onSave).not.toHaveBeenCalled();
+    expect(fields.onDone).toHaveBeenCalledOnce();
+  });
+
+  it("keeps all draft fields local without validating blurs until submission", () => {
+    const fields = fixture({ url: "", title: "", height: "", saveOnBlur: false });
+    change(fields.title, "Title first");
+    blur(fields.title);
+    expect(screen.queryByRole("alert")).toBeNull();
+    change(fields.link, URL);
+    blur(fields.link);
+    change(fields.height, "600");
+    blur(fields.height);
+    expect(fields.onSave).not.toHaveBeenCalled();
+    expect(fields.onDone).not.toHaveBeenCalled();
+    fields.submit();
+    expect(fields.onSave).toHaveBeenCalledExactlyOnceWith({ url: URL, title: "Title first", height: "600" });
     expect(fields.onDone).toHaveBeenCalledOnce();
   });
 });

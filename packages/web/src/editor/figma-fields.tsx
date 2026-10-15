@@ -5,12 +5,13 @@ import { Input } from "../ui/shadcn/input.js";
 
 export interface FigmaFieldValues { url: string; title: string | null; height: string | null }
 
-export function FigmaFields({ url, title, height, onSave, onDone, focusLink = false, discardInvalid = false }: {
+export function FigmaFields({ url, title, height, onSave, onDone, focusLink = false, discardInvalid = false, saveOnBlur = true }: {
   url: string; title: string; height: string;
   onSave: (values: FigmaFieldValues) => void;
   onDone: () => void;
   focusLink?: boolean;
   discardInvalid?: boolean;
+  saveOnBlur?: boolean;
 }): ReactElement {
   const [link, setLink] = useState(url);
   const [name, setName] = useState(title);
@@ -30,6 +31,7 @@ export function FigmaFields({ url, title, height, onSave, onDone, focusLink = fa
       return false;
     }
   };
+  const blur = (): void => { if (saveOnBlur) save(); };
   return (
     <form className="ub-figma-fields" noValidate onSubmit={(event) => {
       event.preventDefault();
@@ -37,14 +39,14 @@ export function FigmaFields({ url, title, height, onSave, onDone, focusLink = fa
     }}>
       <label htmlFor={`${fieldId}-url`}>Figma link
         <Input id={`${fieldId}-url`} value={link} type="url" aria-invalid={error !== ""} onChange={(event) => setLink(event.target.value)}
-          onBlur={() => { save(); }}
+          onBlur={blur}
           autoFocus={focusLink} />
       </label>
       <label htmlFor={`${fieldId}-title`}>Title
-        <Input id={`${fieldId}-title`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => { save(); }} />
+        <Input id={`${fieldId}-title`} value={name} onChange={(event) => setName(event.target.value)} onBlur={blur} />
       </label>
       <label htmlFor={`${fieldId}-height`}>Height
-        <Input id={`${fieldId}-height`} value={size} inputMode="numeric" placeholder="480" onChange={(event) => setSize(event.target.value)} onBlur={() => { save(); }} />
+        <Input id={`${fieldId}-height`} value={size} inputMode="numeric" placeholder="480" onChange={(event) => setSize(event.target.value)} onBlur={blur} />
       </label>
       {error !== "" && <p role="alert">{error}</p>}
       <button type="submit" hidden>Done</button>

@@ -35,6 +35,7 @@ export function FigmaDraft({ editor }: { editor: Editor }): ReactElement | null 
       height=""
       focusLink
       discardInvalid
+      saveOnBlur={false}
       onSave={(values) => { commitFigmaDraft(editor, draft, values); }}
       onDone={() => { discardFigmaDraft(editor); if (!editor.isDestroyed) editor.view.focus(); }}
     />

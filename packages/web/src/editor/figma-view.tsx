@@ -215,7 +215,7 @@ class FigmaView implements NodeView {
     this.ui.placeholder.textContent = navigator.onLine ? "Figma preview" : "The Figma preview needs a connection.";
     this.ui.handle.hidden = !writable || this.editing;
     this.resize.setDisabled(!writable || this.editing);
-    this.showHeight(this.height());
+    if (!this.resize.isDragging()) this.showHeight(this.height());
     if (this.iframe !== null) this.iframe.title = title;
   };
 

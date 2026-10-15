@@ -64,7 +64,7 @@ async function paste(page: Page, text: string): Promise<void> {
   }, text);
 }
 
-test("menu drafts stay local, focus their link, and publish only a valid link", { tag: "@webkit" }, async ({ browser }, info) => {
+test("menu drafts keep field navigation local until Done and return focus to the editor", { tag: "@webkit" }, async ({ browser }, info) => {
   const { page, writer, uuid, block } = await fixture(browser, false, info.project.use.hasTouch === true);
   await placeCaretIn(editor(page).locator(":scope > p"), { touch: info.project.use.hasTouch === true });
   await page.keyboard.type("/figma");
@@ -73,12 +73,17 @@ test("menu drafts stay local, focus their link, and publish only a valid link", 
   await expect(field).toBeFocused();
   await expect(block).toHaveAttribute("data-figma-draft", "true");
   expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  await activateControl(page.getByRole("textbox", { name: "Title", exact: true }));
+  await page.keyboard.type("Title first");
+  await activateControl(field);
+  await expect(block.getByRole("alert")).toHaveCount(0);
   await field.fill("https://figma.com/deck/refused");
   await activateControl(page.getByRole("textbox", { name: "Title", exact: true }));
-  await expect(block.getByRole("alert")).toContainText("Figma links must use /design/");
+  await expect(block.getByRole("alert")).toHaveCount(0);
   expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
   await activateControl(block.getByRole("button", { name: "Done", exact: true }));
   await expect(block).toHaveCount(0);
+  await expect(editor(page)).toBeFocused();
   expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
 
   await placeCaretIn(editor(page).locator(":scope > p"), { touch: info.project.use.hasTouch === true });
@@ -87,10 +92,23 @@ test("menu drafts stay local, focus their link, and publish only a valid link", 
   field = page.getByRole("textbox", { name: "Figma link", exact: true });
   await expect(field).toBeFocused();
   await field.fill(LINK);
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  if (info.project.use.hasTouch === true) await activateControl(title);
+  else await field.press("Tab");
+  await expect(title).toBeFocused();
+  await page.keyboard.type("Typed title");
+  const height = page.getByRole("textbox", { name: "Height", exact: true });
+  if (info.project.use.hasTouch === true) await activateControl(height);
+  else await title.press("Tab");
+  await expect(height).toBeFocused();
+  await page.keyboard.type("600");
+  await expect(block).toHaveAttribute("data-figma-draft", "true");
+  expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
   await activateControl(block.getByRole("button", { name: "Done", exact: true }));
   await expect(block).not.toHaveAttribute("data-figma-draft", "true");
+  await expect(editor(page)).toBeFocused();
   await expect(block.locator("iframe")).toHaveCount(1);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).toBe(`url: ${NORMALIZED}\n\n`);
+  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).toBe(`url: ${NORMALIZED}\ntitle: Typed title\nheight: 600\n\n`);
 });
 
 test("bare accepted paste converts with a link undo step, while inline and refused links stay links", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -195,12 +213,28 @@ async function mouseDrag(page: Page, handle: Locator, delta: number, cancel = fa
   await page.mouse.up();
 }
 
-test("mouse height drags commit once, clamp both bounds, and Escape stores nothing", async ({ browser }) => {
-  const { page, uuid, block } = await fixture(browser, true);
+test("mouse height drags keep their preview through peer edits, commit once, clamp bounds, and Escape stores nothing", async ({ browser }) => {
+  const { page, writer, uuid, block } = await fixture(browser, true);
   const watch = await watchHeight(uuid);
   try {
     const handle = block.locator(".ub-figma-resize");
-    await mouseDrag(page, handle, 80);
+    const initial = (await stored(writer, uuid)).blocks[0];
+    if (initial === undefined) throw new Error("e2e: stored Figma block missing");
+    const start = await point(handle);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x, start.y + 80, { steps: 10 });
+    const viewer = block.locator(".ub-figma-viewer");
+    await expect.poll(() => viewer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(300);
+    const preview = await viewer.evaluate((element) => getComputedStyle(element).height);
+    await writer.call("edit_block", {
+      uuid, block_id: initial.id, old_text: initial.text,
+      new_text: initial.text.replace("Caption words.", "A peer edited this caption."), rev: initial.rev,
+    });
+    await expect(block.locator(".ub-figma-caption")).toContainText("A peer edited this caption.");
+    await expect(viewer).toHaveCSS("height", preview);
+    expect(watch.values).toEqual([]);
+    await page.mouse.up();
     await expect.poll(() => watch.values).toEqual(["380"]);
     await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "380px");
     await mouseDrag(page, handle, 50, true);
