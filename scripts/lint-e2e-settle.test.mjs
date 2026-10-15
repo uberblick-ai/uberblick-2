@@ -30,6 +30,18 @@ test("open-page assertions fail for direct counts and assigned aliases", () => {
   ]) assert.match(lint(source)[0]?.message ?? "", /open-page counts/, source);
 });
 
+test("retry callbacks reject captured MCP snapshots instead of retrying only the assertion", () => {
+  for (const assertion of [
+    "await expect.poll(() => doc.blocks).toEqual(before);",
+    "await expectMcp(async () => { expect(doc.blocks).toEqual(before); });",
+    "await expectMcp(() => doc, value => expect(value.blocks).toEqual(before));",
+    "const read = () => doc; await expect.poll(read).toEqual(before);",
+    "async function read() { return doc; } await expectMcp(read, value => expect(value.blocks).toEqual(before));",
+  ]) {
+    assert.equal(lint(`const doc = await session.call('get_doc', {uuid}); ${assertion}`).length, 1, assertion);
+  }
+});
+
 test("polling, shared assertions, baselines and unrelated immediate reads remain valid", () => {
   assert.deepEqual(lint(`
     const before = await session.call('get_doc', {uuid});
@@ -40,6 +52,12 @@ test("polling, shared assertions, baselines and unrelated immediate reads remain
       expect(await session.call('get_data', {uuid})).toEqual([]);
     });
     await expect.poll(async () => (await session.call('get_data', {uuid})).count).toBe(2);
+    async function read() { const doc = await session.call('get_doc', {uuid}); return doc; }
+    const readData = async () => { const data = await session.call('get_data', {uuid}); return data; };
+    await expect.poll(read).toEqual(before);
+    await expectMcp(read, doc => expect(doc.blocks).toEqual(before.blocks));
+    await expectMcp(readData, data => expect(data).toEqual([]));
+    await expectMcp(async () => { const doc = await read(); expect(doc.blocks).toEqual(before.blocks); });
     const width = await page.evaluate(() => innerWidth); expect(width).toBe(100);
     // expect(await session.call('get_doc')).toEqual(before);
     const example = "expect(context.pages()).toHaveLength(1)";

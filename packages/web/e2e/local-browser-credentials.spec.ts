@@ -8,6 +8,8 @@ import { placeCaret } from "./harness.js";
 
 const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
 
+type OfflineTextHistory = { readings: (string | null)[]; stop: () => void };
+
 async function documentText(page: Page): Promise<string | null> {
   return editor(page).evaluate((element) => {
     const copy = element.cloneNode(true) as HTMLElement;
@@ -47,6 +49,22 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(shared).toHaveText("synced with hub");
   const authenticatedGeometry = await statusGeometry(page);
 
+  await observer.evaluate(() => {
+    const read = (): string | null => {
+      const prose = document.querySelector(".ub-editor .ProseMirror");
+      if (prose === null) return null;
+      const copy = prose.cloneNode(true) as HTMLElement;
+      for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) cursor.remove();
+      return copy.textContent;
+    };
+    const readings = [read()];
+    const mutations = new MutationObserver(() => { readings.push(read()); });
+    mutations.observe(document.body, { childList: true, characterData: true, subtree: true });
+    (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory = {
+      readings,
+      stop: () => { readings.push(read()); mutations.disconnect(); },
+    };
+  });
   await harness().restartOpen({ authenticated: false });
   await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
@@ -73,12 +91,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await page.keyboard.type("; saved locally");
   await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
-  const upstreamWriter = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
-  await expect(editor(upstreamWriter)).toBeVisible();
-  await proveDocumentPageArrival(upstreamWriter, observer, { path: "upstream" });
   await expect(reason).toBeVisible();
   await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
-  expect(await documentText(observer)).toBe("before restart");
   const localGeometry = await statusGeometry(page);
 
   // This page retains its original imported browser key on another local-only
@@ -90,8 +104,13 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
   expect(await statusGeometry(page)).toEqual(localGeometry);
 
+  await observer.evaluate(() => { (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory.stop(); });
   await harness().restartOpen({ authenticated: true });
   await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
+  await proveDocumentPageArrival(page, observer, { path: "upstream" });
+  // The same observer has now received a later write through the acting relay.
+  const offlineReadings = await observer.evaluate(() => (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory.readings);
+  expect(offlineReadings.every(text => text === "before restart")).toBe(true);
   await expect(shared).toHaveText("synced with hub");
   await expect(reason).toBeHidden();
   await expect(page.getByTestId("account-menu")).toContainText("Not signed in");

@@ -8,6 +8,7 @@ const sharedHelper = "packages/web/e2e/settle.ts";
 const mcpReads = new Set(["get_doc", "get_data", "export_markdown"]);
 const MCP = 1;
 const PAGES = 2;
+const CAPTURED_MCP = 4;
 
 /** Use TypeScript's binder to follow local read-back aliases without matching text. */
 export function lintE2eSources(sources) {
@@ -34,39 +35,48 @@ export function lintE2eSources(sources) {
     visit(source);
   }
 
-  function returned(body, seen) {
+  function returned(body, seen, scopes) {
     if (!body) return 0;
-    if (!ts.isBlock(body)) return provenance(body, seen);
+    if (!ts.isBlock(body)) return provenance(body, seen, scopes);
     let result = 0;
     function visit(node) {
       if (ts.isFunctionLike(node)) return;
-      if (ts.isReturnStatement(node) && node.expression) result |= provenance(node.expression, seen);
+      if (ts.isReturnStatement(node) && node.expression) result |= provenance(node.expression, seen, scopes);
       else ts.forEachChild(node, visit);
     }
     ts.forEachChild(body, visit);
     return result;
   }
 
-  function declarationSource(declaration, seen) {
-    if (ts.isVariableDeclaration(declaration)) return provenance(declaration.initializer, seen);
+  function storedValue(node, seen, scopes) {
+    const value = provenance(node, seen, scopes);
+    if (!node || scopes.length === 0 || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return value;
+    for (let parent = node; parent; parent = parent.parent) {
+      if (scopes.includes(parent)) return value;
+    }
+    return value & MCP ? value | CAPTURED_MCP : value;
+  }
+
+  function declarationSource(declaration, seen, scopes) {
+    if (ts.isVariableDeclaration(declaration)) return storedValue(declaration.initializer, seen, scopes);
     if (ts.isBindingElement(declaration)) {
       let owner = declaration.parent;
       while (owner && !ts.isVariableDeclaration(owner)) owner = owner.parent;
-      return owner ? provenance(owner.initializer, seen) : 0;
+      return owner ? storedValue(owner.initializer, seen, scopes) : 0;
     }
-    if (ts.isFunctionDeclaration(declaration)) return returned(declaration.body, seen);
+    if (ts.isFunctionDeclaration(declaration)) return returned(declaration.body, seen, [...scopes, declaration]);
     return 0;
   }
 
-  function provenance(node, seen = new Set()) {
+  function provenance(node, seen = new Set(), scopes = []) {
     if (!node || seen.has(node)) return 0;
     const next = new Set(seen).add(node);
     if (ts.isIdentifier(node)) {
       const symbol = checker.getSymbolAtLocation(node);
-      const initial = (symbol?.declarations ?? []).reduce((value, declaration) => value | declarationSource(declaration, next), 0);
-      return (assignments.get(symbol) ?? []).reduce((value, assignment) => value | provenance(assignment, next), initial);
+      const initial = (symbol?.declarations ?? []).reduce((value, declaration) => value | declarationSource(declaration, next, scopes), 0);
+      return (assignments.get(symbol) ?? []).reduce((value, assignment) => value | storedValue(assignment, next, scopes), initial);
     }
-    if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) return returned(node.body, next);
+    if (ts.isFunctionExpression(node) || ts.isArrowFunction(node)) return returned(node.body, next, [...scopes, node]);
     if (ts.isCallExpression(node)) {
       const method = ts.isPropertyAccessExpression(node.expression) ? node.expression.name.text : undefined;
       const first = node.arguments[0];
@@ -74,17 +84,17 @@ export function lintE2eSources(sources) {
       if (mcpReads.has(method) || (method === "call" && first && ts.isStringLiteralLike(first) && mcpReads.has(first.text))) return MCP;
     }
     let result = 0;
-    ts.forEachChild(node, (child) => { result |= provenance(child, next); });
+    ts.forEachChild(node, (child) => { result |= provenance(child, next, scopes); });
     return result;
   }
 
-  function retriedMcpAssertion(node) {
+  function mcpRetryCallback(node) {
     for (let parent = node.parent; parent; parent = parent.parent) {
       if ((ts.isArrowFunction(parent) || ts.isFunctionExpression(parent)) &&
         ts.isCallExpression(parent.parent) && ts.isIdentifier(parent.parent.expression) &&
-        parent.parent.expression.text === "expectMcp" && parent.parent.arguments.includes(parent)) return true;
+        parent.parent.expression.text === "expectMcp" && parent.parent.arguments.includes(parent)) return parent;
     }
-    return false;
+    return undefined;
   }
 
   for (const source of program.getSourceFiles()) {
@@ -96,10 +106,12 @@ export function lintE2eSources(sources) {
         const assertion = ts.isIdentifier(callee) && callee.text === "expect" ||
           ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
           callee.expression.text === "expect" && (callee.name.text === "soft" || callee.name.text === "poll");
-        if (assertion) {
-          const value = provenance(node.arguments[0]);
+        const sharedRead = ts.isIdentifier(callee) && callee.text === "expectMcp";
+        if (assertion || sharedRead) {
           const polling = ts.isPropertyAccessExpression(callee) && callee.name.text === "poll";
-          if (value & PAGES || value & MCP && !polling && !retriedMcpAssertion(node)) {
+          const retry = mcpRetryCallback(node);
+          const value = provenance(node.arguments[0], new Set(), retry ? [retry] : []);
+          if (value & PAGES || value & MCP && (value & CAPTURED_MCP || !polling && !retry && !sharedRead)) {
             const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
             diagnostics.push({ file: name, line: line + 1, column: character + 1,
               message: value & PAGES ? "Assert open-page counts through settle.ts, after a positive reader barrier for a negative check." :

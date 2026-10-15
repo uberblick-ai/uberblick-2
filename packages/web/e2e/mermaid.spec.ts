@@ -451,6 +451,7 @@ test("strict rendering prevents source callbacks, script execution and styles ou
     }
     expect(await page.evaluate(() => (window as unknown as { mermaidAttack: number }).mermaidAttack)).toBe(0);
     expect(await paint()).toEqual(before);
+    await proveMcpArrival(page, session, uuid, { path: "upstream" });
     await expectMcp(async () => { expect((await storedBlock(session, uuid)).text).toBe(hostile); });
   }
   await editSource(session, uuid, SOURCE);

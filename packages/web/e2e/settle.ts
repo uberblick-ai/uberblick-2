@@ -90,7 +90,9 @@ export async function readRenderData(session: McpSession, uuid: string): Promise
 export async function waitForDocumentDraw(page: Page, session: McpSession, uuid: string, options: {
   index?: number | "all"; outcome?: "success" | "error"; source?: string; timeout?: number;
 } = {}): Promise<void> {
-  const throughRelay = await page.locator(".ub-status[data-local-sync]").getAttribute("data-upstream-sync") !== null;
+  await page.waitForFunction(() => document.querySelector(".ub-status[data-local-sync]") !== null,
+    undefined, { timeout: options.timeout ?? 20_000 });
+  const throughRelay = await page.evaluate(() => document.querySelector(".ub-status[data-local-sync]")?.hasAttribute("data-upstream-sync") === true);
   await test.step(`upstream MCP revision is drawn through ${throughRelay ? "ub open relay" : "direct upstream hub"}`, async () => {
     type Block = { id: string; type: string; language?: string; text: string; rev: string };
     let blocks: Block[] = [];
@@ -103,11 +105,22 @@ export async function waitForDocumentDraw(page: Page, session: McpSession, uuid:
       blocks = options.index === "all" ? rendered : block === undefined ? [] : [block];
     }).toPass({ timeout: options.timeout ?? 20_000 });
     const data = blocks.some(block => block.type === "chart") ? await readRenderData(session, uuid) : null;
-    for (const block of blocks) {
-      await waitForDraw(page.locator(`[id="${block.id}"]`), { source: block.rev, data: block.type === "chart" ? data : null,
-        ...(options.outcome === undefined ? {} : { outcome: options.outcome }),
-        ...(options.timeout === undefined ? {} : { timeout: options.timeout }) });
-    }
+    const revision = dataRevision(data);
+    const expected = blocks.map(block => ({
+      source: block.rev,
+      data: block.type === "chart" ? revision : dataRevision(null),
+      outcome: options.outcome ?? "success",
+    }));
+    // Generated tables can contain hundreds of thousands of cells. Read all
+    // block attributes through the DOM's id index in one browser round trip.
+    await expect.poll(() => page.evaluate(ids => ids.map(id => {
+      const element = document.getElementById(id);
+      return {
+        source: element?.getAttribute("data-source-rev") ?? null,
+        data: element?.getAttribute("data-data-rev") ?? null,
+        outcome: element?.getAttribute("data-draw-state") ?? null,
+      };
+    }), blocks.map(block => block.id)), { timeout: options.timeout ?? 20_000 }).toEqual(expected);
   });
 }
 
