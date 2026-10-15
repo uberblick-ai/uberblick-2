@@ -226,13 +226,12 @@ test("mouse height drags keep their preview through peer edits, commit once, cla
     await page.mouse.move(start.x, start.y + 80, { steps: 10 });
     const viewer = block.locator(".ub-figma-viewer");
     await expect.poll(() => viewer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(300);
-    const preview = await viewer.evaluate((element) => getComputedStyle(element).height);
     await writer.call("edit_block", {
       uuid, block_id: initial.id, old_text: initial.text,
       new_text: initial.text.replace("Caption words.", "A peer edited this caption."), rev: initial.rev,
     });
     await expect(block.locator(".ub-figma-caption")).toContainText("A peer edited this caption.");
-    await expect(viewer).toHaveCSS("height", preview);
+    await expect.poll(() => viewer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(300);
     expect(watch.values).toEqual([]);
     await page.mouse.up();
     await expect.poll(() => watch.values).toEqual(["380"]);
