@@ -1627,7 +1627,6 @@ h6.ub-heading {
 }
 
 .ub-decision-related,
-.ub-decision-attribution,
 .ub-decision-record-meta {
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
@@ -1745,20 +1744,20 @@ h6.ub-heading {
   border-radius: 50%;
 }
 
-.ub-decisions-row[data-state="in-force"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="in-force"] .ub-decisions-mark {
   border-color: var(--status-success);
   background: var(--status-success);
 }
 
-.ub-decisions-row[data-state="under-review"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="under-review"] .ub-decisions-mark {
   background: linear-gradient(90deg, var(--muted-foreground) 50%, transparent 50%);
 }
 
-.ub-decisions-row[data-state="agent-stance"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="agent-stance"] .ub-decisions-mark {
   border-width: 2px;
 }
 
-.ub-decisions-row[data-state="conflict"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="conflict"] .ub-decisions-mark {
   border-color: var(--destructive);
   background: var(--destructive);
   border-radius: 2px;
@@ -1783,25 +1782,94 @@ h6.ub-heading {
   }
 }
 
-.ub-decision-topic-state {
-  font-weight: 600;
-  margin-block: 1.25rem 0.5rem;
-}
-
 .ub-decision-notice {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.ub-decision-answer-label {
+.ub-decision-answer-header {
+  container: decision-answer / inline-size;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin-block: 1rem 0.5rem;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin-block: 1.25rem 0.75rem;
+  font-family: var(--font-sans);
 }
 
-.ub-decision-answer-label a {
+.ub-decision-answer-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ub-decision-answer-caption {
+  color: var(--muted-foreground);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+  font-weight: 500;
+  letter-spacing: 0.035em;
+}
+
+.ub-decision-answer-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+  font-weight: 500;
+}
+
+.ub-decision-answer-state .ub-decisions-mark {
+  flex: none;
+  align-self: center;
+  margin-block-start: 0;
+}
+
+.ub-decision-answer-state[data-state="not-yet-decided"],
+.ub-decision-answer-state[data-state="open-proposal"] {
+  border-style: dashed;
+}
+
+.ub-decision-answer-state[data-state="rejected"] {
+  color: var(--destructive);
+}
+
+.ub-decision-answer-state[data-state="rejected"] .ub-decisions-mark {
+  border-color: var(--destructive);
+  background: var(--destructive);
+}
+
+.ub-decision-attribution {
+  margin-inline-start: auto;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+}
+
+@container decision-answer (max-width: 34rem) {
+  .ub-decision-attribution {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+.ub-decision-earlier-answer,
+.ub-decision-current-answer {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  margin-block: 0.5rem;
+}
+
+.ub-decision-current-answer a {
   text-decoration: underline;
 }
 

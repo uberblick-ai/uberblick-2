@@ -117,9 +117,97 @@ async function archivedLink(link: Locator): Promise<void> {
   expect(style.decoration).not.toContain("line-through");
 }
 
-for (const touch of [false, true]) {
-  const appearance = touch ? "dark" : "light";
-  test(`decision topic history, links and comments on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+async function answerHeader(page: Page, label: string, state: string): Promise<void> {
+  const header = page.locator(".ub-decision-answer-header");
+  await expect(header).toHaveCount(1);
+  await expect(header.getByText("ANSWER", { exact: true })).toBeVisible();
+  await expect(header.locator(".ub-decision-answer-state")).toHaveText(label);
+  await expect(header.locator(".ub-decision-answer-state")).toHaveAttribute("data-state", state);
+  await expect(page.locator(".ub-decision-topic-state, .ub-decision-answer-label")).toHaveCount(0);
+  const styles = await header.evaluate((element) => {
+    const pill = element.querySelector(".ub-decision-answer-state");
+    const mark = pill?.querySelector(".ub-decisions-mark");
+    const caption = element.querySelector(".ub-decision-answer-caption");
+    if (pill === null || mark === null || mark === undefined || caption === null) throw new Error("e2e: missing answer state mark");
+    const probe = document.createElement("span");
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    element.append(probe);
+    const token = (property: string, value: string): string => {
+      probe.style.setProperty(property, value);
+      return getComputedStyle(probe).getPropertyValue(property);
+    };
+    try {
+      const pillStyle = getComputedStyle(pill);
+      const markStyle = getComputedStyle(mark);
+      return {
+        ink: pillStyle.color, fill: pillStyle.backgroundColor, border: pillStyle.borderTopColor, outline: pillStyle.borderTopStyle,
+        markFill: markStyle.backgroundColor, markBorder: markStyle.borderTopColor, markImage: markStyle.backgroundImage,
+        markBorderWidth: markStyle.borderTopWidth, markRadius: markStyle.borderRadius,
+        font: getComputedStyle(caption).fontFamily, timeFont: getComputedStyle(element.querySelector("time") ?? caption).fontFamily,
+        uiFont: token("font-family", "var(--font-sans)"), neutral: token("color", "var(--muted-foreground)"),
+        success: token("color", "var(--status-success)"), destructive: token("color", "var(--destructive)"),
+        half: token("background-image", "linear-gradient(90deg, var(--muted-foreground) 50%, transparent 50%)"),
+        amber: [token("color", "var(--brand)"), token("color", "var(--brand-ink)"), token("color", "var(--status-warning)"), token("color", "var(--status-warning-subtle)")],
+      };
+    } finally { probe.remove(); }
+  });
+  expect(styles.font).toBe(styles.uiFont);
+  expect(styles.timeFont).toBe(styles.uiFont);
+  for (const color of [styles.ink, styles.fill, styles.border, styles.markFill, styles.markBorder]) expect(styles.amber).not.toContain(color);
+  if (state === "in-force") expect([styles.markFill, styles.markBorder]).toEqual([styles.success, styles.success]);
+  if (state === "under-review") expect(styles.markImage).toBe(styles.half);
+  if (state === "agent-stance") {
+    expect(styles.markBorderWidth).toBe("2px");
+    expect(styles.markFill).toBe("rgba(0, 0, 0, 0)");
+  }
+  if (state === "conflict" || state === "rejected") expect([styles.markFill, styles.markBorder]).toEqual([styles.destructive, styles.destructive]);
+  if (state === "conflict") expect(styles.markRadius).toBe("2px");
+  if (state === "superseded" || state === "withdrawn") expect([styles.ink, styles.markBorder]).toEqual([styles.neutral, styles.neutral]);
+  if (state === "not-yet-decided" || state === "open-proposal") expect(styles.outline).toBe("dashed");
+}
+
+async function relativeAttribution(page: Page, who: string, when: string): Promise<void> {
+  const attribution = page.locator(".ub-decision-answer-header .ub-decision-attribution");
+  const time = attribution.locator("time");
+  await expect(time).toHaveAttribute("datetime", when);
+  await expect(time).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
+  await expect(attribution).toHaveText(`${who} · ${await time.innerText()}`);
+  await expect(time).toHaveAttribute("title", await page.evaluate((value) =>
+    new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)), when));
+}
+
+async function headerLayout(page: Page, wrapped: boolean | null): Promise<void> {
+  const layout = await page.locator(".ub-decision-answer-header").evaluate((element) => {
+    const state = element.querySelector(".ub-decision-answer-state");
+    const attribution = element.querySelector(".ub-decision-attribution");
+    const pane = element.closest(".ub-document-pane");
+    if (state === null || attribution === null || pane === null) throw new Error("e2e: missing answer header layout");
+    const pill = state.getBoundingClientRect();
+    const meta = attribution.getBoundingClientRect();
+    return {
+      pillTop: pill.top, pillBottom: pill.bottom, attributionTop: meta.top,
+      attributionRight: meta.right, headerRight: element.getBoundingClientRect().right,
+      headerWidth: element.clientWidth, headerScroll: element.scrollWidth,
+      paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth,
+      pageWidth: document.documentElement.clientWidth, pageScroll: document.documentElement.scrollWidth,
+    };
+  });
+  if (wrapped === true) expect(layout.attributionTop).toBeGreaterThanOrEqual(layout.pillBottom);
+  else if (wrapped === false) {
+    expect(layout.attributionTop).toBeLessThan(layout.pillBottom);
+    expect(Math.abs(layout.headerRight - layout.attributionRight)).toBeLessThanOrEqual(2);
+  }
+  expect(layout.headerScroll).toBeLessThanOrEqual(layout.headerWidth + 1);
+  expect(layout.paneScroll).toBeLessThanOrEqual(layout.paneWidth + 1);
+  expect(layout.pageScroll).toBeLessThanOrEqual(layout.pageWidth + 1);
+}
+
+for (const { touch, appearance } of [
+  { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
+  { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
+] as const) {
+  test(`decision topic history, links and comments on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const formerOwner = await create(writer, "Former related page", "Previous guidance.");
     const owner = await create(writer, "Current related page", "Current guidance remains readable when archived.");
@@ -158,7 +246,7 @@ for (const touch of [false, true]) {
       beforeNavigate: captureClipboard,
     });
     await expect(page.getByRole("heading", { name: "Current topic title", exact: true })).toBeVisible();
-    await expect(page.locator(".ub-decision-topic-state")).toHaveText("Under review");
+    await answerHeader(page, "In force", "in-force");
     await expect(page.locator(".ub-decision-notice")).toContainText("The current answer stays in force.");
     await selected(page, current.uuid, answerText(current));
     await selectedTopicPin(page, touch);
@@ -174,7 +262,8 @@ for (const touch of [false, true]) {
     await expect.poll(() => topicPins(writer, topicRecords)).toEqual([first.uuid]);
     await selectedTopicPin(page, touch);
     const currentColor = await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color);
-    await expect(page.locator(".ub-decision-attribution")).toHaveText("Decided by Recorded answerer · 2026-10-04T12:00:00Z");
+    await relativeAttribution(page, "Recorded answerer", "2026-10-04T12:00:00.000Z");
+    await headerLayout(page, touch ? null : false);
     await expect(entry(page, first.uuid)).toContainText("Linked record");
     await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(5);
     await expect(page.locator(".ub-decision-record-state")).toHaveText(["Superseded", "In force", "Rejected", "Withdrawn", "Open proposal"]);
@@ -186,8 +275,15 @@ for (const touch of [false, true]) {
     await archivedLink(entry(page, pending.uuid).locator(".ub-doclink"));
     await copyPath(page, topicPath, touch);
     await page.screenshot({
-      path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${touch ? "ipad-dark" : "desktop-light"}.png`), fullPage: true,
+      path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}.png`), fullPage: true,
     });
+    const column = page.locator(".ub-document-pane > .ub-column");
+    await column.evaluate((element) => { (element as HTMLElement).style.inlineSize = "18rem"; });
+    await headerLayout(page, true);
+    await page.screenshot({
+      path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}-narrow.png`), fullPage: true,
+    });
+    await column.evaluate((element) => { (element as HTMLElement).style.removeProperty("inline-size"); });
 
     const earlier = entry(page, first.uuid).locator(".ub-decision-record");
     if (touch) await earlier.tap();
@@ -207,7 +303,13 @@ for (const touch of [false, true]) {
     await activateControl(actions, { touch });
     await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
     await page.keyboard.press("Escape");
-    await expect(page.locator(".ub-decision-answer-label")).toContainText("History · Superseded");
+    await answerHeader(page, "Superseded", "superseded");
+    const replacementAge = await entry(page, current.uuid).locator("time").textContent();
+    await expect(page.locator(".ub-decision-earlier-answer")).toContainText(`Earlier answer. Replaced ${replacementAge}; it no longer applies.`);
+    await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toBeVisible();
+    await page.screenshot({
+      path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}-earlier.png`), fullPage: true,
+    });
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
     expect(await editor(page).locator("p").evaluate((element) => getComputedStyle(element).color)).not.toBe(currentColor);
     const rail = await readThread(page, "Conversation about the earlier answer.", touch);
@@ -226,8 +328,8 @@ for (const touch of [false, true]) {
     await activateControl(entry(page, rejected.uuid).locator(".ub-decision-record"), { touch });
     await expect(page).toHaveURL(new RegExp(`${rejectedPath}$`));
     await selected(page, rejected.uuid, answerText(rejected));
-    await expect(page.locator(".ub-decision-answer-label")).toContainText("History · Rejected");
-    await expect(page.locator(".ub-decision-attribution")).toContainText("Rejected by Recorded rejecter");
+    await answerHeader(page, "Rejected", "rejected");
+    await relativeAttribution(page, "Recorded rejecter", "2026-10-04T12:00:00.000Z");
     await expect(page.locator(".ub-decision-rejection")).toHaveText("Rejection reason: The proposal does not meet the constraint.");
     await readThread(page, "Conversation about the rejection.", touch);
     await closeThreadDrawer(page, touch);
@@ -238,6 +340,23 @@ for (const touch of [false, true]) {
     await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
     await selected(page, current.uuid, answerText(current));
     await expect(page).toHaveURL(new RegExp(`${topicPath}$`));
+
+    await activateControl(entry(page, pending.uuid).locator(".ub-decision-record"), { touch });
+    await selected(page, pending.uuid, answerText(pending));
+    await answerHeader(page, "Under review", "under-review");
+    await expect(page.locator(".ub-decision-notice")).toHaveText("The current answer stays in force. Open proposal");
+    await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
+    await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
+    await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
+    await selected(page, current.uuid, answerText(current));
+
+    await activateControl(entry(page, withdrawn.uuid).locator(".ub-decision-record"), { touch });
+    await selected(page, withdrawn.uuid, answerText(withdrawn));
+    await answerHeader(page, "Withdrawn", "withdrawn");
+    await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
+    await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
+    await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
+    await selected(page, current.uuid, answerText(current));
 
     await activateControl(page.locator(".ub-decision-notice a"), { touch });
     await expect(page).toHaveURL(new RegExp(`/${rfc.uuid}$`));
@@ -278,32 +397,34 @@ for (const touch of [false, true]) {
   });
 }
 
-test("undecided proposals and conflicting answers remain labelled as history", async ({ browser }) => {
+test("undecided proposals, agent stances and conflicting answers show selected-record headers", async ({ browser }) => {
   const writer = session();
   const rfc = await create(writer, "First topic RFC", "Discuss the first answer.");
   const proposal = await create(writer, "Unanswered topic", "Open proposal is not guidance in force.", { kind: "decision", discussion: rfc.uuid });
   const page = await openApp(browser, `/${harness().workspace}/${proposal.uuid}`, { upstream: true });
   await selected(page, proposal.uuid, answerText(proposal));
-  await expect(page.locator(".ub-decision-topic-state")).toHaveText("Not yet decided");
-  await expect(page.locator(".ub-decision-answer-label")).toHaveText("History · Open proposal");
+  await answerHeader(page, "Not yet decided", "not-yet-decided");
+  await expect(page.locator(".ub-decision-notice")).toHaveText("Open proposal");
+  await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
+  await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
   await activateControl(page.locator(".ub-decision-notice a"));
   await expect(editor(page)).toHaveText(answerText(rfc));
 
   const stance = await create(writer, "An initial stance", "Initial agent answer.", { kind: "decision", status: "decided" });
   await page.goto(new URL(`/${harness().workspace}/${stance.uuid}`, harness().appUrl).href);
   await selected(page, stance.uuid, answerText(stance));
-  await expect(page.locator(".ub-decision-topic-state")).toHaveText("Agent stance");
-  await expect(page.locator(".ub-decision-attribution")).toHaveCount(0);
+  await answerHeader(page, "Agent stance", "agent-stance");
+  await expect(page.locator(".ub-decision-attribution")).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
+  await expect(page.locator(".ub-decision-answer-header").getByText("Agent stance", { exact: true })).toHaveCount(1);
   const left = await create(writer, "Competing answer one", "The first conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, answer: answer("First answerer"),
   });
   const right = await create(writer, "Competing answer two", "The second conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, answer: answer("Second answerer"),
   });
-  await expect(page.locator(".ub-decision-topic-state")).toHaveText("Conflict");
   await expect(page.locator(".ub-decision-notice")).toContainText("Nothing is in force.");
   await selected(page, right.uuid, answerText(right));
-  await expect(page.locator(".ub-decision-answer-label")).toHaveText("History · Conflicting answer");
+  await answerHeader(page, "Conflicting answer", "conflict");
   await expect(page.locator(".ub-decision-record-state")).toHaveText(["Superseded", "Conflicting answer", "Conflicting answer"]);
   await activateControl(entry(page, left.uuid).locator(".ub-decision-record"));
   await selected(page, left.uuid, answerText(left));
