@@ -103,7 +103,7 @@ export async function waitForDocumentDraw(page: Page, session: McpSession, uuid:
  * write. Reading it on this MCP session proves the preceding browser action
  * has reached the replica used by get_doc, export_markdown and get_data.
  */
-export async function proveMcpArrival(page: Page, session: McpSession, uuid: string, options: { path: "upstream" }): Promise<void> {
+export async function proveMcpArrival(page: Page, session: McpSession, uuid: string, options: { path: "upstream"; restore?: boolean }): Promise<void> {
   await test.step(`later browser metadata reaches the ${options.path} MCP reader`, async () => {
     const picker = page.getByRole("button", { name: "Edit tags", exact: true });
     const archived = await page.getByRole("button", { name: "Restore", exact: true }).count() > 0;
@@ -122,6 +122,15 @@ export async function proveMcpArrival(page: Page, session: McpSession, uuid: str
     await expectMcp(() => session.call<{ tags: { name: string }[] }>("get_doc", { uuid }), doc => {
       expect(doc.tags.some(tag => tag.name === label)).toBe(!selected);
     });
+    if (options.restore === true) {
+      await picker.click();
+      await page.getByRole("option", { name: label, exact: true }).click();
+      await page.keyboard.press("Escape");
+      await waitForAcknowledged(page, { path: options.path });
+      await expectMcp(() => session.call<{ tags: { name: string }[] }>("get_doc", { uuid }), doc => {
+        expect(doc.tags.some(tag => tag.name === label)).toBe(selected);
+      });
+    }
     if (archived) {
       await page.getByRole("button", { name: "Document actions", exact: true }).click();
       await page.getByRole("menuitem", { name: "Archive document", exact: true }).click();
@@ -151,6 +160,27 @@ export async function proveBrowserArrival(page: Page, options: {
       await page.getByRole("alertdialog").getByRole("button", { name: "Archive document", exact: true }).click();
       await waitForAcknowledged(page, { path: options.path });
     }
+  });
+}
+
+/** Observe a later metadata write at both pages before checking unchanged document content. */
+export async function proveDocumentPageArrival(actor: Page, reader: Page, options: { path: SyncPath }): Promise<void> {
+  const throughRelay = await actor.locator(".ub-status[data-local-sync]").getAttribute("data-upstream-sync") !== null;
+  const path = options.path === "relay" ? "ub open relay→document page" :
+    throughRelay ? "ub open relay→upstream hub→document page" : "upstream hub→observer";
+  await test.step(`later browser metadata reaches ${path}`, async () => {
+    await actor.getByRole("button", { name: "Edit tags", exact: true }).click();
+    const option = actor.getByRole("option").first();
+    const selected = await option.getAttribute("aria-selected") === "true";
+    const label = (await option.locator(":scope > span").nth(1).textContent())?.trim();
+    if (label === undefined || label === "") throw new Error("e2e: page arrival proof needs a catalog tag");
+    const hasTag = async (page: Page): Promise<boolean> => (await page.locator(".ub-tag-name").allTextContents()).includes(label);
+    await expect.poll(() => hasTag(reader)).toBe(selected);
+    await option.click();
+    await actor.keyboard.press("Escape");
+    await waitForAcknowledged(actor, { path: options.path });
+    await expect.poll(() => hasTag(actor)).toBe(!selected);
+    await expect.poll(() => hasTag(reader)).toBe(!selected);
   });
 }
 

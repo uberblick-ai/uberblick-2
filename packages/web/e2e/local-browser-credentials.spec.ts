@@ -1,4 +1,4 @@
-import { waitForAcknowledged } from "./settle.js";
+import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /** An open page survives local serving restarts and credential changes. */
 
 import { expect, test } from "@playwright/test";
@@ -73,7 +73,12 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await page.keyboard.type("; saved locally");
   await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
-  await expect.poll(() => documentText(observer)).toBe("before restart");
+  const upstreamWriter = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
+  await expect(editor(upstreamWriter)).toBeVisible();
+  await proveDocumentPageArrival(upstreamWriter, observer, { path: "upstream" });
+  await expect(reason).toBeVisible();
+  await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
+  expect(await documentText(observer)).toBe("before restart");
   const localGeometry = await statusGeometry(page);
 
   // This page retains its original imported browser key on another local-only

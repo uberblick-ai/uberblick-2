@@ -308,7 +308,7 @@ for (const touch of [false, true]) {
     await activateControl(menu.getByRole("menuitem", { name: "Decisions", exact: true }), { touch });
     await expect(menu).toBeHidden();
     await expectBlockInView(page);
-    await proveMcpArrival(page, writer, owner.uuid, { path: "upstream" });
+    await proveMcpArrival(page, writer, owner.uuid, { path: "upstream", restore: true });
     await expectMcp(async () => {
       const displayed = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
       expect(displayed.blocks).toEqual(before.blocks);

@@ -88,7 +88,7 @@ export function useServingRoomStatus(
           expired,
         ]);
         if (!active) return;
-        answerSync?.(status.rooms[room]?.hubAcked ?? null);
+        answerSync?.(status.notSharedReason || status.replicaUnavailable ? null : status.rooms[room]?.hubAcked ?? null);
         setAnswer({
           client,
           room,

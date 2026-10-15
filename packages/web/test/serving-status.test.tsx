@@ -173,6 +173,17 @@ describe("the locally served room's upstream reading", () => {
     expect(room.listeners.size).toBe(0);
   });
 
+  it("exposes an explicit sharing refusal immediately without changing local acknowledgement", async () => {
+    const api = client(async () => ({ ...status(ROOM_A, false), notSharedReason: "no-hub-credentials" }));
+    const room = connectedRoom();
+    const view = render(<ServedReading api={api} connection={room.connection} />);
+    await flush();
+    const element = view.container.querySelector<HTMLElement>(".ub-status")!;
+    expect(element.dataset.localSync).toBe("acknowledged");
+    expect(element.dataset.upstreamSync).toBe("offline");
+    view.unmount();
+  });
+
   it("ignores a late answer after the room changes", async () => {
     vi.useFakeTimers();
     const a = deferred<DocumentSearchStatus>();

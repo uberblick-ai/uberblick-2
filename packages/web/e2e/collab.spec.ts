@@ -1,4 +1,4 @@
-import { waitForAcknowledged } from "./settle.js";
+import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /**
  * The collaboration proof points, in a real browser against a real hub.
  *
@@ -125,12 +125,14 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.press("Enter");
   await expect(calloutB.getByRole("alert")).toHaveText("A TL;DR is at most 300 characters.");
   await expect(summaryB).toHaveValue("x".repeat(301));
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   await summaryB.press("End");
   await summaryB.press("Shift+Enter");
   await b.keyboard.insertText("A second line.");
   await expect(summaryB).toHaveValue("A short summary for readers.\nA second line.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   // Leaving an unchanged field closes it; a draft must stay local until saved.
@@ -142,6 +144,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.fill("Changed in the other tab.");
   await b.locator(".ub-title").click();
   await expect(summaryB).toHaveValue("Changed in the other tab.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.press("Enter");
   await expect(calloutA).toContainText("Changed in the other tab.");
@@ -198,6 +201,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled with Escape.");
   await summary.press("Escape");
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
@@ -206,6 +210,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled by tapping Cancel.");
   await a.getByRole("button", { name: "Cancel", exact: true }).tap();
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
