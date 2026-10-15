@@ -294,7 +294,7 @@ export function BrowserHubSignIn({ claimStateKnown, claimable, onClaim }: {
         {busy === "sign-out" ? "Signing out…" : "Sign out"}
       </Button> : approval !== null ? <>
         <p>Open <a className="underline" href={approval.verificationUri} target="_blank" rel="noopener noreferrer">{approval.verificationUri}</a> and enter this code:</p>
-        <p className="select-text font-mono text-xl"><code>{approval.userCode}</code></p>
+        <p className="select-text font-mono ub-type-h2"><code>{approval.userCode}</code></p>
         <p role="status">Waiting for GitHub approval…</p>
         <Button variant="outline" disabled={busy !== ""} onClick={() => void cancel()}>Cancel sign-in</Button>
       </> : availability === "configured" ? <>

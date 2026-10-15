@@ -80,7 +80,7 @@ describe("code block language", () => {
     const fix = await fixture("ts");
     const caption = fix.element.querySelector(".ub-code-caption");
     expect(caption?.contains(trigger())).toBe(true);
-    expect(trigger().textContent).toContain("ts");
+    expect(trigger().textContent).toContain("TypeScript");
     const search = await open();
     expect(document.activeElement).toBe(search);
     const labels = options().map((item) => item.textContent?.replace("✓", "").trim());
@@ -126,12 +126,12 @@ describe("code block language", () => {
     expect(fix.editor.state.selection.head).toBe(selection.head);
   });
 
-  it.each(["ts", "not-supported"])("preserves stored %s on open and Escape, then returns focus to its block", async (language) => {
+  it.each([["ts", "TypeScript"], ["not-supported", "Not-supported"]])("preserves stored %s on open and Escape, then returns focus to its block", async (language, label) => {
     const fix = await fixture(language);
     const before = snapshotFragment(fix.ydoc);
     const selection = fix.editor.state.selection;
     const search = await open();
-    expect(trigger().textContent).toContain(language);
+    expect(trigger().textContent).toContain(label);
     act(() => typeInto(search, "python"));
     await act(async () => search.dispatchEvent(new KeyboardEvent("keydown", {
       key: "Escape", bubbles: true, cancelable: true,

@@ -42,7 +42,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
   getDirectoryEntry,
@@ -52,10 +52,9 @@ import {
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   FailingStore,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -165,13 +164,14 @@ function stubOnly(
 }
 
 afterEach(async () => {
-  for (const client of peers.splice(0)) client.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const store of stores.splice(0)) store.close();
-  for (const started of hubs.splice(0)) await started.stop().catch(() => {});
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [...stores.splice(0).map((store) => () => store.close())],
+  });
 });
 
-afterAll(removeTempDirs);
 
 describe("a create that only half landed", () => {
   it("row 1 — keeps a stub whose document room never arrived, and never answers with an empty document", async () => {

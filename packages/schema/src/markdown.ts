@@ -1534,13 +1534,13 @@ export function importMarkdown(markdown: string): ImportedDoc {
     if (fence !== null) {
       flush();
       const marker = fence[1] ?? "```";
-      const fenceChar = marker.startsWith("~") ? "~" : "`";
-      const closeRe = new RegExp(`^[${fenceChar}]{${marker.length},}$`);
+      const closeRe = marker.startsWith("~") ? /^~+$/ : /^`+$/;
       const info = (fence[2] ?? "").toLowerCase();
       const body: string[] = [];
       let closed = false;
       for (let j = i + 1; j < lines.length; j += 1) {
-        if (closeRe.test((lines[j] ?? "").trim())) {
+        const candidate = (lines[j] ?? "").trim();
+        if (candidate.length >= marker.length && closeRe.test(candidate)) {
           i = j;
           closed = true;
           break;

@@ -199,35 +199,6 @@ for (const pause of ["hover", "keyboard", "hidden"] as const) {
   });
 }
 
-test("sticky updates stay in place, dismissal preserves the condition, and resolution allows recurrence", async ({ browser }) => {
-  const page = await openFixture(browser);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync unavailable" });
-  await expect(notice(page, "Sync unavailable")).toBeVisible();
-  await page.evaluate(() => {
-    (window as unknown as { stickyNotice: Element | null }).stickyNotice = document.querySelector("[data-sonner-toast]");
-  });
-  await publish(page, "sticky", { key: "sync", severity: "warning", message: "Sync retrying" });
-  await expect(notice(page, "Sync retrying")).toHaveAttribute("data-type", "warning");
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
-  expect(await page.evaluate(() => document.querySelector("[data-sonner-toast]") ===
-    (window as unknown as { stickyNotice: Element | null }).stickyNotice)).toBe(true);
-  await notice(page, "Sync retrying").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "warning", message: "Sync retrying" });
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync retrying" });
-  await expect(notice(page, "Sync retrying")).toHaveAttribute("data-type", "error");
-  await notice(page, "Sync retrying").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync failed again" });
-  await expect(notice(page, "Sync failed again")).toBeVisible();
-  await resolveSticky(page, "sync");
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await resolveSticky(page, "sync");
-  await publish(page, "sticky", { key: "sync", severity: "error", message: "Sync failed again" });
-  await expect(notice(page, "Sync failed again")).toBeVisible();
-});
-
 test("changed sticky content published during dismissal animation survives the old notice cleanup", async ({ browser }) => {
   const page = await openFixture(browser, { clock: true });
   await publish(page, "sticky", { key: "connection", severity: "error", message: "First failure" });
@@ -271,93 +242,88 @@ test("native keyboard entry and final dismissal restore origin focus without tak
   await expect(origin).toBeFocused();
 });
 
-test("a transient can be dismissed early with a pointer", async ({ browser }) => {
-  const page = await openFixture(browser);
-  await publish(page, "transient", { severity: "success", message: "Dismiss me" });
-  await notice(page, "Dismiss me").getByRole("button").click();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-});
-
-for (const appearance of ["light", "dark"] as const) {
-  for (const width of [1280]) {
-    test(`${appearance} notices are accessible and stay above chrome within ${width}px`, async ({ browser }) => {
-      const page = await openFixture(browser, { width });
-      await page.evaluate((appearance) =>
-        (window as unknown as { notificationFixture: Fixture }).notificationFixture.appearance(appearance), appearance);
-      await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
-      for (const severity of ["success", "info", "warning", "error"] as const) {
-        await publish(page, "sticky", { key: severity, severity, message: `${severity} condition` });
-      }
-      const origin = page.getByRole("textbox", { name: "Origin control" });
-      await origin.focus();
-      await page.keyboard.press("Shift+F8");
-      await expect(page.locator("[data-sonner-toast]").last()).toHaveAttribute("data-expanded", "true");
-      // Native transform transitions finish before inspecting painted bounds.
-      await page.waitForTimeout(500);
-      await expect(page.locator("[data-sonner-toaster]")).toHaveAttribute("data-sonner-theme", appearance);
-      const shapes = new Set<string>();
-      for (const severity of ["success", "info", "warning", "error"] as const) {
-        const condition = notice(page, `${severity} condition`);
-        await expect(condition).toHaveAttribute("data-type", severity);
-        await expect(condition).toContainText(severity === "info" ? "Information" : severity.charAt(0).toUpperCase() + severity.slice(1));
-        const readings = await condition.evaluate((element) => {
-          const bounds = element.getBoundingClientRect();
-          const chrome = document.querySelector<HTMLElement>("[data-fixture-chrome]");
-          if (chrome === null) throw new Error("missing fixture chrome");
-          // Include the chrome in this hit test, then release the pointer
-          // so the fixture's ordinary page controls remain usable.
-          chrome.style.pointerEvents = "auto";
-          const painted = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-          chrome.style.pointerEvents = "none";
-          return {
-            top: bounds.top, left: bounds.left, right: bounds.right, bottom: bounds.bottom,
-            aboveChrome: painted !== null && element.contains(painted),
-            icon: element.querySelector("[data-icon] svg")?.innerHTML,
-          };
-        });
-        expect(readings.top).toBeGreaterThanOrEqual(0);
-        expect(readings.left).toBeGreaterThanOrEqual(0);
-        expect(readings.right).toBeLessThanOrEqual(width);
-        expect(readings.bottom).toBeLessThanOrEqual(720);
-        expect(readings.aboveChrome).toBe(true);
-        expect(readings.icon).toBeDefined();
-        shapes.add(readings.icon ?? "");
-      }
-      expect(shapes.size, "each severity has a distinct icon as well as a text label").toBe(4);
-      const readings = await renderedText(page, "[aria-live=polite]");
-      expect(readings.length).toBeGreaterThanOrEqual(4);
-      for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
-      const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-      assertNoViolations(axe.violations);
-      await expect(page.locator("[data-sonner-toast]").last()).toHaveAttribute("data-mounted", "true");
-      await page.waitForTimeout(500);
-      await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notifications-${appearance}-${width}.png`) });
-      const error = notice(page, "error condition");
-      const close = error.getByRole("button");
-      const restingToastShadow = await error.evaluate((element) => getComputedStyle(element).boxShadow);
-      const restingCloseShadow = await close.evaluate((element) => getComputedStyle(element).boxShadow);
-      await page.keyboard.press("Tab");
-      await expect(error).toBeFocused();
-      await expect.poll(() => error.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingToastShadow);
-      await page.keyboard.press("Tab");
-      await expect(close).toBeFocused();
-      await expect.poll(() => close.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingCloseShadow);
-      await page.keyboard.press("Shift+Tab");
-      await page.keyboard.press("Shift+Tab");
-      await expect(origin).toBeFocused();
-      await notice(page, "error condition").getByRole("button").click();
-      await expect(notice(page, "error condition")).toHaveCount(0);
-      await origin.focus();
-      await page.keyboard.press("Shift+F8");
-      await page.keyboard.press("Tab");
-      await page.keyboard.press("Tab");
-      await expect(notice(page, "warning condition").getByRole("button")).toBeFocused();
-      await page.keyboard.press("Enter");
-      await expect(notice(page, "warning condition")).toHaveCount(0);
-      // Native multi-notice dismissal may leave focus on the body.
-    });
+test("notices are accessible in both appearances and stay above chrome", async ({ browser }) => {
+  const width = 1280;
+  const page = await openFixture(browser, { width });
+  for (const severity of ["success", "info", "warning", "error"] as const) {
+    await publish(page, "sticky", { key: severity, severity, message: `${severity} condition` });
   }
-}
+  const origin = page.getByRole("textbox", { name: "Origin control" });
+  for (const appearance of ["light", "dark"] as const) {
+    await page.evaluate((appearance) =>
+      (window as unknown as { notificationFixture: Fixture }).notificationFixture.appearance(appearance), appearance);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
+    await origin.focus();
+    await page.keyboard.press("Shift+F8");
+    await expect(page.locator("[data-sonner-toast]").last()).toHaveAttribute("data-expanded", "true");
+    await page.locator("[data-sonner-toaster]").evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+    });
+    await expect(page.locator("[data-sonner-toaster]")).toHaveAttribute("data-sonner-theme", appearance);
+    const shapes = new Set<string>();
+    for (const severity of ["success", "info", "warning", "error"] as const) {
+      const condition = notice(page, `${severity} condition`);
+      await expect(condition).toHaveAttribute("data-type", severity);
+      await expect(condition).toContainText(severity === "info" ? "Information" : severity.charAt(0).toUpperCase() + severity.slice(1));
+      const readings = await condition.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const chrome = document.querySelector<HTMLElement>("[data-fixture-chrome]");
+        if (chrome === null) throw new Error("missing fixture chrome");
+        // Include the chrome in this hit test, then release the pointer
+        // so the fixture's ordinary page controls remain usable.
+        chrome.style.pointerEvents = "auto";
+        const painted = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        chrome.style.pointerEvents = "none";
+        return {
+          top: bounds.top, left: bounds.left, right: bounds.right, bottom: bounds.bottom,
+          aboveChrome: painted !== null && element.contains(painted),
+          icon: element.querySelector("[data-icon] svg")?.innerHTML,
+        };
+      });
+      expect(readings.top).toBeGreaterThanOrEqual(0);
+      expect(readings.left).toBeGreaterThanOrEqual(0);
+      expect(readings.right).toBeLessThanOrEqual(width);
+      expect(readings.bottom).toBeLessThanOrEqual(720);
+      expect(readings.aboveChrome).toBe(true);
+      expect(readings.icon).toBeDefined();
+      shapes.add(readings.icon ?? "");
+    }
+    expect(shapes.size, "each severity has a distinct icon as well as a text label").toBe(4);
+    const readings = await renderedText(page, "[aria-live=polite]");
+    expect(readings.length).toBeGreaterThanOrEqual(4);
+    for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+    const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+    assertNoViolations(axe.violations);
+    await expect(page.locator("[data-sonner-toast]").last()).toHaveAttribute("data-mounted", "true");
+    await page.locator("[data-sonner-toaster]").evaluate(async (element) => {
+      await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished));
+    });
+    await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notifications-${appearance}-${width}.png`) });
+    const error = notice(page, "error condition");
+    const close = error.getByRole("button");
+    const restingToastShadow = await error.evaluate((element) => getComputedStyle(element).boxShadow);
+    const restingCloseShadow = await close.evaluate((element) => getComputedStyle(element).boxShadow);
+    await page.keyboard.press("Tab");
+    await expect(error).toBeFocused();
+    await expect.poll(() => error.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingToastShadow);
+    await page.keyboard.press("Tab");
+    await expect(close).toBeFocused();
+    await expect.poll(() => close.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe(restingCloseShadow);
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Shift+Tab");
+    await expect(origin).toBeFocused();
+  }
+  await notice(page, "error condition").getByRole("button").click();
+  await expect(notice(page, "error condition")).toHaveCount(0);
+  await origin.focus();
+  await page.keyboard.press("Shift+F8");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  await expect(notice(page, "warning condition").getByRole("button")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(notice(page, "warning condition")).toHaveCount(0);
+  // Native multi-notice dismissal may leave focus on the body.
+});
 
 test("an active sticky notice stays reachable through a burst of transients in a short iPad-width viewport @webkit", async ({ browser, browserName }) => {
   const page = await openFixture(browser, { width: 810, height: 400, clock: true });

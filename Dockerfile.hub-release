@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --froze
 COPY packages packages
 COPY scripts/build-hub-release-payload.mjs scripts/build-hub-release-payload.mjs
 COPY compose.release.yml remote.https.yml remote.tailscale.yml remote.env.example remote-settings.sh REMOTE.md RELEASING.md ./
-COPY bin/remote-compose.sh bin/hub-backup.sh bin/hub-restore.sh bin/hub-admin-setup.sh bin/
+COPY bin/remote-compose.sh bin/hub-backup.sh bin/hub-restore.sh bin/
 ARG HUB_RELEASE_VERSION
 ARG HUB_RELEASE_COMMIT
 ARG HUB_SYNC_PROTOCOL_VERSION
@@ -39,9 +39,10 @@ LABEL org.opencontainers.image.version=$HUB_RELEASE_VERSION \
     io.uberblick.sync-protocol-version=$HUB_SYNC_PROTOCOL_VERSION
 ENV NODE_ENV=production HUB_HOST=0.0.0.0 PORT=1234 HUB_DB_PATH=/data/hub.sqlite
 WORKDIR /app
-COPY --from=build /out/hub.mjs /out/hub-admin-setup.mjs ./
+COPY --from=build /out/hub.mjs /out/ub-hub.mjs ./
 COPY --from=build /out/release /release
 COPY hub-release-entrypoint.sh remote-settings.sh /usr/local/bin/
+COPY --chmod=0755 bin/ub-hub /usr/local/bin/ub-hub
 RUN install -d -o node -g node /data
 USER node
 EXPOSE 1234

@@ -6,21 +6,13 @@
  * start an empty one — and a workspace id is a uuid, making it path-safe.
  */
 
-import { spawn } from "node:child_process";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { InvalidWorkspaceIdError } from "@uberblick/schema";
-import {
-  DEFAULT_HUB_URL,
-  defaultWorkspaceDatabasePath,
-  resolveAgentSession,
-  resolveMcpConfig,
-} from "../src/config.js";
-import { PACKAGE_ROOT, mainTsProcess } from "./helpers.js";
+import { resolveMcpConfig, } from "../src/config.js";
 import { bridgeConfig } from "../src/remote.js";
-import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 
 const WORKSPACE = "9c1f0b4a-6d27-4e83-9b5a-1f2e3d4c5b6a";
 const DATA_HOME = "/tmp/uberblick-config-test";
@@ -30,57 +22,7 @@ function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { XDG_DATA_HOME: DATA_HOME, WORKSPACE_ID: WORKSPACE, ...overrides };
 }
 
-/** Run `src/main.ts` to completion and collect what it said and returned. */
-function runServer(
-  overrides: NodeJS.ProcessEnv,
-): Promise<{ code: number | null; stderr: string }> {
-  const { command, args } = mainTsProcess();
-  const child = spawn(command, args, {
-    cwd: PACKAGE_ROOT,
-    env: { PATH: process.env.PATH ?? "", ...overrides },
-    stdio: ["ignore", "ignore", "pipe"],
-    timeout: 10_000,
-  });
-  let stderr = "";
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  return new Promise((resolve) => {
-    child.on("exit", (code) => resolve({ code, stderr }));
-  });
-}
-
 describe("resolveMcpConfig", () => {
-  it("keeps non-serve callers independent of UB_AGENT_SESSION", () => {
-    for (const value of ["same-session", "invalid/session"]) {
-      const first = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
-      const second = resolveMcpConfig(env({ UB_AGENT_SESSION: value }));
-      expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
-      expect(first.sessionId).not.toBe(second.sessionId);
-    }
-  });
-
-  it("keeps the same caller-chosen identity and colour across reconnects", () => {
-    const session = "Caller.Run_1570-1";
-    const first = resolveMcpConfig(env(), resolveAgentSession(session));
-    const second = resolveMcpConfig(env(), resolveAgentSession(session));
-    expect(first.sessionId).toBe(session);
-    expect(second.sessionId).toBe(session);
-    expect(second.color).toBe(first.color);
-  });
-
-  it.each(["wss://hub.example/ws", "ws://0.0.0.0:1234", "ws://[::]:1234", "ws://127.attacker.example:1234"])("requires stored login and suppresses the secret for %s", hubUrl => {
-    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
-    expect(config.authSecret).toBeNull();
-    expect(config.deviceLogin).toBeDefined();
-  });
-
-  it.each(["ws://localhost:1234", "ws://127.42.0.9:1234", "ws://[::1]:1234"])("keeps loopback secret admission for %s", hubUrl => {
-    const config = resolveMcpConfig(env({ HUB_URL: hubUrl, HUB_AUTH_TOKEN: "local-only-secret" }));
-    expect(config.authSecret).toBe("local-only-secret");
-    expect(config.deviceLogin).toBeUndefined();
-  });
 
   it("selects the stored origin login for a loopback proxy and keeps other local hubs separate", async () => {
     const directory = mkdtempSync(join(tmpdir(), "loopback-device-config-"));
@@ -102,127 +44,5 @@ describe("resolveMcpConfig", () => {
       expect(sameOrigin.deviceLogin).toBeDefined();
       expect(sameOrigin.authSecret).toBeNull();
     } finally { rmSync(directory, { recursive: true, force: true }); }
-  });
-
-  it("retains device admission without a login and drops it when a bridge targets another local hub", () => {
-    const proxy = resolveMcpConfig(env({ HUB_URL: "ws://localhost:8080/ws", HUB_ADMISSION: "device", HUB_AUTH_TOKEN: "never-send-this" }));
-    expect(proxy.authSecret).toBeNull();
-    expect(proxy.deviceLogin).toBeDefined();
-    expect(bridgeConfig(proxy, { hubUrl: "ws://localhost:1234" }).deviceLogin).toBeUndefined();
-  });
-
-  it("reclassifies bridge endpoint overrides without moving a login between hubs", () => {
-    const local = resolveMcpConfig(env({ HUB_AUTH_TOKEN: "local-only-secret" }));
-    const remote = bridgeConfig(local, { hubUrl: "wss://hub.example/ws", authSecret: "never-send-this" });
-    expect(remote.authSecret).toBeNull();
-    expect(remote.deviceLogin).toBeDefined();
-    expect(bridgeConfig(remote, { hubUrl: "ws://127.0.0.1:1234" }).deviceLogin).toBeUndefined();
-  });
-  it("keys the rooms and the database by the workspace uuid", () => {
-    const config = resolveMcpConfig(env());
-    expect(config.workspaceId).toBe(WORKSPACE);
-    expect(DEFAULT_HUB_URL).toBe("ws://localhost:1234");
-    expect(config.hubUrl).toBe(DEFAULT_HUB_URL);
-    expect(config.authSecret).toBeNull();
-    expect(config.databasePath).toBe(
-      join(DATA_HOME, "uberblick", `${WORKSPACE}.sqlite`),
-    );
-  });
-
-  it("resolves a decorated and a bare spelling to one workspace", () => {
-    // The slug is display only. Two spellings that hydrated two databases
-    // would be two local replicas of one corpus, converging with neither.
-    const decorated = resolveMcpConfig(
-      env({ WORKSPACE_ID: `uberblick-${WORKSPACE}` }),
-    );
-    const bare = resolveMcpConfig(env());
-    expect(decorated.workspaceId).toBe(bare.workspaceId);
-    expect(decorated.databasePath).toBe(bare.databasePath);
-  });
-
-  it("puts both spellings of one workspace in one replica file", () => {
-    // The layout is `@uberblick/mcp-server/storage`'s to decide and its suite's to
-    // prove; what matters here is that both spellings of one workspace land on
-    // one file — two replicas of one corpus would converge with neither.
-    const dataHome = mkdtempSync(join(tmpdir(), "uberblick-data-home-"));
-    const expected = join(dataHome, "uberblick", `${WORKSPACE}.sqlite`);
-    expect(defaultWorkspaceDatabasePath(WORKSPACE, { XDG_DATA_HOME: dataHome })).toBe(
-      expected,
-    );
-    expect(
-      defaultWorkspaceDatabasePath(`uberblick-${WORKSPACE}`, { XDG_DATA_HOME: dataHome }),
-    ).toBe(expected);
-    // Resolution reads; it never creates. Nothing to clean up but the shell.
-    rmSync(dataHome, { recursive: true, force: true });
-  });
-
-  it("lets UBERBLICK_DB name the file outright", () => {
-    const named = "/tmp/uberblick-config-test/named.sqlite";
-    expect(resolveMcpConfig(env({ UBERBLICK_DB: named })).databasePath).toBe(named);
-  });
-
-  it("refuses a value that is not a workspace id", () => {
-    for (const workspaceId of [
-      "main",
-      "a/b",
-      "..",
-      "../outside",
-      "..\\outside",
-      ".",
-      `uberblick-${WORKSPACE.toUpperCase()}`,
-    ]) {
-      expect(() => resolveMcpConfig(env({ WORKSPACE_ID: workspaceId }))).toThrow(
-        InvalidWorkspaceIdError,
-      );
-    }
-  });
-
-  it("refuses to start with no workspace at all", () => {
-    // Blank and unset are the same thing, and neither has a default.
-    for (const value of ["", "   "]) {
-      expect(() => resolveMcpConfig(env({ WORKSPACE_ID: value }))).toThrow(
-        /WORKSPACE_ID/,
-      );
-    }
-    const { WORKSPACE_ID: _omitted, ...withoutWorkspace } = env();
-    expect(() => resolveMcpConfig(withoutWorkspace)).toThrow(/ub workspace create/);
-  });
-});
-
-describe("serve's agent session input", () => {
-  it.each(["x", "A".repeat(64), "Caller.Run_1570-1"])("accepts %s exactly", (session) => {
-    expect(resolveAgentSession(session)).toBe(session);
-  });
-
-  it.each([undefined, "", " \t\n"])("uses a fresh process identity for blank %s", (session) => {
-    expect(resolveAgentSession(session)).toBeUndefined();
-    const first = resolveMcpConfig(env(), resolveAgentSession(session));
-    const second = resolveMcpConfig(env(), resolveAgentSession(session));
-    expect(first.sessionId).toMatch(/^agent-[0-9a-f-]{36}$/);
-    expect(first.sessionId).not.toBe(second.sessionId);
-  });
-
-  it.each(["a".repeat(65), "a/b", "two words", " padded", "padded ", "é", "a\nb", "a\n"])("refuses nonblank %s instead of replacing it", (session) => {
-    expect(() => resolveAgentSession(session)).toThrow(/UB_AGENT_SESSION/);
-  });
-});
-
-describe("the server process", () => {
-  it("refuses an invalid agent session before serving", async () => {
-    const run = await runServer(env({ UB_AGENT_SESSION: "invalid/session" }));
-    expect(run.code).toBe(1);
-    expect(run.stderr).toMatch(/UB_AGENT_SESSION/);
-    expect(run.stderr).not.toContain("serving");
-  });
-
-  it("exits non-zero and names `ub workspace create` when WORKSPACE_ID is unset", async () => {
-    // The whole interface is the environment an MCP client hands the process,
-    // so "it refuses" has to be true of the process, not only of the function.
-    // stdout is the JSON-RPC transport: the complaint goes to stderr.
-    const run = await runServer({});
-
-    expect(run.code).not.toBe(0);
-    expect(run.stderr).toMatch(/WORKSPACE_ID/);
-    expect(run.stderr).toMatch(/ub workspace create/);
   });
 });

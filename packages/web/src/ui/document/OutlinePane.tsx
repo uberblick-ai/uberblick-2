@@ -64,9 +64,9 @@ export function OutlinePane({
           <button
             ref={trigger}
             type="button"
-            className="ub-outline-trigger inline-flex min-h-6 min-w-6 items-center gap-[0.45rem] rounded-full border border-border bg-(--card-accent) px-[0.55rem] py-1 text-secondary-foreground text-xs/[1.4] whitespace-nowrap cursor-pointer [font-family:inherit] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-h-11"
+            className="ub-outline-trigger inline-flex min-h-6 min-w-6 items-center gap-[0.45rem] rounded-full border border-border bg-(--card-accent) px-[0.55rem] py-1 text-secondary-foreground ub-type-caption whitespace-nowrap cursor-pointer [font-family:inherit] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-h-11"
           >
-            Contents <span className="text-[0.7rem] text-muted-foreground">{entries.length}</span>
+            Contents <span className="ub-type-caption text-muted-foreground">{entries.length}</span>
           </button>
         </DropdownMenuTrigger>
       </div>
@@ -90,7 +90,7 @@ export function OutlinePane({
         }}
       >
         <div className="ub-outline-panel-body flex min-h-0 flex-col p-3">
-          <DropdownMenuLabel className="mb-[0.4rem] mt-0 text-[0.7rem]! tracking-[0.06em] uppercase">On this page</DropdownMenuLabel>
+          <DropdownMenuLabel className="mb-[0.4rem] mt-0 ub-type-caption! tracking-[0.06em] uppercase">On this page</DropdownMenuLabel>
           <ul role="none" className="m-0 min-h-0 list-none overflow-y-auto p-0">
             {entries.map((entry) => (
               <li

@@ -9,7 +9,7 @@ import { yUndoPluginKey } from "y-prosemirror";
 import { findBlockById } from "../../editor/block-menu.js";
 import { retypeBlockInTransaction } from "../../editor/retype.js";
 import { selectedBlock } from "../../editor/source-chrome.js";
-import { codeLanguages } from "../../editor/syntax-highlighting.js";
+import { codeLanguageLabel, codeLanguages } from "../../editor/syntax-highlighting.js";
 import { PickerList } from "../PickerList.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
 
@@ -118,10 +118,10 @@ export function CodeLanguageControl({ editor, canWrite }: {
       setOpen(next);
     }}>
       <PopoverTrigger asChild>
-        <button type="button" className="ub-code-language-trigger flex max-w-full cursor-pointer items-start gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" aria-label="Code language"
+        <button type="button" className="ub-code-language-trigger flex max-w-full cursor-pointer items-center gap-[0.35rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.05rem] text-muted-foreground [font:inherit] hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" aria-label="Code language"
           title="Code language · Shift+F10 from the code block" aria-keyshortcuts="Shift+F10"
           aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
-          <span className="overflow-hidden text-ellipsis">{language || "Plain text"}</span><span aria-hidden="true">▾</span>
+          <span className="overflow-hidden text-ellipsis">{codeLanguageLabel(language)}</span><span aria-hidden="true">▾</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(16rem,calc(100vw_-_2rem))]! overflow-hidden p-0!"
@@ -145,7 +145,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
         }}>
           <input ref={search} type="search" role="combobox" aria-label="Search languages"
             aria-autocomplete="list" aria-expanded={open} aria-controls={listId}
-            className="w-full rounded-(--radius-sm) border border-input bg-background px-2 py-1 text-foreground [font:inherit] [@media(pointer:coarse)]:text-base"
+            className="w-full rounded-(--radius-sm) border border-input bg-background px-2 py-1 text-foreground [font:inherit] [@media(pointer:coarse)]:ub-type-body"
             placeholder="Search languages" value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {

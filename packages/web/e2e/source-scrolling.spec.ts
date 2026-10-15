@@ -1,6 +1,8 @@
 /** Fenced source stays aligned, scrolls inside its panel, and keeps usable chrome. */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
+import { setNativeSelection } from "./native-selection.js";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
@@ -78,11 +80,10 @@ async function expectSingleLine(source: Locator, scroller = source): Promise<voi
       firstTop: first.getBoundingClientRect().top,
       lastTop: last.getBoundingClientRect().top,
       fontSize: Number.parseFloat(style.fontSize),
-      previousSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.85,
     };
   }, LONG_LINE.length);
   expect(Math.abs(layout.lastTop - layout.firstTop)).toBeLessThan(1);
-  expect(layout.fontSize).toBeLessThan(layout.previousSize);
+  expect(layout.fontSize).toBe(13);
   await expect.poll(() => scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
@@ -153,11 +154,15 @@ async function expectSourceControl(control: Locator, source: Locator, floor: num
 
 async function expectPinned(control: Locator, scroller: Locator): Promise<void> {
   await scroller.scrollIntoViewIfNeeded();
-  await scroller.evaluate((element) => { element.scrollLeft = 0; });
-  const before = await control.boundingBox();
-  await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-  expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-  expect(await control.boundingBox()).toEqual(before);
+  // A debounced Mermaid draw can shift the page between the two reads, so the
+  // pair repeats until one layout holds; a control that scrolls never passes.
+  await expect(async () => {
+    await scroller.evaluate((element) => { element.scrollLeft = 0; });
+    const before = await control.boundingBox();
+    await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    expect(await control.boundingBox()).toEqual(before);
+  }).toPass({ timeout: 20_000 });
 }
 
 async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> {
@@ -171,8 +176,7 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
   ] as const) {
     await insertSource(page, name, LONG_LINE);
     const source = page.locator(selector);
-    const copy = name === "Mermaid" ? page.locator(".ub-mermaid-header .ub-copy")
-      : source.locator("..").locator(":scope > .ub-copy");
+    const copy = source.locator("..").locator(".ub-block-caption .ub-copy");
     await expectSourceControl(copy, source, floor);
     await expectPinned(copy, source);
     if (name === "Code") {
@@ -202,7 +206,7 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
   await expect(toggle).toHaveText("Play");
   const frame = page.locator(".ub-terminal-frame");
   await expectSourceControl(toggle, frame, floor);
-  const copy = page.locator(".ub-terminal > .ub-copy");
+  const copy = page.locator(".ub-terminal .ub-block-caption .ub-copy");
   await expectSourceControl(copy, frame, floor);
   for (const control of [toggle, copy]) await expectPinned(control, page.locator(".ub-terminal-screen"));
   if (touch) await toggle.tap();
@@ -266,21 +270,26 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
       // Clicking a drawn terminal opens its editable transcript.
       if (selector === ".ub-terminal-source" && !await source.isVisible()) await page.locator(".ub-terminal-screen").click();
       await source.scrollIntoViewIfNeeded();
-      const copy = selector === ".ub-mermaid-source" ? page.locator(".ub-mermaid-header .ub-copy")
-        : source.locator("..").locator(":scope > .ub-copy");
+      const copy = source.locator("..").locator(".ub-block-caption .ub-copy");
       for (const collapsed of [true, false]) {
         await page.locator(".ub-editor .ProseMirror").focus();
-        await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-        await source.evaluate((element, caretOnly) => {
+        await setNativeSelection(source, () => source.evaluate((element, caretOnly) => {
           const first = document.createTreeWalker(element, NodeFilter.SHOW_TEXT).nextNode();
           if (first === null) throw new Error("e2e: missing source text");
           const range = document.createRange();
           range.setStart(first, 0);
           range.setEnd(first, caretOnly ? 0 : 4);
+          const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+          if (root === null) throw new Error("e2e: source has no editor");
+          const expected = {
+            anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+            head: root.editor.view.posAtDOM(range.endContainer, range.endOffset),
+          };
           const selection = document.getSelection();
           selection?.removeAllRanges();
           selection?.addRange(range);
-        }, collapsed);
+          return expected;
+        }, collapsed));
         await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         const before = await editorSelection(page);
         expect(before.focused).toBe(true);
@@ -289,7 +298,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         const previous = (await notices.elementHandles())[0];
         if (touch) await copy.tap();
         else await copy.click();
-        await expect(copy).toHaveText(selector === ".ub-mermaid-source" ? "Copy" : "copy");
+        await expect(copy).toHaveText("Copy");
         // Wait for native dismissal so the previous success cannot satisfy
         // assertions before the replacement has been published.
         if (previous !== undefined) {
@@ -368,9 +377,10 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
     const rect = range.getBoundingClientRect();
     return { x: rect.left, y: rect.top + rect.height / 2 };
   });
-  if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
-  else await page.mouse.click(end.x, end.y);
-  await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+  await setNativeSelection(code, async () => {
+    if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
+    else await page.mouse.click(end.x, end.y);
+  });
   await expect.poll(() => code.evaluate((element) => {
     const selection = document.getSelection();
     if (selection === null || !selection.isCollapsed || selection.focusNode === null || !element.contains(selection.focusNode)) return "";
@@ -397,7 +407,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   const copy = block.locator(".ub-copy");
   const before = await copy.boundingBox();
   const language = block.getByRole("button", { name: "Code language" });
-  await expect(language).toHaveText("python▾");
+  await expect(language).toHaveText("Python▾");
   const caption = await language.boundingBox();
   await code.evaluate((element) => { element.scrollLeft = 0; });
   expect(await copy.boundingBox()).toEqual(before);
@@ -408,7 +418,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   await expect(copy).toBeInViewport();
   if (info.project.use.hasTouch === true) await copy.tap();
   else await copy.click();
-  await expect(copy).toHaveText("copy");
+  await expect(copy).toHaveText("Copy");
   const copied = page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
     has: page.locator("[data-description]", { hasText: /^Copied to clipboard$/ }),
   });

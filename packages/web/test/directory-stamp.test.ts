@@ -3,7 +3,7 @@
  * `updatedAt` on the directory stub, written by a web client.
  *
  * What this suite defends is the bargain, the same one
- * `packages/mcp-server/test/timestamps.test.ts` defends for the server: the
+ * `packages/mcp-server/test/timestamps.core.test.ts` defends for the server: the
  * directory is broadcast to every client in the workspace, so a stamp per
  * keystroke would turn one person typing into traffic for everyone. The
  * contract is "at most one bump per window, immediately on a title or tag

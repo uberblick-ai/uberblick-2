@@ -28,7 +28,7 @@ export function useSidebar(): SidebarState {
   return context;
 }
 
-export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 cursor-pointer rounded-(--radius-sm) border font-[inherit] [font-size:inherit] leading-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+export const SIDEBAR_TOGGLE_CLASSES = "absolute z-4 size-8 cursor-pointer rounded-(--radius-sm) border font-[inherit] [font-size:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function SidebarProvider({
   open,
@@ -154,7 +154,7 @@ export function SidebarMenuButton({ className, ...props }: ComponentProps<"butto
       data-slot="sidebar-menu-button"
       data-sidebar="menu-button"
       className={cn(
-        "peer/menu-button flex min-h-8 w-full min-w-0 items-center gap-2 rounded-(--radius-sm) p-2 text-left text-sm cursor-pointer [@media(any-pointer:coarse)]:min-h-11",
+        "peer/menu-button flex min-h-8 w-full min-w-0 items-center gap-2 rounded-(--radius-sm) p-2 text-left ub-type-ui cursor-pointer [@media(any-pointer:coarse)]:min-h-11",
         "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground active:bg-sidebar-accent active:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sidebar-ring disabled:pointer-events-none disabled:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
         className,
       )}

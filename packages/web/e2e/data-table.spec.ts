@@ -63,9 +63,9 @@ async function tableDoc(session: McpSession, title: string, mapping: unknown = M
   return result.uuid;
 }
 
-async function editMapping(session: McpSession, uuid: string, text: string): Promise<void> {
+async function editMapping(session: McpSession, uuid: string, text: string, index = 0): Promise<void> {
   const doc = await session.call<DocPayload>("get_doc", { uuid });
-  const block = doc.blocks.find((entry) => entry.type === "chart");
+  const block = doc.blocks.filter((entry) => entry.type === "chart")[index];
   if (block === undefined) throw new Error("e2e: no data-table chart block in get_doc");
   await session.call("edit_block", { uuid, block_id: block.id, old_text: block.text, new_text: text, rev: block.rev });
 }
@@ -367,7 +367,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(table).toContainText("/relative");
     await expect(table.getByRole("link")).toHaveCount(1);
     const openSource = page.getByRole("button", { name: "Open table source", exact: true });
-    const copy = block.getByRole("button", { name: "copy", exact: true });
+    const copy = block.getByRole("button", { name: "Copy", exact: true });
     await editor(page).locator(":scope > p").first().click();
     await expect(openSource).toHaveCSS("opacity", "0");
     await expect(copy).toHaveCSS("opacity", "0");
@@ -469,88 +469,6 @@ test("every header sorts through native pointer and keyboard input without movin
   await info.attach("header-sorting", { path: screenshot, contentType: "image/png" });
 });
 
-test("reader sorting keeps the Recent days window local and read-free through live updates and source resets", async ({ browser }) => {
-  const session = writer();
-  const mapping = {
-    version: 1, type: "table", collection: "measurements", title: "Recent days", limit: 7,
-    columns: [{ field: "day", label: "Day", format: "date" }, { field: "deliveries", label: "Deliveries", format: "number" }],
-    sort: { field: "day", direction: "desc" },
-  };
-  const uuid = await tableDoc(session, "Local Recent days", mapping);
-  const stored = await session.call<DocPayload>("get_doc", { uuid });
-  const chart = stored.blocks.find(block => block.type === "chart");
-  if (chart === undefined) throw new Error("e2e: the Recent days source is missing");
-  await session.call("insert_block", { uuid, after_block_id: chart.id, type: "chart", text: JSON.stringify(mapping) });
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
-    replaceRecords: [999, 888, 777, 70, 10, 40, 30, 60, 20, 50].map((deliveries, index) => ({
-      id: `day-${index + 1}`, value: { day: `2026-10-${String(index + 1).padStart(2, "0")}`, deliveries },
-    })),
-  }] });
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    contextOptions: { locale: "en-US" }, beforeNavigate: loading => installProbe(loading, uuid),
-  });
-  const tables = page.getByRole("table", { name: "Recent days", exact: true });
-  await expect(tables).toHaveCount(2);
-  const table = tables.first();
-  const other = tables.nth(1);
-  const observer = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: { locale: "en-US" } });
-  const observerTable = observer.getByRole("table", { name: "Recent days", exact: true }).first();
-  const dayCells = (target: Locator) => target.locator("tbody tr td:first-child");
-  const days = (...values: number[]) => values.map(day => `Oct ${day}, 2026`);
-  const initial = days(10, 9, 8, 7, 6, 5, 4);
-  await expect(dayCells(table)).toHaveText(initial);
-  await expect(dayCells(other)).toHaveText(initial);
-  await expect(dayCells(observerTable)).toHaveText(initial);
-  const block = page.locator(".ub-chart[data-view='table']").first();
-  const notice = block.locator(".ub-chart-notice");
-  const diagnostics = block.locator(".ub-chart-diagnostics");
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 10 records");
-  const before = await session.call("get_data", { uuid, collection: "measurements", limit: 1000 });
-  const probe = () => page.evaluate(() => {
-    const { reads, localUpdates } = (window as unknown as { tableProbe: { reads: number; localUpdates: number } }).tableProbe;
-    return { reads, localUpdates };
-  });
-  const counts = await probe();
-  expect(counts.reads).toBeGreaterThan(0);
-  const diagnosticsText = await diagnostics.textContent();
-  const deliveries = table.getByRole("button", { name: "Deliveries", exact: true });
-  await deliveries.click();
-  await expect(dayCells(table)).toHaveText(days(5, 9, 7, 6, 10, 8, 4));
-  await expectHeaderOrder(table, "Deliveries", "ascending");
-  await deliveries.click();
-  await expect(dayCells(table)).toHaveText(days(4, 8, 10, 6, 7, 9, 5));
-  await expectHeaderOrder(table, "Deliveries", "descending");
-  await expect(dayCells(other)).toHaveText(initial);
-  await expectHeaderOrder(other, "Day", "descending");
-  await expect(dayCells(observerTable)).toHaveText(initial);
-  await expectHeaderOrder(observerTable, "Day", "descending");
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 10 records");
-  expect(await diagnostics.textContent()).toBe(diagnosticsText);
-  expect(await probe()).toEqual(counts);
-  expect(await session.call("get_data", { uuid, collection: "measurements", limit: 1000 })).toEqual(before);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.filter(block => block.type === "chart").map(block => block.text))
-    .toEqual([JSON.stringify(mapping), JSON.stringify(mapping)]);
-
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
-    { id: "day-11", value: { day: "2026-10-11", deliveries: 5 } },
-  ] }] });
-  await expect(dayCells(table)).toHaveText(days(8, 10, 6, 7, 9, 5, 11));
-  await expectHeaderOrder(table, "Deliveries", "descending");
-  await expect(deliveries).toBeFocused();
-  await expect(dayCells(other)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
-  await expect(dayCells(observerTable)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 7 of 11 records");
-
-  await editMapping(session, uuid, `${JSON.stringify(mapping)}\n`);
-  await expect(dayCells(table)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
-  await expectHeaderOrder(table, "Day", "descending");
-  await deliveries.click();
-  await expectHeaderOrder(table, "Deliveries", "ascending");
-  await page.reload();
-  await expect(dayCells(table)).toHaveText(days(11, 10, 9, 8, 7, 6, 5));
-  await expectHeaderOrder(table, "Day", "descending");
-});
-
 test("touch header sorting starts from record order when the mapping has no sort", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const session = writer();
   const uuid = await tableDoc(session, "Touch header sorting", {
@@ -584,126 +502,57 @@ test("touch header sorting starts from record order when the mapping has no sort
   await expect(page.locator(".ub-chart-source")).toBeHidden();
 });
 
-test("MCP data and mapping updates keep all rows and sort across reload and reopen", async ({ browser }) => {
+test("chart and table problem states recover and locked views keep their source and data", async ({ browser }) => {
   const session = writer();
-  const uuid = await tableDoc(session, "Live data table");
-  await measurements(session, uuid);
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
-  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
-  await expect(table).toBeVisible();
-  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
-  let navigations = 0;
-  page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: TARGET } }] }] });
-  await expect(table).toContainText("Arriving update");
-  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
-  const beforeMapping = await session.call("get_data", { uuid });
-  const updated = { ...MAPPING, title: "Live evidence", pageSize: 5, sort: { field: "value", direction: "desc" },
-    columns: MAPPING.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
-  await editMapping(session, uuid, JSON.stringify(updated));
-  const renamed = page.getByRole("table", { name: "Live evidence", exact: true });
-  await expect(renamed.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
-  await expect(renamed.locator("tbody tr")).toHaveCount(RECORDS.length);
-  await expect(renamed.locator("tbody tr").first()).toContainText("Arriving update");
-  expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: TARGET } }] }] });
-  await expect(renamed).toContainText("Later update");
-  await expect(renamed.locator("tbody tr").first()).toContainText("Later update");
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", deleteRecords: ["e", "f"] }] });
-  await expect(renamed.locator("tbody tr")).toHaveCount(4);
-  await expect(renamed).toContainText("Later update");
-  expect(navigations).toBe(0);
-  expect(await page.evaluate(() => (window as unknown as { tableProbe: { localUpdates: number } }).tableProbe.localUpdates)).toBe(0);
-  const lightInk = await renamed.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
-  await page.getByTestId("account-menu").click();
-  await page.getByRole("button", { name: "Dark", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect.poll(() => renamed.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightInk);
-  await page.reload();
-  await expect(renamed).toBeVisible();
-  await expect(renamed.locator("tbody tr")).toHaveCount(4);
-  await expect(renamed.locator("tbody tr").first()).toContainText("Later update");
-  const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toBeVisible();
-  await expect(reopened.locator(".ub-data-table tbody tr")).toHaveCount(4);
-  await expect(reopened.getByRole("table", { name: "Live evidence", exact: true })).toContainText("Later update");
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(updated));
-});
-
-test("a record limit keeps the first sorted rows in one live table with a neutral footnote", { tag: "@webkit" }, async ({ browser }) => {
-  const session = writer();
-  const mapping = { ...MAPPING, pageSize: 1, limit: 2, sort: { field: "day", direction: "desc" },
-    columns: [{ field: "name", label: "Name" }, { field: "day", label: "Day", format: "date" }] };
-  const uuid = await tableDoc(session, "Limited live data table", mapping);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA, replaceRecords: [
-    { id: "a", value: { name: "First", day: "2026-01-01" } },
-    { id: "b", value: { name: "Second", day: "2026-01-02" } },
-    { id: "c", value: { name: "Third", day: "2026-01-03" } },
-  ] }] });
+  const chartMapping = {
+    version: 1, type: "line", collection: "measurements", title: "Evidence trend",
+    x: { field: "day", type: "date", label: "Day" },
+    y: [{ field: "value", label: "Autonomous", unit: "%" }],
+  };
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Chart and table states", description: "Generated views recover and remain readable when content is locked.",
+    blocks: [
+      { type: "paragraph", text: "Read the live evidence below." },
+      { type: "chart", text: JSON.stringify(MAPPING) },
+      { type: "chart", text: JSON.stringify(chartMapping) },
+    ],
+  });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
-  const notice = page.locator(".ub-chart-notice");
-  const diagnostics = page.locator(".ub-chart-diagnostics");
-  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Third", "Second"]);
-  await expect(page.locator(".ub-data-table")).toHaveCount(1);
-  await expect(page.locator(".ub-table-range, .ub-table-pager")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^(Previous|Next) page$|show more/i })).toHaveCount(0);
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 3 records");
-  await expect(notice).not.toHaveAttribute("aria-live", /.*/);
-  await expect(notice).not.toHaveAttribute("role", /alert|status/);
-  await expect(notice).toHaveCSS("color", await page.locator(".ub-chart-open").evaluate((element) => getComputedStyle(element).color));
-  await expect(diagnostics).toBeHidden();
-
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
-    { id: "d", value: { name: "Fourth", day: "2026-01-04" } },
-  ] }] });
-  await expect(table.locator("tbody tr td:first-child")).toHaveText(["Fourth", "Third"]);
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 4 records");
-  await expect(diagnostics).toBeHidden();
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
-
-  const ascending = { ...mapping, sort: { field: "day", direction: "asc" } };
-  await editMapping(session, uuid, JSON.stringify(ascending));
-  await expect(table.locator("tbody tr td:first-child")).toHaveText(["First", "Second"]);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
-    { id: "e", value: { name: "Fifth", day: "2026-01-05" } },
-  ] }] });
-  await expect(notice).toHaveText("Generated from document data · read-only · Showing 2 of 5 records");
-  await expect(table.locator("tbody tr td:first-child")).toHaveText(["First", "Second"]);
-  await expect(diagnostics).toBeHidden();
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(ascending));
-
-  await editMapping(session, uuid, JSON.stringify({ ...ascending, limit: 5 }));
-  await expect(table.locator("tbody tr")).toHaveCount(5);
-  await expect(notice).toHaveText("Generated from document data · read-only");
-  await editMapping(session, uuid, JSON.stringify({ ...ascending, limit: null }));
-  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
-  await expect(notice).toBeHidden();
-});
-
-test("problem states recover without editing stored values and decided or archived tables keep every row", async ({ browser }) => {
-  const session = writer();
-  const uuid = await tableDoc(session, "Table states");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
+  const tableRoot = page.locator(".ub-chart").first();
+  const chartRoot = page.locator(".ub-chart").nth(1);
+  const canvas = page.getByRole("img", { name: "Evidence trend", exact: true });
+  const expectChartReady = async (): Promise<void> => {
+    await expect(chartRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
+    await expect(canvas).toBeVisible();
+  };
+  await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
+  await expect(chartRoot.locator(".ub-chart-message")).toContainText(/collection.*(?:absent|not found|missing)/i);
   await editMapping(session, uuid, "{invalid JSON");
-  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
+  await editMapping(session, uuid, "{invalid JSON", 1);
+  await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
+  await expect(chartRoot.locator(".ub-chart-message")).toContainText(/invalid.*(?:configuration|JSON)/i);
   await editMapping(session, uuid, JSON.stringify(MAPPING));
+  await editMapping(session, uuid, JSON.stringify(chartMapping), 1);
   await measurements(session, uuid);
   await expect(page.getByRole("table", { name: "Delivery evidence", exact: true })).toBeVisible();
+  await expectChartReady();
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
-  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "no-records");
+  await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "no-records");
+  await expect(chartRoot.locator(".ub-chart-message")).toContainText(/no plottable records/i);
   await measurements(session, uuid);
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await expectChartReady();
   const stored = await session.call<DocPayload>("get_doc", { uuid });
   const data = await session.call("get_data", { uuid });
+  const records = await session.call("get_data", { uuid, collection: "measurements" });
   const peer = await legacyDecisionPeer(harness(), uuid);
   peers.push(peer);
   peer.decide("decided");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await expectChartReady();
+  await expect(session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] })).rejects.toThrow(/decision_read_only/);
   const sort = table.getByRole("button", { name: "Autonomous", exact: true });
   await sort.click();
   await expectHeaderOrder(table, "Autonomous", "ascending");
@@ -711,32 +560,42 @@ test("problem states recover without editing stored values and decided or archiv
     "Relative link", "<strong>kept as text</strong>", '{"compact":true}', "Absent", "Null", "Invalid values",
   ]);
   await expect(sort).toBeFocused();
-  await expect(page.locator(".ub-chart-source")).toBeHidden();
+  await expect(tableRoot.locator(".ub-chart-source")).toBeHidden();
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });
-  await page.locator(".ub-chart").hover();
+  await tableRoot.hover();
   await openSource.click();
-  await expect(page.locator(".ub-chart-source")).toBeVisible();
+  await expect(tableRoot.locator(".ub-chart-source")).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await editor(page).locator(":scope > p").first().click();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
+  await expect(editMapping(session, uuid, "{}", 1)).rejects.toThrow(/decision_read_only/);
+  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
+  expect(await session.call("get_data", { uuid })).toEqual(data);
+  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
   await session.call("archive_doc", { uuid });
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await expectChartReady();
+  await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   // Read-only selection is not an editing caret; reopen the reading view before
   // proving the archived document's secondary keyboard source action.
   await page.reload();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
+  await expectChartReady();
   await tabTo(page, sort);
   await page.keyboard.press("Space");
   await expectHeaderOrder(table, "Autonomous", "ascending");
   await expect(sort).toBeFocused();
   await expect(table.locator("tbody tr").first()).toContainText("Relative link");
-  await expect(page.locator(".ub-chart-source")).toBeHidden();
+  await expect(tableRoot.locator(".ub-chart-source")).toBeHidden();
   await tabTo(page, openSource);
   await page.keyboard.press("Enter");
-  await expect(page.locator(".ub-chart-source")).toBeVisible();
+  await expect(tableRoot.locator(".ub-chart-source")).toBeVisible();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
+  await expect(editMapping(session, uuid, "{}", 1)).rejects.toThrow(/doc_archived/);
   expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
   expect(await session.call("get_data", { uuid })).toEqual(data);
+  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
 });
 
 test("a generated table wider than the document keeps horizontal scrolling inside its block", async ({ browser }) => {

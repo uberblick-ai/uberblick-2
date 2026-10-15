@@ -20,7 +20,7 @@ import {
   CHART_RECORD_LIMIT, chartAccessibleDescription, chartDiagnosticsText,
 } from "./chart-data.js";
 import type { ChartReady } from "./chart-data.js";
-import { chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import { blockCaption, chartChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import { prepareTable, tableDiagnosticsText } from "./table-data.js";
 import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
@@ -42,7 +42,11 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
   // Chart.js also extends all-negative axes to zero when enabled.
   const beginAtZero = (axis: "y" | "yRight"): boolean => !result.series.some((series, index) =>
     axes.seriesAxes[index] === axis && series.points.some(point => point.y !== null && point.y < 0));
-  const font = { family: colors.fontFamily, size: 11 };
+  const font = {
+    family: colors.fontFamily,
+    size: Number.parseFloat(colors.fontSize),
+    lineHeight: colors.lineHeight,
+  };
   const ranges = layout === "panels" ? chartPanelRanges(result.series) : [];
   const panelUnit = (index: number): string => result.series[index]?.unit || "";
   const formatValue = (index: number, value: number): string =>
@@ -171,7 +175,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
           legend: { display: layout === "overlay", position: "bottom", align: "start", labels: {
             color: colors.color, font, usePointStyle: true, pointStyle: "line", boxWidth: 20, boxHeight: 8,
           } },
-          tooltip: { callbacks: {
+          tooltip: { titleFont: font, bodyFont: font, footerFont: font, callbacks: {
             title: items => items[0]?.parsed.x == null ? "" : formatChartX(items[0].parsed.x, config.x.type),
             label: item => {
               const index = indices[item.datasetIndex] ?? 0;
@@ -205,12 +209,14 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const panel = document.createElement("div");
     panel.className = "ub-chart-panel";
     panel.contentEditable = "false";
-    const title = document.createElement("p");
+    const header = blockCaption("Chart");
+    const title = document.createElement("span");
     title.className = "ub-chart-title";
+    header.label.append(title);
     const openButton = document.createElement("button");
     openButton.className = "ub-chart-open";
     openButton.type = "button";
-    openButton.textContent = "source";
+    openButton.textContent = "Source";
     openButton.setAttribute("aria-label", "Open chart source");
     const screen = document.createElement("div");
     screen.className = "ub-chart-screen";
@@ -237,9 +243,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const probe = document.createElement("span");
     probe.className = "ub-chart-probe";
     probe.setAttribute("aria-hidden", "true");
-    panel.append(title, openButton, screen, table.element, description, message, diagnostics, notice, probe);
+    panel.append(screen, table.element, description, message, diagnostics, notice, probe);
     const copy = copyButton(() => current.textContent);
-    dom.append(panel, footer, copy.element, contentDOM);
+    header.actions.append(copy.element, openButton);
+    dom.append(header.row, panel, footer, contentDOM);
 
     const releaseChart = (): void => {
       for (const instance of instances) instance.destroy();
@@ -261,17 +268,10 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     const draw = (data: DocData | null, readError?: unknown): void => {
       if (destroyed) return;
       try {
-        if (readError !== undefined) throw readError;
         if (dirty || prepared === null || snapshot !== data) {
           try { tableSource = JSON.parse(current.textContent)?.type === "table"; }
           catch { tableSource = false; }
-          prepared = tableSource ? prepareTable(current.textContent, data) : prepareChart(current.textContent, data);
-          snapshot = data;
-          dirty = false;
         }
-        const result = prepared;
-        notice.classList.toggle("ub-chart-limit-notice", result.status === "ready" &&
-          result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         const view = tableSource ? "table" : "line";
         if (dom.dataset.view !== view) dom.dataset.view = view;
         // Reserve the actions beside the footnote, outside the table and its
@@ -279,12 +279,21 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         if (tableSource && notice.parentNode !== footer) {
           footer.append(notice, openButton, copy.element, diagnostics);
         } else if (!tableSource && notice.parentNode !== panel) {
-          screen.before(openButton);
+          header.actions.append(copy.element, openButton);
           panel.append(diagnostics, notice, probe);
-          contentDOM.before(copy.element);
         }
+        header.row.hidden = tableSource;
         footer.hidden = !tableSource;
         openButton.setAttribute("aria-label", tableSource ? "Open table source" : "Open chart source");
+        if (readError !== undefined) throw readError;
+        if (dirty || prepared === null || snapshot !== data) {
+          prepared = tableSource ? prepareTable(current.textContent, data) : prepareChart(current.textContent, data);
+          snapshot = data;
+          dirty = false;
+        }
+        const result = prepared;
+        notice.classList.toggle("ub-chart-limit-notice", result.status === "ready" &&
+          result.config.limit !== undefined && result.config.limit <= CHART_RECORD_LIMIT);
         panel.dataset.state = result.status;
         if (result.status !== "ready") {
           table.render(result);
@@ -424,13 +433,11 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         return true;
       },
       stopEvent: event => event.target instanceof Node &&
-        (panel.contains(event.target) || footer.contains(event.target) || copy.element.contains(event.target)),
+        (header.row.contains(event.target) || panel.contains(event.target) || footer.contains(event.target)),
       // The derived root presentation is chrome too, never content to reparse.
       ignoreMutation: mutation =>
         (mutation.type === "attributes" && mutation.target === dom && mutation.attributeName === "data-view") ||
-        (mutation.type === "childList" && mutation.target === dom &&
-          [...mutation.addedNodes, ...mutation.removedNodes].every(child => child === copy.element)) ||
-        panel.contains(mutation.target) || footer.contains(mutation.target) || copy.element.contains(mutation.target),
+        header.row.contains(mutation.target) || panel.contains(mutation.target) || footer.contains(mutation.target),
       destroy: () => {
         destroyed = true;
         binding.destroy();

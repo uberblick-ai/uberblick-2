@@ -41,14 +41,14 @@ const FIRST_GROUP_NAME = "Pinned";
 /** What `+ group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
-const GROUP_ACTION_CLASSES = "ub-group-act flex-none min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] text-[0.75rem]/[inherit] [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
+const GROUP_ACTION_CLASSES = "ub-group-act flex-none min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] ub-type-caption [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
 
 // Both modes share a grid cell; only each mode's middle content scrolls.
 const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 flex flex-col transition-[transform,opacity] duration-[180ms] ease-[ease] motion-reduce:transition-none motion-reduce:duration-0 [&[inert]]:pointer-events-none [&[inert]_*]:pointer-events-none";
 
 // Native buttons have no preflight reset. Keep their inherited type and focus
 // ring while Tailwind gates hover by the primary input's capability.
-const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left text-sm/[inherit] font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
 const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
@@ -89,6 +89,7 @@ type SidebarProps = {
   /** The workspace the address names, or null when it names none. */
   workspace: Workspace | null;
   workspaceNames?: ReadonlyMap<string, string | null>;
+  workspaceLocation?: string | null;
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
@@ -125,7 +126,7 @@ export function Sidebar(props: SidebarProps): ReactElement {
   return (
     <SidebarFrame
       ref={sidebarRoot}
-      className="ub-list group/sidebar overflow-clip [overflow-clip-margin:1.25rem]"
+      className="ub-list group/sidebar overflow-clip"
       aria-label="Sidebar"
       data-mode={props.settingsOpen ? "settings" : "documents"}
       onEscapeKeyDown={(event) => {
@@ -162,6 +163,7 @@ function SidebarContent({
   workspaces,
   workspace,
   workspaceNames,
+  workspaceLocation,
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
   identity,
@@ -249,7 +251,7 @@ function SidebarContent({
       <button
         ref={collapseButtonRef}
         type="button"
-        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 border-transparent bg-(--sidebar-accent) text-sidebar-foreground ${drawer ? "right-2" : "-right-4"}`}
+        className={`${SIDEBAR_TOGGLE_CLASSES} ub-sidebar-toggle ub-sidebar-hide top-2 right-2 [@media(any-pointer:coarse)]:size-11 border-transparent bg-(--sidebar-accent) text-sidebar-foreground`}
         aria-expanded="true"
         aria-label={collapseLabel}
         title={collapseLabel}
@@ -262,18 +264,19 @@ function SidebarContent({
         onDraggingChange={onDraggingChange}
         active={!collapsed && !settingsOpen && sidebarWritable}
       >
-      <div className={`ub-sidebar-stack grid min-w-0 min-h-0 flex-1 ${drawer ? "pt-10" : ""}`}>
+      <div className="ub-sidebar-stack grid min-w-0 min-h-0 flex-1">
         <nav
           className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
           aria-label="Documents"
           aria-hidden={settingsOpen || collapsed}
           inert={settingsOpen || collapsed}
         >
-          <SidebarHeader className={drawer ? undefined : "pr-6"}>
+          <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
             <WorkspaceSwitcher
               workspaces={workspaces}
               current={workspace}
               names={workspaceNames}
+              workspaceLocation={workspaceLocation}
               onOpenChange={onWorkspaceMenuOpenChange}
               onSwitch={onSwitchWorkspace}
               active={!settingsOpen && !collapsed}
@@ -358,7 +361,6 @@ function SidebarContent({
           </SidebarScrollContent>
         </nav>
         <SettingsNavigation
-          drawer={drawer}
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           active={settingsOpen && !collapsed}
           page={settingsPage}
@@ -388,7 +390,6 @@ function SidebarContent({
 
 /** The navigation pane that replaces the document sidebar in settings mode. */
 function SettingsNavigation({
-  drawer,
   workspaceLabel: label,
   active,
   page,
@@ -396,7 +397,6 @@ function SettingsNavigation({
   onSelect,
   onBack,
 }: {
-  drawer: boolean;
   workspaceLabel: string;
   active: boolean;
   page: SettingsPage | null;
@@ -411,10 +411,10 @@ function SettingsNavigation({
       aria-hidden={!active}
       inert={!active}
     >
-      <SidebarHeader className={drawer ? undefined : "pr-6"}>
+      <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
         <button
           type="button"
-          className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left text-sm font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           data-swap-focus
           onClick={onBack}
         >
@@ -526,13 +526,13 @@ function Soon({
     <li>
       <button
         type="button"
-        className="ub-nav-soon flex min-h-8.5 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-muted-foreground)"
+        className="ub-nav-soon flex min-h-8.5 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
         aria-disabled="true"
       >
         {icon}
         <span>
           {children}{" "}
-          <span className="block text-[11px]">Coming soon</span>
+          <span className="block ub-type-small">Coming soon</span>
         </span>
       </button>
     </li>
@@ -760,7 +760,7 @@ function GroupSection({
           <button
             type="button"
             {...rowClickGuard}
-            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] text-[11px] font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
+            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] ub-type-caption font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
             ref={sortable.handleRef}
             aria-describedby={ydoc === null ? undefined : instructions}
             aria-expanded={!collapsed}
@@ -862,7 +862,7 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
     <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
         {...rowClickGuard}
-        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] text-sm text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
+        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
         ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />

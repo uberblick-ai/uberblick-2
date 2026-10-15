@@ -100,6 +100,9 @@ describe("Mermaid source and derived diagrams", () => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     await draw();
     expect(block.dataset.state).toBe("ready");
+    expect(block.querySelectorAll(":scope > .ub-block-caption")).toHaveLength(1);
+    expect(block.querySelector(".ub-block-label")?.textContent).toBe("Mermaid");
+    expect([...block.querySelectorAll(".ub-block-actions > button")].map(button => button.textContent)).toEqual(["Copy", "Source"]);
     expect(drawing(block).textContent).toBe(SOURCE);
     expect(block.querySelector<HTMLElement>(".ub-mermaid-panel")?.contentEditable).toBe("false");
     expect(block.classList.contains("ub-mermaid-editing")).toBe(false);
@@ -291,7 +294,7 @@ describe("Mermaid source and derived diagrams", () => {
     content.append(sourceText);
     const changed = (target: Node): MutationRecord => ({ type: "childList", target }) as MutationRecord;
     const event = (target: Node): Event => ({ target }) as unknown as Event;
-    for (const selector of [".ub-mermaid-header", ".ub-copy", ".ub-mermaid-panel", ".ub-mermaid-error"]) {
+    for (const selector of [".ub-block-caption", ".ub-copy", ".ub-mermaid-panel", ".ub-mermaid-error"]) {
       const chrome = view.dom.querySelector(selector)!;
       expect(view.ignoreMutation!(changed(chrome))).toBe(true);
       expect(view.stopEvent!(event(chrome))).toBe(true);

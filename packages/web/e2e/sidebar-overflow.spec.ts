@@ -110,20 +110,20 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
     };
     const bounds = box(sidebar);
     const hideBox = box(hide);
-    const covered = [...header.querySelectorAll<HTMLElement>(".ub-workspace-name, .ub-workspace-caret, .ub-settings-back")]
+    const covered = [...header.querySelectorAll<Element>(".ub-workspace-marker, .ub-workspace-name, .ub-workspace-location, .ub-workspace-caret, .ub-settings-back")]
       .filter((control) => {
         const rect = box(control);
         return rect.left < hideBox.right && rect.right > hideBox.left
           && rect.top < hideBox.bottom && rect.bottom > hideBox.top;
-      }).map((control) => control.className);
-    const outside = [...header.querySelectorAll<HTMLElement>("button"), ...footer.querySelectorAll<HTMLElement>("button")]
+      }).map((control) => control.getAttribute("class"));
+    const outside = [hide, ...header.querySelectorAll<HTMLElement>("button"), ...footer.querySelectorAll<HTMLElement>("button")]
       .filter((control) => {
         const rect = box(control);
         return rect.top < bounds.top || rect.bottom > bounds.bottom
           || rect.left < bounds.left || rect.right > bounds.right;
       }).map((control) => control.className);
     return { header: box(header), content: box(content), footer: box(footer), settings: box(settings),
-      account: box(account), bounds, covered, outside, sidebarTop: sidebar.scrollTop,
+      account: box(account), hide: hideBox, bounds, covered, outside, sidebarTop: sidebar.scrollTop,
       paneTop: element.scrollTop, contentTop: content.scrollTop };
   });
   await activeContent(page).evaluate((content) => { content.scrollTop = 0; });
@@ -132,6 +132,8 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   expect(before.outside).toEqual([]);
   expect(before.header.top).toBeGreaterThanOrEqual(before.bounds.top);
   expect(before.header.bottom).toBeLessThanOrEqual(before.content.top);
+  expect(before.hide.top).toBeGreaterThanOrEqual(before.header.top);
+  expect(before.hide.bottom).toBeLessThanOrEqual(before.header.bottom);
   expect(before.content.bottom).toBeLessThanOrEqual(before.footer.top);
   expect(before.settings.bottom).toBeLessThanOrEqual(before.account.top);
   expect(before.footer.bottom).toBeLessThanOrEqual(before.bounds.bottom);
@@ -144,6 +146,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   expect(after.footer).toEqual(before.footer);
   expect(after.settings).toEqual(before.settings);
   expect(after.account).toEqual(before.account);
+  expect(after.hide).toEqual(before.hide);
   expect(after.sidebarTop).toBe(0);
   expect(after.paneTop).toBe(0);
   expect(after.outside).toEqual([]);
@@ -178,6 +181,17 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
         await openSidebar(page);
         await expect(page.getByTestId("account-menu")).toContainText(`@${"a".repeat(39)}`);
         await settleSidebar(page);
+        const workspace = activePane(page).locator(".ub-workspace");
+        await expect(workspace.locator(".ub-workspace-name")).toHaveText("Unnamed workspace");
+        await expect(workspace.locator(".ub-workspace-location")).toHaveText(new URL(harness().hubUrl).host);
+        const lines = await workspace.evaluate((button) => {
+          const name = button.querySelector(".ub-workspace-name")?.getBoundingClientRect();
+          const location = button.querySelector(".ub-workspace-location")?.getBoundingClientRect();
+          if (!name || !location) throw new Error("e2e: missing workspace header lines");
+          return { nameBottom: name.bottom, locationTop: location.top, nameLeft: name.left, locationLeft: location.left };
+        });
+        expect(lines.nameBottom).toBeLessThanOrEqual(lines.locationTop);
+        expect(lines.nameLeft).toBe(lines.locationLeft);
         await expectHorizontalFit(page);
         await expectFixedFrame(page, content === "long labels");
         await horizontalWheel(page);
@@ -209,8 +223,8 @@ test("empty and long-label sidebars fit narrow and docked layouts in both modes"
     }
   }
 
-  // The docked hide control overhangs its frame; the drawer's close control
-  // fits inside it. Exercise the outer half of each to defend their hit area.
+  // Both controls fit inside the frame. Exercise their outer half to defend
+  // the hit area nearest the sidebar edge.
   for (const width of [810, 1280]) {
     await page.setViewportSize({ width, height: 832 });
     await openSidebar(page);

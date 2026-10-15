@@ -101,19 +101,19 @@ function ArchivedBanner({
     onRestoreFocused?.();
   }, [focusRestore, onRestoreFocused]);
   return (
-    <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] leading-[1.5] text-(--foreground)">
+    <p className="ub-archived-banner mb-3 flex flex-wrap items-baseline gap-2 rounded-(--radius) border border-(--status-warning) bg-(--status-warning-subtle) px-3 py-[0.6rem] text-(--foreground)">
       <span><strong className="font-medium">Archived.</strong> Read-only and hidden from the document list.</span>
       <button
         ref={restore}
         type="button"
-        className="ml-auto cursor-pointer rounded-(--radius-sm) border border-(--border) bg-(--secondary) px-[0.45rem] py-[0.15rem] font-[inherit] text-xs text-(--secondary-foreground)"
+        className="ml-auto cursor-pointer rounded-(--radius-sm) border border-(--border) bg-(--secondary) px-[0.45rem] py-[0.15rem] font-[inherit] ub-type-caption text-(--secondary-foreground)"
         disabled={onRestore === null}
         onClick={() => onRestore?.()}
       >
         {onRestore === null ? "Restore unavailable" : "Restore"}
       </button>
       {onRestore === null && (
-        <span className="ub-restore-unavailable basis-full text-xs">
+        <span className="ub-restore-unavailable basis-full ub-type-small">
           Restore is unavailable while the directory is not ready to write.
         </span>
       )}
@@ -486,7 +486,7 @@ export function StatusLine({
 
   // Refusals retain their compact word; recovery stays in notices and details.
   return (
-    <div className="ub-status min-w-0 text-[0.8rem]/[1.2] text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
+    <div className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {statusLink ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           {statusFacts}
@@ -966,7 +966,7 @@ export function EditorPane({
       {threads.length > 0 && onToggleThreads !== undefined && (
         <button
           type="button"
-          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] text-xs leading-[1.6] border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap cursor-pointer"
+          className="ub-threads-toggle ub-pane-threads-toggle hidden max-xl:inline-flex items-center gap-[0.35rem] [font-family:inherit] [font-weight:inherit] ub-type-caption border border-border rounded-full py-[0.1rem] px-[0.55rem] bg-(--card-accent) text-secondary-foreground whitespace-nowrap cursor-pointer"
           aria-expanded={threadsOpen}
           aria-controls="ub-rail"
           onClick={onToggleThreads}

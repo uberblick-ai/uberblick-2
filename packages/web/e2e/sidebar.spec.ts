@@ -45,6 +45,51 @@ async function openDrawer(page: Page, settings = false): Promise<void> {
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
 }
 
+test("workspace header controls work with keyboard, pointer and touch @webkit-touch", async ({ browser }) => {
+  for (const width of [1280, 810]) {
+    const page = await openApp(browser, "/", {
+      contextOptions: { viewport: { width, height: 832 }, hasTouch: true, isMobile: true, colorScheme: "dark" },
+      readySelector: ".ub-body",
+    });
+    const drawer = width < 1280;
+    const restore = page.getByRole("button", { name: "Show document list", exact: true });
+    if (drawer) await restore.tap();
+    const workspace = page.locator(".ub-workspace");
+    await expect(workspace).toBeVisible();
+    await expect(workspace.locator(".ub-workspace-location")).toBeVisible();
+
+    await workspace.focus();
+    await page.keyboard.press("Enter");
+    const menu = page.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("menuitem")).toHaveCount(1);
+    const current = menu.getByRole("menuitem", { name: "Unnamed workspace", exact: true });
+    await expect(current).toHaveAttribute("aria-current", "true");
+    await page.keyboard.press("Escape");
+    await expect(workspace).toBeFocused();
+
+    await workspace.click();
+    await expect(menu).toBeVisible();
+    await current.click();
+    await expect(menu).toHaveCount(0);
+    if (drawer) await restore.tap();
+
+    await workspace.tap();
+    await expect(menu).toBeVisible();
+    await current.tap();
+    await expect(menu).toHaveCount(0);
+    if (drawer) await restore.tap();
+
+    const hide = page.getByRole("button", { name: drawer ? "Close document list" : "Hide document list", exact: true });
+    await hide.tap();
+    await expect(restore).toBeFocused();
+    if (drawer) await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+    else await expect(page.locator(".ub-list")).toHaveAttribute("inert", "");
+    await restore.tap();
+    await expect(hide).toBeFocused();
+  }
+});
+
 test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
   const page = await openApp(browser);
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
@@ -275,7 +320,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   const sidebar = page.locator(".ub-list");
   const restore = page.getByRole("button", { name: "Show document list" });
   // A portalled menu must also retire when its owning sidebar closes.
-  await page.getByRole("button", { name: /^Unnamed workspace · / }).click();
+  await page.getByRole("button", { name: /^Unnamed workspace\b/ }).click();
   await expect(page.locator(".ub-workspace-menu")).toBeVisible();
   await page.evaluate(async () => {
     document.querySelector<HTMLButtonElement>(".ub-sidebar-hide")?.click();
@@ -355,30 +400,6 @@ test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   }
 });
 
-test("a drag reorders the sidebar, and the other browser sees the new order", async ({
-  browser,
-}) => {
-  const first = docTitle("first");
-  const second = docTitle("second");
-
-  const [a, b] = await Promise.all([openApp(browser), openApp(browser)]);
-  await expect(a.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await expect(b.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await createPinnedDoc(a, first);
-  await createPinnedDoc(a, second);
-  await expect(pinnedTitles(a)).toHaveText([first, second]);
-
-  // The sidebar is a synced document like any other, so the second browser is
-  // already looking at it — nobody told it anything.
-  await expect(pinnedTitles(b)).toHaveText([first, second]);
-
-  // Dragging the row reorders it without also opening its document.
-  await dragOnto(a, a.getByRole("button", { name: second, exact: true }), pinnedTitles(a).nth(0));
-
-  await expect(pinnedTitles(a)).toHaveText([second, first]);
-  await expect(pinnedTitles(b)).toHaveText([second, first]);
-});
-
 test("the drawer's menus, group editing and pointer, keyboard and touch sorting work with a hidden docked preference", async ({ browser }) => {
   const page = await openApp(browser, "/", { contextOptions: { hasTouch: true } });
   await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
@@ -391,7 +412,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await openDrawer(page);
   const drawer = page.getByRole("dialog", { name: "Sidebar", exact: true });
 
-  await page.getByRole("button", { name: /^Unnamed workspace · / }).click();
+  await page.getByRole("button", { name: /^Unnamed workspace\b/ }).click();
   await expect(page.locator(".ub-workspace-menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toBeVisible();

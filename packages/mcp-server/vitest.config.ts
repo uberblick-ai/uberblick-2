@@ -25,23 +25,73 @@ const osSensitive = [
   "store-open",
 ];
 
+const osOnly = process.env.UB_TEST_SCOPE === "os";
+const core = "test/**/*.core.test.ts";
+const processes = "test/**/*.process.test.ts";
+
+function suites(suffix: string): string[] {
+  return osOnly
+    ? osSensitive.map((name) => `test/${name}${suffix}.test.ts`)
+    : [`test/**/*${suffix}.test.ts`];
+}
+
 export default defineConfig({
   test: {
-    include:
-      process.env.UB_TEST_SCOPE === "os"
-        ? osSensitive.map((name) => `test/${name}.test.ts`)
-        : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/mcp-server.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
-    // Allow sequential connect/sync/shutdown and restart waits on real sockets,
-    // child processes and SQLite files. Exceed WAIT_TIMEOUT_MS in test/helpers.ts
-    // so named waits diagnose a missing condition before the test deadline.
-    testTimeout: 120_000,
-    hookTimeout: 120_000,
-    // Socket, process and timer waits leave workers idle; allow oversubscription.
-    maxWorkers: "150%",
+    // Standalone runs use one worker per core; root runs share a machine budget.
+    maxWorkers: "100%",
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "core",
+          include: [...suites(".core"), ...(osOnly ? [] : ["src/**/*.test.ts"])],
+          // Only transport-free, in-memory tests share a module graph.
+          // Module mocks and MCP boundary tests stay in the isolated tier.
+          isolate: false,
+          testTimeout: 10_000,
+          hookTimeout: 10_000,
+          restoreMocks: true,
+          unstubEnvs: true,
+          unstubGlobals: true,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          include: suites("{,.*}"),
+          exclude: [core, processes],
+          isolate: true,
+          // Exceed the named real-time waits so their diagnostics arrive first.
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "process",
+          include: suites(".process"),
+          isolate: true,
+          globalSetup: ["test/process-setup.ts"],
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
+        },
+      },
+    ],
   },
 });

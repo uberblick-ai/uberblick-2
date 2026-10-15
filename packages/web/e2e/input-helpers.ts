@@ -1,4 +1,5 @@
 /** Native fixture input follows the page's device, with interior cell targets. */
+import { expect } from "@playwright/test";
 import type { Locator } from "@playwright/test";
 
 export async function activateControl(target: Locator, options: { touch?: boolean | undefined } = {}): Promise<void> {
@@ -11,4 +12,15 @@ export async function activateControl(target: Locator, options: { touch?: boolea
       : undefined);
     await target.tap(position === undefined ? {} : { position });
   } else await target.click();
+}
+
+/**
+ * Close an open drawer and wait for its deferred focus return, which follows
+ * the unmount and would otherwise land on the next input.
+ */
+export async function closeIfOpen(close: Locator, returnTo: Locator, options: { touch?: boolean | undefined } = {}): Promise<void> {
+  if (!await close.isVisible()) return;
+  await activateControl(close, options);
+  await expect(close).toBeHidden();
+  await expect(returnTo).toBeFocused();
 }

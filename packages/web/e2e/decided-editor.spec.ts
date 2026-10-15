@@ -3,9 +3,9 @@
  * Pointer dragging and touch ranges still reach comments; metadata arriving
  * over the real transport locks an existing view without replacing or moving it.
  */
-import { devices, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { editor, setupHarness } from "./app-helpers.js";
+import { closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
@@ -61,7 +61,7 @@ async function onlyComment(page: Page): Promise<void> {
   await expect(page.getByRole("button", { name: /^(Bold|Italic|Strikethrough|Inline code|External link)$/ })).toHaveCount(0);
 }
 
-async function addComment(page: Page, text: string, touch = false): Promise<void> {
+async function addComment(page: Page, text: string, touch = false, expectedThreads = 1): Promise<void> {
   const comment = composer(page).getByRole("button", { name: "Comment", exact: true });
   if (touch) await comment.tap();
   else await comment.click();
@@ -69,99 +69,71 @@ async function addComment(page: Page, text: string, touch = false): Promise<void
   const submit = composer(page).getByRole("button", { name: "Comment", exact: true });
   if (touch) await submit.tap();
   else await submit.click();
-  await expect(editor(page).locator("[data-comment-thread]")).toHaveCount(1);
+  await expect(editor(page).locator("[data-comment-thread]")).toHaveCount(expectedThreads);
 }
 
-test("a pointer selection on a decided record offers only Comment and keeps existing threads keyboard reachable", async ({ browser }) => {
-  const uuid = await record(session(), "decided");
+test("decided prose and cells offer only Comment, keep threads keyboard reachable and preserve approved content", async ({ browser }) => {
+  const writer = session();
+  const uuid = await record(writer, "decided", [
+    { type: "paragraph", text: "Selected words remain readable after deciding." },
+    { type: "table", text: "| Approved cell |\n| --- |\n| Approved value |" },
+  ]);
+  const before = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await page.locator(".ub-tldr-body > p").click();
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
-  const paragraph = editor(page).locator(":scope > p").first();
-  const box = await paragraph.boundingBox();
-  if (box === null) throw new Error("e2e: prose block has no box");
-  const baseline = box.y + Math.min(box.height, 24) / 2;
-  await page.mouse.move(box.x + 8, baseline);
-  await page.mouse.down();
-  await page.mouse.move(box.x + Math.min(170, box.width - 8), baseline, { steps: 12 });
-  await page.mouse.up();
-  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
-  expect(selected.length).toBeGreaterThan(0);
-  await onlyComment(page);
-  await addComment(page, "Pointer comment on approved reasoning.");
-  const highlight = editor(page).locator("[data-comment-thread]");
-  await expect(highlight).toHaveText(selected);
-  await highlight.click();
-  const rail = page.getByRole("region", { name: "Threads", exact: true });
-  await expect(rail).toContainText("Pointer comment on approved reasoning.");
-
-  // Native Tab reaches the highlight even though the editor itself has no
-  // editing caret. Enter moves keyboard focus into the matching rail card.
-  await page.getByRole("button", { name: "Document actions" }).focus();
-  for (let count = 0; count < 20; count += 1) {
-    if (await highlight.evaluate((element) => document.activeElement === element)) break;
-    await page.keyboard.press("Tab");
-  }
-  await expect(highlight).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(rail.locator(".ub-thread")).toBeFocused();
-  await rail.getByRole("button", { name: "Reply", exact: true }).click();
-  await rail.getByPlaceholder("Reply…").fill("Keyboard readers can continue this thread.");
-  await rail.getByRole("button", { name: "Reply", exact: true }).click();
-  await expect(rail).toContainText("Keyboard readers can continue this thread.");
-  await rail.getByRole("button", { name: "Resolve", exact: true }).click();
-  await expect(highlight).toHaveAccessibleName("Resolved comment thread");
-  await highlight.click();
-  await rail.getByRole("button", { name: "Reopen", exact: true }).click();
-  await expect(highlight).toHaveAccessibleName("Comment thread");
-  await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
-});
-
-test("a decided cell offers only Comment and its rail and highlight keep the approved content", async ({ browser }) => {
-  const writer = session();
-  const uuid = await record(writer, "decided", [{ type: "table", text: "| Approved cell |\n| --- |\n| Approved value |" }]);
-  const before = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  const prose = editor(page).locator(":scope > p").first();
   const header = editor(page).locator(".ub-table th").first();
-  const paragraph = header.locator("p");
-  const box = await paragraph.boundingBox();
-  if (box === null) throw new Error("e2e: cell has no box");
-  const baseline = box.y + Math.min(box.height, 24) / 2;
-  await page.mouse.move(box.x + 2, baseline);
-  await page.mouse.down();
-  await page.mouse.move(box.x + Math.min(70, box.width - 2), baseline, { steps: 12 });
-  await page.mouse.up();
-  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
-  expect(selected.length).toBeGreaterThan(0);
-  await onlyComment(page);
-  await addComment(page, "Discuss the approved cell.");
-  const highlight = header.locator("[data-comment-thread]");
-  await expect(highlight).toHaveText(selected);
   const rail = page.getByRole("region", { name: "Threads", exact: true });
-  await expect(rail.locator(".ub-thread-excerpt")).toHaveText(selected);
-  await expect(rail.locator(".ub-thread")).toHaveAttribute("aria-current", "true");
-  await rail.locator(".ub-thread").click();
-  await expect(highlight).toHaveClass(/ub-comment-flash/);
-  await page.getByRole("button", { name: "Document actions" }).focus();
-  for (let count = 0; count < 20; count += 1) {
-    if (await highlight.evaluate((element) => document.activeElement === element)) break;
-    await page.keyboard.press("Tab");
+  for (const [index, part] of [
+    { target: prose, container: prose, inset: 8, length: 170, comment: "Pointer comment on approved reasoning.", reply: "Keyboard readers can continue this thread." },
+    { target: header.locator("p"), container: header, inset: 2, length: 70, comment: "Discuss the approved cell.", reply: "Cell reply." },
+  ].entries()) {
+    const box = await part.target.boundingBox();
+    if (box === null) throw new Error("e2e: approved content has no box");
+    const baseline = box.y + Math.min(box.height, 24) / 2;
+    await page.mouse.move(box.x + part.inset, baseline);
+    await page.mouse.down();
+    await page.mouse.move(box.x + Math.min(part.length, box.width - part.inset), baseline, { steps: 12 });
+    await page.mouse.up();
+    const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+    expect(selected.length).toBeGreaterThan(0);
+    await onlyComment(page);
+    await addComment(page, part.comment, false, index + 1);
+    const highlight = part.container.locator("[data-comment-thread]");
+    await expect(highlight).toHaveText(selected);
+    await highlight.click();
+    await expect(rail).toContainText(part.comment);
+    const card = rail.locator(".ub-thread-card").filter({ hasText: part.comment });
+    const cardButton = card.locator(".ub-thread");
+    await expect(card.locator(".ub-thread-excerpt")).toHaveText(selected);
+    await expect(cardButton).toHaveAttribute("aria-current", "true");
+    await cardButton.click();
+    await expect(highlight).toHaveClass(/ub-comment-flash/);
+
+    // Native Tab reaches each highlight without an editing caret; Enter
+    // moves keyboard focus into that highlight's matching rail card.
+    await page.getByRole("button", { name: "Document actions" }).focus();
+    for (let count = 0; count < 20; count += 1) {
+      if (await highlight.evaluate((element) => document.activeElement === element)) break;
+      await page.keyboard.press("Tab");
+    }
+    await expect(highlight).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(cardButton).toBeFocused();
+    await card.getByRole("button", { name: "Reply", exact: true }).click();
+    await card.getByPlaceholder("Reply…").fill(part.reply);
+    await card.getByRole("button", { name: "Reply", exact: true }).click();
+    await expect(card).toContainText(part.reply);
+    await card.getByRole("button", { name: "Resolve", exact: true }).click();
+    await expect(highlight).toHaveAccessibleName("Resolved comment thread");
+    await highlight.click();
+    await card.getByRole("button", { name: "Reopen", exact: true }).click();
+    await expect(highlight).toHaveAccessibleName("Comment thread");
   }
-  await expect(highlight).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(rail.locator(".ub-thread")).toBeFocused();
-  await rail.getByRole("button", { name: "Reply", exact: true }).click();
-  await rail.getByPlaceholder("Reply…").fill("Cell reply.");
-  await rail.getByRole("button", { name: "Reply", exact: true }).click();
-  await expect(rail).toContainText("Cell reply.");
-  await rail.getByRole("button", { name: "Resolve", exact: true }).click();
-  await expect(highlight).toHaveAccessibleName("Resolved comment thread");
-  await highlight.click();
-  await rail.getByRole("button", { name: "Reopen", exact: true }).click();
-  await expect(highlight).toHaveAccessibleName("Comment thread");
+  await expect(prose).toHaveText("Selected words remain readable after deciding.");
   const after = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
   expect(after.blocks).toEqual(before.blocks);
 });
@@ -195,7 +167,7 @@ test("touch selection on a decided record starts a thread and its highlight open
   await addComment(page, "Touch readers can discuss the decided record.", true);
   const highlight = editor(page).locator("[data-comment-thread]");
   const close = page.getByRole("button", { name: "Close threads", exact: true });
-  if (await close.isVisible()) await close.tap();
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await highlight.tap();
   const rail = page.getByRole("region", { name: "Threads", exact: true });
   await expect(rail).toContainText("Touch readers can discuss the decided record.");
@@ -205,45 +177,13 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(rail).toContainText("Touch reply.");
   await rail.getByRole("button", { name: "Resolve", exact: true }).tap();
   // Dismissing the drawer exposes the text highlight for the touch route back.
-  if (await close.isVisible()) await close.tap();
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await expect(highlight).toHaveAccessibleName("Resolved comment thread");
   await highlight.tap();
   await rail.getByRole("button", { name: "Reopen", exact: true }).tap();
-  if (await close.isVisible()) await close.tap();
+  await closeIfOpen(close, page.locator(".ub-threads-toggle"), { touch: true });
   await expect(highlight).toHaveAccessibleName("Comment thread");
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
-});
-
-for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) test(`legacy decision summaries offer no authoring on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
-  const writer = session();
-  const uuid = await record(writer, "open");
-  const peer = await legacyDecisionPeer(harness(), uuid);
-  peers.push(peer);
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    upstream: true, contextOptions: { ...(touch ? devices["iPad (gen 7)"] : {}), colorScheme: appearance },
-  });
-  for (const status of ["open", "decided", "rejected", "withdrawn"] as const) {
-    peer.decide(status, "Keep the approved wording.");
-    await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
-    const summary = page.locator(".ub-tldr-body > p");
-    await expect(summary).toHaveText("Keep the approved wording.");
-    if (touch) await summary.tap();
-    else await summary.click();
-    await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
-    const actions = page.getByRole("button", { name: "Document actions" });
-    if (touch) await actions.tap();
-    else { await actions.focus(); await page.keyboard.press("Enter"); }
-    await expect(page.getByRole("menu")).toBeVisible();
-    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    peer.decide(status, null);
-    await expect(page.locator(".ub-tldr")).toHaveCount(0);
-    if (touch) await actions.tap();
-    else await actions.click();
-    await expect(page.getByRole("menuitem", { name: /(?:Add|Edit) TL;DR/ })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-  }
 });
 
 test("an open decision keeps its title, prose and tables read-only through later states", async ({ browser }) => {

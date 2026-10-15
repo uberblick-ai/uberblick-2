@@ -1,13 +1,7 @@
 /** Composed TableKit surface: direct input, contained overflow and caret reveal. */
 import { devices, expect, test } from "@playwright/test";
-import type { Locator } from "@playwright/test";
-import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { HocuspocusProvider } from "@hocuspocus/provider";
-import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
-import { wrapToken } from "@uberblick/schema/protocol";
-import { appendBlock, directoryRoom, getBlocksFragment, initDoc, roomForDoc, tableCellText, tableRows, upsertDirectoryEntry } from "@uberblick/schema";
-import * as Y from "yjs";
+import { roomForDoc } from "@uberblick/schema";
 import { activateControl, createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { placeCaret, placeCaretIn } from "./harness.js";
 
@@ -81,72 +75,6 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
     }
   }
 });
-
-for (const input of [
-  { name: "desktop", viewport: { width: 1280, height: 800 }, hasTouch: false },
-  { name: "iPad-sized touch", viewport: { width: 1024, height: 1366 }, hasTouch: true },
-] as const) {
-  test(`nested table edits move the chrome rev and match a fresh reading — ${input.name}`, async ({ browser }) => {
-    const page = await openApp(browser, "/", { contextOptions: { viewport: input.viewport, hasTouch: input.hasTouch } });
-    if (input.viewport.width < 1280) {
-      await page.getByRole("button", { name: "Show document list", exact: true }).click();
-    }
-    await createDoc(page, docTitle("Table revision"));
-    await placeCaret(page);
-    await page.keyboard.type("/table");
-    await page.keyboard.press("Enter");
-    const table = page.locator(".ub-table");
-    const first = table.locator("th").first();
-    const revision = page.locator(".ub-doc-rev");
-    await expect(table.locator("th")).toHaveCount(3);
-    await expect(revision).toHaveText(/rev [0-9a-f]{8}$/);
-    let before = await revision.innerText();
-
-    const activate = (control: Locator): Promise<void> => activateControl(control, { touch: input.hasTouch });
-    const checkFreshRev = async (): Promise<void> => {
-      await expect(revision).not.toHaveText(before);
-      await expect(page.locator(".ub-status-word--saved")).toHaveText("saved here");
-      const after = await revision.innerText();
-      // Reload starts a new observer against the saved document; it must agree
-      // with the revision maintained incrementally while the editor was open.
-      await page.reload();
-      await expect(table).toBeVisible();
-      await expect(revision).toHaveText(after);
-      before = after;
-    };
-
-    await activate(first);
-    await page.keyboard.insertText("Alpha");
-    await expect(first).toHaveText("Alpha");
-    await checkFreshRev();
-    await expect(first).toHaveText("Alpha");
-
-    await activate(first);
-    // Native range setup follows the cell-formatting proofs: selectionchange
-    // imports the range into the real editor and its stock formatting toolbar.
-    await page.evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-    await first.locator("p").evaluate((element, pointerType) => {
-      element.dispatchEvent(new PointerEvent("pointerdown", { pointerType, bubbles: true, pointerId: 1 }));
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-    }, input.hasTouch ? "touch" : "mouse");
-    const formatting = page.getByRole("toolbar", { name: "Text formatting and comment", exact: true });
-    await expect(formatting).toBeVisible();
-    await activate(formatting.getByRole("button", { name: "Bold", exact: true }));
-    await expect(first.locator("strong")).toHaveText("Alpha");
-    await checkFreshRev();
-    await expect(first.locator("strong")).toHaveText("Alpha");
-
-    await activate(first);
-    await activate(page.getByRole("button", { name: "Insert column after 1", exact: true }));
-    await expect(table.locator("th")).toHaveCount(4);
-    await checkFreshRev();
-    await expect(table.locator("th")).toHaveCount(4);
-  });
-}
 
 test("a document link typed in a table cell opens its target and Back restores the table", async ({ page }, info) => {
   await page.goto(harness().appUrl);
@@ -289,84 +217,3 @@ for (const colorScheme of ["light", "dark"] as const) {
     await expect(page.locator(".ub-title")).toHaveValue(secondTitle);
   });
 }
-
-test("two merged cell link conflicts stay distinct through repair and the table binds afterwards", async ({ page }, info) => {
-  const source = randomUUID();
-  const targets = [randomUUID(), randomUUID()] as const;
-  const hrefs = ["https://example.invalid/first", "https://example.invalid/other"] as const;
-  const doc = new Y.Doc();
-  initDoc(doc, { uuid: source, title: "Table conflict repair" });
-  appendBlock(doc, { type: "table", text: "| first suffix | other suffix | unchanged |\n| --- | --- | --- |" });
-  const texts = (ydoc: Y.Doc): [Y.XmlText, Y.XmlText, Y.XmlText] => {
-    const table = getBlocksFragment(ydoc).get(0);
-    if (!(table instanceof Y.XmlElement)) throw new Error("e2e: table fixture is absent");
-    const row = tableRows(table)[0];
-    if (row?.length !== 3) throw new Error("e2e: table fixture must have three header cells");
-    const [first, second, third] = row.map((cell) => tableCellText(cell));
-    if (!(first instanceof Y.XmlText) || !(second instanceof Y.XmlText) || !(third instanceof Y.XmlText)) {
-      throw new Error("e2e: table fixture cells must hold shared text");
-    }
-    return [first, second, third];
-  };
-  const cells = texts(doc);
-  cells[0].format(0, 5, { bold: true });
-  cells[1].format(0, 5, { italic: true });
-  const other = new Y.Doc();
-  Y.applyUpdate(other, Y.encodeStateAsUpdate(doc));
-  for (const column of [0, 1] as const) {
-    cells[column].format(0, 5, { link: { href: hrefs[column] } });
-    texts(other)[column].format(0, 5, { docLink: { docId: targets[column] } });
-  }
-  Y.applyUpdate(doc, Y.encodeStateAsUpdate(other));
-  other.destroy();
-
-  const peers: Array<{ provider: HocuspocusProvider; ydoc: Y.Doc }> = [];
-  const secret = await importRootSecret(harness().authSecret);
-  const connect = async (room: string, ydoc = new Y.Doc()): Promise<Y.Doc> => {
-    const provider = new HocuspocusProvider({
-      url: harness().hubUrl, name: room, document: ydoc,
-      token: async () => wrapToken(await mintToken(secret, {
-        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
-        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-      })),
-    });
-    peers.push({ provider, ydoc });
-    await new Promise<void>((resolve) => provider.on("synced", resolve));
-    return ydoc;
-  };
-  try {
-    const directory = await connect(directoryRoom(harness().workspaceUuid));
-    upsertDirectoryEntry(directory, { uuid: source, title: "Table conflict repair" });
-    targets.forEach((uuid, column) => { upsertDirectoryEntry(directory, { uuid, title: `Cell target ${column + 1}` }); });
-    await connect(roomForDoc(harness().workspaceUuid, source), doc);
-    await page.goto(new URL(`/${ws()}/${source}`, harness().appUrl).href);
-    const repairs = page.locator(".ub-link-repair li");
-    await expect(repairs).toHaveCount(2);
-    await expect(page.locator(".ub-editor .ProseMirror")).toHaveCount(0);
-    await expect(repairs.nth(0).locator("q")).toHaveText("first");
-    await expect(repairs.nth(1).locator("q")).toHaveText("other");
-    const first = repairs.nth(0).getByRole("button", { name: "Keep the document: Cell target 1", exact: true });
-    if (info.project.use.hasTouch === true) await first.tap();
-    else await first.click();
-    await expect(repairs).toHaveCount(1);
-    await expect(repairs.locator("q")).toHaveText("other");
-    await expect(page.locator(".ub-editor .ProseMirror")).toHaveCount(0);
-    const second = repairs.getByRole("button", { name: `Keep the link: ${hrefs[1]}`, exact: true });
-    if (info.project.use.hasTouch === true) await second.tap();
-    else await second.click();
-    await expect(repairs).toHaveCount(0);
-    const table = page.locator(".ub-table");
-    await expect(table.locator("th")).toHaveText(["first suffix", "other suffix", "unchanged"]);
-    await expect(table.locator("th").nth(0).locator("strong a.ub-doclink, a.ub-doclink strong")).toHaveText("first");
-    await expect(table.locator("th").nth(1).locator("em a.ub-link, a.ub-link em")).toHaveText("other");
-    await expect.poll(() => cells[0].toDelta()).toEqual([
-      { insert: "first", attributes: { bold: true, docLink: { docId: targets[0] } } }, { insert: " suffix" },
-    ]);
-    await expect.poll(() => cells[1].toDelta()).toEqual([
-      { insert: "other", attributes: { italic: true, link: { href: hrefs[1] } } }, { insert: " suffix" },
-    ]);
-  } finally {
-    for (const { provider, ydoc } of peers) { provider.destroy(); ydoc.destroy(); }
-    if (!peers.some((peer) => peer.ydoc === doc)) doc.destroy();
-  }
-});

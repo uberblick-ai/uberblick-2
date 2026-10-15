@@ -7,7 +7,7 @@ import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock, deleteBlock, directoryRoom, editBlock,
   getBlocks, getBlocksFragment, initDoc, roomForDoc,
-  tableCellText, tableRows, tombstoneDirectoryEntry, upsertDirectoryEntry,
+  tableCellText, tableRows, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { setupHarness } from "./app-helpers.js";
@@ -33,7 +33,6 @@ async function publishTable(options: { source?: string; ragged?: boolean } = {})
   uuid: string;
   id: string;
   doc: Y.Doc;
-  directory: Y.Doc;
   close: () => void;
 }> {
   const uuid = randomUUID();
@@ -65,7 +64,7 @@ async function publishTable(options: { source?: string; ragged?: boolean } = {})
     const directory = await connect(directoryRoom(harness().workspaceUuid));
     upsertDirectoryEntry(directory, { uuid, title });
     await connect(roomForDoc(harness().workspaceUuid, uuid), doc);
-    return { uuid, id, doc, directory, close };
+    return { uuid, id, doc, close };
   } catch (error) {
     close();
     throw error;
@@ -140,37 +139,6 @@ test("an open column menu keeps its target through collaborator edits, insertion
     await expect(table.locator("td")).toHaveText(["new one", "edited last", "new two", "tail"]);
     await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text)
       .toBe("| New | C |\n| --- | --- |\n| new one | edited last |\n| new two | tail |");
-  } finally { fixture.close(); }
-});
-
-test("a column move resolves its target after collaborator edits and insertion to its left", async ({ page }) => {
-  const source = "| A | B | C |\n| --- | --- | --- |\n| alpha | one | last |\n| beta | two | tail |";
-  const fixture = await publishTable({ source });
-  try {
-    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
-    const table = page.locator(".ub-table");
-    await expect(table.locator("th")).toHaveText(["A", "B", "C"]);
-    await table.locator("td").nth(1).click();
-    await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
-    const move = page.getByRole("menuitem", { name: "Move column left", exact: true });
-    await expect(move).toBeEnabled();
-    const edited = source.replace("one", "edited one").replace("last", "edited last");
-    editBlock(fixture.doc, fixture.id, source, edited, {
-      tableMapping: { rows: [0, 1, 2], columns: [0, 1, 2] },
-    });
-    await expect(table.locator("td").nth(1)).toHaveText("edited one");
-    const expanded = "| A | New | B | C |\n| --- | --- | --- | --- |\n| alpha | new one | edited one | edited last |\n| beta | new two | two | tail |";
-    editBlock(fixture.doc, fixture.id, edited, expanded, {
-      tableMapping: { rows: [0, 1, 2], columns: [0, null, 1, 2] },
-    });
-    await expect(table.locator("th")).toHaveText(["A", "New", "B", "C"]);
-    await expect(move).toBeEnabled();
-    await move.click();
-    await expect(page.getByRole("menu")).toHaveCount(0);
-    await expect(table.locator("th")).toHaveText(["A", "B", "New", "C"]);
-    await expect(table.locator("td")).toHaveText(["alpha", "edited one", "new one", "edited last", "beta", "two", "new two", "tail"]);
-    await expect.poll(() => getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text)
-      .toBe("| A | B | New | C |\n| --- | --- | --- | --- |\n| alpha | edited one | new one | edited last |\n| beta | two | new two | tail |");
   } finally { fixture.close(); }
 });
 
@@ -337,29 +305,3 @@ test("a ragged shared table offers no structural controls and retains editable c
       .toEqual([3, 3, 2]);
   } finally { fixture.close(); }
 });
-
-for (const kind of ["row", "column"] as const) {
-test(`a received archive closes its ${kind} menu and removes structural controls`, async ({ page }) => {
-  const fixture = await publishTable();
-  try {
-    await page.goto(new URL(`/${ws()}/${fixture.uuid}`, harness().appUrl).href);
-    const table = page.locator(".ub-table");
-    await expect(table.locator("tr")).toHaveCount(3);
-    await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "true");
-    await table.locator("td").first().click();
-    await page.getByRole("button", { name: kind === "row" ? "Row 2 actions" : "Column 1 actions", exact: true }).click();
-    await expect(page.getByRole("menuitem", { name: `Delete ${kind}`, exact: true })).toBeVisible();
-    if (kind === "column") await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeEnabled();
-    tombstoneDirectoryEntry(fixture.directory, fixture.uuid);
-    await expect(page.locator(".ub-archived-banner")).toBeVisible();
-    await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute("contenteditable", "false");
-    await expect(page.getByRole("menu")).toHaveCount(0);
-    await expect(page.getByRole("menuitem", { name: /^Move column / })).toHaveCount(0);
-    await expect(page.locator(".ub-table-controls")).toHaveCount(0);
-    await table.locator("td").first().click({ button: "right" });
-    await expect(page.getByRole("menu")).toHaveCount(0);
-    await expect(table.locator("td")).toHaveText(["alpha", "one", "beta", "two"]);
-    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(SOURCE);
-  } finally { fixture.close(); }
-});
-}

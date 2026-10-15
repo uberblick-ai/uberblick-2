@@ -6,8 +6,8 @@ import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
-import { caughtUp, client, closeClient, closeDeviceSync, config, environment, hub } from "./device-sync-fixture.js";
-import { sleep, testConfig, waitUntil, WORKSPACE } from "./helpers.js";
+import { client, closeClient, closeDeviceSync, config, environment, hub, listeners } from "./device-sync-fixture.js";
+import { sleep, testConfig, trackListener, waitUntil, WORKSPACE } from "./helpers.js";
 
 afterEach(closeDeviceSync);
 
@@ -80,10 +80,14 @@ describe("stored-login refusal", () => {
     await writeHubLogin(second.origin, two, env);
     const a = await client(config(first, env));
     const b = await client(config(second, env));
-    await Promise.all([caughtUp(a), caughtUp(b)]);
+    const settled = await Promise.all([
+      a.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+      b.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+    ]);
+    expect(settled).toMatchObject([{ caughtUp: true }, { caughtUp: true }]);
     first.revoke(one.credential.record.id);
     await waitUntil("only first hub to require sign-in", () => a.instance.replicas.sync.state().authRecovery === "sign-in-required");
-    await caughtUp(b);
+    expect(await b.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
     expect(readHubLogins(env).logins[second.origin]).toEqual(two);
     expect(second.renewalCount).toBe(0);
     expect(second.authentications.every(auth => auth.claims?.kid === two.credential.record.id)).toBe(true);
@@ -145,8 +149,10 @@ describe("stored-login refusal", () => {
     expect(written).toMatchObject({ applied: true, synced: false });
     fixture.grant(WORKSPACE);
     await fixture.resume();
-    await caughtUp(rig);
-    expect(getMeta(fixture.readRoom(roomForDoc(WORKSPACE, written.uuid))!).title).toBe("Unreachable");
+    await waitUntil("the resumed hub to apply the offline edit", () =>
+      fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "Unreachable",
+    70_000);
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 })).toMatchObject({ caughtUp: true });
   });
 
   it("distinguishes an unconfigured renewal route from a proxy outage", async () => {
@@ -175,23 +181,21 @@ describe("stored-login refusal", () => {
       response.writeHead(302, { Location: other.url });
       response.end();
     });
+    const tracked = trackListener(redirector);
+    listeners.push(() => tracked.close());
     redirector.on("upgrade", (_request, socket) => {
       socket.end(`HTTP/1.1 302 Found\r\nLocation: ${other.url}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     });
     await new Promise<void>((resolve) => redirector.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = redirector.address();
-      if (address === null || typeof address === "string") throw new Error("no redirect server port");
-      const origin = `http://127.0.0.1:${address.port}`;
-      await writeHubLogin(origin, issuer.issue({ workspaces: [WORKSPACE] }), env);
-      const redirected = await client({ ...config(issuer, env), hubUrl: `ws://127.0.0.1:${address.port}` });
-      await waitUntil("websocket redirect refusal", () => redirected.instance.replicas.sync.state().status === "hub-down");
-      expect(redirected.instance.replicas.sync.mintCount).toBe(0);
-      expect(other.authentications).toEqual([]);
-      await closeClient(redirected);
-    } finally {
-      await new Promise<void>((resolve, reject) => redirector.close((error) => error ? reject(error) : resolve()));
-    }
+    const address = redirector.address();
+    if (address === null || typeof address === "string") throw new Error("no redirect server port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    await writeHubLogin(origin, issuer.issue({ workspaces: [WORKSPACE] }), env);
+    const redirected = await client({ ...config(issuer, env), hubUrl: `ws://127.0.0.1:${address.port}` });
+    await waitUntil("websocket redirect refusal", () => redirected.instance.replicas.sync.state().status === "hub-down");
+    expect(redirected.instance.replicas.sync.mintCount).toBe(0);
+    expect(other.authentications).toEqual([]);
+    await closeClient(redirected);
   });
 
   // A login naming the workspace meets the skew at room admission; one without

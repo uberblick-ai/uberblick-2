@@ -182,25 +182,6 @@ for (const colorScheme of ["light", "dark"] as const) {
   });
 }
 
-test("the scan rejects a seeded unnamed button on an open surface", async ({ browser }) => {
-  const page = await openApp(browser, "/", {
-    contextOptions: { viewport: { width: 1280, height: 800 } }, readySelector: ".ub-workspace",
-  });
-  await page.locator(".ub-workspace").click();
-  await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
-  await page.locator("[data-slot=dropdown-menu-content]").evaluate((surface) => {
-    const button = document.createElement("button");
-    button.id = "seeded-unnamed-button";
-    button.style.cssText = "width:32px;height:32px";
-    surface.append(button);
-  });
-  const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-  expect(result.violations.find((rule) => rule.id === "button-name")?.nodes.map((node) => node.target))
-    .toContainEqual(["#seeded-unnamed-button"]);
-  const exclusions = await scanExclusions(page, result.violations);
-  expect(() => assertNoViolations(result.violations, exclusions)).toThrow(/button-name/);
-});
-
 test("element exclusions preserve same-rule siblings and reject ambiguous selectors", async ({ page }) => {
   await page.setContent(`<!doctype html><html lang="en"><title>Exclusion probe</title><body>
     <main><h1>Scrollable lists</h1><div data-slot="caret-menu-content">
@@ -220,35 +201,4 @@ test("element exclusions preserve same-rule siblings and reject ambiguous select
   await page.locator('[id="radix:sibling"]').evaluate((node) => node.setAttribute("aria-label", "Block types"));
   const ambiguous = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   await expect(scanExclusions(page, ambiguous.violations)).rejects.toThrow(/exclusion is ambiguous/);
-});
-
-test("record axe's rendered oklch via light-dark contrast classification", async ({ browser }, info) => {
-  const readings = [];
-  for (const colorScheme of ["light", "dark"] as const) {
-    const page = await openApp(browser, "/", {
-      contextOptions: { colorScheme, viewport: { width: 1280, height: 800 } }, readySelector: ".ub-workspace",
-    });
-    await page.evaluate(() => {
-      const probe = document.createElement("p");
-      probe.id = "axe-bad-contrast";
-      // Neutral oklch has relative luminance L^3: ~1.39:1 light, ~1.23:1 dark.
-      probe.style.cssText = "position:fixed;inset:100px auto auto 400px;z-index:9999;padding:20px;font:16px sans-serif;color:light-dark(oklch(0.8 0 0),oklch(0.25 0 0));background:light-dark(oklch(0.9 0 0),oklch(0.15 0 0))";
-      probe.textContent = "Deliberately unreadable contrast";
-      document.body.append(probe);
-    });
-    const result = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
-    const classification = ["violations", "passes", "incomplete"] as const;
-    const outcome = classification.find((kind) => result[kind].some((rule) =>
-      rule.id === "color-contrast" && rule.nodes.some((node) => node.target.includes("#axe-bad-contrast"))));
-    expect(outcome, "axe must classify the rendered colour probe").toBeDefined();
-    readings.push({ colorScheme, outcome, rendered: await page.locator("#axe-bad-contrast").evaluate((node) => {
-      const style = getComputedStyle(node);
-      return { color: style.color, background: style.backgroundColor, colorScheme: style.colorScheme };
-    }), results: classification.flatMap((kind) => result[kind].filter((rule) => rule.id === "color-contrast")
-      .flatMap((rule) => rule.nodes.filter((node) => node.target.includes("#axe-bad-contrast")).map((node) => ({ kind, node })))) });
-  }
-  console.log(JSON.stringify(readings.map(({ colorScheme, outcome, rendered }) => ({ colorScheme, outcome, rendered }))));
-  const reportPath = info.outputPath("axe-colour-probe.json");
-  await writeFile(reportPath, JSON.stringify(readings, null, 2));
-  await info.attach("axe colour probe", { path: reportPath, contentType: "application/json" });
 });

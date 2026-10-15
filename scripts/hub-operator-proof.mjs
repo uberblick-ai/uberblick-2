@@ -1,0 +1,191 @@
+#!/usr/bin/env node
+// Exercise the committed hub image on disposable Compose volumes without publishing ports.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const scratchRoot = process.env.UB_AGENTS_SCRATCH ?? tmpdir();
+const sha = process.argv[2];
+assert(process.argv.length === 3 && /^[0-9a-f]{40}$/.test(sha ?? ""),
+  "usage: node scripts/hub-operator-proof.mjs <full-source-sha>");
+const scratch = mkdtempSync(join(scratchRoot, `hub-image-proof-${process.env.UB_AGENTS_RUN ?? "local"}-`));
+const log = join(scratch, "proof.log");
+const run = (process.env.UB_AGENTS_RUN ?? "local").toLowerCase().replaceAll(/[^a-z0-9]/g, "");
+const project = `hub-operator-proof-${run}-${randomUUID().slice(0, 8)}`;
+const tag = `uberblick-hub-operator-proof:${sha}-${project.slice(-8)}`;
+const emptyVolume = `${project}-empty`;
+const deployment = join(scratch, "deployment");
+mkdirSync(deployment);
+const containers = new Set();
+let active;
+let interrupted;
+let cleaning = false;
+const kill = () => { if (active?.pid) { try { process.kill(-active.pid, "SIGTERM"); } catch {} } };
+const cancel = signal => { if (!cleaning) { interrupted = signal; kill(); } };
+process.on("SIGINT", () => cancel("SIGINT"));
+process.on("SIGTERM", () => cancel("SIGTERM"));
+const deadline = setTimeout(() => cancel("ten-minute proof deadline"), 600_000);
+
+async function command(program, args, options = {}) {
+  if (interrupted && !options.cleanup) throw new Error(interrupted);
+  return new Promise((accept, reject) => {
+    const child = spawn(program, args, {
+      cwd: options.cwd ?? root, env: { ...process.env, COMPOSE_PROJECT_NAME: project },
+      detached: true, stdio: [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    });
+    active = child;
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let terminate;
+    child.stdout.setEncoding("utf8").on("data", data => { stdout += data; });
+    child.stderr.setEncoding("utf8").on("data", data => { stderr += data; });
+    if (options.input !== undefined) { child.stdin.on("error", () => {}); child.stdin.end(options.input); }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
+      terminate = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 2_000);
+    }, options.timeout ?? 45_000);
+    child.once("error", error => { clearTimeout(timer); clearTimeout(terminate); active = undefined; reject(error); });
+    child.once("close", (code, signal) => {
+      clearTimeout(timer); clearTimeout(terminate); active = undefined;
+      appendFileSync(log, `${program} ${args.join(" ")}\nexit=${code} signal=${signal}\n${stdout}${stderr}\n`);
+      if (timedOut || (code !== 0 && !options.allowFailure)) reject(new Error(`${program} failed (${timedOut ? "deadline" : signal ?? code}): ${stdout}${stderr}`));
+      else accept({ code, signal, stdout, stderr });
+    });
+  });
+}
+
+const docker = (args, options) => command("docker", args, options);
+const compose = (args, options = {}) => docker(["compose", "--project-name", project, "--file", "docker-compose.yml", ...args], { cwd: deployment, ...options });
+const exec = (args, options) => compose(["exec", "-T", "hub", ...args], options);
+const offline = (args, options = {}) => {
+  const name = `${project}-operator`;
+  containers.add(name);
+  return compose(["run", "--rm", "--no-deps", "-T", "--name", name, "hub", ...args], options);
+};
+const live = (source, options) => exec(["node", "-e", source], options);
+const textState = async () => JSON.parse((await live('const fs=require("node:fs"); const {DatabaseSync}=require("node:sqlite"); const db=new DatabaseSync("/data/hub.sqlite",{readOnly:true}); console.log(JSON.stringify({documents:db.prepare("SELECT name,hex(data) AS data FROM documents ORDER BY name").all(), files:fs.readdirSync("/data").sort()}));db.close();')).stdout);
+const fileHash = async () => (await offline(["node", "-e", 'const fs=require("node:fs"),crypto=require("node:crypto"); console.log(crypto.createHash("sha256").update(fs.readFileSync("/data/hub.sqlite")).digest("hex"));'])).stdout.trim();
+const assertDoctor = result => {
+  const lines = result.stdout.split("\n").filter(line => /^(ok|warn|FAIL|skip)\s/.test(line));
+  assert.equal(lines.length, 5, result.stdout + result.stderr);
+  assert.deepEqual(lines.map(line => line.trim().split(/\s+/)[1]), ["hub", "database", "storage", "github", "clock"]);
+  assert.equal(result.code, lines.some(line => line.startsWith("FAIL")) ? 1 : 0);
+};
+async function serving() {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const status = await exec(["ub-hub", "status"], { allowFailure: true });
+    if (status.code === 0) return status;
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error("hub did not answer status");
+}
+
+try {
+  const resolved = (await command("git", ["rev-parse", "--verify", "--end-of-options", `${sha}^{commit}`])).stdout.trim();
+  assert.equal(resolved, sha, "the supplied commit exists unchanged");
+  const context = join(scratch, "source");
+  mkdirSync(context);
+  const archive = join(scratch, "source.tar");
+  await command("git", ["archive", "--format=tar", "--output", archive, sha]);
+  await command("tar", ["-xf", archive, "-C", context]);
+  const protocol = readFileSync(join(context, "packages/schema/src/protocol.ts"), "utf8")
+    .match(/export const SYNC_PROTOCOL_VERSION = ([1-9]\d*);/)?.[1];
+  assert.ok(protocol, "the commit declares its sync protocol");
+  console.log(`Building actual hub image at commit ${sha}`);
+  await docker(["build", "--platform", "linux/amd64", "--file", join(context, "Dockerfile.hub-release"),
+    "--build-arg", "HUB_RELEASE_VERSION=0.0.1", "--build-arg", `HUB_RELEASE_COMMIT=${sha}`,
+    "--build-arg", `HUB_SYNC_PROTOCOL_VERSION=${protocol}`, "--build-arg", "HUB_RELEASE_HUB_IMAGE=ghcr.io/uberblick-ai/hub:0.0.1",
+    "--build-arg", "HUB_RELEASE_WEB_IMAGE=ghcr.io/uberblick-ai/hub-web:0.0.1", "--target", "hub", "--tag", tag, context], { timeout: 360_000 });
+  const imageId = (await docker(["image", "inspect", tag, "--format", "{{.Id}}"])).stdout.trim();
+  console.log(`Built ${imageId}; extracting the image's release and testing PATH.`);
+  const extract = `${project}-extract`;
+  containers.add(extract);
+  await docker(["create", "--name", extract, "--entrypoint", "/bin/true", tag]);
+  await docker(["cp", `${extract}:/release/.`, deployment]);
+  await docker(["rm", extract]);
+  const release = JSON.parse(readFileSync(join(deployment, "release.json"), "utf8"));
+  assert.equal(release.sourceCommit, sha);
+  assert.equal(release.version, "0.0.1");
+  writeFileSync(join(deployment, "docker-compose.yml"), `services:\n  hub:\n    image: ${tag}\n    volumes:\n      - hub-data:/data\nvolumes:\n  hub-data:\n`);
+  const files = JSON.parse((await docker(["run", "--rm", "--entrypoint", "node", tag, "-e",
+    'const fs=require("node:fs"); console.log(JSON.stringify({user:process.getuid(), executable:fs.statSync("/usr/local/bin/ub-hub").mode&0o111, legacyBundle:fs.existsSync("/app/hub-admin-setup.mjs"), legacyWrapper:fs.existsSync("/release/bin/hub-admin-setup.sh")}));'])).stdout);
+  assert.equal(files.user, 1000); assert.ok(files.executable); assert.equal(files.legacyBundle, false); assert.equal(files.legacyWrapper, false);
+  for (const args of [[], ["--help"]]) {
+    const result = await offline(["ub-hub", ...args]);
+    for (const name of ["status", "doctor", "admin-setup", "backup", "restore"]) assert.match(result.stdout, new RegExp(name));
+  }
+  for (const args of [["unknown"], ["backup", "extra"], ["restore"]]) {
+    const result = await offline(["ub-hub", ...args], { allowFailure: true });
+    assert.equal(result.code, 2); assert.match(result.stderr, /usage: ub-hub/);
+  }
+  await compose(["up", "--detach", "hub"]);
+  const status = await serving();
+  assert.match(status.stdout, /release\s+0\.0\.1/); assert.ok(status.stdout.includes(sha), status.stdout);
+  assert.match(status.stdout, new RegExp(`protocol\\s+${protocol}`)); assert.match(status.stdout, /database\s+\/data\/hub\.sqlite/);
+  assert.match(status.stdout, /documents\s+1/); assert.match(status.stdout, /claimed\s+no/);
+  const doctor = await exec(["ub-hub", "doctor"], { allowFailure: true });
+  assertDoctor(doctor); assert.match(doctor.stdout, /^ok\s+hub\s/m); assert.match(doctor.stdout, /^ok\s+database\s/m);
+  console.log(`Live status and doctor's five checks: ${doctor.code === 0 ? "passed" : "diagnostic failures recorded in proof log"}.`);
+  const receipt = await exec(["ub-hub", "admin-setup", "status", "00000000-0000-4000-8000-000000001174"], { allowFailure: true });
+  assert.equal(receipt.code, 1); assert.match(receipt.stdout + receipt.stderr, /unknown/);
+  const initial = await textState();
+  const started = (await compose(["ps", "--quiet", "hub"])).stdout.trim();
+  const backup = await exec(["ub-hub", "backup"]);
+  const path = backup.stdout.match(/backup\s+(\/data\/[^\s]+\.sqlite)/)?.[1];
+  assert.ok(path, backup.stdout); assert.match(backup.stdout, /docker compose cp hub:/);
+  const check = JSON.parse((await live(`const fs=require("node:fs"),{DatabaseSync}=require("node:sqlite");const db=new DatabaseSync(${JSON.stringify(path)},{readOnly:true});console.log(JSON.stringify({mode:fs.statSync(${JSON.stringify(path)}).mode&0o777,uid:fs.statSync(${JSON.stringify(path)}).uid,integrity:db.prepare("PRAGMA integrity_check").get().integrity_check,documents:db.prepare("SELECT name,hex(data) AS data FROM documents ORDER BY name").all()}));db.close();`)).stdout);
+  assert.equal(check.mode, 0o600); assert.equal(check.uid, 1000); assert.equal(check.integrity, "ok"); assert.deepEqual(check.documents, initial.documents);
+  assert.equal((await compose(["ps", "--quiet", "hub"])).stdout.trim(), started); await serving();
+  const beforeReadonly = await textState();
+  const mode = Number((await live('const fs=require("node:fs");console.log(fs.statSync("/data").mode&0o777);fs.chmodSync("/data",0o500);')).stdout);
+  try {
+    const refusal = await exec(["ub-hub", "backup"], { allowFailure: true });
+    assert.equal(refusal.code, 1); assert.match(refusal.stderr, /EACCES|permission denied/);
+    assert.deepEqual(await textState(), beforeReadonly); await serving();
+  } finally { await live(`require("node:fs").chmodSync("/data",${mode});`); }
+  console.log("Online backup verified at 0600; write-denied backup published nothing and the hub kept serving.");
+  await command("sh", ["bin/hub-backup.sh", "legacy.sqlite"], { cwd: deployment, timeout: 90_000 });
+  const legacy = readFileSync(join(deployment, "legacy.sqlite"));
+  await serving();
+  const liveRestore = await offline(["ub-hub", "restore", "-"], { input: legacy, allowFailure: true });
+  assert.equal(liveRestore.code, 1); assert.match(liveRestore.stderr, /docker compose stop hub/); assert.match(liveRestore.stderr, /live database was unchanged/);
+  assert.deepEqual((await textState()).documents, initial.documents);
+  await compose(["stop", "hub"]);
+  const stoppedStatus = await offline(["ub-hub", "status"], { allowFailure: true });
+  assert.equal(stoppedStatus.code, 1); assert.ok(stoppedStatus.stdout.includes(sha), stoppedStatus.stdout); assert.match(stoppedStatus.stdout, /hub\s+not running/);
+  const stoppedDoctor = await offline(["ub-hub", "doctor"], { allowFailure: true }); assertDoctor(stoppedDoctor);
+  assert.match(stoppedDoctor.stdout, /^FAIL\s+hub\s/m); assert.match(stoppedDoctor.stdout, /^ok\s+database\s/m);
+  const unchanged = await fileHash();
+  const corrupt = await offline(["ub-hub", "restore", "-"], { input: Buffer.from("corrupt sqlite candidate"), allowFailure: true });
+  assert.equal(corrupt.code, 1); assert.match(corrupt.stderr, /live database was unchanged/); assert.equal(await fileHash(), unchanged);
+  await offline(["node", "-e", 'require("node:fs").writeFileSync("/data/hub.sqlite-journal","synthetic journal");']);
+  const journal = await offline(["ub-hub", "restore", "-"], { input: legacy, allowFailure: true });
+  assert.equal(journal.code, 1); assert.match(journal.stderr, /rollback journal/); assert.match(journal.stderr, /docker compose start hub/); assert.equal(await fileHash(), unchanged);
+  await offline(["node", "-e", 'const fs=require("node:fs");if(fs.readFileSync("/data/hub.sqlite-journal","utf8")!=="synthetic journal")throw Error("unexpected journal");fs.unlinkSync("/data/hub.sqlite-journal");']);
+  await offline(["ub-hub", "restore", "-"], { input: legacy });
+  assert.equal(await fileHash(), createHash("sha256").update(legacy).digest("hex"));
+  const pathRestore = await offline(["ub-hub", "restore", path]); assert.match(pathRestore.stdout, /restored/);
+  await compose(["start", "hub"]); await serving(); assert.deepEqual((await textState()).documents, initial.documents);
+  await docker(["volume", "create", emptyVolume]);
+  const emptyName = `${project}-empty-restore`; containers.add(emptyName);
+  await docker(["run", "--rm", "--interactive", "--name", emptyName, "--mount", `type=volume,src=${emptyVolume},dst=/data`, tag, "ub-hub", "restore", "-"], { input: legacy });
+  const restored = JSON.parse((await docker(["run", "--rm", "--mount", `type=volume,src=${emptyVolume},dst=/data`, tag, "node", "-e",
+    'const fs=require("node:fs"),crypto=require("node:crypto"),{DatabaseSync}=require("node:sqlite");const file=fs.statSync("/data/hub.sqlite");const db=new DatabaseSync("/data/hub.sqlite",{readOnly:true});console.log(JSON.stringify({mode:file.mode&0o777,uid:file.uid,integrity:db.prepare("PRAGMA integrity_check").get().integrity_check,hash:crypto.createHash("sha256").update(fs.readFileSync("/data/hub.sqlite")).digest("hex")}));db.close();'])).stdout);
+  assert.equal(restored.mode, 0o600); assert.equal(restored.uid, 1000); assert.equal(restored.integrity, "ok"); assert.equal(restored.hash, createHash("sha256").update(legacy).digest("hex"));
+  console.log("Restore proved running-hub, corrupt-candidate and journal refusals; volume-path and stdin restore preserve legacy backups, including into an empty volume.");
+  writeFileSync(join(scratch, "result.json"), `${JSON.stringify({ sha, source: "commit", imageId, doctor: doctor.stdout, stoppedDoctor: stoppedDoctor.stdout, success: true }, null, 2)}\n`);
+  console.log(`PASS ${sha}; evidence ${scratch}`);
+} finally {
+  clearTimeout(deadline); cleaning = true;
+  await compose(["down", "--volumes", "--remove-orphans"], { allowFailure: true, cleanup: true });
+  for (const name of containers) await docker(["rm", "--force", name], { allowFailure: true, cleanup: true });
+  await docker(["volume", "rm", emptyVolume], { allowFailure: true, cleanup: true });
+  console.log("Task-owned containers and volumes cleaned; image retained.");
+}

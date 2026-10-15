@@ -411,7 +411,7 @@ export function BlockMenu({
       <button
         type="button"
         ref={gutterButton}
-        className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 text-base leading-none text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
+        className={`absolute z-[1] flex items-center justify-center rounded-(--radius-sm) border border-transparent bg-transparent p-0 ub-type-body text-(--muted-foreground) [font-family:inherit] transition-opacity duration-[120ms] ease-out motion-reduce:transition-none ${
           anchor?.touch ? "left-[-44px] size-11" : "left-[calc(-1*var(--block-gutter))] size-6"
         } ${visible ? "pointer-events-auto cursor-pointer opacity-100 hover:bg-secondary hover:border-(--border) hover:text-foreground" : "pointer-events-none opacity-0"}`}
         style={{ top: `${anchor?.top ?? 0}px` }}
@@ -460,7 +460,7 @@ export function BlockMenu({
             aria-expanded={open}
             aria-controls={entries.length > 0 ? listId : undefined}
             aria-activedescendant={activeId}
-            className="mb-[0.3rem] w-full shrink-0 rounded-(--radius-sm) border border-input bg-background px-[0.4rem] py-[0.3rem] text-[0.85rem] text-foreground [font-family:inherit] [@media(pointer:coarse)]:text-base"
+            className="mb-[0.3rem] w-full shrink-0 rounded-(--radius-sm) border border-input bg-background px-[0.4rem] py-[0.3rem] ub-type-ui text-foreground [font-family:inherit] [@media(pointer:coarse)]:ub-type-body"
             placeholder="Search blocks…"
             aria-label="Search blocks"
             value={gutterQuery}

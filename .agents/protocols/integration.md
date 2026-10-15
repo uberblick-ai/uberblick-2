@@ -12,9 +12,22 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   have concluded `success` at `headRefOid` (`gh pr checks <n>`). Read main's
   active `signoff` ruleset (`gh api repos/uberblick-ai/uberblick-2/rulesets`,
   then `gh api repos/uberblick-ai/uberblick-2/rulesets/<id>`) and verify it
-  requires all three contexts from GitHub Actions (`integration_id: 15368`).
-  A missing context blocks agent merge: escalate to a maintainer; no run
-  changes repository settings. Wait for a pending check; for a failure, read
+  requires all three contexts from GitHub Actions (`integration_id: 15368`)
+  and a `code_scanning` rule for CodeQL with
+  `security_alerts_threshold: high_or_higher` and `alerts_threshold: none`.
+  A missing context or CodeQL rule blocks agent merge: escalate to a
+  maintainer; no run changes repository settings.
+  CodeQL runs on GitHub, outside `ci.yml` and `mise run ci`. Wait for its
+  analysis and results check to finish at `headRefOid`, and verify that they
+  report no new security alert at high or above. Inspect the new alerts listed
+  by the CodeQL check and their security severities: its conclusion alone is
+  insufficient because the results-check severity setting is separate from
+  the ruleset threshold. Lower-severity and non-security alerts do not block.
+  A PR-introduced security alert at high or above is a branch failure: finish
+  `changes` naming the alert. If an alert is called a false positive, escalate
+  to a maintainer, who alone decides whether to dismiss it; no run dismisses
+  an alert.
+  Wait for a pending CI check; for a failure, read
   `gh run view <id> --log-failed`. A lint, typecheck, test or spec failure
   that main's `CI` run does not show the same way (the base comparison below)
   is a branch failure: finish `changes` naming it. When it does show the same

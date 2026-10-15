@@ -78,9 +78,20 @@ jobs:
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
         run: mise run typecheck
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
+        id: test-linux
         run: mise run test
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'macOS' }}
+        id: test-macos
         run: mise run test-os
+      - name: Upload per-test results
+        if: ${{ always() && (steps.test-linux.outcome == 'success' || steps.test-linux.outcome == 'failure' || steps.test-macos.outcome == 'success' || steps.test-macos.outcome == 'failure') }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-${{ runner.os }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vitest-results/
+          if-no-files-found: warn
       # The website is static HTML the build script assembles; a page that
       # fails to build must not reach main, where Pages deploys it.
       - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}

@@ -1,9 +1,11 @@
 /** Native card parts share ordinary prose input, marks and comment controls. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { join } from "node:path";
-import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import { closeIfOpen, createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
+import { setNativeSelection } from "./native-selection.js";
 
 const { harness } = setupHarness();
 
@@ -23,15 +25,21 @@ async function openCard(page: Page): Promise<Locator> {
 
 async function selectPart(part: Locator): Promise<void> {
   await part.locator("p").click();
-  await part.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-  await part.evaluate((element) => {
+  await setNativeSelection(part, () => part.evaluate((element) => {
     element.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, pointerId: 1 }));
     const range = document.createRange();
     range.selectNodeContents(element.querySelector("p") ?? element);
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: card part has no editor");
+    const expected = {
+      anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+      head: root.editor.view.posAtDOM(range.endContainer, range.endOffset),
+    };
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  });
+    return expected;
+  }));
 }
 
 test("both menu paths focus the title and optional placeholders collapse outside the focused card", { tag: "@webkit" }, async ({ page }, info) => {
@@ -102,8 +110,7 @@ test("all four prose parts take formatting and web comments and keep footer link
     await composer.getByRole("button", { name: "Comment", exact: true }).click();
     await expect(field.locator("[data-comment-thread]")).toHaveText(text);
     await expect(page.locator(".ub-thread-card").filter({ hasText: `Discuss ${part}` })).toContainText("Card 1");
-    const close = page.getByRole("button", { name: "Close threads", exact: true });
-    if (await close.isVisible()) await close.click();
+    await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), { touch: false });
   }
   const footer = card.locator(".ub-card-footer p");
   await footer.click();

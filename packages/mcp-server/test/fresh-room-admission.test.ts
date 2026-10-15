@@ -9,10 +9,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_PENDING_DOCUMENTS } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -31,14 +30,11 @@ const hubs: Hub[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  vi.restoreAllMocks();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [() => { vi.restoreAllMocks(); }],
+  });
 });
 
 async function hub(options: Parameters<typeof startHub>[0] = {}): Promise<Hub> {

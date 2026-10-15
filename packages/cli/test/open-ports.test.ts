@@ -7,6 +7,7 @@
 
 import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { directoryRoom } from "@uberblick/schema";
@@ -487,13 +488,28 @@ describe("ub open: hub, ports and serving role", () => {
     const hubPort = await freePort();
     const webPort = await freePort();
 
-    // Interrupted the instant the hub has bound its socket — before the web
-    // server is up, and so before there is any banner.
+    // Hold the hub's listening notification after its socket binds. A TCP
+    // observation alone cannot keep startup from reaching the web banner
+    // before the parent gets a turn to send its interrupt.
+    const preload = join(box.cwd, "hold-hub-startup.mjs");
+    writeFileSync(preload, `
+import { Server } from "node:net";
+const emit = Server.prototype.emit;
+Server.prototype.emit = function (event, ...args) {
+  if (event === "listening" && this.address()?.port === ${hubPort}) {
+    process.once("SIGINT", () => {
+      setImmediate(() => emit.call(this, event, ...args));
+    });
+    return true;
+  }
+  return emit.call(this, event, ...args);
+};
+`, "utf8");
     pointAt(box, `ws://127.0.0.1:${hubPort}`);
     const run = await interruptWhen(
       box,
       ["--port", String(webPort)],
-      env,
+      { ...env, NODE_OPTIONS: `${env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(preload).href}` },
       () => untilBound(hubPort),
     );
 

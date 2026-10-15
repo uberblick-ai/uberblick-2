@@ -43,7 +43,7 @@ function payload(directory: string, version: string, protocol = 1): void {
   for (const file of ["remote.env.example", "remote-settings.sh", "remote.https.yml", "remote.tailscale.yml", "REMOTE.md", "RELEASING.md"]) {
     writeFileSync(join(directory, file), readFileSync(resolve(import.meta.dirname, "../../..", file)));
   }
-  for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", "hub-admin-setup.sh"]) {
+  for (const file of ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh"]) {
     writeFileSync(join(directory, "bin", file), readFileSync(resolve(import.meta.dirname, "../../../bin", file)));
   }
   const metadata = manifest(version, protocol);

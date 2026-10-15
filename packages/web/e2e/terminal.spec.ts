@@ -133,15 +133,18 @@ test("the panel swaps with the source, and real Tab reaches its pause control", 
   await caretAway(page);
   await expect(panel(page)).toBeVisible();
 
-  // Browser Tab order reaches the panel, then the pause control from the prose.
+  // Browser Tab order follows the caption's Copy and Pause actions, then the
+  // transcript panel, from the prose above the block.
   // Native Enter must survive ProseMirror's event boundary; the new label is
   // the one end-state witness. jsdom holds the pause/resume sequence.
   await page.keyboard.press("Tab");
-  await expect(panel(page)).toBeFocused();
+  await expect(page.locator(".ub-terminal .ub-copy")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(control(page)).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(control(page)).toHaveText("Play");
+  await page.keyboard.press("Tab");
+  await expect(panel(page)).toBeFocused();
 });
 
 test("scrolling the demonstration into view delivers the real observer", async ({ page }) => {

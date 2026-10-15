@@ -65,6 +65,8 @@ export interface HubExtensionContext {
   deviceCredentials: boolean;
   protocolVersion: number;
   log: HubLogger;
+  flush(): Promise<void>;
+  storeFailure(): string | null;
 }
 
 export interface HubExtension {
@@ -537,7 +539,8 @@ export async function createHub(config: HubConfig, options: {
 
   let extension: HubExtension | undefined;
   try {
-    extension = options.extension?.({ database, server: () => server, deviceCredentials, protocolVersion, log });
+    extension = options.extension?.({ database, server: () => server, deviceCredentials, protocolVersion, log,
+      flush, storeFailure: () => storeFailure === undefined ? null : String(storeFailure.error) });
   } catch (error) {
     closeDatabase();
     throw error;
@@ -631,22 +634,23 @@ export async function createHub(config: HubConfig, options: {
   }
 
   /** The sticky store failure, as the error a durability claim should not hide. */
-  const storeError = (): Error | undefined =>
-    storeFailure === undefined
+  function storeError(): Error | undefined {
+    return storeFailure === undefined
       ? undefined
       : new Error(
           "hub: a document store failed, so the hub's state is not durable: " +
             String(storeFailure.error),
           { cause: storeFailure.error },
         );
+  }
 
-  const flush = async (): Promise<void> => {
-    await flushPendingStores(hocuspocus, log);
+  async function flush(): Promise<void> {
+    await flushPendingStores(server.hocuspocus, log);
     const failed = storeError();
     if (failed !== undefined) {
       throw failed;
     }
-  };
+  }
   let stopping: Promise<void> | undefined;
 
   const runStop = async (): Promise<void> => {

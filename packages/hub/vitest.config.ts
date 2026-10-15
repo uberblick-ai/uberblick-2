@@ -21,7 +21,16 @@ export default defineConfig({
         : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/hub.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Every suite binds real sockets and opens real SQLite files. They use

@@ -5,7 +5,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
-import { codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
+import { blockCaption, codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import rendererUrl from "./wireframe-renderer-url.js";
 
 type WireframeRenderer = typeof import("@uberblick/wireframe");
@@ -34,26 +34,21 @@ export function wireframeBlockView(): NodeViewRenderer {
     let destroyed = false;
     let hasDrawing = false;
     const dom = document.createElement("div");
-    dom.className = "ub-code ub-wireframe";
-    const header = document.createElement("div");
-    header.className = "ub-wireframe-header";
-    header.contentEditable = "false";
+    dom.className = "ub-code ub-wireframe ub-block-frame";
+    const header = blockCaption("");
     const caption = document.createElement("span");
     caption.className = "ub-code-caption";
     const label = document.createElement("span");
     label.className = "ub-code-caption-text";
-    label.textContent = "wireframe";
+    label.textContent = "Wireframe";
     caption.append(label);
-    const actions = document.createElement("div");
-    actions.className = "ub-wireframe-actions";
     const source = document.createElement("button");
     source.type = "button";
     source.textContent = "Source";
     source.setAttribute("aria-label", "Open wireframe source");
     const copy = copyButton(() => current.textContent);
-    copy.element.textContent = "Copy";
-    actions.append(copy.element, source);
-    header.append(caption, actions);
+    header.actions.append(copy.element, source);
+    header.label.append(caption);
     const panel = document.createElement("div");
     panel.className = "ub-wireframe-panel";
     panel.contentEditable = "false";
@@ -80,7 +75,7 @@ export function wireframeBlockView(): NodeViewRenderer {
     panel.append(viewport, stale, diagnostics);
     const contentDOM = document.createElement("pre");
     contentDOM.className = "ub-wireframe-source";
-    dom.append(header, panel, contentDOM);
+    dom.append(header.row, panel, contentDOM);
 
     const resize = (): void => {
       if (destroyed || !hasDrawing || viewport.clientWidth === 0) return;
@@ -164,8 +159,8 @@ export function wireframeBlockView(): NodeViewRenderer {
         return true;
       },
       stopEvent: event => event.target instanceof Node &&
-        (header.contains(event.target) || panel.contains(event.target)),
-      ignoreMutation: mutation => header.contains(mutation.target) || panel.contains(mutation.target) ||
+        (header.row.contains(event.target) || panel.contains(event.target)),
+      ignoreMutation: mutation => header.row.contains(mutation.target) || panel.contains(mutation.target) ||
         (mutation.type === "attributes" && mutation.target === dom &&
           ["id", "data-language", "data-annotated"].includes(mutation.attributeName ?? "")),
       destroy: () => {

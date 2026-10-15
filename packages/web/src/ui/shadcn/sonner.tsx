@@ -42,8 +42,8 @@ export function NotificationToaster(): ReactElement {
       toastOptions={{
         closeButtonAriaLabel: "Dismiss notification",
         classNames: {
-          toast: "shadow-(--shadow-float)! focus-visible:shadow-[inset_0_0_0_2px_var(--card-foreground)]! pr-10! w-full!",
-          description: "text-card-foreground!",
+          toast: "ub-type-small! shadow-(--shadow-float)! focus-visible:shadow-[inset_0_0_0_2px_var(--card-foreground)]! pr-10! w-full!",
+          description: "ub-type-small! text-card-foreground!",
           closeButton: "left-auto! right-2! top-2! transform-none! size-6! text-card-foreground! bg-card! border-(--border)! hover:bg-secondary! focus-visible:shadow-[0_0_0_2px_var(--card-foreground)]!",
         },
       }}

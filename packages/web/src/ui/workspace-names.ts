@@ -32,7 +32,8 @@ export function useWorkspaceNames(
       const handle = acquireRoom(settingsRoom(uuid), identity, { presence: false });
       const room = handle.connection;
       const read = (): void => {
-        const name = room.status.hasReceivedServerState ? getWorkspaceName(room.ydoc) : null;
+        if (!room.status.hasReceivedServerState) return;
+        const name = getWorkspaceName(room.ydoc);
         setOtherNames((previous) => {
           if (previous.has(uuid) && previous.get(uuid) === name) return previous;
           return new Map(previous).set(uuid, name);
@@ -51,28 +52,28 @@ export function useWorkspaceNames(
   }, [localMenu, menuOpen, otherUuids, identity]);
   const currentReceived = currentUuid !== null && connection?.room === settingsRoom(currentUuid) && status.hasReceivedServerState;
   useEffect(() => {
-    if (!localMenu || !currentReceived || currentUuid === null) return;
+    if (!currentReceived || currentUuid === null) return;
     setOtherNames(previous => previous.has(currentUuid) && previous.get(currentUuid) === currentName
       ? previous : new Map(previous).set(currentUuid, currentName));
-  }, [localMenu, currentReceived, currentUuid, currentName]);
+  }, [currentReceived, currentUuid, currentName]);
   const names = new Map(recordedNames ?? []);
   for (const [uuid, name] of otherNames) names.set(uuid, name);
-  if (currentUuid !== null) {
-    names.set(currentUuid, currentReceived ? currentName : localMenu ? names.get(currentUuid) ?? null : null);
-  }
+  if (currentUuid !== null && currentReceived) names.set(currentUuid, currentName);
   return names;
 }
 
-/** A stable short identifier distinguishes unnamed entries without a full UUID. */
+/** Only names already read from offered workspaces can establish a duplicate. */
 export function workspaceLabel(
   workspace: Workspace,
   names: ReadonlyMap<string, string | null>,
   workspaces: readonly Workspace[],
 ): string {
-  const name = names.get(workspace.uuid);
-  if (name !== null && name !== undefined) return name;
+  const name = names.get(workspace.uuid) ?? "Unnamed workspace";
+  const duplicates = workspaces.filter((other) => names.has(other.uuid)
+    && (names.get(other.uuid) ?? "Unnamed workspace") === name);
+  if (!names.has(workspace.uuid) || duplicates.length < 2) return name;
   const shortId = workspace.uuid.slice(0, 8);
-  const collisions = workspaces.filter((other) => other.uuid.slice(0, 8) === shortId);
+  const collisions = duplicates.filter((other) => other.uuid.slice(0, 8) === shortId);
   const suffix = collisions.length > 1 ? ` (${collisions.findIndex((other) => other.uuid === workspace.uuid) + 1})` : "";
-  return `Unnamed workspace · ${shortId}${suffix}`;
+  return `${name} · ${shortId}${suffix}`;
 }

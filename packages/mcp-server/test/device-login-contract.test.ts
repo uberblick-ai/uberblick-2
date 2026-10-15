@@ -9,6 +9,7 @@ import { DEVICE_RENEWAL_COOLDOWN_MS, ensureDeviceLogin } from "../src/device-log
 import { acquireInitLock } from "../src/init-lock.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
+import { cleanupTestResources } from "./helpers.js";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
@@ -28,8 +29,10 @@ async function setup(protocolVersion?: number) {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  await Promise.all(hubs.splice(0).map((hub) => hub.close()));
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  await cleanupTestResources({
+    hubs: hubs.splice(0).map((hub) => () => hub.close()),
+    after: directories.splice(0).map((directory) => () => rmSync(directory, { recursive: true, force: true })),
+  });
 });
 
 function expireCooldown(): void {

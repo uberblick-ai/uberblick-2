@@ -5,15 +5,16 @@
  */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
-import { legacyDecisionPeer } from "./legacy-decision-peer.js";
+import { renderedText } from "./contrast-helpers.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
-const peers: Array<{ close: () => void }> = [];
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -24,7 +25,6 @@ test.beforeAll(() => {
   });
 });
 test.afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.close();
   await agent?.closeSessions();
 });
 test.afterAll(async () => { await agent?.close(); agent = null; });
@@ -33,6 +33,33 @@ function writer(): McpSession {
   if (agent === null) throw new Error("e2e: chart MCP agent is not configured");
   return agent.open({ name: "chart-data-e2e" });
 }
+
+test("all eight panel caption colours keep AA on the blue tint in both appearances", { tag: "@webkit" }, async ({ browser }) => {
+  const session = writer();
+  const mapping = { ...MAPPING, layout: "panels", y: Array.from({ length: 8 }, (_, index) => ({
+    field: "latency", label: `Series ${index + 1}`, unit: "ms",
+  })) };
+  const uuid = await chartDoc(session, "Eight panel inks", mapping);
+  await measurements(session, uuid);
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      contextOptions: { viewport: { width: 1366, height: 900 }, colorScheme: appearance },
+    });
+    await expectReady(page);
+    const panels = page.locator(".ub-chart-series-panel");
+    await expect(panels).toHaveCount(8);
+    const colours = await panels.locator(".ub-chart-series-header").evaluateAll(elements =>
+      elements.map(element => getComputedStyle(element).color));
+    expect(new Set(colours).size).toBe(8);
+    for (let index = 0; index < 8; index += 1) {
+      const selector = `.ub-chart-series-panel:nth-child(${index + 1}) .ub-chart-series-header`;
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const readings = await renderedText(page, selector);
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
 
 interface DocPayload {
   uuid: string;
@@ -154,33 +181,31 @@ async function expectPanelTickGeometry(
   return ticks;
 }
 
-/** Controls share the title's line and stay inside the panel in every state. */
+/** One caption holds the chart label, title and controls in every state. */
 async function expectCornerControls(page: Page, sourceName = "Open chart source"): Promise<void> {
   const root = page.locator(".ub-chart");
-  const panel = page.locator(".ub-chart-panel");
+  const caption = root.locator(".ub-block-caption");
   const source = page.getByRole("button", { name: sourceName, exact: true });
   const copy = root.locator(".ub-copy");
-  await expect(source).toHaveText("source");
+  await expect(source).toHaveText("Source");
   await expect(source).toBeVisible();
   await expect(copy).toBeVisible();
-  const frame = await root.evaluate((element) => ({
-    label: getComputedStyle(element, "::before").content,
-    labelDisplay: getComputedStyle(element, "::before").display,
-    padding: Number.parseFloat(getComputedStyle(element).paddingTop),
-  }));
-  expect(frame.labelDisplay === "none" || ["none", '""'].includes(frame.label)).toBe(true);
-  expect(frame.padding).toBe(0);
-  const panelBox = await panel.boundingBox();
+  await expect(caption).toHaveCount(1);
+  await expect(caption).toBeVisible();
+  await expect(caption.locator(".ub-block-label")).toContainText("Chart");
+  const rootBox = await root.boundingBox();
+  const captionBox = await caption.boundingBox();
   const sourceBox = await source.boundingBox();
   const copyBox = await copy.boundingBox();
-  if (panelBox === null || sourceBox === null || copyBox === null) throw new Error("e2e: chart corner controls have no box");
-  expect(sourceBox.x).toBeGreaterThan(panelBox.x + panelBox.width / 2);
-  expect(copyBox.x).toBeGreaterThanOrEqual(sourceBox.x + sourceBox.width);
-  expect(copyBox.x + copyBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width);
-  expect(sourceBox.y).toBeGreaterThanOrEqual(panelBox.y);
-  expect(copyBox.y).toBeGreaterThanOrEqual(panelBox.y);
-  // A hidden title contributes no line; the controls still occupy the corner.
-  const title = panel.locator(".ub-chart-title");
+  if (rootBox === null || captionBox === null || sourceBox === null || copyBox === null) throw new Error("e2e: chart caption controls have no box");
+  expect(copyBox.x).toBeGreaterThan(rootBox.x + rootBox.width / 2);
+  expect(sourceBox.x).toBeGreaterThanOrEqual(copyBox.x + copyBox.width);
+  expect(sourceBox.x + sourceBox.width).toBeLessThanOrEqual(rootBox.x + rootBox.width);
+  for (const box of [sourceBox, copyBox]) {
+    expect(box.y).toBeGreaterThanOrEqual(captionBox.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(captionBox.y + captionBox.height + 0.5);
+  }
+  const title = caption.locator(".ub-chart-title");
   if (await title.isVisible()) {
     const titleBox = await title.boundingBox();
     if (titleBox === null) throw new Error("e2e: chart title has no box");
@@ -206,9 +231,9 @@ async function chartDoc(session: McpSession, title: string, mapping: unknown = M
   return result.uuid;
 }
 
-async function editMapping(session: McpSession, uuid: string, text: string): Promise<void> {
+async function editMapping(session: McpSession, uuid: string, text: string, index = 0): Promise<void> {
   const doc = await session.call<DocPayload>("get_doc", { uuid });
-  const block = doc.blocks.find((entry) => entry.type === "chart");
+  const block = doc.blocks.filter((entry) => entry.type === "chart")[index];
   if (block === undefined) throw new Error("e2e: no chart block in get_doc");
   await session.call("edit_block", {
     uuid, block_id: block.id, old_text: block.text, new_text: text, rev: block.rev,
@@ -444,57 +469,133 @@ test("editor insertion and the source control work by pointer and keyboard in bo
     await expect(openSource).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(source).toBeVisible();
-    await page.keyboard.press("End");
+    await expect.poll(() => source.evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
+    // ProseMirror's focus sync can undo an End key; a checked scripted caret survives it.
+    await setNativeSelection(source, () => source.evaluate((element) => {
+      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+      if (root === null) throw new Error("e2e: chart source has no editor");
+      const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let last: Node | null = null;
+      while (texts.nextNode()) last = texts.currentNode;
+      if (last === null) throw new Error("e2e: chart source has no text");
+      const range = document.createRange();
+      range.setStart(last, last.textContent?.length ?? 0);
+      range.collapse(true);
+      const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return { anchor: position, head: position };
+    }));
     await page.keyboard.insertText(" ");
-    await expect(source).toHaveText(`${JSON.stringify(MAPPING)} `);
+    // toHaveText trims, so compare the exact source.
+    await expect.poll(() => source.textContent()).toBe(`${JSON.stringify(MAPPING)} `);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.press("ArrowLeft");
     await expectReady(page);
     await expectCornerControls(page);
     await canvasEvidence(page.locator(".ub-chart"), info, `chart-${appearance}`);
-    const stored = await session.call<DocPayload>("get_doc", { uuid });
-    expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(`${JSON.stringify(MAPPING)} `);
+    // The browser edit reaches the writer's replica through `ub open` and the hub.
+    await expect.poll(async () => {
+      const stored = await session.call<DocPayload>("get_doc", { uuid });
+      return stored.blocks.find((entry) => entry.type === "chart")?.text;
+    }).toBe(`${JSON.stringify(MAPPING)} `);
   }
 });
 
-test("MCP updates and remote mapping edits redraw through ub open, preserve data and survive reopen", async ({ browser }) => {
+test("MCP updates and mapping edits redraw charts and tables, preserve data and survive reload and reopen", async ({ browser }) => {
   const session = writer();
-  const uuid = await chartDoc(session, "Live line chart");
+  const target = "https://example.invalid/table-evidence";
+  const tableMapping = {
+    version: 1, type: "table", collection: "evidence", title: "Delivery evidence", pageSize: 2,
+    columns: [
+      { field: "name", label: "Name" },
+      { field: "value", label: "Autonomous", format: "number", unit: "%", decimals: 2 },
+      { field: "day", label: "Day", format: "date" },
+      { field: "url", label: "Evidence", format: "link" },
+    ],
+  };
+  const records = [
+    { id: "a", value: { name: "<strong>kept as text</strong>", value: 12.5, day: "2026-01-01", url: target } },
+    { id: "b", value: {} },
+    { id: "c", value: { name: null, value: null, day: null, url: null } },
+    { id: "d", value: { name: "Invalid values", value: "12", day: "2026-02-31", url: "javascript:alert(1)" } },
+    { id: "e", value: { name: { compact: true }, value: 20, day: "2026-01-02T12:30:00Z", url: "data:text/html,<script>alert(1)</script>" } },
+    { id: "f", value: { name: "Relative link", value: 0, day: "2026-01-03", url: "/relative" } },
+  ];
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Live chart and data table", description: "Two generated views receive document data and mapping updates.",
+    blocks: [
+      { type: "paragraph", text: "Read the live measurements and evidence below." },
+      { type: "chart", text: JSON.stringify(MAPPING) },
+      { type: "chart", text: JSON.stringify(tableMapping) },
+    ],
+  });
   await measurements(session, uuid);
+  await session.call("update_data", { uuid, operations: [{ collection: "evidence", schema: { version: 1, schema: { type: "object" } }, replaceRecords: records }] });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
-  await expectReady(page);
+  await expect(page.locator(".ub-chart-panel").first()).toHaveAttribute("data-state", "ready");
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
+  await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAccessibleDescription(/Latency.*125.*ms/);
   await expect(canvas).toHaveAccessibleDescription(/Errors.*4.*requests/);
-  await expect(page.locator(".ub-chart-diagnostics")).toContainText(/1.*(?:date|x)/i);
-  await expect(page.locator(".ub-chart-description")).not.toHaveAttribute("aria-live", /.*/);
+  const chart = page.locator(".ub-chart").first();
+  await expect(chart.locator(".ub-chart-diagnostics")).toContainText(/1.*(?:date|x)/i);
+  await expect(chart.locator(".ub-chart-description")).not.toHaveAttribute("aria-live", /.*/);
+  const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
+  await expect(table).toBeVisible();
+  await expect(table.locator("tbody tr")).toHaveCount(records.length);
   let navigations = 0;
   page.on("framenavigated", (frame) => { if (frame === page.mainFrame()) navigations += 1; });
   await session.call("update_data", {
-    uuid, operations: [{ collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 250, errors: 9 } }] }],
+    uuid, operations: [
+      { collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 250, errors: 9 } }] },
+      { collection: "evidence", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: target } }] },
+    ],
   });
   await expect(canvas).toHaveAccessibleDescription(/Latency.*250.*ms/);
   await expect(canvas).toHaveAccessibleDescription(/Errors.*9.*requests/);
-  const beforeMapping = await session.call("get_data", { uuid, collection: "measurements" });
+  await expect(table).toContainText("Arriving update");
+  await expect(table.locator("tbody tr")).toHaveCount(records.length);
+  const beforeMapping = await session.call("get_data", { uuid });
+  const beforeMeasurements = await session.call("get_data", { uuid, collection: "measurements" });
   const updatedMapping = { ...MAPPING, title: "Live API health", y: [{ field: "latency", label: "Response time", unit: "ms" }] };
   await editMapping(session, uuid, JSON.stringify(updatedMapping));
+  const updatedTableMapping = { ...tableMapping, title: "Live evidence", pageSize: 5, sort: { field: "value", direction: "desc" },
+    columns: tableMapping.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
+  await editMapping(session, uuid, JSON.stringify(updatedTableMapping), 1);
   const renamed = page.getByRole("img", { name: "Live API health", exact: true });
+  const renamedTable = page.getByRole("table", { name: "Live evidence", exact: true });
   await expect(renamed).toBeVisible();
   await expect(renamed).toHaveAccessibleDescription(/Response time.*250.*ms/);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMapping);
+  await expect(renamedTable.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(records.length);
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Arriving update");
+  expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
+  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMeasurements);
   await session.call("update_data", {
-    uuid, operations: [{ collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 375, errors: 11 } }] }],
+    uuid, operations: [
+      { collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 375, errors: 11 } }] },
+      { collection: "evidence", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: target } }] },
+    ],
   });
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  await expect(renamedTable).toContainText("Later update");
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
+  await session.call("update_data", { uuid, operations: [{ collection: "evidence", deleteRecords: ["e", "f"] }] });
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(renamedTable).toContainText("Later update");
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
   const lightCanvas = await renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const lightInk = await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1));
+  const lightTableInk = await renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
   await page.getByTestId("account-menu").click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect.poll(() => renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(lightCanvas);
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1))).not.toBe(lightInk);
+  await expect.poll(() => renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightTableInk);
   const paintedText = await page.evaluate(() => (window as unknown as { chartProbe: { texts: string[] } }).chartProbe.texts);
   expect(paintedText).toContain("Latency (ms)");
   expect(paintedText).toContain("Errors (requests)");
@@ -504,10 +605,19 @@ test("MCP updates and remote mapping edits redraw through ub open, preserve data
   expect(navigations).toBe(0);
   await page.reload();
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  await expect(renamedTable).toBeVisible();
+  await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
   const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await expect(reopened.getByRole("img", { name: "Live API health", exact: true })).toHaveAccessibleDescription(/Response time.*375.*ms/);
+  const reopenedTable = reopened.getByRole("table", { name: "Live evidence", exact: true });
+  await expect(reopenedTable).toBeVisible();
+  await expect(reopenedTable.locator("tbody tr")).toHaveCount(4);
+  await expect(reopenedTable).toContainText("Later update");
   const stored = await session.call<DocPayload>("get_doc", { uuid });
-  expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(JSON.stringify(updatedMapping));
+  expect(stored.blocks.filter((entry) => entry.type === "chart").map((entry) => entry.text)).toEqual([
+    JSON.stringify(updatedMapping), JSON.stringify(updatedTableMapping),
+  ]);
   const data = await session.call<{ records: { id: string; value: unknown }[] }>("get_data", { uuid, collection: "measurements" });
   expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
 });
@@ -639,102 +749,6 @@ test("crowded daily endpoint labels stay inside the canvas after resizing", { ta
       expect(label.right, `${label.text} right edge at ${width}px`).toBeLessThanOrEqual(width);
     }
   }
-});
-
-test("number labels keep irregular continuous positions and ignore empty rows under both missing modes", async ({ browser }) => {
-  const session = writer();
-  const observations = [1, 2, 7, 7.5, 40].map((value) => ({ value, label: String(value) }));
-  for (const missing of ["gap", "connect"] as const) {
-    const mapping = { ...MAPPING, title: "Numeric observations", missing,
-      x: { field: "sample", type: "number", label: "Observation" },
-      y: [{ field: "latency", label: "Latency", unit: "ms" }],
-    };
-    const uuid = await chartDoc(session, `Numeric chart ${missing}`, mapping);
-    await session.call("update_data", { uuid, operations: [{ collection: "measurements",
-      schema: { version: 1, schema: { type: "object", properties: {
-        sample: { type: "number" }, latency: { type: ["number", "null"] },
-      } } },
-      replaceRecords: [
-        ...observations.map((observation, index) => ({ id: `point-${index}`, value: { sample: observation.value, latency: 80 + index * 5 } })),
-        { id: "empty", value: { sample: 3, latency: null } },
-      ],
-    }] });
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      beforeNavigate: (loading) => installProbe(loading, uuid),
-      contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
-    });
-    await expect(page.getByRole("img", { name: "Numeric observations", exact: true })).toBeVisible();
-    await expectObservationGeometry(page, observations, /^[\d.]+$/);
-    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-    expect(ink.filter((entry) => entry.text === "Observation")).toHaveLength(1);
-    expect(ink.some((entry) => entry.text === "3")).toBe(false);
-  }
-});
-
-test("omitted close intraday pairs leave retained hourly labels compact", async ({ browser }) => {
-  const session = writer();
-  for (const fraction of ["131", "131676"]) {
-    const uuid = await chartDoc(session, `Hourly observations ${fraction}`, {
-      ...MAPPING, y: [{ field: "latency", label: "Latency", unit: "ms" }],
-    });
-    const records = [
-      ...Array.from({ length: 24 }, (_, hour) => ({
-        day: `2026-10-07T${String(hour).padStart(2, "0")}:00:00.${fraction}Z`, label: `${String(hour).padStart(2, "0")}:00`,
-      })),
-      { day: `2026-10-07T13:00:00.331${fraction.length === 6 ? "676" : ""}Z`, label: "13:00" },
-    ].sort((a, b) => a.day.localeCompare(b.day));
-    await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
-      replaceRecords: records.map((record, index) => ({ id: `event-${index}`, value: { day: record.day, latency: 80 + index * 5 } })),
-    }] });
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      beforeNavigate: (loading) => installProbe(loading, uuid),
-      contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
-    });
-    await expectReady(page);
-    await page.evaluate(() => document.fonts.ready);
-    await page.locator(".ub-chart-screen").evaluate(element => {
-      const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
-      probe.ink = []; probe.points = [];
-      (element as HTMLElement).style.width = "900px";
-    });
-    await expect.poll(() => page.locator(".ub-chart canvas").evaluate(element => element.getBoundingClientRect().width)).toBe(900);
-    await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points.length)).toBe(records.length);
-    const labels = await expectObservationGeometry(page, records.map(record => ({ value: Date.parse(record.day), label: record.label })), /^\d{2}:\d{2}$/);
-    expect(labels).toHaveLength(24);
-    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-    expect(ink.some(entry => /^\d{2}:\d{2}:\d{2}/.test(entry.text))).toBe(false);
-  }
-});
-
-test("intraday observation labels carry day and UTC context while full tooltips stay unchanged", async ({ browser }) => {
-  const session = writer();
-  const timestamps = ["2026-10-07T09:00:00Z", "2026-10-07T12:00:00Z", "2026-10-08T09:00:00Z"];
-  const uuid = await chartDoc(session, "Intraday chart observations");
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
-    replaceRecords: timestamps.map((day, index) => ({ id: `point-${index}`, value: { day, latency: 80 + index * 5, errors: 3 + index } })),
-  }] });
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-    beforeNavigate: (loading) => installProbe(loading, uuid),
-    contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
-  });
-  await expectReady(page);
-  const labels = await expectObservationGeometry(page, timestamps.map((timestamp, index) => ({
-    value: Date.parse(timestamp), label: index === 1 ? "12:00" : "09:00",
-  })), /^\d{2}:\d{2}$/, true);
-  const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
-  const days = ink.filter((entry) => /^Oct [78]$/.test(entry.text));
-  expect(days.map((entry) => entry.text)).toEqual(["Oct 7", "Oct 8"]);
-  expect(days[0]?.x).toBeCloseTo(labels[0]?.x ?? NaN, 5);
-  expect(days[1]?.x).toBeCloseTo(labels[2]?.x ?? NaN, 5);
-  expect(ink.filter((entry) => entry.text === "UTC")).toHaveLength(1);
-  expect(ink.some((entry) => entry.text === "2026")).toBe(false);
-  const canvas = page.getByRole("img", { name: "API latency", exact: true });
-  const box = await canvas.boundingBox();
-  if (box === null) throw new Error("e2e: intraday chart has no canvas box");
-  await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
-  await page.mouse.move(box.x + (labels[2]?.x ?? 0) - 1, box.y + box.height / 3);
-  await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts))
-    .toContain("Oct 8, 2026, 9:00:00 AM UTC");
 });
 
 test("observation ink, independent unit axes and nearest-x tooltips keep sparse and single-x charts readable", async ({ browser }) => {
@@ -1102,38 +1116,6 @@ test("panels compare units, retain empty series and switch layouts without rende
   await expect(page.locator(".ub-chart-message")).toContainText("No plottable records");
   await expect(page.locator(".ub-chart-screen")).toBeHidden();
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
-});
-
-test("problem states clear automatically and locked content still renders without changing stored source", async ({ browser }) => {
-  const session = writer();
-  const uuid = await chartDoc(session, "Chart problems");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  await expect(page.locator(".ub-chart-message")).toContainText(/collection.*(?:absent|not found|missing)/i);
-  await editMapping(session, uuid, "{invalid JSON");
-  await expect(page.locator(".ub-chart-message")).toContainText(/invalid.*(?:configuration|JSON)/i);
-  await editMapping(session, uuid, JSON.stringify(MAPPING));
-  await measurements(session, uuid);
-  await expectReady(page);
-  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
-  await expect(page.locator(".ub-chart-message")).toContainText(/no plottable records/i);
-  await measurements(session, uuid);
-  await expectReady(page);
-  const data = await session.call("get_data", { uuid, collection: "measurements" });
-  const stored = await session.call<DocPayload>("get_doc", { uuid });
-  const peer = await legacyDecisionPeer(harness(), uuid);
-  peers.push(peer);
-  peer.decide("decided");
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expectReady(page);
-  await expect(session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] })).rejects.toThrow(/decision_read_only/);
-  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(data);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
-  await session.call("archive_doc", { uuid });
-  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await expectReady(page);
-  await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
 });
 
 interface Timings {

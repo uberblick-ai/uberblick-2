@@ -23,6 +23,7 @@ import type { Plugin } from "@tiptap/pm/state";
 import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
 import {
+  blockCaption,
   copyButton,
   selectedBlock,
   sourceEditingPlugin,
@@ -137,7 +138,9 @@ export const terminalBlockView: NodeViewRenderer = ({
   toggle.setAttribute("contenteditable", "false");
 
   const copy = copyButton(() => current.textContent);
-  dom.append(screen, spoken, toggle, copy.element, contentDOM);
+  const header = blockCaption("Terminal");
+  header.actions.append(copy.element, toggle);
+  dom.append(header.row, screen, spoken, contentDOM);
 
   /** Cleared on every stop path; at most one is ever outstanding. */
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -341,8 +344,7 @@ export const terminalBlockView: NodeViewRenderer = ({
     // caret.
     stopEvent: (event: Event): boolean => {
       if (!(event.target instanceof Node)) return false;
-      if (copy.element.contains(event.target)) return true;
-      if (toggle.contains(event.target)) return true;
+      if (header.row.contains(event.target)) return true;
       if (screen.contains(event.target)) {
         return event.type === "mousedown" || event.type === "keydown";
       }
@@ -353,8 +355,7 @@ export const terminalBlockView: NodeViewRenderer = ({
     ignoreMutation: (mutation: { target: Node }): boolean =>
       screen.contains(mutation.target) ||
       spoken.contains(mutation.target) ||
-      toggle.contains(mutation.target) ||
-      copy.element.contains(mutation.target),
+      header.row.contains(mutation.target),
     destroy: () => {
       stop();
       watcher?.disconnect();

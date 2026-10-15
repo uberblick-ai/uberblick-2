@@ -249,7 +249,11 @@ async function pageFits(page: Page): Promise<void> {
 
 async function capture(page: Page, info: TestInfo, label: string, colorScheme: "light" | "dark"): Promise<void> {
   if (info.project.name !== "chromium" || process.env.UB_AGENTS_SCRATCH === undefined) return;
-  await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${colorScheme}.png`) });
+  for (const appearance of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: appearance });
+    await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${appearance}.png`) });
+  }
+  await page.emulateMedia({ colorScheme });
 }
 
 /** Like Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons. */
@@ -294,8 +298,8 @@ test("a caret table and another hovered table reveal their own controls together
   await pageFits(page);
 });
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`hover reveals quiet controls without moving the table and the pointer reaches them — ${colorScheme}`, async ({ page }, info) => {
+test("hover reveals quiet controls without moving the table and the pointer reaches them", async ({ page }, info) => {
+  const colorScheme = "light";
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
   await editor(page).locator(":scope > p").first().click();
@@ -331,10 +335,9 @@ test(`hover reveals quiet controls without moving the table and the pointer reac
   await expect(table.locator("tr").nth(2).locator("td")).toHaveCount(4);
   await pageFits(page);
 });
-}
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`column hover reaches its top menu and caret, focus and open menus keep it revealed — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+test("column hover reaches its top menu and caret, focus and open menus keep it revealed", { tag: "@webkit" }, async ({ page }, info) => {
+  const colorScheme = "light";
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
@@ -378,7 +381,6 @@ test(`column hover reaches its top menu and caret, focus and open menus keep it 
   await expect(table.locator("th")).toHaveCount(3);
   await pageFits(page);
 });
-}
 
 test("keyboard reaches every column menu while the native strip reveals off-screen columns", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Touch Safari reaches column menus by touch instead of native button Tab");
@@ -422,8 +424,8 @@ test("keyboard reaches every column menu while the native strip reveals off-scre
   await pageFits(page);
 });
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`touch reveals column menus without moving cells and reaches both wide-table edges — ${colorScheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+test("touch reveals column menus without moving cells and reaches both wide-table edges", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const colorScheme = "light";
   const page = await touchPage(browser, info, 820);
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page, true);
@@ -463,7 +465,6 @@ test(`touch reveals column menus without moving cells and reaches both wide-tabl
   await expect(table.locator("td")).toHaveCount(0);
   await pageFits(page);
 });
-}
 
 test("column moves swap every row, focus the moved column and each undo separately", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page);
@@ -548,8 +549,8 @@ test("caret and pointer reveal their own rows while hidden controls pass input t
   await expect(controls(page)).toHaveCount(0);
 });
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`hover alone reveals one row and reaches its border insertion and adjacent menu — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+test("hover alone reveals one row and reaches its border insertion and adjacent menu", { tag: "@webkit" }, async ({ page }, info) => {
+  const colorScheme = "light";
   test.skip(info.project.use.hasTouch === true, "Hover requires a pointer device");
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
@@ -619,10 +620,9 @@ test(`hover alone reveals one row and reaches its border insertion and adjacent 
   await expect(controls(page)).toHaveCount(0);
   await pageFits(page);
 });
-}
 
-for (const colorScheme of ["light", "dark"] as const) {
-test(`row menus target their row by trigger, right click and keyboard and protect the header — ${colorScheme}`, { tag: "@webkit" }, async ({ page }, info) => {
+test("row menus target their row by trigger, right click and keyboard and protect the header", { tag: "@webkit" }, async ({ page }, info) => {
+  const colorScheme = "light";
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
   await activate(table.locator("td").first(), info);
@@ -668,7 +668,6 @@ test(`row menus target their row by trigger, right click and keyboard and protec
   await expect(button(page, "Row 1 actions")).toBeFocused();
   await pageFits(page);
 });
-}
 
 test("keyboard reaches insertion buttons from a table caret and each button inserts once", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page);

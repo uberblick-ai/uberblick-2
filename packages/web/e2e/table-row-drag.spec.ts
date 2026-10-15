@@ -418,6 +418,7 @@ test("an immediate touch swipe from a row handle scrolls without picking up a ro
     await touch(session, "touchStart", point);
     for (let step = 1; step <= 6; step += 1) {
       await touch(session, "touchMove", { x: point.x, y: point.y - step * 15 });
+      // Pace six moves within the 250 ms touch pickup delay.
       await page.waitForTimeout(20);
     }
     await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });

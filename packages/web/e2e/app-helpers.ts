@@ -3,7 +3,7 @@ import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } fr
 import { openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 import { activateControl } from "./input-helpers.js";
-export { activateControl } from "./input-helpers.js";
+export { activateControl, closeIfOpen } from "./input-helpers.js";
 
 interface OpenAppOptions {
   contextOptions?: BrowserContextOptions;

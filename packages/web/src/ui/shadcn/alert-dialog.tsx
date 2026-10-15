@@ -73,7 +73,7 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("m-0 text-base font-semibold", className)}
+      className={cn("m-0 ub-type-body font-semibold", className)}
       {...props}
     />
   );
@@ -86,7 +86,7 @@ function AlertDialogDescription({
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
-      className={cn("mt-[0.65rem] mb-4 leading-normal text-muted-foreground", className)}
+      className={cn("mt-[0.65rem] mb-4 text-muted-foreground", className)}
       {...props}
     />
   );
@@ -105,7 +105,7 @@ function AlertDialogContent({
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-30 grid w-[min(28rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-(--radius) border border-border bg-card p-4 text-[0.85rem] text-card-foreground shadow-(--shadow-float) outline-hidden",
+          "fixed top-1/2 left-1/2 z-30 grid w-[min(28rem,calc(100vw-2rem))] max-h-[calc(100dvh-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-(--radius) border border-border bg-card p-4 ub-type-ui text-card-foreground shadow-(--shadow-float) outline-hidden",
           className,
         )}
         {...props}

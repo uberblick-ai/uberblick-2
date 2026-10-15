@@ -2,8 +2,10 @@
  * real IME candidate menus remain in device-input.md. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import type { Editor } from "@tiptap/core";
+import { closeIfOpen, createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
+import { setNativeSelection } from "./native-selection.js";
 
 const { harness, trackContext } = setupHarness();
 
@@ -93,10 +95,7 @@ async function selectCell(
     if (!(root instanceof HTMLElement)) throw new Error("e2e: missing editor");
     root.focus();
   });
-  // Let ProseMirror's scheduled focus-to-DOM sync finish before setting the
-  // native range; otherwise it can replace the test's selection on WebKit.
-  await cell.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-  await cell.evaluate((element, { start, end, input, endIndex }) => {
+  await setNativeSelection(cell, () => cell.evaluate((element, { start, end, input, endIndex }) => {
     if (input !== undefined) element.dispatchEvent(new PointerEvent("pointerdown", {
       pointerType: input, bubbles: true, pointerId: 1,
     }));
@@ -114,10 +113,17 @@ async function selectCell(
     const range = document.createRange();
     range.setStart(...position(element, start));
     range.setEnd(...position(last, end));
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: missing editor");
+    const expected = {
+      anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+      head: root.editor.view.posAtDOM(range.endContainer, range.endOffset),
+    };
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }, { start, end, input, endIndex });
+    return expected;
+  }, { start, end, input, endIndex }));
   await cell.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
 
@@ -272,8 +278,9 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await expect(page.locator(".ub-thread-card")).toContainText("pha words suffix");
   await expect(page.locator(".ub-thread-card")).toContainText("Clamped cell discussion");
   await expect(page.locator(".ub-thread-card .ub-thread")).toHaveAttribute("aria-current", "true");
-  const closeThreads = page.getByRole("button", { name: "Close threads", exact: true });
-  if (await closeThreads.isVisible()) await activate(closeThreads, info);
+  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), page.locator(".ub-threads-toggle"), {
+    touch: info.project.use.hasTouch === true,
+  });
   await selectCell(first, 0, 5, "mouse");
   await expect(toolbar(page)).toBeVisible();
   await page.keyboard.press("ArrowRight");

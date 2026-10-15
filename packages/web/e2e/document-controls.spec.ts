@@ -127,8 +127,8 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
   const rowHeights = await page.locator(".ub-docs-row").evaluateAll((rows) =>
     rows.map((row) => row.getBoundingClientRect().height));
   if (!touch) {
-    // The base's single-line rows are 33.78px, plus a collapsed header border.
-    for (const height of rowHeights) expect(height, "compact desktop document row").toBeLessThanOrEqual(35);
+    // Body leading plus the existing padding keeps each row on one line.
+    for (const height of rowHeights) expect(height, "compact desktop document row").toBeLessThanOrEqual(41);
   }
   for (const [name, initial] of [["Title", "ascending"], ["Changed", "descending"]] as const) {
     const heading = page.getByRole("columnheader", { name: new RegExp(`^${name}`) });

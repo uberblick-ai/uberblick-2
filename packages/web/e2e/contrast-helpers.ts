@@ -40,9 +40,9 @@ interface TextPaint {
 export async function renderedText(
   page: Page,
   root: string,
-  options: { mutedOnly?: boolean } = {},
+  options: { mutedOnly?: boolean; exclude?: string } = {},
 ): Promise<TextReading[]> {
-  const snapshot = await readPaint(page, { selector: root, mutedOnly: options.mutedOnly ?? false });
+  const snapshot = await readPaint(page, { selector: root, mutedOnly: options.mutedOnly ?? false, exclude: options.exclude ?? null });
   const grounds = pageGrounds(snapshot.page.backgroundImage, snapshot.page.backgroundColor);
   const readings: TextReading[] = [];
   for (const text of snapshot.text) {
@@ -94,11 +94,11 @@ export function strokeSeparation(_page: Page, ink: string, ground: string): Prom
   return Promise.resolve(separation(ink, ground));
 }
 
-function readPaint(page: Page, request: { selector: string; mutedOnly: boolean }): Promise<{
+function readPaint(page: Page, request: { selector: string; mutedOnly: boolean; exclude: string | null }): Promise<{
   page: Pick<PaintLayer, "backgroundColor" | "backgroundImage">;
   text: TextPaint[];
 }> {
-  return page.evaluate(({ selector, mutedOnly }) => {
+  return page.evaluate(({ selector, mutedOnly, exclude }) => {
     type Layer = { element: Element; style: CSSStyleDeclaration };
     const start = document.querySelector(selector);
     if (start === null) throw new Error(`no rendered text surface for ${selector}`);
@@ -122,6 +122,7 @@ function readPaint(page: Page, request: { selector: string; mutedOnly: boolean }
       isBody: element === document.body,
     }));
     const visible = (element: Element, path: Layer[]): boolean => {
+      if (exclude !== null && element.closest(exclude) !== null) return false;
       if (element.closest("[aria-hidden='true'], [data-disabled], [aria-disabled='true'], :disabled") !== null) {
         return false;
       }

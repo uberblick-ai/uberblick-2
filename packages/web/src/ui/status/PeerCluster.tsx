@@ -139,7 +139,7 @@ export function PeerCluster({
               <button
                 ref={overflowTrigger}
                 type="button"
-                className={`${PEER_CONTROL_CLASS} ub-peer-more border border-solid border-(--border) bg-(--secondary) text-(--secondary-foreground) font-(family-name:--font-sans) text-[0.7rem] font-semibold [line-height:inherit]`}
+                className={`${PEER_CONTROL_CLASS} ub-peer-more border border-solid border-(--border) bg-(--secondary) text-(--secondary-foreground) font-(family-name:--font-sans) ub-type-caption font-semibold`}
                 aria-label={`${remaining.length} more ${
                   remaining.length === 1 ? "collaborator" : "collaborators"
                 }`}

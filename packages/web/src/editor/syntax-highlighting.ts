@@ -9,7 +9,24 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { common, createLowlight } from "lowlight";
 
-const highlighter = createLowlight(common);
+const highlighter = createLowlight();
+const displayNames = new Map<string, string>([["wireframe", "Wireframe"]]);
+
+// Read names and aliases as the existing grammars register with Lowlight.
+for (const [id, grammar] of Object.entries(common)) {
+  highlighter.register(id, (highlightJs) => {
+    const language = grammar(highlightJs);
+    const label = language.name ?? id;
+    for (const name of [id, ...language.aliases ?? []]) displayNames.set(name, label);
+    return language;
+  });
+}
+
+/** Display labels never change the stored language or the Markdown fence. */
+export function codeLanguageLabel(language: unknown): string {
+  if (typeof language !== "string" || language === "") return "Plain text";
+  return displayNames.get(language.toLowerCase()) ?? language.charAt(0).toUpperCase() + language.slice(1);
+}
 
 /** Canonical fence names from the same registry that colours the source. */
 export const codeLanguages: readonly string[] = highlighter.listLanguages();

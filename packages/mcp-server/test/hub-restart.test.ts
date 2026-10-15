@@ -17,10 +17,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -28,6 +27,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { HubOptions, Rig, TestConfigOptions } from "./helpers.js";
@@ -36,13 +36,10 @@ const hubs: Hub[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function hub(options: HubOptions = {}) {
@@ -114,18 +111,6 @@ function poisonRoom(databasePath: string, room: string): void {
   }
 }
 
-/** Wait until a server reports everything it holds has reached the hub. */
-async function waitForSynced(rig: Rig, label: string): Promise<void> {
-  await waitUntil(`${label} to report itself in sync with the hub`, async () => {
-    const status = await rig.ok("sync_status", {});
-    return (
-      status.hub.status === "connected" &&
-      status.pendingRooms.length === 0 &&
-      status.unsyncedChanges === 0
-    );
-  });
-}
-
 describe("a hub that restarts under connected servers", () => {
   it("brings both of them back and converges on a write made afterwards", async () => {
     const database = tempDatabasePath();
@@ -148,8 +133,8 @@ describe("a hub that restarts under connected servers", () => {
       "written before the restart",
       "the reader",
     );
-    await waitForSynced(here, "the writer");
-    await waitForSynced(there, "the reader");
+    expect(await here.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    expect(await there.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     await first.stop();
     hubs.splice(hubs.indexOf(first), 1);
@@ -190,13 +175,16 @@ describe("a hub that restarts under connected servers", () => {
     const first = await hub({ databasePath: database });
     const port = first.port;
 
-    const here = await serverOn(port);
+    // The refused room is never quiet, so any settle a rebuild leaves owed runs
+    // to the whole sync budget. The test waits for each condition itself, so
+    // keep the budget short rather than idle out the 10s live-hub settle.
+    const here = await serverOn(port, { syncTimeoutMs: 1_000 });
     const doomed = await here.ok("create_doc", {
       title: "The document the hub will not load",
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "stored before it was poisoned" }],
     });
-    await waitForSynced(here, "the writer");
+    expect(await here.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     // Stop, poison one room, start again on the same port and database. From
     // here on the hub accepts this server's token and refuses that one room —
@@ -245,7 +233,8 @@ describe("a hub that restarts under connected servers", () => {
       description: "A test document.",
       blocks: [{ type: "paragraph", text: "the healthy rooms still carry writes" }],
     });
-    const there = await serverOn(port);
+    // This replica attaches the refused room too; the same short budget.
+    const there = await serverOn(port, { syncTimeoutMs: 1_000 });
     await waitForBlock(
       there,
       kept.uuid,
@@ -258,10 +247,10 @@ describe("a hub that restarts under connected servers", () => {
     }): Map<string, boolean> =>
       new Map(status.rooms.map((entry) => [entry.room, entry.synced]));
 
-    await waitUntil("the healthy room to report itself synced", async () => {
-      const status = await here.ok("sync_status", {});
-      return roomsOf(status).get(`${WORKSPACE}/${kept.uuid}`) === true;
-    });
+    expect(await here.instance.replicas.waitForSettled({
+      rooms: [`${WORKSPACE}/${kept.uuid}`],
+      deadline: performance.now() + WAIT_TIMEOUT_MS,
+    })).toMatchObject({ caughtUp: true });
 
     // And the answer stays honest room by room: the refused one is not synced,
     // the healthy one is, and the document is still readable, because the local

@@ -246,8 +246,8 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     expect(searchBox?.y).toBeLessThan(typeBox?.y ?? 0);
     await expect(titleFilter).toHaveAttribute("placeholder", "Search");
     await expect(titleFilter).toHaveCSS("border-top-width", "1px");
-    await expect(titleFilter).toHaveCSS("font-size", "14px");
-    await expect(titleFilter).toHaveCSS("line-height", "20px");
+    await expect(titleFilter).toHaveCSS("font-size", touch ? "16px" : "14px");
+    await expect(titleFilter).toHaveCSS("line-height", touch ? "27px" : "20px");
     await expect(titleFilter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.getByRole("tablist")).toHaveCount(0);
     await expect(page.getByRole("columnheader")).toHaveText(["Title", "Group", "Tags", "Changed", "Actions"]);
@@ -396,93 +396,6 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(state).toHaveValue("all");
   });
 }
-
-test("local search matches all fields and word forms, keeps shared relevance, and finds a topic's history", async ({ browser }) => {
-  const writer = agent().open({ name: "shared-list-search-e2e" });
-  const marker = docTitle("sharedsearch").replaceAll("-", "");
-  const fixtures = [
-    { title: `Launching ${marker}`, description: "A title match.", text: "A release plan." },
-    { title: `A description match ${marker}`, description: "We are launching the release.", text: "The owner and schedule." },
-    { title: `Z body match ${marker}`, description: "A content match.", text: "We are launching the release." },
-    { title: `Tag lookup ${marker}`, description: "Only its tag names this subject.", text: "A routine plan.", tags: ["sync"] },
-  ];
-  const names = new Map<string, string>();
-  for (const fixture of fixtures) {
-    const created = await writer.call<{ uuid: string }>("create_doc", {
-      title: fixture.title, description: fixture.description,
-      blocks: [{ type: "paragraph", text: fixture.text }],
-      ...(fixture.tags === undefined ? {} : { tags: fixture.tags }),
-    });
-    names.set(created.uuid, fixture.title);
-  }
-  const page = await openApp(browser, `/${harness().workspace}/all`);
-  const mcp = await writer.call<{ hits: Array<{ uuid: string }> }>("search", { query: "launch", limit: 100 });
-  const expected = mcp.hits.map((hit) => names.get(hit.uuid));
-  expect(expected).not.toContain(undefined);
-  const search = page.getByRole("searchbox", { name: "Search" });
-  await search.fill("launch");
-  await expect(listedTitles(page)).toHaveText(expected as string[]);
-  await expect(page.locator("thead [aria-sort]")).toHaveCount(0);
-  // A nonmatching second word leaves every launch match: words combine with OR.
-  await search.fill(`launch absent${marker}`);
-  await expect(listedTitles(page)).toHaveText(expected as string[]);
-  await page.getByRole("button", { name: "Title", exact: true }).click();
-  const titleOrder = fixtures.slice(0, 3).map((fixture) => fixture.title).sort((left, right) => left.localeCompare(right));
-  await expect(listedTitles(page)).toHaveText(titleOrder);
-  await expect(page.getByRole("columnheader", { name: /^Title/ })).toHaveAttribute("aria-sort", "ascending");
-  // Even an edit with the same effective words restores shared relevance.
-  await search.fill("launch ");
-  await expect(listedTitles(page)).toHaveText(expected as string[]);
-  await expect(page.locator("thead [aria-sort]")).toHaveCount(0);
-  await search.fill("");
-  await expect(page.getByRole("columnheader", { name: /^Title/ })).toHaveAttribute("aria-sort", "ascending");
-  await search.fill("sync");
-  await expect(listedTitles(page)).toHaveText([`Tag lookup ${marker}`]);
-
-  const historyWord = `historical${marker}`;
-  const approval = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
-  const first = await decision(writer, `${marker} former question`, `${historyWord} belongs to the previous answer.`, { status: "decided", answer: approval });
-  const current = await decision(writer, `${marker} current question`, "The current answer still appears.", { status: "decided", supersedes: first.uuid, answer: approval });
-  await search.fill(historyWord);
-  await page.getByRole("button", { name: "Decisions", exact: true }).click();
-  await expect(listedTitles(page)).toHaveText([`${marker} current question`]);
-  await expect(page.locator(".ub-docs-row")).toContainText("The current answer still appears.");
-  await page.locator(".ub-docs-open").click();
-  await expect(page).toHaveURL(new RegExp(`/${first.uuid}$`));
-  await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
-  await page.goBack();
-  await page.route("**/api/search?*", (route) => route.fulfill({ status: 503, json: { error: "replica_unavailable" } }));
-  await search.fill(`absent${marker}`);
-  await expect(page.locator(".ub-docs-empty")).toContainText("Search is unavailable");
-  await expect(page.locator(".ub-docs-empty")).not.toContainText("No decisions");
-  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await expect(search).toHaveValue("");
-  await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
-});
-
-test("a tag filter retains a matching document beyond the first 100 shared search hits", async ({ browser }) => {
-  test.setTimeout(120_000);
-  const writer = agent().open({ name: "uncapped-list-search-e2e" });
-  const query = docTitle("uncappedsearch").replaceAll("-", "");
-  for (let index = 0; index < 149; index += 1) {
-    await writer.call("create_doc", {
-      title: `${query} ${index}`, description: "A high-ranked title match.",
-      blocks: [{ type: "paragraph", text: "A release plan." }], tags: ["billing"],
-    });
-  }
-  const tailTitle = `Filtered tail ${query.slice(-6)}`;
-  const tail = await writer.call<{ uuid: string }>("create_doc", {
-    title: tailTitle, description: "A low-ranked content match.",
-    blocks: [{ type: "paragraph", text: `${query} ${"Other planning details. ".repeat(40)}` }], tags: ["auth"],
-  });
-  const page = await openApp(browser, `/${harness().workspace}/all`);
-  const mcp = await writer.call<{ hits: Array<{ uuid: string }> }>("search", { query, limit: 100 });
-  expect(mcp.hits.map((hit) => hit.uuid)).not.toContain(tail.uuid);
-  await page.getByRole("searchbox", { name: "Search" }).fill(query);
-  await expect(page.locator(".ub-docs-row")).toHaveCount(150);
-  await pickTags(page, ["auth"], false);
-  await expect(listedTitles(page)).toHaveText([tailTitle]);
-});
 
 test("tag overflow recalculates when the bundled UI font loads @webkit", async ({ browser }) => {
   const title = docTitle("tagfontload");

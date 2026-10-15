@@ -76,6 +76,9 @@ describe("wireframe code blocks", () => {
     const editor = createUberblickEditor({ element, fragment: getBlocksFragment(doc), editable, canWrite: () => editable });
     try {
       await draw();
+      expect(root(element).querySelectorAll(":scope > .ub-block-caption")).toHaveLength(1);
+      expect(root(element).querySelector(".ub-block-label")?.textContent).toBe("Wireframe");
+      expect([...root(element).querySelectorAll(".ub-block-actions > button")].map(button => button.textContent)).toEqual(["Copy", "Source"]);
       expect(element.querySelectorAll(".ub-wireframe-drawing .wf-root")).toHaveLength(2);
       expect(root(element).querySelector<HTMLElement>(".ub-wireframe-panel")?.contentEditable).toBe("false");
       expect(root(element).querySelector(".ub-wireframe-source")?.textContent).toBe(SOURCE);

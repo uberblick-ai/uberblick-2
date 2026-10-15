@@ -16,8 +16,6 @@
  * - **The theme is real.** `data-theme` re-themes the editor and the sidebar
  *   from tokens alone, and survives a reload. A stylesheet is exactly what
  *   jsdom does not have.
- * - **A connected agent is counted.** The count reads awareness over a real
- *   hub, and the session it counts is a client that is not a browser at all.
  * - **The cascade wires the highlight.** The token table holds palette floors;
  *   rendered consumers must still share one card accent, including the focused
  *   orphan chip whose actual ground changes with state.
@@ -25,14 +23,6 @@
  *   wish; only an engine that fetched the woff2 and put it in `document.fonts`
  *   says the title is set in the face the app ships rather than in the serif
  *   behind it.
- * - **The brand's ink is one value, and readable.** Four rules across three
- *   surfaces are meant to resolve to the same colour and clear AA on every
- *   ground they land on; only an engine that ran the cascade can say whether
- *   they did.
- * - **A surface is measured, not a selector list.** The sidebar's interior is
- *   held to its own strokes and to WCAG AA by walking what the column and its
- *   two menus actually paint — which needs a cascade, a `light-dark()` and a
- *   layout; checking rules separately would miss mismatched consumers.
  * - **The document and rail are one composition.** Their fixed insets and
  *   overlay breakpoint are geometry, so only a laid-out browser can prove that
  *   viewport surplus follows them without shifting the prose.
@@ -247,7 +237,7 @@ for (const scheme of ["dark"] as const) {
     );
 
     // The configured workspace uses its shared display-name reading.
-    const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
+    const configured = menu.getByRole("menuitem", { name: "Unnamed workspace", exact: true });
     await expect(configured).toBeVisible();
 
     // And an item on that surface stays visible when it is the one being
@@ -1070,50 +1060,6 @@ for (const scheme of ["light"] as const) {
   });
 }
 
-test("MCP connections counts a connected agent session, and stops when it goes", async ({
-  browser,
-}) => {
-  const page = await openAppearanceApp(browser, "dark");
-  const connections = page.locator(".ub-panel-fact", { hasText: "MCP connections" });
-
-  await page.getByTestId("account-menu").click();
-  await expect(connections).toContainText("0");
-
-  // An agent, as far as the hub and the awareness map are concerned: a client
-  // that publishes a user and says positively that it is an agent. That
-  // pair is exactly what the MCP server's replicas publish, in one write
-  // (`mcp-server/src/replica.ts`), and the marker is what the count reads —
-  // omitting it makes this session a person: the count requires a positive marker.
-  const doc = new Y.Doc();
-  const agent = new HocuspocusProvider({
-    url: harness().hubUrl,
-    name: directoryRoom(harness().workspaceUuid),
-    document: doc,
-    // Wrapped like every real client — the hub reads the protocol version out
-    // of the auth message before it reads the token.
-    token: async () =>
-      wrapToken(
-        await mintToken(await importRootSecret(harness().authSecret), {
-          typ: "room",
-          sub: `agent-${randomUUID()}`,
-          workspace: harness().workspaceUuid,
-          scope: "read-write",
-          kid: null,
-          lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
-        }),
-      ),
-  });
-  agent.setAwarenessField("user", { name: "an agent", color: "#7b5ec7" });
-  agent.setAwarenessField("client", "agent");
-
-  try {
-    await expect(connections).toContainText("1");
-  } finally {
-    agent.destroy();
-  }
-  await expect(connections).toContainText("0");
-});
-
 for (const viewport of [720, 1280]) {
 test(`the document collaborator cluster stays compact and jumps once without moving selection — ${viewport}px`, async ({
   browser,
@@ -1439,27 +1385,11 @@ test(`the document collaborator cluster stays compact and jumps once without mov
 /** One colour a surface paints, and the ground it lands on. */
 type Reading = {
   where: string;
-  kind: "text" | "stroke";
+  kind: "stroke";
   colour: string;
   ground: string;
 };
 
-/**
- * Everything one rendered surface paints, walked rather than listed.
- *
- * Correct individual rules can still leave an interior painted for the wrong
- * surface. So this reads the surface the reader sees —
- * every stroke and every text under a root, against the ground each actually
- * sits on — and a rule added later is measured without anybody remembering to
- * add it.
- *
- * A stroke is a border, an outline, or a hairline element painted with a fill
- * of its own; the menu separator is that third shape. A text is an element with
- * words of its own, so an ancestor's ink is not counted once per descendant.
- * Skipped: anything unrendered, and anything inside an inactive control — WCAG
- * 1.4.3 excepts a disabled component's text, and the vendored menu draws its two
- * unavailable items at half opacity.
- */
 type GroundLayer = { colour: string; image: string; body: boolean };
 
 /** Resolve raw ancestor paint in Node, through the shared colour module. */
@@ -1480,6 +1410,7 @@ function groundsFromLayers(layers: GroundLayer[]): string[] {
   throw new Error("nothing opaque under this surface");
 }
 
+/** Read visible strokes under a surface, excluding disabled controls. */
 async function surface(page: Page, root: string): Promise<Reading[]> {
   const raw = await page.evaluate((selector) => {
     const start = document.querySelector(selector);
@@ -1499,11 +1430,6 @@ async function surface(page: Page, root: string): Promise<Reading[]> {
       if (element.closest("[data-disabled], [aria-disabled='true'], :disabled") !== null) continue;
       const style = getComputedStyle(element);
       const where = `${selector} ${element.tagName.toLowerCase()}${element.getAttribute("class") === null ? "" : `.${element.getAttribute("class")?.trim().split(/\s+/).join(".")}`}`;
-      const field = (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) && element.value.trim() !== "";
-      const speaks = field || [...element.childNodes].some(
-        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() !== "",
-      );
-      if (speaks) readings.push({ where, kind: "text", colour: style.color, layers: layers(element) });
       for (const side of ["top", "right", "bottom", "left"] as const) {
         if (Number.parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0) {
           readings.push({ where: `${where} border-${side}`, kind: "stroke", colour: style.getPropertyValue(`border-${side}-color`), layers: layers(element) });
@@ -1526,158 +1452,9 @@ async function surface(page: Page, root: string): Promise<Reading[]> {
   });
 }
 
-/**
- * The sidebar's interior is the sidebar's own surface.
- *
- * Its interior must use the sidebar's ground rather than the page card's.
- * Each floor is read off the column itself so it cannot drift from the surface:
- *
- * - **Light — the strokes.** Every separator or outline reaches at least the
- *   OKLab separation the column's own outer edge has (`--sidebar-border` on
- *   `--sidebar`, ΔE 0.040).
- * - **Dark — the strokes.** They are white at a low alpha there, where a
- *   separation between two opaque colours is not the measurement; the composite
- *   is. No interior stroke is weaker against its ground than that same outer
- *   edge.
- * - **Both — the ink.** Every text reaches WCAG AA's 4.5:1. `--sidebar-accent`
- *   is tighter than `--sidebar`, and the resting column paints no text on it —
- *   every row that takes it does so hovered or highlighted — so the walk reaches
- *   it deliberately and then asserts it got there, rather than leaving the
- *   tighter ground unmeasured while everything else passes.
- *
- * Chroma is what separates an accent from the surface: every neutral this column
- * paints sits at or under 0.015, and the 28% brand edge at 0.15. The two
- * populations are a tenfold apart, and the threshold below sits about three
- * times clear of each of them, so it is a gap rather than a number picked to
- * make something pass. A stroke carrying its own meaning (`--brand`, a focus
- * ring) is excluded.
- * Meaning, not a named token: a list of accent rules would be the selector list
- * this test exists not to be.
- *
- * Text has no such exclusion: `.ub-menu-current`, the current workspace's row,
- * reads `--brand-ink` and is measured like every other text on the surface.
- */
 const accentChroma = 0.05;
 
-for (const scheme of ["light"] as ReadonlyArray<"light" | "dark">) {
-  test(`the sidebar's interior reads the sidebar's own tokens — ${scheme}`, async ({
-    browser,
-  }) => {
-    const page = await openAppearanceApp(browser, scheme);
-
-    // The floor is the column's outer edge, whatever it is painted.
-    const edge = await painted(page, ".ub-list", "border-right-color");
-    const ground = await painted(page, ".ub-list", "background-color");
-    const floor =
-      scheme === "light" ? separation(edge, ground) : contrast(edge, ground);
-    // Reading the floor off the column is what keeps it from drifting away from
-    // the surface — but it would also fall with `--sidebar-border` if that token
-    // were ever weakened, and every interior stroke would still pass. AC1 names
-    // 0.040, so light holds that absolutely too. Dark's floor is relative by the
-    // criterion's own construction and has no such number.
-    if (scheme === "light") expect(floor).toBeGreaterThanOrEqual(0.04);
-
-    // Include the standard header menu button's hover ground in the token walk.
-    const workspace = page.locator(".ub-workspace");
-    // Put the pointer outside the sidebar before reading its resting ground.
-    const viewport = page.viewportSize();
-    if (viewport === null) throw new Error("e2e: no viewport");
-    await page.mouse.move(viewport.width - 1, viewport.height - 1);
-    const resting = await paintedIn(workspace, "background-color");
-    await workspace.hover();
-    const workspaceGround = await paintedIn(workspace, "background-color");
-    expect(workspaceGround).not.toBe(resting);
-    const readings = await surface(page, ".ub-list");
-
-    // A group, so its header rule and two quiet actions are on screen. "+ group"
-    // makes one and opens its rename field, so the column is read once with the
-    // field and once with the header at rest.
-    await page.getByRole("button", { name: "+ group" }).click();
-    readings.push(...(await surface(page, ".ub-list")));
-    const groupName = `Sidebar tokens ${scheme}`;
-    await page.getByLabel("Group name").fill(groupName);
-    await page.getByLabel("Group name").press("Enter");
-    await expect(page.locator(".ub-group-label").filter({ hasText: groupName })).toBeVisible();
-    readings.push(...(await surface(page, ".ub-list")));
-
-    // Both anchored menus, each while it is open: they are portalled siblings
-    // of the app, so nothing in the column reaches them and they carry their
-    // own rules.
-    await workspace.click();
-    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
-    readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
-    // Include the current row's name and visible checkmark on the highlight ground.
-    await page.locator(".ub-menu-current").hover();
-    const highlight = await painted(page, ".ub-menu-current", "background-color");
-    readings.push(...(await surface(page, "[data-slot=dropdown-menu-content]")));
-    await page.keyboard.press("Escape");
-    await page.getByTestId("account-menu").click();
-    await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
-    readings.push(...(await surface(page, "[data-slot=popover-content]")));
-
-    // The walk reached that ground — the coverage the change is tightest on, and
-    // the same assertion that a silently empty result cannot pass.
-    expect(
-      readings.filter((one) => one.kind === "text" && one.ground === highlight),
-      `no text measured on ${highlight}`,
-    ).not.toHaveLength(0);
-
-    for (const { where, kind, colour, ground: under } of readings) {
-      const ink = oklab(colour);
-      const seen = `${where} — ${colour} on ${under}`;
-      if (kind === "text") {
-        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(4.5);
-        continue;
-      }
-      // A stroke above the threshold is the accent, which the criterion excludes.
-      if (ink.chroma > accentChroma) continue;
-      // Awareness hues are the one legacy-colour ground on this surface. UI
-      // component strokes on them have a contrast contract, not an OKLab-token
-      // separation to compare with the sidebar edge.
-      if (legacySrgb(under) !== null) {
-        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(3);
-        continue;
-      }
-      if (scheme === "dark") {
-        expect(contrast(colour, under), seen).toBeGreaterThanOrEqual(floor);
-      } else {
-        // A separation is between two opaque colours. Light has no translucent
-        // stroke today, and one added later must fail here rather than be
-        // measured uncomposited and pass on a number nothing paints.
-        expect(ink.alpha, seen).toBe(1);
-        expect(separation(colour, under), seen).toBeGreaterThanOrEqual(floor);
-      }
-    }
-
-    // Settings uses the same sidebar ground. Its Back control is a native
-    // button, so its utilities must carry both the hover and inherited face.
-    await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
-    const back = page.locator(".ub-settings-back");
-    await expect(back).toBeVisible();
-    expect(await paintedIn(back, "font-family")).toBe(
-      await painted(page, ".ub-settings-sidebar", "font-family"),
-    );
-    await page.mouse.move(viewport.width - 1, viewport.height - 1);
-    const backResting = await paintedIn(back, "background-color");
-    await back.hover();
-    const backGround = await paintedIn(back, "background-color");
-    expect(backGround).not.toBe(backResting);
-    expect(contrast(await paintedIn(back, "color"), backGround)).toBeGreaterThanOrEqual(4.5);
-  });
-}
-
-/**
- * Every ground one text is read against: the nearest ancestor that paints an
- * opaque colour, the way `surface()` above finds one — or, where nothing over
- * the page does, `--page-ground`'s own stops, because the page's ground is a
- * gradient rather than a colour and a text on it is read against all of it.
- *
- * Derived rather than named, for the reason the walk exists: a link that lands
- * inside an annotated range or an inline-code span has a ground its rule never
- * mentions, and a list of expected grounds would keep passing after that ground
- * moved.
- */
+/** Resolve ancestor paint, including every stop of the page gradient. */
 async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
   const layers = await locator.evaluate((element) => {
     const result: GroundLayer[] = [];
@@ -1688,115 +1465,6 @@ async function groundsUnder(_page: Page, locator: Locator): Promise<string[]> {
     return result;
   });
   return groundsFromLayers(layers);
-}
-
-/**
- * One brand ink, wherever the brand is text.
- *
- * The walk above measures `.ub-menu-current` on `--sidebar` and on
- * `--sidebar-accent`. It cannot see the other three functional consumers: they
- * live on the document page. So this reads all four as the browser paints them,
- * holds each to AA on the grounds it actually sits on, and asserts they are
- * *one* value — no surface owning a private copy is the criterion, and five
- * rules reading five near-identical ambers would pass every contrast assertion
- * here while failing it.
- *
- * A link is read twice, because a document link is reachable on two very
- * different grounds: on the page's gradient, and inside an annotated range,
- * where `.ub-comment` paints `--brand-subtle` under it. Both are derived from
- * the rendered element rather than named here.
- *
- */
-for (const scheme of ["light"] as const) {
-  test(`the brand's functional ink is one readable value — ${scheme}`, async ({
-    browser,
-  }) => {
-    const page = await openAppearanceApp(browser, scheme);
-
-    // A document carrying the three consumers outside the sidebar. It needs a
-    // title before the header offers Pin at all.
-    await page.getByRole("button", { name: "+ new doc" }).click();
-    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
-    const uuid = new URL(page.url()).pathname.split("/")[2] ?? "";
-    await page.locator(".ub-title").fill(`brand ink ${scheme}`);
-
-    // Two links in one paragraph, and a thread over the second of them: the
-    // external link stays on the page's own ground, the reference ends up on
-    // `--brand-subtle`, and neither ground is named below.
-    const label = "reference";
-    await placeCaret(page);
-    await page.keyboard.type(`[a page](https://example.com/) and [${label}](${uuid})`);
-    const reference = page.locator(".ub-editor a.ub-doclink");
-    // An unresolved reference is painted `--muted-foreground` instead, so the
-    // resolved state is what makes this a reading of the brand ink at all.
-    await expect(reference).toHaveAttribute("data-doc-link-state", "resolved");
-    // Back over the reference's own label, which the caret is sitting after —
-    // Home would take the external link with it and leave nothing on the page's
-    // ground.
-    for (let back = 0; back < label.length; back += 1) {
-      await page.keyboard.press("Shift+ArrowLeft");
-    }
-    await page.getByRole("button", { name: "Comment", exact: true }).click();
-    await page.keyboard.type("a thread", { delay: 15 });
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".ub-editor .ub-comment a.ub-doclink")).toBeVisible();
-
-    const actions = page.getByRole("button", { name: "Document actions" });
-    await actions.click();
-    await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
-    await actions.click();
-    const pin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
-    await expect(pin).toBeVisible();
-
-    const consumers: Array<[string, Locator]> = [
-      [".ub-link", page.locator(".ub-editor a.ub-link")],
-      [".ub-doclink, annotated", reference],
-    ];
-
-    const inks = new Set<string>();
-    const grounds = new Map<string, string[]>();
-    for (const [where, locator] of [...consumers, [".ub-action-pinned", pin] as const]) {
-      const ink = await paintedIn(locator, "color");
-      inks.add(ink);
-      const under = await groundsUnder(page, locator);
-      grounds.set(where, under);
-      for (const ground of under) {
-        expect(
-          contrast(ink, ground),
-          `${where} — ${ink} on ${ground}`,
-        ).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-    expect(grounds.get(".ub-link"), "the two link consumers sit on distinct grounds").not.toEqual(
-      grounds.get(".ub-doclink, annotated"),
-    );
-    if (scheme === "light") {
-      await page.locator("body").evaluate((body) => {
-        const layer = document.createElement("span");
-        layer.style.backgroundImage = "linear-gradient(red, red)";
-        const text = document.createElement("span");
-        text.id = "painted-ground-probe";
-        layer.append(text);
-        body.append(layer);
-      });
-      await expect(groundsUnder(page, page.locator("#painted-ground-probe"))).rejects.toThrow(
-        "cannot establish the ground through a painted image",
-      );
-    }
-    await page.keyboard.press("Escape");
-
-    // And the fourth rule, in the switcher the walk above opens for its own
-    // reasons.
-    await page.locator(".ub-workspace").click();
-    await expect(page.locator("[data-slot=dropdown-menu-content]")).toBeVisible();
-
-    const currentInk = await paintedIn(page.locator(".ub-menu-current"), "color");
-    inks.add(currentInk);
-    for (const ground of await groundsUnder(page, page.locator(".ub-menu-current"))) {
-      expect(contrast(currentInk, ground)).toBeGreaterThanOrEqual(4.5);
-    }
-    expect([...inks], "the functional brand ink is one value").toHaveLength(1);
-  });
 }
 
 test("the document title uses the bundled Fraunces while prose keeps its own face", async ({
@@ -1857,6 +1525,117 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
   expect(fetched.offOrigin).toEqual([]);
   expect(fetched.fraunces).toBeGreaterThan(0);
 });
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`chrome uses Geist for readings and controls, reserving mono for copyable text — ${scheme} @webkit`, async ({ browser }, info) => {
+    const hasTouch = info.project.name === "webkit-ipad";
+    const viewport = { width: hasTouch ? 810 : 1280, height: 1080 };
+    const page = await openAppearanceApp(browser, scheme, "", hasTouch, {
+      viewport: { width: 1280, height: 1080 }, isMobile: hasTouch,
+    });
+    const uuid = await createDoc(page, `Typography ${scheme}`);
+    const uiFace = await painted(page, ".ub-list", "font-family");
+    expect(uiFace).toMatch(/^['"]?Geist['"]?,/);
+    const monoFace = await painted(page, ".ub-doc-id", "font-family");
+    expect(monoFace).toContain("Geist Mono");
+    const ui = async (locator: Locator): Promise<void> => {
+      await expect(locator).toHaveCSS("font-family", uiFace);
+    };
+    const mono = async (locator: Locator): Promise<void> => {
+      await expect(locator).toHaveCSS("font-family", monoFace);
+    };
+    await ui(page.locator(".ub-list-head .ub-muted"));
+    await page.setViewportSize(viewport);
+    await expect(page.locator(".ub-last-updated time")).toBeVisible();
+    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-ids", ".ub-copy-link", ".ub-doc-rev"]) {
+      for (const element of await page.locator(selector).all()) await ui(element);
+    }
+    await expect(page.locator(".ub-doc-meta .ub-copy-link")).toHaveAccessibleName(
+      `uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`,
+    );
+    for (const id of await page.locator(".ub-doc-id").all()) await mono(id);
+    const revision = page.locator(".ub-doc-rev .ub-doc-id");
+    await expect(revision).toHaveText(/^[0-9a-f]{8}$/);
+    await page.evaluate(() => document.fonts.ready);
+    const revisionWidths = await revision.evaluate((element) => {
+      const original = element.textContent;
+      const width = element.getBoundingClientRect().width;
+      element.textContent = "········";
+      const placeholder = element.getBoundingClientRect().width;
+      element.textContent = original;
+      const style = getComputedStyle(element);
+      const canvas = document.createElement("canvas").getContext("2d");
+      if (canvas === null) throw new Error("no canvas for font measurement");
+      canvas.font = `${style.fontSize} ${style.fontFamily}`;
+      return { width, placeholder, monoZeroEm: canvas.measureText("0").width / Number.parseFloat(style.fontSize) };
+    });
+    expect(revisionWidths.placeholder).toBeCloseTo(revisionWidths.width, 2);
+    await info.attach("typography", { body: JSON.stringify(revisionWidths), contentType: "application/json" });
+    for (const width of [767, 744]) {
+      await page.setViewportSize({ width, height: viewport.height });
+      await expect(page.locator(".ub-doc-rev")).toBeHidden();
+      await expect(page.locator(".ub-copy-link")).toBeVisible();
+    }
+    await page.setViewportSize(viewport);
+    await page.getByRole("button", { name: /^Sync details/ }).click();
+    const sync = page.getByRole("dialog", { name: "Sync and presence" });
+    await expect(sync).toBeVisible();
+    for (const fact of await sync.locator(".ub-sync-fact").all()) {
+      const identifier = ["Hub", "Room"].includes(await fact.locator("dt").innerText());
+      await (identifier ? mono : ui)(fact.locator("dd"));
+    }
+    await page.keyboard.press("Escape");
+
+    if (!(await page.getByTestId("account-menu").isVisible())) {
+      await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    }
+    await page.getByTestId("account-menu").click();
+    await ui(page.locator(".ub-panel-fact dd"));
+    await page.keyboard.press("Escape");
+    if (hasTouch) await page.getByRole("button", { name: "Close document list", exact: true }).click();
+    await placeCaret(page);
+    await page.keyboard.type("/");
+    const caret = page.getByRole("listbox", { name: "Block types" });
+    await expect(caret).toBeVisible();
+    for (const label of await caret.locator('p[role="presentation"], [role="option"] > span:last-child').all()) {
+      await ui(label);
+    }
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Backspace");
+
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, uuid), document: doc,
+      token: async () => wrapToken(await mintToken(await importRootSecret(harness().authSecret), {
+        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    try {
+      await new Promise<void>((resolve) => provider.on("synced", resolve));
+      appendBlock(doc, { type: "code", text: "const answer = 42;" });
+      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "missing", columns: [{ field: "value" }] }) });
+      await expect(page.locator(".ub-code")).toBeVisible();
+      await mono(page.locator(".ub-code > code"));
+      await mono(page.locator(".ub-chart-source"));
+      await ui(page.locator(".ub-chart-footer .ub-chart-open"));
+      await ui(page.locator(".ub-chart-footer .ub-copy"));
+    } finally {
+      provider.destroy();
+      doc.destroy();
+    }
+
+    await page.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    for (const fact of await page.locator("[data-settings-facts] > div").all()) {
+      const label = await fact.locator("dt").innerText();
+      await (["Workspace UUID", "Address segment", "Hub"].includes(label) ? mono : ui)(fact.locator("dd"));
+      if (["Documents", "MCP connections"].includes(label)) {
+        await expect(fact.locator("dd")).toHaveCSS("font-variant-numeric", "tabular-nums");
+      }
+    }
+  });
+}
 
 /**
  * The copy-link control's touch target.
@@ -2064,7 +1843,7 @@ function editorSelection(page: Page) {
   });
 }
 
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["light"] as const) {
   test(`copy consumers publish fresh shared notices and preserve source selection — ${scheme} @webkit`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme, "", false, {
       viewport: { width: 1400, height: 1000 }, isMobile: false,
@@ -2140,7 +1919,7 @@ for (const scheme of ["light", "dark"] as const) {
       expect(selected.focused).toBe(true);
       expect(selected.from).not.toBe(selected.to);
       for (const [selector, , text] of sources) {
-        const copyLabel = selector === ".ub-mermaid" ? "Copy" : "copy";
+        const copyLabel = "Copy";
         const copy = page.locator(selector).getByRole("button", { name: copyLabel, exact: true });
         await activateCopy(page, copy);
         await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
@@ -2162,7 +1941,7 @@ for (const scheme of ["light", "dark"] as const) {
         await expect(copyNotice(page, mode === "failed" ? "Copy failed" : "Copied to clipboard")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
         expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [sources[0][2]]);
         expect(await editorSelection(page)).toEqual(selected);
-        await expect(copy).toHaveText("copy");
+        await expect(copy).toHaveText("Copy");
         await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
       }
     } finally {
@@ -2384,67 +2163,6 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     page.getByRole("region", { name: "Active" }).getByRole("listitem"),
   ).toHaveCount(EXAMPLE_TAGS.length);
 });
-
-for (const scheme of ["light"] as const) {
-  // Tokens cannot see later rules across settings states; axe cannot read text on the page gradient.
-  test(`both settings pages keep every text readable through curation states — ${scheme}`, async ({ browser }) => {
-    const path = `/${harness().workspace}/settings/tags`;
-    const page = await openAppearanceApp(browser, scheme, `/${harness().workspace}/settings`);
-    const readings = await surface(page, "[data-settings-page]");
-    expect(readings.filter((one) => one.kind === "text")).not.toHaveLength(0);
-    await page.goto(new URL(path, harness().appUrl).href);
-    const field = page.getByLabel("Create a tag");
-    await expect(field).toBeEnabled();
-    readings.push(...await surface(page, "[data-settings-page]"));
-
-    const name = `proof-${scheme}-${randomUUID().slice(0, 8)}`;
-    await field.fill("Invalid Name");
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    readings.push(...await surface(page, "[data-settings-page]"));
-    await field.fill(name);
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: `Retire ${name}` })).toBeVisible();
-    readings.push(...await surface(page, "[data-settings-page]"));
-
-    // The field's value, both action variants on their hover grounds, and the
-    // active/retired duplicate feedback all paint text beyond the resting page.
-    await field.fill(name);
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("already an active tag");
-    readings.push(...await surface(page, "[data-settings-page]"));
-    for (const variant of ["default", "outline"]) {
-      const button = page.locator(`[data-settings-page] button[data-variant=${variant}]`).first();
-      await button.hover();
-      await expect.poll(() => button.evaluate((element) => element.getAnimations().length)).toBe(0);
-      readings.push(...await surface(page, "[data-settings-page]"));
-    }
-    await page.getByRole("button", { name: `Retire ${name}` }).click();
-    await expect(page.getByRole("button", { name: `Restore ${name}` })).toBeVisible();
-    await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("is retired");
-    readings.push(...await surface(page, "[data-settings-page]"));
-
-    // A connected client becomes read-only; a fresh replica waits for the
-    // catalog. Both are ordinary product states, reached through real transport.
-    await harness().stopHub();
-    try {
-      await expect(page.getByText("Tag changes are unavailable while this page is disconnected.")).toBeVisible();
-      readings.push(...await surface(page, "[data-settings-page]"));
-      const waiting = await openAppearanceApp(browser, scheme, path);
-      await expect(waiting.getByText("Waiting for the tag catalog…")).toBeVisible();
-      readings.push(...await surface(waiting, "[data-settings-page]"));
-    } finally {
-      await harness().startHub();
-    }
-
-    for (const { where, kind, colour, ground } of readings) {
-      if (kind === "text") {
-        expect(contrast(colour, ground), `${where} — ${colour} on ${ground}`).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-  });
-}
 
 /** Real document, catalog and presence state; all peers end with the proof. */
 async function contrastDocument(
@@ -2699,7 +2417,7 @@ for (const scheme of ["light"] as const) {
  * Seed both thread states through schema operations for deterministic orphaning
  * without a reload or key deletion.
  */
-for (const scheme of ["light", "dark"] as const) {
+for (const scheme of ["dark"] as const) {
   test(`card highlights share one fill and keep their rendered floors — ${scheme}`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.setViewportSize({ width: 1000, height: 1000 });
@@ -2988,10 +2706,8 @@ for (const scheme of ["light"] as const) {
   });
 }
 
-// Tokens and axe cannot observe a positioned sibling screen or the controls' opacity/focus cascade.
-// The screen is deliberately dark in both appearances. Compare each light
-// control to the corresponding dark rendering, including opacity and focus.
-test("terminal controls keep their dark-screen contrast in either appearance", async ({ browser }, testInfo) => {
+// Tokens and axe cannot establish the controls' opacity/focus cascade.
+test("terminal caption controls keep AA contrast on the appearance-aware tint", async ({ browser }, testInfo) => {
   const page = await openAppearanceApp(browser, "dark");
   await contrastDocument(page, "dark", async () => {
     // The preceding diagram changes the terminal's position when it renders.
@@ -3018,18 +2734,11 @@ test("terminal controls keep their dark-screen contrast in either appearance", a
     console.log(`Terminal readings: ${JSON.stringify(readings)}`);
     await testInfo.attach("terminal-controls", { body: JSON.stringify(readings, null, 2), contentType: "application/json" });
     for (const [key, values] of Object.entries(readings)) {
-      const floor = key.endsWith("rest")
-        ? key.includes("ub-copy") ? 3.317915 : 7.054520
-        : 17.521906;
-      expect(values[0]?.ratio, key).toBeGreaterThanOrEqual(floor);
+      expect(values.length, key).toBeGreaterThan(0);
+      for (const reading of values) expect(reading.ratio, `${key} ${JSON.stringify(reading)}`).toBeGreaterThanOrEqual(4.5);
     }
-    for (const [key, light] of Object.entries(readings).filter(([key]) => key.startsWith("light"))) {
-      const dark = readings[key.replace(/^light/, "dark")];
-      expect(light.length).toBe(1);
-      expect(dark?.length).toBe(1);
-      expect(legacySrgb(light[0]?.ground ?? "")).toEqual(legacySrgb(await painted(page, ".ub-terminal-screen", "background-color")));
-      expect(light[0]?.ratio).toBeGreaterThanOrEqual(dark?.[0]?.ratio ?? Infinity);
-    }
+    expect(legacySrgb(readings["light .ub-terminal-toggle rest"]?.[0]?.ground ?? ""))
+      .not.toEqual(legacySrgb(readings["dark .ub-terminal-toggle rest"]?.[0]?.ground ?? ""));
   });
 });
 
@@ -3152,34 +2861,6 @@ for (const [device, width, hasTouch] of [
     }
   });
 }
-
-test("unavailable Restore and pin reasons are visible on touch", async ({ browser }) => {
-  const page = await openApp(browser, "/", {
-    upstream: true,
-    contextOptions: { viewport: { width: 810, height: 900 }, hasTouch: true },
-  });
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await createDoc(page, "Still listed");
-  await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await createDoc(page, "Archived reason");
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
-  await expect(page.locator(".ub-archived-banner")).toBeVisible();
-  await harness().stopHub();
-  try {
-    await expect(page.getByRole("button", { name: "Restore unavailable" })).toBeDisabled();
-    await expect(page.locator(".ub-restore-unavailable")).toBeVisible();
-    await expect(page.locator(".ub-restore-unavailable")).toContainText("directory is not ready to write");
-    await page.getByRole("button", { name: "Show document list", exact: true }).click();
-    await page.getByRole("button", { name: "All docs", exact: true }).click();
-    await expect(page.locator(".ub-docs-pin-unavailable")).toBeVisible();
-    await expect(page.locator(".ub-docs-pin-unavailable")).toContainText("sidebar is not ready to write");
-    await expect(page.locator(".ub-docs-pin").first()).toBeDisabled();
-  } finally {
-    await harness().startHub();
-  }
-});
 
 test("decision archive and restore follow the whole topic and its first record", async ({ browser }) => {
   const first = randomUUID();

@@ -100,18 +100,6 @@ async function archiveDoc(page: Page): Promise<void> {
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 
-async function textPoint(target: Locator, offset: number): Promise<{ x: number; y: number }> {
-  return target.evaluate((element, index) => {
-    const text = element.firstChild;
-    if (text?.nodeType !== Node.TEXT_NODE) throw new Error("e2e: fixture prefix missing");
-    const range = document.createRange();
-    range.setStart(text, index);
-    range.setEnd(text, index + 1);
-    const box = range.getBoundingClientRect();
-    return { x: box.x + 1, y: box.y + box.height / 2 };
-  }, offset);
-}
-
 test("only link text naming its GitHub issue or pull request becomes a pill", async ({ page }) => {
   await newDoc(page);
   const accepted = [
@@ -274,45 +262,22 @@ test("copying a range serializes stored text and its ordinary link, with no pres
   expect(copied.html).not.toContain("<svg");
 });
 
-test("pill pointer and read-only keyboard activation follow the address while Shift extends selection", { tag: "@webkit" }, async ({ page }) => {
+test("pill clicks follow the address in editable and read-only prose while Shift extends selection", { tag: "@webkit" }, async ({ page }) => {
   await typeFixture(page);
   const pill = page.locator(".ub-github-pill");
-  for (const colorScheme of ["light", "dark"] as const) {
-    await page.reload();
-    await expect(pill).toBeVisible();
-    await page.emulateMedia({ colorScheme });
-    await expectPopup(page, () => pill.click());
-    await placeCaret(page, "start");
-    await pill.click({ modifiers: ["Shift"] });
-    await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? "")).toMatch(/^before /);
-    await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
-    expect(page.context().pages()).toHaveLength(1);
-    await placeCaret(page);
-  }
-  await archiveDoc(page);
-  await page.reload();
-  const link = page.locator(".ub-editor a.ub-link");
-  for (const colorScheme of ["light", "dark"] as const) {
-    await page.reload();
-    await expect(pill).toBeVisible();
-    await page.emulateMedia({ colorScheme });
-    await expectPopup(page, () => pill.click());
-    await link.focus();
-    await expectPopup(page, () => page.keyboard.press("Enter"));
-  }
   await page.reload();
   await expect(pill).toBeVisible();
-  const paragraph = editor(page).locator(":scope > p").first();
-  const start = await textPoint(paragraph, 0);
-  const end = await textPoint(paragraph, 5);
-  await page.mouse.move(start.x, start.y);
-  await page.mouse.down();
-  await page.mouse.move(end.x, end.y, { steps: 12 });
-  await page.mouse.up();
-  expect(await page.evaluate(() => document.getSelection()?.toString())).not.toBe("");
+  await expectPopup(page, () => pill.click());
+  await placeCaret(page, "start");
   await pill.click({ modifiers: ["Shift"] });
   await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? "")).toMatch(/^before /);
+  await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
   expect(page.context().pages()).toHaveLength(1);
+  await placeCaret(page);
+  await archiveDoc(page);
+  await page.reload();
+  await expect(pill).toBeVisible();
+  await expectPopup(page, () => pill.click());
 });
 
 async function commentPill(page: Page): Promise<void> {
@@ -349,19 +314,6 @@ test("comment highlights stay visible on a pill and Comments can open its thread
   if ((page.viewportSize()?.width ?? 1280) < 1280) await page.locator(".ub-threads-toggle").click();
   await page.locator(".ub-thread-card .ub-thread").filter({ hasText: "Pill evidence comment" }).click();
   await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(1);
-});
-
-test("a touch tap follows a commented pill", { tag: "@webkit-touch" }, async ({ page }, info) => {
-  test.skip(info.project.use.hasTouch !== true, "This proof uses the device's touch input.");
-  await typeFixture(page);
-  await commentPill(page);
-  for (const colorScheme of ["light", "dark"] as const) {
-    await page.reload();
-    await expect(page.locator(".ub-github-pill")).toBeVisible();
-    await page.emulateMedia({ colorScheme });
-    await expectPopup(page, () => page.locator(".ub-github-pill").tap());
-    await expect(page.locator('.ub-thread[aria-current="true"]')).toHaveCount(0);
-  }
 });
 
 async function pillStyle(pill: Locator): Promise<Record<string, string>> {

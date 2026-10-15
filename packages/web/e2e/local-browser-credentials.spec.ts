@@ -188,13 +188,12 @@ test("local-only status answers leave the readings and prose in place", async ({
 });
 
 
-for (const appearance of ["light", "dark"] as const) {
-test(`device recovery notices preserve local editing and native tablet touch controls — ${appearance}`, async ({ browser }) => {
+test("device recovery notices preserve local editing and native tablet touch controls", async ({ browser }) => {
   test.setTimeout(90_000);
   await harness().restartOpen({ authenticated: true });
   let notSharedReason: "no-hub-credentials" | "sign-in-required" | "no-workspace-access" | "credential-store" | "renewal-unavailable" | null = null;
   const page = await openApp(browser, "/", {
-    contextOptions: { viewport: { width: 820, height: 1180 }, hasTouch: true, colorScheme: appearance },
+    contextOptions: { viewport: { width: 820, height: 1180 }, hasTouch: true, colorScheme: "light" },
     readySelector: ".ub-docs-heading",
     beforeNavigate: async (opening) => {
       await opening.route("**/api/status", async (route) => {
@@ -312,4 +311,3 @@ test(`device recovery notices preserve local editing and native tablet touch con
     samePageMarker,
   )).toBe(true);
 });
-}

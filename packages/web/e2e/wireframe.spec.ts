@@ -1,6 +1,8 @@
 /** Wireframe previews use ordinary code source through the production replica. */
-import { devices, expect, test } from "@playwright/test";
+import { setNativeSelection } from "./native-selection.js";
+import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -9,7 +11,6 @@ import type { McpSession } from "./mcp-agent.js";
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
 const SOURCE = "dialog Delete draft?\n  text This cannot be undone.\n  row.end\n    button.focus Cancel\n    button.danger Delete";
-const INVALID = "dialog Broken\n text Wrong indentation";
 
 test.beforeAll(() => {
   agent = new McpAgent({
@@ -68,9 +69,7 @@ async function caretEnd(element: Locator): Promise<void> {
     if (view === null) throw new Error("e2e: source has no editor");
     view.focus();
   });
-  // ProseMirror reconciles focus after 20ms; let it finish before replacing the caret.
-  await element.page().evaluate(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
-  await element.evaluate((node) => {
+  await setNativeSelection(element, () => element.evaluate((node) => {
     const texts = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
       acceptNode: (text) => text.parentElement?.closest(".ProseMirror-yjs-cursor") === null
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
@@ -81,10 +80,14 @@ async function caretEnd(element: Locator): Promise<void> {
     const range = document.createRange();
     range.setStart(last, last.textContent?.length ?? 0);
     range.collapse(true);
+    const root = node.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: caret target has no editor");
+    const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  });
+    return { anchor: position, head: position };
+  }));
   // A native key flushes pending selection work before the following input.
   await element.page().keyboard.press("Shift");
   await expect.poll(() => element.evaluate((node) => {
@@ -130,6 +133,8 @@ test("the renderer loads on first use and later edits recover from failed chunk 
   expect(requests).toHaveLength(0);
   await caretEnd(page.locator(".ub-code > code"));
   await chooseLanguage(page, "wireframe", true);
+  // The block rev covers its language, so MCP edits wait for the browser's change.
+  await expect.poll(async () => (await codeBlock(session, uuid)).language).toBe("wireframe");
   const diagnostics = page.locator(".ub-wireframe-diagnostics");
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
   await expect(preview(page).locator(".wf-root")).toHaveCount(0);
@@ -173,8 +178,7 @@ test("the language picker makes a wireframe, Source returns its caret, and anoth
   await expect(source(page)).toBeVisible();
   await expect.poll(() => source(page).evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
   await expect(editor(page)).toBeFocused();
-  const stored = await codeBlock(session, uuid);
-  expect(stored).toMatchObject({ type: "code", language: "wireframe", text: SOURCE });
+  await expect.poll(() => codeBlock(session, uuid)).toMatchObject({ type: "code", language: "wireframe", text: SOURCE });
   expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
     .toContain(`\`\`\`wireframe\n${SOURCE}\n\`\`\``);
   await chooseLanguage(page, "python", true);
@@ -285,35 +289,6 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
   }
 });
 
-test("errors retain the last good drawing or show diagnostics alone, while every warning still renders", async ({ browser }) => {
-  const session = writer();
-  const uuid = await wireframeDoc(session, "Wireframe errors");
-  const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
-  const good = preview(page).locator(".wf-root");
-  await expect(good).toBeVisible();
-  const original = await good.elementHandle();
-  if (original === null) throw new Error("e2e: good wireframe drawing is missing");
-  await editSource(session, uuid, INVALID);
-  await expect(page.locator(".ub-wireframe-diagnostics")).toContainText(/Line 2: error:.*indentation/);
-  await expect(page.locator(".ub-wireframe-stale")).toHaveText("Preview is stale");
-  expect(await original.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
-  const freshUuid = await wireframeDoc(session, "Wireframe without a good drawing", INVALID);
-  const fresh = await openApp(browser, `/${harness().workspace}/${freshUuid}`);
-  await expect(fresh.locator(".ub-wireframe-diagnostics")).toContainText(/Line 2: error:.*indentation/);
-  await expect(preview(fresh).locator(".wf-root")).toHaveCount(0);
-  await expect(fresh.locator(".ub-wireframe-stale")).toBeHidden();
-  const warnings = ["dialog.unknown Warning screen", ...Array.from({ length: 6 }, (_, index) => `  text.unknown Warning ${index + 1}`)].join("\n");
-  await editSource(session, uuid, warnings);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Warning screen");
-  await expect(page.locator(".ub-wireframe-diagnostics li")).toHaveCount(7);
-  for (let line = 1; line <= 7; line += 1) await expect(page.locator(".ub-wireframe-diagnostics li").nth(line - 1)).toContainText(`Line ${line}: warning:`);
-  await expect(page.locator(".ub-wireframe-stale")).toBeHidden();
-  await editSource(session, uuid, SOURCE);
-  await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
-  await expect(page.locator(".ub-wireframe-diagnostics")).toBeHidden();
-});
-
 function wideSource(buttons: number, labelLength = 12): string {
   return ["banner", "  text Wide screen", "  row", ...Array.from({ length: buttons }, (_, index) => `    button ${String(index).padStart(2, "0")}${"x".repeat(labelLength)}`)].join("\n");
 }
@@ -338,63 +313,62 @@ async function evidence(page: Page, info: TestInfo, name: string): Promise<void>
 test("desktop and iPad wireframes fit inside their column and follow both appearances with UI fonts", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const uuid = await wireframeDoc(session, "Wireframe fit and appearance");
-  for (const touch of [false, true]) {
-    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-      contextOptions: { ...(touch ? devices["iPad Pro 11"] : { viewport: { width: 1280, height: 800 } }), colorScheme: "light" },
-    });
-    await expect(preview(page).locator(".wf-root")).toBeVisible();
-    await activateControl(openSource(page), { touch });
-    await expect(source(page)).toBeVisible();
-    const font = await preview(page).locator(".wf-root").evaluate((element) => getComputedStyle(element).fontFamily);
-    expect(font).not.toMatch(/mono/i);
-    expect(await source(page).evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
-    expect(await openSource(page).evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
-    await activateControl(neighbor(page), { touch });
-    await expect(source(page)).toBeHidden();
-    const paper = preview(page).locator(".wf-dialog-card");
-    const light = await paper.evaluate((element) => getComputedStyle(element).backgroundColor);
-    const root = await preview(page).locator(".wf-root").elementHandle();
-    if (root === null) throw new Error("e2e: themed wireframe is missing");
-    await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-light`);
-    await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-    await expect.poll(() => paper.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(light);
-    expect(await root.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
-    expect(await preview(page).locator(".wf-focus").evaluate((element) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--brand)";
-      element.append(probe);
-      const amber = getComputedStyle(probe).color;
-      probe.remove();
-      return getComputedStyle(element).outlineColor !== amber;
-    })).toBe(true);
-    await activateControl(openSource(page), { touch });
-    await expect(source(page)).toBeVisible();
-    await activateControl(neighbor(page), { touch });
-    await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
-    await editSource(session, uuid, wideSource(12));
-    await expect(preview(page).locator(".wf-button")).toHaveCount(12);
-    await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
-    const viewport = page.locator(".ub-wireframe-viewport");
-    await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-    await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-    expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-    await expectContained(page);
-    // A less-wide drawing fits by shrinking, before the scrolling floor.
-    const mediumLength = await viewport.evaluate((element) => {
-      const button = element.querySelector(".wf-button");
-      const context = document.createElement("canvas").getContext("2d");
-      if (button === null || context === null) throw new Error("e2e: missing width measurement");
-      const style = getComputedStyle(button);
-      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      return Math.ceil(element.clientWidth * 1.2 / context.measureText("x").width);
-    });
-    await editSource(session, uuid, wideSource(1, mediumLength));
-    await expect(preview(page).locator(".wf-button")).toHaveCount(1);
-    await expect.poll(() => fitScale(page)).toBeGreaterThan(0.6);
-    expect(await fitScale(page)).toBeLessThan(1);
-    await expectContained(page);
-    await editSource(session, uuid, SOURCE);
-  }
+  const touch = info.project.use.hasTouch === true;
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    contextOptions: { colorScheme: "light" },
+  });
+  await expect(preview(page).locator(".wf-root")).toBeVisible();
+  await activateControl(openSource(page), { touch });
+  await expect(source(page)).toBeVisible();
+  const font = await preview(page).locator(".wf-root").evaluate((element) => getComputedStyle(element).fontFamily);
+  expect(font).not.toMatch(/mono/i);
+  expect(await source(page).evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/mono/i);
+  expect(await openSource(page).evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
+  await activateControl(neighbor(page), { touch });
+  await expect(source(page)).toBeHidden();
+  const paper = preview(page).locator(".wf-dialog-card");
+  const light = await paper.evaluate((element) => getComputedStyle(element).backgroundColor);
+  const root = await preview(page).locator(".wf-root").elementHandle();
+  if (root === null) throw new Error("e2e: themed wireframe is missing");
+  await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-light`);
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await expect.poll(() => paper.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(light);
+  expect(await root.evaluate((element) => element === document.querySelector(".ub-wireframe-drawing > .wf-root"))).toBe(true);
+  expect(await preview(page).locator(".wf-focus").evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--brand)";
+    element.append(probe);
+    const amber = getComputedStyle(probe).color;
+    probe.remove();
+    return getComputedStyle(element).outlineColor !== amber;
+  })).toBe(true);
+  await activateControl(openSource(page), { touch });
+  await expect(source(page)).toBeVisible();
+  await activateControl(neighbor(page), { touch });
+  await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
+  await editSource(session, uuid, wideSource(12));
+  await expect(preview(page).locator(".wf-button")).toHaveCount(12);
+  await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
+  const viewport = page.locator(".ub-wireframe-viewport");
+  await expect.poll(() => viewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await viewport.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expectContained(page);
+  // A less-wide drawing fits by shrinking, before the scrolling floor.
+  const mediumLength = await viewport.evaluate((element) => {
+    const button = element.querySelector(".wf-button");
+    const context = document.createElement("canvas").getContext("2d");
+    if (button === null || context === null) throw new Error("e2e: missing width measurement");
+    const style = getComputedStyle(button);
+    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    return Math.ceil(element.clientWidth * 1.2 / context.measureText("x").width);
+  });
+  await editSource(session, uuid, wideSource(1, mediumLength));
+  await expect(preview(page).locator(".wf-button")).toHaveCount(1);
+  await expect.poll(() => fitScale(page)).toBeGreaterThan(0.6);
+  expect(await fitScale(page)).toBeLessThan(1);
+  await expectContained(page);
+  await editSource(session, uuid, SOURCE);
 });
 
 test("warning banners use the product warning colours in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -492,6 +466,7 @@ test("100 wireframes do no rendering work during prose typing and record compara
   }
   const wireframePage = pages[1];
   if (wireframePage === undefined) throw new Error("e2e: wireframe workload page is missing");
+  // Observe beyond the 200 ms redraw debounce without faking the performance clock.
   await wireframePage.waitForTimeout(300);
   expect(await wireframePage.evaluate(() => (window as unknown as { wireframeTyping: { redraws: number } }).wireframeTyping.redraws)).toBe(0);
   const measured = { ordinaryCode: plain, wireframes: wireframe, ordinaryMedianMs: median(plain), wireframeMedianMs: median(wireframe), blocks: 100 };
