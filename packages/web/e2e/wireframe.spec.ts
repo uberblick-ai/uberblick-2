@@ -2,6 +2,7 @@
 import { setNativeSelection } from "./native-selection.js";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -79,9 +80,13 @@ async function caretEnd(element: Locator): Promise<void> {
     const range = document.createRange();
     range.setStart(last, last.textContent?.length ?? 0);
     range.collapse(true);
+    const root = node.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: caret target has no editor");
+    const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
+    return { anchor: position, head: position };
   }));
   // A native key flushes pending selection work before the following input.
   await element.page().keyboard.press("Shift");
@@ -128,6 +133,8 @@ test("the renderer loads on first use and later edits recover from failed chunk 
   expect(requests).toHaveLength(0);
   await caretEnd(page.locator(".ub-code > code"));
   await chooseLanguage(page, "wireframe", true);
+  // The block rev covers its language, so MCP edits wait for the browser's change.
+  await expect.poll(async () => (await codeBlock(session, uuid)).language).toBe("wireframe");
   const diagnostics = page.locator(".ub-wireframe-diagnostics");
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
   await expect(preview(page).locator(".wf-root")).toHaveCount(0);
@@ -171,8 +178,7 @@ test("the language picker makes a wireframe, Source returns its caret, and anoth
   await expect(source(page)).toBeVisible();
   await expect.poll(() => source(page).evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
   await expect(editor(page)).toBeFocused();
-  const stored = await codeBlock(session, uuid);
-  expect(stored).toMatchObject({ type: "code", language: "wireframe", text: SOURCE });
+  await expect.poll(() => codeBlock(session, uuid)).toMatchObject({ type: "code", language: "wireframe", text: SOURCE });
   expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
     .toContain(`\`\`\`wireframe\n${SOURCE}\n\`\`\``);
   await chooseLanguage(page, "python", true);
