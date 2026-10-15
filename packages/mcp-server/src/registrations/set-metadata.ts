@@ -19,8 +19,8 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
       "RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. " +
       "Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null " +
       "tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; " +
-      "description/tags/links writable. Decision answers use one to three short answer blocks and a brief reason; " +
-      "guidance on related page, discussion in RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; " +
+      "description/tags/links writable. See lifecycle's Decision answers and topics section for decision answer guidance. " +
+      "Stub answerPreview uses legacy TL;DR/first paragraph/list; " +
       "get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived " +
       "documents refuse metadata; lifecycle uses set_status." +
       helpPointer("set_metadata"),
