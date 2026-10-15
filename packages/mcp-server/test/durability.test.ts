@@ -23,6 +23,7 @@ import type { Hub } from "@uberblick/hub";
 import { MirrorStore } from "../src/store.js";
 import {
   FailingStore,
+  LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
   sleep,
@@ -32,6 +33,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
@@ -495,6 +497,7 @@ describe("the pending watermark", () => {
 
     const rig = await startServer(
       testConfig({
+        ...LIVE_HUB_SETTLE,
         databasePath: racedPath,
         authSecret: TEST_SECRET,
         hubUrl: `ws://127.0.0.1:${running.port}`,
@@ -505,15 +508,10 @@ describe("the pending watermark", () => {
 
     const created = await rig.ok("create_doc", { title: "Watermarks", description: "A test document." });
     const room = `${WORKSPACE}/${created.uuid}`;
-    await waitUntil("the room to be acknowledged", async () => {
-      const status = await rig.ok("sync_status", {});
-      return (
-        status.hub.status === "connected" &&
-        !(status.pendingRooms as { room: string }[]).some(
-          (entry) => entry.room === room,
-        )
-      );
-    });
+    expect(await rig.instance.replicas.waitForSettled({
+      rooms: [room],
+      deadline: performance.now() + WAIT_TIMEOUT_MS,
+    })).toMatchObject({ caughtUp: true });
 
     // An outside process appends between the poll and the pending read.
     const outside = store(racedPath);

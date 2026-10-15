@@ -121,10 +121,11 @@ it("retains a newer cross-process append between the final poll and marker relea
   let appendedSeq = 0;
   const waitForQuiet = rig.instance.replicas.sync.waitForQuiet.bind(rig.instance.replicas.sync);
   vi.spyOn(rig.instance.replicas.sync, "waitForQuiet").mockImplementation(async (options) => {
-    await waitForQuiet(options);
+    const result = await waitForQuiet(options);
     store.beforeNextPendingRead(() => {
       appendedSeq = outside.appendUpdate(replica.room, update, "local");
     });
+    return result;
   });
   appendBlock(replica.doc, { type: "paragraph", text: "The acknowledged write." });
   const pending = await rig.instance.replicas.waitForPendingChanges(performance.now() + 5_000);

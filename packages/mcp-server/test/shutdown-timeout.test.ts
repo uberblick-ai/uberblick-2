@@ -146,9 +146,9 @@ it("uses only the budget left after draining admitted startup work and leaves ti
             first = false;
             enter();
             await new Promise((resolve) => setTimeout(resolve, 1_200));
-            return;
+            return { caughtUp: false, reason: "deadline" };
           }
-          await waitForQuiet(options);
+          return waitForQuiet(options);
         };
         const [, transport] = InMemoryTransport.createLinkedPair();
         void instance.connect(transport);

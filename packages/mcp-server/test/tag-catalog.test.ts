@@ -24,6 +24,7 @@ import {
   TEST_SECRET,
   waitForCorpus,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
@@ -433,10 +434,7 @@ describe("the workspace tag catalog", () => {
       tags: [AUTH.id],
       blocks: [{ type: "paragraph", text: "convergent wombat" }],
     });
-    await waitUntil("the author's catalog and document to reach the hub", async () => {
-      const status = await author.ok("sync_status");
-      return status.pendingRooms.length === 0;
-    });
+    expect(await author.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 
     const databasePath = tempDatabasePath();
     const fresh = await synced(hub.port, databasePath);

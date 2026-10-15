@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { Server, type onAuthenticatePayload } from "@hocuspocus/server";
-import type * as Y from "yjs";
+import * as Y from "yjs";
 import type { StoredHubLogin } from "../../mcp-server/src/auth-store.js";
 import { CredentialAdmission, type CredentialContext } from "../src/credential-admission.js";
 import { handleCredentialRenewal } from "../src/credential-renewal.js";
@@ -41,6 +41,7 @@ export async function startDeviceSyncHub(options: {
   const protocolVersion = options.protocolVersion ?? SYNC_PROTOCOL_VERSION;
   const database = new HubDatabase(join(options.directory, "credential-hub.sqlite"), (error) => { throw error; });
   database.open();
+  const readStoredRoom = database.connection.prepare("SELECT data FROM documents WHERE name = ?");
   const credentials = new CredentialRegistry(database);
   const memberships = new MembershipRegistry(database);
   const admins = new HubAdminRegistry(database);
@@ -156,7 +157,18 @@ export async function startDeviceSyncHub(options: {
     setRenewalReply(reply: DeviceSyncRenewalReply | null): void { renewalReply = reply; },
     setRenewalDelay(ms: number): void { renewalDelayMs = ms; },
     closeConnections(): void { server?.hocuspocus.closeConnections(); },
-    readRoom(room: string): Y.Doc | undefined { return server?.hocuspocus.documents.get(room); },
+    readRoom<T>(room: string, read: (document: Y.Doc) => T): T | undefined {
+      const live = server?.hocuspocus.documents.get(room);
+      if (live !== undefined) return read(live);
+      // Rooms unload after their last connection leaves; persisted state remains observable.
+      const data = readStoredRoom.get(room)?.data;
+      if (!(data instanceof Uint8Array)) return undefined;
+      const document = new Y.Doc();
+      try {
+        Y.applyUpdate(document, data);
+        return read(document);
+      } finally { document.destroy(); }
+    },
     pause, resume,
     async close(): Promise<void> {
       if (closed) return;

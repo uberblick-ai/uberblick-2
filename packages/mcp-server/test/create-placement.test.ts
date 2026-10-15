@@ -22,6 +22,7 @@ import {
 import type { Hub } from "@uberblick/hub";
 import {
   FailingStore,
+  LIVE_HUB_SETTLE,
   peerClient,
   removeTempDirs,
   startHub,
@@ -30,6 +31,7 @@ import {
   testConfig,
   TEST_SECRET,
   waitUntil,
+  WAIT_TIMEOUT_MS,
   WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
@@ -50,7 +52,7 @@ async function server(
       databasePath,
       ...(hubPort === undefined
         ? {}
-        : { authSecret: TEST_SECRET, hubUrl: `ws://127.0.0.1:${hubPort}` }),
+        : { ...LIVE_HUB_SETTLE, authSecret: TEST_SECRET, hubUrl: `ws://127.0.0.1:${hubPort}` }),
     }),
     store,
   );
@@ -324,14 +326,7 @@ describe("with no hub", () => {
     );
 
     // And only then does the call's own claim become true for every room.
-    await waitUntil("every room this server holds to be acknowledged", async () => {
-      const status = await restarted.ok("sync_status", {});
-      return (
-        status.hub.status === "connected" &&
-        status.unsyncedChanges === 0 &&
-        status.pendingRooms.length === 0
-      );
-    });
+    expect(await restarted.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   });
 });
 
