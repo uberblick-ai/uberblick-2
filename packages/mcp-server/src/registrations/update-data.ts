@@ -20,8 +20,8 @@ export function registerUpdateData(server: ToolRegistrar, context: ToolContext):
       "schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. " +
       "Read with get_data; get_doc summarizes collections. " +
       "Decisions refuse data with decision_data_unsupported; decided records " +
-      "keep decision_read_only, and legacy data stays readable. Decisions use one to three short answer " +
-      "blocks with a brief reason, guidance on the related regular page and discussion in an RFC. Their " +
+      "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in lifecycle's " +
+      "Decision answers and topics section. Their " +
       "directory answerPreview uses legacy TL;DR or the first paragraph/list; get_doc page " +
       "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
       "the answer's content blocks." +
