@@ -300,7 +300,7 @@ async function commentPill(page: Page): Promise<void> {
   })).toBe(true);
 }
 
-test("comment highlights stay visible on a pill and Comments can open its thread", { tag: "@webkit" }, async ({ page }, info) => {
+test("comment highlights stay visible on a pill and Comments can open its thread", async ({ page }, info) => {
   await typeFixture(page);
   await commentPill(page);
   if (process.env.UB_AGENTS_SCRATCH !== undefined) {
