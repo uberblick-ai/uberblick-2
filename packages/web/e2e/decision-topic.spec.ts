@@ -60,6 +60,57 @@ async function selected(page: Page, uuid: string, text: string): Promise<void> {
   await expect(entry(page, uuid).locator(".ub-decision-selection")).toHaveText("Selected");
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(editor(page)).toHaveText(text);
+  await expect(page.locator(".ub-decision-related")).toHaveCount(0);
+  await expect(page.getByText(/^Related page:/)).toHaveCount(0);
+}
+
+async function selectedRfc(page: Page, rfc: StoredDoc | null, title = ""): Promise<void> {
+  const line = page.locator(".ub-decision-rfc");
+  if (rfc === null) {
+    await expect(line).toHaveCount(0);
+    return;
+  }
+  await expect(line).toHaveCount(1);
+  await expect(line.getByText("RFC", { exact: true })).toBeVisible();
+  await expect(line.getByRole("link")).toHaveText(title);
+  await expect(line.getByRole("link")).toHaveAttribute("href", new RegExp(`/${rfc.uuid}$`));
+  await expect(page.locator(".ub-decision-answer + .ub-decision-rfc + .ub-decision-history")).toHaveCount(1);
+}
+
+async function rfcLayout(page: Page): Promise<void> {
+  const layout = await page.locator(".ub-decision-rfc").evaluate((element) => {
+    const answer = element.previousElementSibling;
+    const history = element.nextElementSibling;
+    const pane = element.closest(".ub-document-pane");
+    const label = element.querySelector("span");
+    const link = element.querySelector("a");
+    if (answer === null || history === null || pane === null || label === null || link === null) throw new Error("e2e: missing RFC layout");
+    const probe = document.createElement("span");
+    probe.style.color = "var(--muted-foreground)";
+    probe.style.fontFamily = "var(--font-sans)";
+    element.append(probe);
+    try {
+      return {
+        top: element.getBoundingClientRect().top, bottom: element.getBoundingClientRect().bottom,
+        answerBottom: answer.getBoundingClientRect().bottom, historyTop: history.getBoundingClientRect().top,
+        labelColor: getComputedStyle(label).color, linkColor: getComputedStyle(link).color, muted: getComputedStyle(probe).color,
+        labelFont: getComputedStyle(label).fontFamily, linkFont: getComputedStyle(link).fontFamily,
+        uiFont: getComputedStyle(probe).fontFamily,
+        width: element.clientWidth, scroll: element.scrollWidth,
+        paneWidth: pane.clientWidth, paneScroll: pane.scrollWidth,
+        pageWidth: document.documentElement.clientWidth, pageScroll: document.documentElement.scrollWidth,
+      };
+    } finally { probe.remove(); }
+  });
+  expect(layout.top).toBeGreaterThanOrEqual(layout.answerBottom);
+  expect(layout.bottom).toBeLessThanOrEqual(layout.historyTop);
+  expect(layout.labelColor).toBe(layout.muted);
+  expect(layout.linkColor).toBe(layout.muted);
+  expect(layout.labelFont).toBe(layout.uiFont);
+  expect(layout.linkFont).toBe(layout.uiFont);
+  expect(layout.scroll).toBeLessThanOrEqual(layout.width + 1);
+  expect(layout.paneScroll).toBeLessThanOrEqual(layout.paneWidth + 1);
+  expect(layout.pageScroll).toBeLessThanOrEqual(layout.pageWidth + 1);
 }
 
 async function readThread(page: Page, text: string, touch: boolean): Promise<Locator> {
@@ -211,13 +262,15 @@ for (const { touch, appearance } of [
     const writer = session();
     const formerOwner = await create(writer, "Former related page", "Previous guidance.");
     const owner = await create(writer, "Current related page", "Current guidance remains readable when archived.");
+    const firstRfc = await create(writer, "Original answer RFC", "Discuss the original answer here.");
+    const currentRfc = await create(writer, "Current answer RFC", "Discuss the current answer here.");
     const rfc = await create(writer, "Replacement RFC", "Discuss the proposed replacement here.");
     const first = await create(writer, "Initial topic title", "Earlier answer remains available as history.", {
-      kind: "decision", status: "decided", related: formerOwner.uuid, answer: answer("Earlier answerer"),
+      kind: "decision", status: "decided", related: formerOwner.uuid, discussion: firstRfc.uuid, answer: answer("Earlier answerer"),
     });
     await writer.call("pin_doc", { uuid: first.uuid, group: "Reading" });
     const current = await create(writer, "Current topic title", "Current answer stays in force during review.", {
-      kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer("Recorded answerer"),
+      kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, discussion: currentRfc.uuid, answer: answer("Recorded answerer"),
     });
     const rejected = await create(writer, "Rejected alternative", "Rejected answer remains available as history.", {
       kind: "decision", supersedes: current.uuid,
@@ -249,6 +302,12 @@ for (const { touch, appearance } of [
     await answerHeader(page, "In force", "in-force");
     await expect(page.locator(".ub-decision-notice")).toContainText("The current answer stays in force.");
     await selected(page, current.uuid, answerText(current));
+    await selectedRfc(page, currentRfc, "Current answer RFC");
+    const currentRfcTitle = "RFC: Current guidance and its implementation constraints for the shared workspace";
+    await writer.call("set_metadata", { uuid: currentRfc.uuid, title: currentRfcTitle });
+    await selectedRfc(page, currentRfc, currentRfcTitle);
+    await writer.call("archive_doc", { uuid: currentRfc.uuid });
+    await archivedLink(page.locator(".ub-decision-rfc a"));
     await selectedTopicPin(page, touch);
     const topicRecords = [first.uuid, current.uuid, rejected.uuid, withdrawn.uuid, pending.uuid];
     const actions = page.getByRole("button", { name: "Document actions", exact: true });
@@ -269,10 +328,10 @@ for (const { touch, appearance } of [
     await expect(page.locator(".ub-decision-record-state")).toHaveText(["Superseded", "In force", "Rejected", "Withdrawn", "Open proposal"]);
     await expect(entry(page, rejected.uuid)).toContainText("1 comment");
     await expect(entry(page, current.uuid).locator("time")).toHaveAttribute("datetime", "2026-10-04T12:00:00.000Z");
-    await archivedLink(page.locator(".ub-decision-related a"));
-    await expect(page.locator(".ub-decision-related a")).toContainText("Current related page");
+    await expect(page.locator(`.ub-document-pane a[href$="/${owner.uuid}"], .ub-document-pane a[href$="/${formerOwner.uuid}"]`)).toHaveCount(0);
     await archivedLink(page.locator(".ub-decision-notice a"));
     await archivedLink(entry(page, pending.uuid).locator(".ub-doclink"));
+    await rfcLayout(page);
     await copyPath(page, topicPath, touch);
     await page.screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}.png`), fullPage: true,
@@ -280,10 +339,19 @@ for (const { touch, appearance } of [
     const column = page.locator(".ub-document-pane > .ub-column");
     await column.evaluate((element) => { (element as HTMLElement).style.inlineSize = "18rem"; });
     await headerLayout(page, true);
+    await rfcLayout(page);
     await page.screenshot({
       path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `decision-topic-${test.info().project.name}-${touch ? "ipad" : "desktop"}-${appearance}-narrow.png`), fullPage: true,
     });
     await column.evaluate((element) => { (element as HTMLElement).style.removeProperty("inline-size"); });
+    await activateControl(page.locator(".ub-decision-rfc a"), { touch });
+    await expect(page).toHaveURL(new RegExp(`/${currentRfc.uuid}$`));
+    await expect(page.locator(".ub-archived-banner")).toContainText("Archived. Read-only and hidden from the document list.");
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await expect(editor(page)).toHaveText(answerText(currentRfc));
+    await page.goBack();
+    await selected(page, current.uuid, answerText(current));
+    await selectedRfc(page, currentRfc, currentRfcTitle);
 
     const earlier = entry(page, first.uuid).locator(".ub-decision-record");
     if (touch) await earlier.tap();
@@ -299,6 +367,23 @@ for (const { touch, appearance } of [
     }
     await expect(page).toHaveURL(new RegExp(`${firstPath}$`));
     await selected(page, first.uuid, answerText(first));
+    await selectedRfc(page, firstRfc, "Original answer RFC");
+    await rfcLayout(page);
+    const firstRfcLink = page.locator(".ub-decision-rfc a");
+    if (touch) await firstRfcLink.tap();
+    else {
+      await firstRfcLink.focus();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(firstRfcLink).toBeFocused();
+      await page.keyboard.press("Enter");
+    }
+    await expect(page).toHaveURL(new RegExp(`/${firstRfc.uuid}$`));
+    await expect(editor(page)).toHaveText(answerText(firstRfc));
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`${firstPath}$`));
+    await selected(page, first.uuid, answerText(first));
+    await selectedRfc(page, firstRfc, "Original answer RFC");
     await selectedTopicPin(page, touch);
     await activateControl(actions, { touch });
     await expect(page.getByRole("menuitem", { name: "Unpin from sidebar", exact: true })).toBeEnabled();
@@ -328,6 +413,7 @@ for (const { touch, appearance } of [
     await activateControl(entry(page, rejected.uuid).locator(".ub-decision-record"), { touch });
     await expect(page).toHaveURL(new RegExp(`${rejectedPath}$`));
     await selected(page, rejected.uuid, answerText(rejected));
+    await selectedRfc(page, null);
     await answerHeader(page, "Rejected", "rejected");
     await relativeAttribution(page, "Recorded rejecter", "2026-10-04T12:00:00.000Z");
     await expect(page.locator(".ub-decision-rejection")).toHaveText("Rejection reason: The proposal does not meet the constraint.");
@@ -343,6 +429,7 @@ for (const { touch, appearance } of [
 
     await activateControl(entry(page, pending.uuid).locator(".ub-decision-record"), { touch });
     await selected(page, pending.uuid, answerText(pending));
+    await selectedRfc(page, rfc, "Replacement RFC");
     await answerHeader(page, "Under review", "under-review");
     await expect(page.locator(".ub-decision-notice")).toHaveText("The current answer stays in force. Open proposal");
     await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
@@ -352,6 +439,7 @@ for (const { touch, appearance } of [
 
     await activateControl(entry(page, withdrawn.uuid).locator(".ub-decision-record"), { touch });
     await selected(page, withdrawn.uuid, answerText(withdrawn));
+    await selectedRfc(page, null);
     await answerHeader(page, "Withdrawn", "withdrawn");
     await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
@@ -366,11 +454,7 @@ for (const { touch, appearance } of [
     await expect(editor(page)).toHaveText(answerText(rfc));
     await page.goBack();
     await selected(page, current.uuid, answerText(current));
-    await activateControl(page.locator(".ub-decision-related a"), { touch });
-    await expect(editor(page)).toHaveText(answerText(owner));
-    await expect(page.locator(".ub-archived-banner")).toContainText("Archived. Read-only and hidden from the document list.");
-    await page.goBack();
-    await selected(page, current.uuid, answerText(current));
+    await selectedRfc(page, currentRfc, currentRfcTitle);
 
     await writer.call("archive_doc", { uuid: first.uuid });
     await expect(page.locator(".ub-archived-banner")).toContainText("Archived. Read-only and hidden from the document list.");
@@ -378,6 +462,9 @@ for (const { touch, appearance } of [
     await activateControl(entry(page, current.uuid).locator(".ub-decision-record"), { touch });
     await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
     await selected(page, current.uuid, answerText(current));
+    await selectedRfc(page, currentRfc, currentRfcTitle);
+    await archivedLink(page.locator(".ub-decision-rfc a"));
+    await rfcLayout(page);
     const archivedRail = await readThread(page, "Conversation about the current answer.", touch);
     await expect(archivedRail.getByRole("button", { name: /^(Reply|Resolve|Reopen)$/ })).toHaveCount(0);
     await closeThreadDrawer(page, touch);
@@ -403,6 +490,7 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   const proposal = await create(writer, "Unanswered topic", "Open proposal is not guidance in force.", { kind: "decision", discussion: rfc.uuid });
   const page = await openApp(browser, `/${harness().workspace}/${proposal.uuid}`, { upstream: true });
   await selected(page, proposal.uuid, answerText(proposal));
+  await selectedRfc(page, rfc, "First topic RFC");
   await answerHeader(page, "Not yet decided", "not-yet-decided");
   await expect(page.locator(".ub-decision-notice")).toHaveText("Open proposal");
   await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
@@ -413,20 +501,23 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   const stance = await create(writer, "An initial stance", "Initial agent answer.", { kind: "decision", status: "decided" });
   await page.goto(new URL(`/${harness().workspace}/${stance.uuid}`, harness().appUrl).href);
   await selected(page, stance.uuid, answerText(stance));
+  await selectedRfc(page, null);
   await answerHeader(page, "Agent stance", "agent-stance");
   await expect(page.locator(".ub-decision-attribution")).toHaveText(/^(just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
   await expect(page.locator(".ub-decision-answer-header").getByText("Agent stance", { exact: true })).toHaveCount(1);
   const left = await create(writer, "Competing answer one", "The first conflicting answer.", {
-    kind: "decision", status: "decided", supersedes: stance.uuid, answer: answer("First answerer"),
+    kind: "decision", status: "decided", supersedes: stance.uuid, discussion: rfc.uuid, answer: answer("First answerer"),
   });
   const right = await create(writer, "Competing answer two", "The second conflicting answer.", {
     kind: "decision", status: "decided", supersedes: stance.uuid, answer: answer("Second answerer"),
   });
   await expect(page.locator(".ub-decision-notice")).toContainText("Nothing is in force.");
   await selected(page, right.uuid, answerText(right));
+  await selectedRfc(page, null);
   await answerHeader(page, "Conflicting answer", "conflict");
   await expect(page.locator(".ub-decision-record-state")).toHaveText(["Superseded", "Conflicting answer", "Conflicting answer"]);
   await activateControl(entry(page, left.uuid).locator(".ub-decision-record"));
   await selected(page, left.uuid, answerText(left));
+  await selectedRfc(page, rfc, "First topic RFC");
   await expect(page.getByRole("link", { name: "Go to the current answer", exact: true })).toHaveCount(0);
 });
