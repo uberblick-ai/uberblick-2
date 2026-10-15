@@ -3,12 +3,12 @@ import {
   createTagCatalogEntry, DATA_KEY, DATA_LIMITS, readDocData, setTags,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { PersistenceError } from "../src/replica.js";
 import { readWorkspaceData, updateWorkspaceData, WorkspaceDataWriteError } from "../src/workspace-data.js";
-import {
-  FailingStore, hubUrl, LIVE_HUB_SETTLE, removeTempDirs, startHub, startServer,
+import { cleanupTestResources,
+  FailingStore, hubUrl, LIVE_HUB_SETTLE, startHub, startServer,
   TEST_SECRET, testConfig,
 } from "./helpers.js";
 import type { Rig, TestHub } from "./helpers.js";
@@ -62,10 +62,11 @@ async function refuses(rig: Rig, uuid: string, batch: unknown, code: string) {
 }
 
 afterEach(async () => {
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
-afterAll(removeTempDirs);
 
 describe("workspace file data operations", () => {
   it("exempts only the CLI writer and previews without changing document, directory or log", async () => {

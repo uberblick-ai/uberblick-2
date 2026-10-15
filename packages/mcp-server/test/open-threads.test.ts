@@ -4,9 +4,9 @@ import {
   roomForDoc, setAnnotationResolved, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
-import {
-  hubUrl, LIVE_HUB_SETTLE, peerClient, removeTempDirs, startHub, startServer,
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanupTestResources,
+  hubUrl, LIVE_HUB_SETTLE, peerClient, startHub, startServer,
   tempDatabasePath, testConfig, TEST_SECRET, waitUntil, WORKSPACE,
 } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
@@ -15,11 +15,12 @@ const rigs: Rig[] = [];
 const hubs: Hub[] = [];
 const peers: PeerClient[] = [];
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
-afterAll(removeTempDirs);
 
 async function localRig(databasePath = tempDatabasePath()): Promise<Rig> {
   const rig = await startServer(testConfig({ databasePath }));

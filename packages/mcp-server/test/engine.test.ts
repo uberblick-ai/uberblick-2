@@ -25,12 +25,11 @@ import {
 import { log } from "../src/log.js";
 import { collectServingSyncStatus } from "../src/status.js";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   FailingStore,
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -50,12 +49,12 @@ const rigs: Rig[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const engine of engines.splice(0)) await engine.close();
-  for (const store of stores.splice(0)) store.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [...rigs.splice(0), ...engines.splice(0)].map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: stores.splice(0).map((store) => () => store.close()),
+  });
 });
 
 function encodedDoc(uuid: string, text: string, tags: string[] = []): Uint8Array {

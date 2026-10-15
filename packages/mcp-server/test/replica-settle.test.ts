@@ -3,16 +3,17 @@ import { afterEach, expect, it } from "vitest";
 import { getMeta, initDoc, roomForDoc, upsertDirectoryEntry } from "@uberblick/schema";
 import { collectReplicaSyncState } from "../src/status.js";
 import { openWorkspaceReplicas, type WorkspaceReplicaSet } from "../src/workspace-replicas.js";
-import { hubUrl, LIVE_HUB_SETTLE, removeTempDirs, startHub, testConfig, TEST_SECRET, WORKSPACE } from "./helpers.js";
+import { cleanupTestResources, hubUrl, LIVE_HUB_SETTLE, startHub, testConfig, TEST_SECRET, WORKSPACE } from "./helpers.js";
 import type { TestHub } from "./helpers.js";
 
 const workspaces: WorkspaceReplicaSet[] = [];
 const hubs: TestHub[] = [];
 
 afterEach(async () => {
-  for (const workspace of workspaces.splice(0)) await workspace.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: workspaces.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 it("settles pending writes and rooms discovered during hydration without an engine or status polling", async () => {

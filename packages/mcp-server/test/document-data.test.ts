@@ -11,13 +11,12 @@ import { dirname } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   FailingStore,
   LIVE_HUB_SETTLE,
   mainTsProcess,
   PACKAGE_ROOT,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -35,13 +34,15 @@ const hubs = new Set<Hub>();
 const processes = new Set<ProcessClient>();
 
 afterEach(async () => {
-  for (const processClient of processes) await processClient.close();
+  const clients = [...processes, ...rigs];
+  const runningHubs = [...hubs];
   processes.clear();
-  for (const rig of rigs) await rig.close();
   rigs.clear();
-  for (const hub of hubs) await hub.stop();
   hubs.clear();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: clients.map((client) => () => client.close()),
+    hubs: runningHubs.map((hub) => () => hub.stop()),
+  });
 });
 
 async function server(options: TestConfigOptions = {}, store?: MirrorStore) {

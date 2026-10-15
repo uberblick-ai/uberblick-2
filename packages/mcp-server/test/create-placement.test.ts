@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   deleteGroup,
   getMeta,
@@ -20,11 +20,10 @@ import {
   readSidebar,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   FailingStore,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -111,13 +110,14 @@ function pinCount(sidebar: any, uuid: string): number {
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const store of stores.splice(0)) store.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: [...stores.splice(0).map((store) => () => store.close())],
+  });
 });
 
-afterAll(removeTempDirs);
 
 describe("the placement input", () => {
   it("refuses everything but a group id and a position, creating nothing", async () => {

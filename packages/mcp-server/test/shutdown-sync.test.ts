@@ -5,13 +5,12 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { getBlocks } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
 import { messageYjsUpdate } from "y-protocols/sync";
-import {
+import { cleanupTestResources, closeChild, trackChild,
   hubUrl,
   LIVE_HUB_SETTLE,
   mainTsProcess,
   PACKAGE_ROOT,
   peerClient,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -36,16 +35,14 @@ const peers: PeerClient[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
-  await Promise.all(children.splice(0).map(async (child) => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
-    child.kill("SIGKILL");
-    await closed;
-  }));
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [
+      ...rigs.splice(0).map((rig) => () => rig.close()),
+      ...children.splice(0).map((child) => () => closeChild(child)),
+    ],
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function startProcess(options: { hubUrl?: string; authSecret?: string } = {}) {
@@ -65,7 +62,7 @@ async function startProcess(options: { hubUrl?: string; authSecret?: string } = 
     timeout: 35_000,
     killSignal: "SIGKILL",
   });
-  children.push(child);
+  children.push(trackChild(child));
   const frames = new ReadBuffer();
   const replies = new Map<number, JSONRPCMessage>();
   let stdout = "";

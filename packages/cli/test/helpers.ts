@@ -28,6 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inject } from "vitest";
+import { waitUntil as waitForCondition } from "../../mcp-server/test/lifecycle.js";
 import { findProjectConfig } from "../src/project-binding.js";
 
 declare module "vitest" {
@@ -462,11 +463,5 @@ export async function waitUntil(
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await sleep(25);
-  }
+  await waitForCondition(label, predicate, timeoutMs);
 }

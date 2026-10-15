@@ -24,11 +24,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { directoryRoom, listDirectory, parseWorkspaceId } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import { defaultWorkspaceDatabasePath } from "../src/config.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDir,
@@ -50,10 +49,11 @@ const rigs: Rig[] = [];
 const peers: PeerClient[] = [];
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 /**

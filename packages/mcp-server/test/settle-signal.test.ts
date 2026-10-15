@@ -4,9 +4,9 @@ import { messageYjsSyncStep2 } from "y-protocols/sync";
 import { HubSync } from "../src/sync.js";
 import {
   hubUrl,
+  cleanupTestResources,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   testConfig,
@@ -16,16 +16,19 @@ import {
 } from "./helpers.js";
 
 const cleanup: Array<() => void | Promise<void>> = [];
+const peers: Array<() => Promise<void>> = [];
+const hubs: Array<() => Promise<void>> = [];
+const releases: Array<() => void> = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const close of cleanup.splice(0).reverse()) await close();
-  removeTempDirs();
+  for (const release of releases.splice(0)) release();
+  await cleanupTestResources({ clients: cleanup.splice(0), peers: peers.splice(0), hubs: hubs.splice(0) });
 });
 
 it("wakes from caller state without polling, and removes subscriptions after every ending", async () => {
   const hub = await startHub();
-  cleanup.push(() => hub.stop());
+  hubs.push(() => hub.stop());
   const sync = new HubSync(testConfig({
     authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE,
   }), () => {});
@@ -59,7 +62,7 @@ it("wakes from caller state without polling, and removes subscriptions after eve
 
 it("rejects caller predicate failures and releases the caller subscription", async () => {
   const hub = await startHub();
-  cleanup.push(() => hub.stop());
+  hubs.push(() => hub.stop());
   const sync = new HubSync(testConfig({
     authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE,
   }), () => {});
@@ -75,7 +78,7 @@ it("rejects caller predicate failures and releases the caller subscription", asy
 
 it("keeps reconnect writes unacknowledged through the auth-to-handshake gap and the held diff", async () => {
   const hub = await startHub();
-  cleanup.push(() => hub.stop());
+  hubs.push(() => hub.stop());
   const rig = await startServer(testConfig({
     authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), ...LIVE_HUB_SETTLE,
     syncTimeoutMs: 500,
@@ -89,7 +92,7 @@ it("keeps reconnect writes unacknowledged through the auth-to-handshake gap and 
   const replica = rig.instance.replicas.replica(created.uuid);
   const room = `${WORKSPACE}/${created.uuid}`;
   const peer = await peerClient(hub.port, room);
-  cleanup.push(() => peer.destroy());
+  peers.push(() => peer.destroy());
   await peer.synced;
   let originalConnection = hub.hocuspocus.documents.get(room)?.getConnections()
     .find((connection) => "sub" in connection.context && connection.context.sub === rig.config.sessionId);
@@ -102,7 +105,7 @@ it("keeps reconnect writes unacknowledged through the auth-to-handshake gap and 
 
   let release = () => {};
   const held = new Promise<void>((resolve) => { release = resolve; });
-  cleanup.push(release);
+  releases.push(release);
   let entered = false;
   hub.hocuspocus.configuration.extensions.push({
     async beforeSync({ documentName, context, connection, type }) {

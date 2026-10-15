@@ -11,11 +11,13 @@
  */
 
 import { randomUUID } from "node:crypto";
+import type { ChildProcess } from "node:child_process";
+import type { Server, Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HocuspocusProvider } from "@hocuspocus/provider";
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { JsonSchemaValidator, jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
@@ -31,6 +33,87 @@ import { createMcpServer } from "../src/server.js";
 import type { UberblickMcpServer } from "../src/server.js";
 import { MirrorStore } from "../src/store.js";
 import type { UpdateOrigin } from "../src/store.js";
+import { HubConnection } from "../src/hub-connection.js";
+import { drainWaits, waitUntil } from "./lifecycle.js";
+
+export { drainWaits, waitUntil } from "./lifecycle.js";
+
+export type TestCleanup = () => unknown;
+
+/** Close dependents before their servers, preserving every failure. */
+export async function cleanupTestResources(resources: {
+  clients?: TestCleanup[];
+  peers?: TestCleanup[];
+  hubs?: TestCleanup[];
+  after?: TestCleanup[];
+}): Promise<void> {
+  const errors: unknown[] = [];
+  for (const close of [
+    drainWaits,
+    ...(resources.clients ?? []),
+    ...(resources.peers ?? []),
+    ...(resources.hubs ?? []),
+    ...(resources.after ?? []),
+    removeTempDirs,
+  ]) {
+    try { await close(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length) throw new AggregateError(errors, "test teardown failed");
+}
+
+const childClosures = new WeakMap<ChildProcess, Promise<{ error?: Error }>>();
+
+/** Capture completion at spawn, before an exit can precede its pipe closure. */
+export function trackChild<T extends ChildProcess>(child: T): T {
+  let error: Error | undefined;
+  childClosures.set(child, new Promise((resolve) => {
+    child.once("error", (failure) => { error = failure; });
+    child.once("close", () => resolve(error ? { error } : {}));
+  }));
+  return child;
+}
+
+/** Kill a leftover test process and await release of its sockets and pipes. */
+export async function closeChild(child: ChildProcess): Promise<void> {
+  const closed = childClosures.get(child);
+  if (closed === undefined) throw new Error("test child was not tracked at spawn");
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  const result = await closed;
+  if (result.error) throw result.error;
+}
+
+/** Own accepted sockets, including upgrades which HTTP no longer closes. */
+export function trackListener(server: Server): {
+  sockets: Set<Socket>;
+  close(): Promise<void>;
+} {
+  const sockets = new Set<Socket>();
+  const errors: Error[] = [];
+  const closed = new Map<Socket, Promise<void>>();
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ECONNRESET") errors.push(error);
+    });
+    closed.set(socket, new Promise<void>((resolve) => {
+      socket.once("close", () => { sockets.delete(socket); resolve(); });
+    }));
+  });
+  return {
+    sockets,
+    async close() {
+      const stopped = server.listening
+        ? new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+        : Promise.resolve();
+      for (const socket of sockets) socket.destroy();
+      const results = await Promise.allSettled([stopped, ...closed.values()]);
+      for (const result of results) if (result.status === "rejected") errors.push(result.reason);
+      closed.clear();
+      const failures = errors.splice(0);
+      if (failures.length) throw new AggregateError(failures, `test listener failed: ${failures.map(String).join("; ")}`);
+    },
+  };
+}
 
 /**
  * A store whose appends can be made to fail, as a full or read-only disk would.
@@ -119,21 +202,6 @@ export function sleep(ms: number): Promise<void> {
  * as one, just later.
  */
 export const WAIT_TIMEOUT_MS = 20_000;
-
-/** Wait for `predicate`, polling. Throws with `label` on timeout. */
-export async function waitUntil(
-  label: string,
-  predicate: () => boolean | Promise<boolean>,
-  timeoutMs = WAIT_TIMEOUT_MS,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await predicate())) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await sleep(25);
-  }
-}
 
 export interface TestConfigOptions {
   databasePath?: string;
@@ -299,6 +367,7 @@ export async function startServer(
     }
   };
 
+  let closing: Promise<void> | undefined;
   return {
     instance,
     client,
@@ -314,9 +383,14 @@ export async function startServer(
       }
       return result.payload;
     },
-    async close() {
-      await client.close();
-      await instance.close();
+    close() {
+      closing ??= (async () => {
+        const errors: unknown[] = [];
+        try { await client.close(); } catch (error) { errors.push(error); }
+        try { await instance.close(); } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, "MCP rig close failed");
+      })();
+      return closing;
     },
   };
 }
@@ -404,7 +478,7 @@ export interface PeerClient {
   readonly doc: Y.Doc;
   readonly provider: HocuspocusProvider;
   readonly synced: Promise<void>;
-  destroy(): void;
+  destroy(): Promise<void>;
 }
 
 /**
@@ -434,8 +508,12 @@ export async function peerClient(
       lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
     }),
   );
+  const connection = new HubConnection(1_500);
   const provider = new HocuspocusProvider({
-    url: hubUrl(port),
+    websocketProvider: new HocuspocusProviderWebsocket({
+      url: hubUrl(port),
+      WebSocketPolyfill: connection.websocket(),
+    }),
     name: room,
     token,
     document: doc,
@@ -443,12 +521,18 @@ export async function peerClient(
   const synced = new Promise<void>((resolve) => {
     provider.on("synced", () => resolve());
   });
+  provider.attach();
+  let closing: Promise<void> | undefined;
   return {
     doc,
     provider,
     synced,
     destroy() {
-      provider.destroy();
+      closing ??= connection.close(() => {
+          provider.destroy();
+          provider.configuration.websocketProvider.destroy();
+        });
+      return closing;
     },
   };
 }

@@ -191,6 +191,7 @@ export class Replicas {
   private persistenceFailure: { room: string; error: unknown } | null = null;
 
   private destroyed = false;
+  private closing: Promise<void> | null = null;
 
   constructor(
     config: McpConfig,
@@ -1129,9 +1130,9 @@ export class Replicas {
     return [...this.replicas.values()];
   }
 
-  destroy(): void {
+  destroy(): void | Promise<void> {
     if (this.destroyed) {
-      return;
+      return this.closing ?? undefined;
     }
     this.destroyed = true;
     for (const timer of this.cursorTimers.values()) {
@@ -1142,11 +1143,12 @@ export class Replicas {
       clearTimeout(timer);
     }
     this.presenceTimers.clear();
-    this.sync.destroy();
+    this.closing = this.sync.destroy();
     for (const replica of this.replicas.values()) {
       replica.awareness.destroy();
       replica.doc.destroy();
     }
     this.replicas.clear();
+    return this.closing;
   }
 }

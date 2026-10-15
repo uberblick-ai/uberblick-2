@@ -1,7 +1,7 @@
 /** Observe this client's socket without rendering text supplied by a peer. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { subscribe } from "node:diagnostics_channel";
-import { isIP } from "node:net";
+import { isIP, type Socket } from "node:net";
 import { CERTIFICATE_CODES, type HubFailureCause } from "./hub-failure.js";
 
 interface Failure {
@@ -17,6 +17,44 @@ interface Attempt {
   opened: boolean;
   startedAt: number;
   failure: Failure | undefined;
+  socket?: Socket;
+  closed: boolean;
+}
+
+const transports = new WeakMap<WebSocket, Attempt>();
+const owners = new WeakMap<WebSocket, HubConnection>();
+
+/** Observe close before Hocuspocus removes its listeners and forgets the socket. */
+export function closeHubSocket(socket: WebSocket | null | undefined, destroy: () => void): Promise<void> {
+  const owner = socket === null || socket === undefined ? undefined : owners.get(socket);
+  return owner?.close(destroy) ?? closeSockets(socket === null || socket === undefined ? [] : [socket], destroy);
+}
+
+async function closeSockets(sockets: WebSocket[], destroy: () => void): Promise<void> {
+  const closed = sockets.flatMap((socket) => {
+    const transport = transports.get(socket)?.socket;
+    return [
+      // An aborted Node dial can remain CLOSING after dispatching close.
+      socket.readyState === socket.CLOSED || transports.get(socket)?.closed === true
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => socket.addEventListener("close", () => resolve(), { once: true })),
+      transport === undefined || transport.closed
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => transport.once("close", () => resolve())),
+    ];
+  });
+  try {
+    destroy();
+  } finally {
+    // A peer may never answer the close frame, or may stop reading entirely.
+    // Pending writes receive their acknowledgement opportunity before destruction;
+    // releasing the transport must not add another wait to that deadline.
+    for (const socket of sockets) {
+      socket.close();
+      transports.get(socket)?.socket?.destroy();
+    }
+    await Promise.all(closed);
+  }
 }
 
 // The dispatcher handler is Node's own WebSocket handler. Forward all its
@@ -39,9 +77,10 @@ subscribe("undici:request:create", (message) => {
 subscribe("undici:client:sendHeaders", (message) => {
   const { request, socket } = message as {
     request: object;
-    socket: { remoteAddress?: string; remotePort?: number };
+    socket: Socket;
   };
   const attempt = requests.get(request);
+  if (attempt) attempt.socket = socket;
   if (attempt && socket.remoteAddress && isIP(socket.remoteAddress) && socket.remotePort === attempt.port) {
     attempt.endpoint = endpoint(socket.remoteAddress, attempt.port);
   }
@@ -87,8 +126,14 @@ function errorFailure(error: unknown, attempt: Attempt, timeoutMs: number): Fail
 export class HubConnection {
   private current: Attempt | undefined;
   private latest: Failure | undefined;
+  private readonly sockets = new Set<WebSocket>();
 
   constructor(private readonly timeoutMs: number) {}
+
+  /** Include sockets forgotten by provider retries while their close is pending. */
+  close(destroy: () => void): Promise<void> {
+    return closeSockets([...this.sockets], destroy);
+  }
 
   /** A fresh observer for each native WebSocket, including provider retries. */
   websocket() {
@@ -108,7 +153,7 @@ export class HubConnection {
         const target = new URL(url);
         const host = target.hostname;
         const port = Number(target.port || (target.protocol === "wss:" ? 443 : 80));
-        const attempt: Attempt = { host, port, endpoint: `${host}:${port}`, pending: true, opened: false, startedAt: Date.now(), failure: undefined };
+        const attempt: Attempt = { host, port, endpoint: `${host}:${port}`, pending: true, opened: false, startedAt: Date.now(), failure: undefined, closed: false };
         observer.current = attempt;
         super(url, { dispatcher: {
           dispatch(options, handler) {
@@ -143,6 +188,9 @@ export class HubConnection {
             });
           },
         } });
+        transports.set(this, attempt);
+        owners.set(this, observer);
+        observer.sockets.add(this);
         this.addEventListener("open", () => {
           attempt.opened = true;
           attempt.pending = false;
@@ -150,6 +198,12 @@ export class HubConnection {
           if (observer.current === attempt) observer.latest = undefined;
         });
         this.addEventListener("close", (event) => {
+          attempt.closed = true;
+          if (attempt.socket !== undefined && !attempt.socket.closed) {
+            attempt.socket.once("close", () => observer.sockets.delete(this));
+          } else {
+            observer.sockets.delete(this);
+          }
           attempt.pending = false;
           if (attempt.opened) attempt.failure = undefined;
           // These reserved codes are synthesized, never sent in a close frame.

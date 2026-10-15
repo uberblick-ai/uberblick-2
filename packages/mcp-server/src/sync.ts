@@ -348,6 +348,7 @@ export class HubSync {
   private quarantined = false;
 
   private destroyed = false;
+  private closing: Promise<void> | null = null;
 
   /** See {@link HubSyncOptions.silent}. */
   private readonly silent: boolean;
@@ -1147,25 +1148,34 @@ export class HubSync {
     });
   }
 
-  destroy(): void {
-    if (this.destroyed) {
-      return;
-    }
+  destroy(): Promise<void> {
+    if (this.closing !== null) return this.closing;
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    this.closing = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
     this.destroyed = true;
-    this.stateChanged();
-    this.stateListeners.clear();
-    this.stopDeviceWork();
-    this.roomQuietListeners.clear();
-    if (this.rebuildTimer !== null) {
-      clearTimeout(this.rebuildTimer);
-      this.rebuildTimer = null;
-    }
-    for (const provider of this.providers.values()) {
-      provider.destroy();
-    }
-    this.providers.clear();
-    this.releaseAdmissions();
-    this.socket?.destroy();
+    this.connection.close(() => {
+      const errors: unknown[] = [];
+      const close = (action: () => void) => {
+        try { action(); } catch (error) { errors.push(error); }
+      };
+      close(() => this.stateChanged());
+      this.stateListeners.clear();
+      close(() => this.stopDeviceWork());
+      this.roomQuietListeners.clear();
+      if (this.rebuildTimer !== null) {
+        clearTimeout(this.rebuildTimer);
+        this.rebuildTimer = null;
+      }
+      for (const provider of this.providers.values()) {
+        close(() => provider.destroy());
+      }
+      this.providers.clear();
+      close(() => this.releaseAdmissions());
+      close(() => this.socket?.destroy());
+      if (errors.length) throw new AggregateError(errors, "hub sync teardown failed");
+    }).then(resolve, reject);
+    return this.closing;
   }
 
   /** After destruction, drain any issued credential's conditional publication. */

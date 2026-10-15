@@ -14,10 +14,9 @@ import { log } from "../src/log.js";
 import { Replicas } from "../src/replica.js";
 import { collectSyncStatus } from "../src/status.js";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -36,11 +35,14 @@ const hubs: Hub[] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const replicas of replicasToClose.splice(0)) replicas.destroy();
-  for (const store of stores.splice(0)) store.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [
+      ...rigs.splice(0).map((rig) => () => rig.close()),
+      ...replicasToClose.splice(0).map((replicas) => () => replicas.destroy()),
+    ],
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+    after: stores.splice(0).map((store) => () => store.close()),
+  });
 });
 
 function clock(): { wall: number; elapsed: number } {

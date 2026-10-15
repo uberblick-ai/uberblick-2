@@ -11,12 +11,11 @@ import {
   setTags,
   settingsRoom,
 } from "@uberblick/schema";
-import {
+import { cleanupTestResources,
   FailingStore,
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -66,10 +65,11 @@ async function synced(port: number, databasePath = tempDatabasePath()): Promise<
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) peer.destroy();
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 describe("the workspace tag catalog", () => {
@@ -261,7 +261,7 @@ describe("the workspace tag catalog", () => {
       Y.encodeStateAsUpdate(peer),
       "remote",
     );
-    peer.destroy();
+    await peer.destroy();
 
     expect((await rig.ok("list_tags")).tags).toContainEqual({
       id: theirs,

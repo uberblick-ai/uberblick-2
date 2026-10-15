@@ -36,9 +36,10 @@ import {
   removeTempDatabases,
   startHub,
   token as hubToken,
-  waitUntil,
   type TestClient,
 } from "../../hub/test/helpers.js";
+import { waitUntil as pollUntil } from "../../mcp-server/test/lifecycle.js";
+import { cleanUpResources, closeProvider, closeWebSocket } from "./teardown.js";
 
 const TEST_BROWSER_KEY = "independent-local-browser-test-key";
 const OTHER_BROWSER_KEY = "other-independent-local-browser-test-key";
@@ -54,17 +55,23 @@ const providers: HocuspocusProvider[] = [];
 const websockets: HocuspocusProviderWebsocket[] = [];
 const replicaAwareness: { awareness: Awareness; doc: Y.Doc }[] = [];
 
+function waitUntil(label: string, predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  return pollUntil(label, predicate, timeoutMs);
+}
+
 afterEach(async () => {
-  for (const client of clients.splice(0)) client.destroy();
-  for (const provider of providers.splice(0)) provider.destroy();
-  for (const websocket of websockets.splice(0)) websocket.destroy();
-  for (const server of servers.splice(0)) await server.stop();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDatabases();
-  for (const replica of replicaAwareness.splice(0)) {
-    replica.awareness.destroy();
-    replica.doc.destroy();
-  }
+  await cleanUpResources(
+    clients.splice(0).map((client) => () => closeProvider(client.provider)),
+    providers.splice(0).map((provider) => () => closeProvider(provider)),
+    websockets.splice(0).map((websocket) => () => closeWebSocket(websocket)),
+    servers.splice(0).map((server) => () => server.stop()),
+    hubs.splice(0).map((hub) => () => hub.stop()),
+    replicaAwareness.splice(0).map((replica) => () => {
+      replica.awareness.destroy();
+      replica.doc.destroy();
+    }),
+    [removeTempDatabases],
+  );
 });
 
 function browserToken(
@@ -247,6 +254,16 @@ function sharedClient(socket: HocuspocusProviderWebsocket, room: string, token: 
 }
 
 describe("the ub open browser server", () => {
+  it("waits for the native browser socket to close before returning from client cleanup", async () => {
+    const box = await fixture();
+    const client = await box.connect(`${WORKSPACE}/${randomUUID()}`);
+    await client.synced;
+    const socket = client.provider.configuration.websocketProvider.webSocket;
+    expect(socket?.readyState).toBe(WebSocket.OPEN);
+    await closeProvider(client.provider);
+    expect(socket?.readyState).toBe(WebSocket.CLOSED);
+  });
+
   it("serves several workspaces on one socket with keys scoped to each store", async () => {
     const prepared: string[] = [];
     const box = await fixture({

@@ -4,17 +4,20 @@ import { join } from "node:path";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import type { McpConfig } from "../src/config.js";
 import type { Rig } from "./helpers.js";
-import { LIVE_HUB_SETTLE, removeTempDirs, startServer, tempDir, testConfig } from "./helpers.js";
+import { cleanupTestResources, LIVE_HUB_SETTLE, startServer, tempDir, testConfig } from "./helpers.js";
+import type { TestCleanup } from "./helpers.js";
 
 export type DeviceHub = Awaited<ReturnType<typeof startDeviceSyncHub>>;
 const hubs: DeviceHub[] = [];
 const rigs: Rig[] = [];
+export const listeners: TestCleanup[] = [];
 
 /** Pass to `afterEach`: closes every client, then every hub. */
 export async function closeDeviceSync(): Promise<void> {
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.close();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((rig) => () => rig.close()),
+    hubs: [...hubs.splice(0).map((hub) => () => hub.close()), ...listeners.splice(0)],
+  });
 }
 
 export async function hub(protocolVersion?: number): Promise<DeviceHub> {
