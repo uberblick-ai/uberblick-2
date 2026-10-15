@@ -7,6 +7,19 @@ import type { JSONValue } from "@uberblick/schema";
 
 export type SyncPath = "relay" | "upstream";
 
+// Keep control queries out of the generated tables' hundreds of thousands of cells.
+function tagPicker(page: Page): Locator {
+  return page.locator(".ub-doc-meta").getByRole("button", { name: "Edit tags", exact: true });
+}
+
+function tagOptions(page: Page, selected?: boolean): Locator {
+  return page.locator(".ub-tag-picker-panel").getByRole("option", selected === undefined ? {} : { selected });
+}
+
+function restoreButton(page: Page): Locator {
+  return page.locator(".ub-archived-banner").getByRole("button", { name: "Restore", exact: true });
+}
+
 /** A relay acknowledgement covers this computer; upstream also covers its hub. */
 export async function waitForAcknowledged(page: Page, options: { path: SyncPath }): Promise<void> {
   await test.step(`acknowledged by ${options.path === "relay" ? "ub open relay" : "upstream hub"}`, async () => {
@@ -105,11 +118,11 @@ export async function waitForDocumentDraw(page: Page, session: McpSession, uuid:
  */
 export async function proveMcpArrival(page: Page, session: McpSession, uuid: string, options: { path: "upstream"; restore?: boolean }): Promise<void> {
   await test.step(`later browser metadata reaches the ${options.path} MCP reader`, async () => {
-    const picker = page.getByRole("button", { name: "Edit tags", exact: true });
-    const archived = await page.getByRole("button", { name: "Restore", exact: true }).count() > 0;
-    if (archived) await page.getByRole("button", { name: "Restore", exact: true }).click();
+    const picker = tagPicker(page);
+    const archived = await restoreButton(page).count() > 0;
+    if (archived) await restoreButton(page).click();
     await picker.click();
-    const option = page.getByRole("option").first();
+    const option = tagOptions(page).first();
     const selected = await option.getAttribute("aria-selected") === "true";
     const label = (await option.locator(":scope > span").nth(1).textContent())?.trim();
     if (label === undefined || label === "") throw new Error("e2e: arrival proof needs a catalog tag");
@@ -124,7 +137,7 @@ export async function proveMcpArrival(page: Page, session: McpSession, uuid: str
     });
     if (options.restore === true) {
       await picker.click();
-      await page.getByRole("option", { name: label, exact: true }).click();
+      await page.locator(".ub-tag-picker-panel").getByRole("option", { name: label, exact: true }).click();
       await page.keyboard.press("Escape");
       await waitForAcknowledged(page, { path: options.path });
       await expectMcp(() => session.call<{ tags: { name: string }[] }>("get_doc", { uuid }), doc => {
@@ -132,9 +145,9 @@ export async function proveMcpArrival(page: Page, session: McpSession, uuid: str
       });
     }
     if (archived) {
-      await page.getByRole("button", { name: "Document actions", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Archive document", exact: true }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Archive document", exact: true }).click();
+      await page.locator(".ub-doc-meta").getByRole("button", { name: "Document actions", exact: true }).click();
+      await page.locator('[role="menu"]').getByRole("menuitem", { name: "Archive document", exact: true }).click();
+      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive document", exact: true }).click();
       await waitForAcknowledged(page, { path: options.path });
     }
   });
@@ -145,19 +158,19 @@ export async function proveBrowserArrival(page: Page, options: {
   path: "upstream"; readTags: () => string[] | Promise<string[]>;
 }): Promise<void> {
   await test.step("later browser metadata reaches the upstream hub replica reader", async () => {
-    const archived = await page.getByRole("button", { name: "Restore", exact: true }).count() > 0;
-    if (archived) await page.getByRole("button", { name: "Restore", exact: true }).click();
-    await page.getByRole("button", { name: "Edit tags", exact: true }).click();
-    await expect(page.getByRole("option", { selected: true })).toHaveCount(0);
+    const archived = await restoreButton(page).count() > 0;
+    if (archived) await restoreButton(page).click();
+    await tagPicker(page).click();
+    await expect(tagOptions(page, true)).toHaveCount(0);
     await expect.poll(options.readTags).toEqual([]);
-    await page.getByRole("option", { selected: false }).first().click();
+    await tagOptions(page, false).first().click();
     await page.keyboard.press("Escape");
     await waitForAcknowledged(page, { path: options.path });
     await expect.poll(options.readTags).toHaveLength(1);
     if (archived) {
-      await page.getByRole("button", { name: "Document actions", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Archive document", exact: true }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Archive document", exact: true }).click();
+      await page.locator(".ub-doc-meta").getByRole("button", { name: "Document actions", exact: true }).click();
+      await page.locator('[role="menu"]').getByRole("menuitem", { name: "Archive document", exact: true }).click();
+      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive document", exact: true }).click();
       await waitForAcknowledged(page, { path: options.path });
     }
   });
@@ -169,8 +182,8 @@ export async function proveDocumentPageArrival(actor: Page, reader: Page, option
   const path = options.path === "relay" ? "ub open relay→document page" :
     throughRelay ? "ub open relay→upstream hub→document page" : "upstream hub→observer";
   await test.step(`later browser metadata reaches ${path}`, async () => {
-    await actor.getByRole("button", { name: "Edit tags", exact: true }).click();
-    const option = actor.getByRole("option").first();
+    await tagPicker(actor).click();
+    const option = tagOptions(actor).first();
     const selected = await option.getAttribute("aria-selected") === "true";
     const label = (await option.locator(":scope > span").nth(1).textContent())?.trim();
     if (label === undefined || label === "") throw new Error("e2e: page arrival proof needs a catalog tag");
