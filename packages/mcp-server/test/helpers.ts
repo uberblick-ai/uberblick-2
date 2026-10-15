@@ -18,6 +18,8 @@ import { fileURLToPath } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { JsonSchemaValidator, jsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { Hub, HubLogger, HubLogRecord } from "@uberblick/hub";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
@@ -220,6 +222,25 @@ export interface Rig {
   close(): Promise<void>;
 }
 
+/**
+ * Output validators shared by every rig's client. `listTools` otherwise compiles
+ * every output schema with Ajv, about 55 ms a rig; a compiled validator depends
+ * only on its schema, so sharing it checks exactly what a fresh client would.
+ */
+const outputSchemaCompiler = new AjvJsonSchemaValidator();
+const compiledOutputSchemas = new Map<string, JsonSchemaValidator<unknown>>();
+const sharedOutputValidators: jsonSchemaValidator = {
+  getValidator<T>(schema: Parameters<jsonSchemaValidator["getValidator"]>[0]) {
+    const key = JSON.stringify(schema);
+    let validator = compiledOutputSchemas.get(key);
+    if (validator === undefined) {
+      validator = outputSchemaCompiler.getValidator(schema);
+      compiledOutputSchemas.set(key, validator);
+    }
+    return validator as JsonSchemaValidator<T>;
+  },
+};
+
 /** The name the test client identifies itself with over MCP. */
 export const CLIENT_NAME = "uberblick-tests";
 
@@ -246,7 +267,9 @@ export async function startServer(
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
 
-  const client = new Client(clientInfo);
+  const client = new Client(clientInfo, {
+    jsonSchemaValidator: sharedOutputValidators,
+  });
   await Promise.all([
     instance.connect(serverTransport),
     client.connect(clientTransport),
