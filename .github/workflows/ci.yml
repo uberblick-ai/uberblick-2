@@ -27,7 +27,7 @@ on:
       test-worker-budget:
         description: Temporary controlled worker comparison
         type: choice
-        default: '3'
+        default: '4'
         options: [baseline, '2', '3', '4']
 
 # On main, let a started run finish and keep only the newest push waiting behind

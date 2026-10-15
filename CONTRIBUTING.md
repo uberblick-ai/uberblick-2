@@ -272,7 +272,7 @@ Reports live in the Actions runner's temporary directory; local runs, including
 `CI=true mise run ci`, create no reports in the checkout.
 
 `pnpm test` and `pnpm run test:os` share one worker budget across concurrent
-packages. The root runner divides three times the machine's available cores
+packages. The root runner divides four times the machine's available cores
 among at most four concurrent suites. `pnpm --filter <package> test` uses that
 package's standalone worker setting.
 
