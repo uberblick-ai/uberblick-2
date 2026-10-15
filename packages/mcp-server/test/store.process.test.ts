@@ -1,4 +1,3 @@
-import { builtWorker } from "./process-helpers.js";
 /**
  * Three properties of the store that are about the SQLite binding rather than
  * the data model, and that nothing else in the suite would notice losing.
@@ -15,21 +14,7 @@ import { builtWorker } from "./process-helpers.js";
  *    longest of the six bodies, by aborting one of its later statements.
  */
 
-/**
- * Three properties of the store that are about the SQLite binding rather than
- * the data model, and that nothing else in the suite would notice losing.
- *
- * 1. **The file format is the format.** The better-sqlite3 fixture (see
- *    `fixtures/make-legacy.ts`) must stay independently generated; `node:sqlite`
- *    opens it and finds the same log, the same snapshot and the same FTS index.
- *    Compatibility migrations leave the authoritative log intact.
- * 2. **BLOBs are the bytes handed in**, including when those bytes are a view
- *    into a longer buffer.
- * 3. **All-or-nothing writes.** `node:sqlite` has no `.transaction()` wrapper,
- *    so the store issues BEGIN/COMMIT/ROLLBACK itself. A body that throws
- *    part-way through must leave nothing behind — proven on `indexDoc`, the
- *    longest of the six bodies, by aborting one of its later statements.
- */
+import { builtWorker } from "./process-helpers.js";
 import { execFile } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";

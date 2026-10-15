@@ -1,5 +1,5 @@
 /** A real process proves the fallback exit code and stderr-only diagnostic. */
-/** A real process proves the fallback exit code and stderr-only diagnostic. */
+
 import { spawn, type ChildProcess } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
 import { cleanupTestResources, closeChild, trackChild, tempDir, WORKSPACE } from "./shared.js";

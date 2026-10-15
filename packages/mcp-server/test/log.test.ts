@@ -11,18 +11,6 @@
  *   replica built from the compacted log is the same replica.
  */
 
-/**
- * The update log is the authoritative local replica.
- *
- * Three properties, each of which something else depends on:
- *
- * - every update is appended *synchronously*, so a mutating tool cannot return
- *   before its update is committed — verified by reading the file through a
- *   second handle, and by killing the process with `SIGKILL` and coming back;
- * - replicas hydrate from the log, never from the hub;
- * - compaction replaces a log prefix with a snapshot in one transaction, and a
- *   replica built from the compacted log is the same replica.
- */
 import { afterAll, describe, expect, it } from "vitest";
 import { MirrorStore } from "../src/store.js";
 import { WORKSPACE, removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";

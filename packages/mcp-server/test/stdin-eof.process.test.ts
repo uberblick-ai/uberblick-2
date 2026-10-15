@@ -1,4 +1,3 @@
-import { mainProcess } from "./process-helpers.js";
 /**
  * An MCP server whose stdin is already at EOF exits, rather than hanging
  * forever with nobody left to talk to.
@@ -14,20 +13,7 @@ import { mainProcess } from "./process-helpers.js";
  * not in anything this package could stand in for.
  */
 
-/**
- * An MCP server whose stdin is already at EOF exits, rather than hanging
- * forever with nobody left to talk to.
- *
- * Pipes report close; redirected stdin can report end without close. Both
- * events must reach the shutdown path and release the SQLite file.
- *
- * The other half of the invariant is the transport itself: stdout carries
- * JSON-RPC and nothing else, so a shutdown that logs to stdout would corrupt
- * the channel it is closing.
- *
- * Only a real process can show this — the hang is in Node's own stdin stream,
- * not in anything this package could stand in for.
- */
+import { mainProcess } from "./process-helpers.js";
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { afterEach, expect, it } from "vitest";

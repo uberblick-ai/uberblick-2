@@ -1,13 +1,9 @@
-import { builtWorker } from "./process-helpers.js";
 /**
  * Store startup is a process boundary: several MCP sessions normally share
  * one SQLite file, and the busy handler must exist before WAL takes its lock.
  */
 
-/**
- * Store startup is a process boundary: several MCP sessions normally share
- * one SQLite file, and the busy handler must exist before WAL takes its lock.
- */
+import { builtWorker } from "./process-helpers.js";
 import type { ChildProcess } from "node:child_process";
 import { fork } from "node:child_process";
 import { once } from "node:events";

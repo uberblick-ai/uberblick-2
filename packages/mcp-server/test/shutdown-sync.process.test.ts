@@ -1,6 +1,6 @@
+/** A departing stdio process waits for acknowledgement while its replicas live. */
+
 import { mainProcess } from "./process-helpers.js";
-/** A departing stdio process waits for acknowledgement while its replicas live. */
-/** A departing stdio process waits for acknowledgement while its replicas live. */
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { getBlocks } from "@uberblick/schema";

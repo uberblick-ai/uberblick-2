@@ -25,11 +25,13 @@ export function hubCheckoutInvocation(): { args: string[]; sources: string[] } {
   if (command !== "node") throw new Error("hub start must invoke node directly");
   const args: string[] = [];
   const sources: string[] = [];
+  let tsxLoaded = false;
   for (let index = 0; index < original.length; index += 1) {
     const arg = original[index]!;
     // The loader's work is performed once by global setup instead of per child.
-    if (arg === "--import" && original[index + 1] === "tsx") { index += 1; continue; }
+    if (arg === "--import" && original[index + 1] === "tsx") { tsxLoaded = true; index += 1; continue; }
     if (arg.endsWith(".ts")) {
+      if (!tsxLoaded) throw new Error("hub start must load --import tsx before TypeScript sources");
       const source = resolve(HUB_ROOT, arg);
       sources.push(source);
       args.push(builtSource(source));

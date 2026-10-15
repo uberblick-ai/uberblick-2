@@ -11,18 +11,6 @@
  * `set_metadata` refuses to leave a document in.
  */
 
-/**
- * Renaming a document.
- *
- * `meta.title` in the document is authoritative and the directory stub is a
- * cache of it — so what `set_metadata` owes a caller is that both are right when
- * the call returns, that discovery answers from the stub rather than by opening
- * a room, and that two replicas renaming at once end up holding one title
- * rather than two.
- *
- * `create_doc` holds the same rule, so the MCP surface cannot create the state
- * `set_metadata` refuses to leave a document in.
- */
 import { afterEach, describe, expect, it } from "vitest";
 import { getMeta } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";

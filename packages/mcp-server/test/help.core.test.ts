@@ -4,7 +4,6 @@ import { validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
-
 import { type FailingStore, removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 

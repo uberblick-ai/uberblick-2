@@ -1,6 +1,5 @@
 /** The MCP server's read-only, catalog-aware tag boundary. */
 
-/** The MCP server's read-only, catalog-aware tag boundary. */
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Hub } from "@uberblick/hub";

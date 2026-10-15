@@ -8,15 +8,6 @@
  * other up by polling the log tail at tool-call start.
  */
 
-/**
- * Block-scoped writes: what happens when they conflict, and what the derived
- * index does afterwards.
- *
- * Two MCP servers sharing one database is the normal case (a user runs their
- * agent twice), so the concurrency test uses exactly that rather than a mocked
- * second replica: each instance appends to the shared log, and each picks the
- * other up by polling the log tail at tool-call start.
- */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";

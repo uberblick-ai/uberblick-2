@@ -38,10 +38,10 @@ it("uses only the budget left after draining admitted startup work and leaves ti
     await entered;
     started = performance.now();
     await expect(instance.close(started + 5_000)).resolves.toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(5_000);
     await connecting;
     const stderr = diagnostic.mock.calls.flat().join("\n");
     expect(stderr).toContain("1 changes are still only local");
-    expect(stderr).not.toContain("shutdown timed out");
     expect(stderr).not.toContain("No time left for credential publication");
     expect(stdout).not.toHaveBeenCalled();
   } finally {

@@ -10,17 +10,6 @@
  * and restoring is a true reversal of the tombstone alone.
  */
 
-/**
- * Archiving a document: what stops seeing it, what keeps seeing it, and what
- * comes back.
- *
- * The tombstone itself belongs to the schema package — that a tombstone is
- * sticky, and that restoring is the one thing that lifts it, are pinned in
- * `packages/schema/test/directory.test.ts`. What this suite defends is the tool
- * contract an agent actually relies on: archiving removes a document from
- * discovery, from search and from the sidebar without touching a byte of it,
- * and restoring is a true reversal of the tombstone alone.
- */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { WORKSPACE, removeTempDirs, startServer, tempDatabasePath, testConfig, waitUntil } from "./helpers.js";

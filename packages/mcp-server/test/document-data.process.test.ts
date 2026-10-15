@@ -1,7 +1,6 @@
-import { mainProcess } from "./process-helpers.js";
 /** Document data uses the existing room log, snapshots and hub sync path. */
 
-/** Document data uses the existing room log, snapshots and hub sync path. */
+import { mainProcess } from "./process-helpers.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport, getDefaultEnvironment, } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { dirname } from "node:path";

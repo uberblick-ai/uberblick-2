@@ -1,13 +1,9 @@
-import { builtWorker } from "./process-helpers.js";
 /**
  * Serving mode at its two real boundaries: awareness on the wire and a
  * process-held SQLite lock that the OS releases after ordinary exit or SIGKILL.
  */
 
-/**
- * Serving mode at its two real boundaries: awareness on the wire and a
- * process-held SQLite lock that the OS releases after ordinary exit or SIGKILL.
- */
+import { builtWorker } from "./process-helpers.js";
 import type { Hub } from "@uberblick/hub";
 import type { ChildProcess } from "node:child_process";
 import { fork } from "node:child_process";

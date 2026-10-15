@@ -1,6 +1,6 @@
+/** Exercise the checkout preload and the release entry as real hub processes. */
+
 import { builtSource, HUB_ROOT, hubCheckoutInvocation } from "./process-helpers.js";
-/** Exercise the checkout preload and the release entry as real hub processes. */
-/** Exercise the checkout preload and the release entry as real hub processes. */
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

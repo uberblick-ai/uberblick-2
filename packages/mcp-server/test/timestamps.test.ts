@@ -22,29 +22,6 @@
  * clock rather than by shrinking the window down to something untrue.
  */
 
-/**
- * Directory timestamps: sort keys a fresh client gets without opening a room.
- *
- * What this suite defends is the bargain behind them. `createdAt` is a fact
- * written once. `updatedAt` is deliberately coarse, because the directory is
- * broadcast to every client in the workspace and a stamp per keystroke would
- * turn typing in one document into traffic for everyone — so the contract is
- * "at most one bump per window, and immediately on a title or tag change,
- * which writes the stub anyway".
- *
- * The other half of the bargain is authorship: `updatedAt` says when someone
- * changed the document, not when a replica noticed it, so everything a server
- * merely observes — a log replay, an index rebuild, an archive restore — repairs
- * a stub that disagrees without ever restamping it. The hub's own arm of
- * that rule, a peer's edit arriving over the wire, is in `sync.test.ts`, where
- * the hub and the second client already live. Concurrent authored stamps resolve
- * to the greater number, so a future-skewed clock stands until a later authored
- * stamp exceeds it.
- *
- * The clock is faked (`toFake: ["Date"]`) and the timers are not: these rigs
- * run a real server over a real store, and a window is crossed by moving the
- * clock rather than by shrinking the window down to something untrue.
- */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";

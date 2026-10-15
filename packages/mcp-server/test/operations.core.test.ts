@@ -5,7 +5,6 @@ import { GuidanceBriefing } from "../src/briefing.js";
 import { startServer, testConfig } from "./core-helpers.js";
 import { INTERNAL_ERROR_MESSAGE, toFailure } from "../src/failures.js";
 import { operations } from "../src/operations.js";
-
 import { PersistenceError, Replicas } from "../src/replica.js";
 import { pinDocOperation, unpinDocOperation } from "../src/sidebar-tools.js";
 import { MirrorStore } from "../src/store.js";

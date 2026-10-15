@@ -3,10 +3,6 @@
  * process-held SQLite lock that the OS releases after ordinary exit or SIGKILL.
  */
 
-/**
- * Serving mode at its two real boundaries: awareness on the wire and a
- * process-held SQLite lock that the OS releases after ordinary exit or SIGKILL.
- */
 import type { Hub } from "@uberblick/hub";
 import { appendBlock, getBlocks, initDoc, roomForDoc } from "@uberblick/schema";
 import { randomUUID } from "node:crypto";

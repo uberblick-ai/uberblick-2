@@ -1,6 +1,5 @@
 /** Document data uses the existing room log, snapshots and hub sync path. */
 
-/** Document data uses the existing room log, snapshots and hub sync path. */
 import type { Hub } from "@uberblick/hub";
 import { readDocData } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";

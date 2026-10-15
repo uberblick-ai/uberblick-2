@@ -1,4 +1,3 @@
-import { mainProcess } from "./process-helpers.js";
 /**
  * Configuration comes from the environment, and one value there is
  * load-bearing three times: `WORKSPACE_ID` names the rooms this server opens,
@@ -7,13 +6,7 @@ import { mainProcess } from "./process-helpers.js";
  * start an empty one — and a workspace id is a uuid, making it path-safe.
  */
 
-/**
- * Configuration comes from the environment, and one value there is
- * load-bearing three times: `WORKSPACE_ID` names the rooms this server opens,
- * the workspace claim in its hub token, and the SQLite file it hydrates from.
- * There is no default — a guess would silently open somebody else's corpus or
- * start an empty one — and a workspace id is a uuid, making it path-safe.
- */
+import { mainProcess } from "./process-helpers.js";
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { PACKAGE_ROOT } from "./helpers.js";

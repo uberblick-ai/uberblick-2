@@ -4,7 +4,6 @@ import type { HocuspocusProviderWebsocket } from "@hocuspocus/provider";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { HubSync } from "../src/sync.js";
-
 import { cleanupTestResources, testConfig, type trackListener } from "./core-helpers.js";
 
 const clients: HubSync[] = [];

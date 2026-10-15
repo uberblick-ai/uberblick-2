@@ -25,9 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getMeta } from "@uberblick/schema";
 import { PersistenceError, Replicas } from "../src/replica.js";
-
 import { importSeedDocs, readSeedDocs } from "../src/seed.js";
-
 import { cleanupTestResources, FailingStore, WORKSPACE, tempDir, testConfig } from "./core-helpers.js";
 
 /**

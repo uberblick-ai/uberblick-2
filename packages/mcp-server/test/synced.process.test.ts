@@ -1,4 +1,3 @@
-import { builtSource, mainProcess } from "./process-helpers.js";
 /**
  * What `synced: true` promises, and what it does not.
  *
@@ -15,21 +14,7 @@ import { builtSource, mainProcess } from "./process-helpers.js";
  * the test's own bookkeeping instead of the hub's.
  */
 
-/**
- * What `synced: true` promises, and what it does not.
- *
- * It promises that the hub acknowledged the update: the update is in the hub's
- * memory and will be written within the hub's store debounce. It does not
- * promise that the update is on the hub's disk — and the gap is not theoretical:
- * a hub killed inside that window drops a write this server already reported as
- * `synced: true` with `unsyncedChanges: 0`. The tool descriptions say exactly
- * that; this probe is the behaviour they describe, pinned so the claim cannot
- * quietly widen again.
- *
- * The debounce lives in the hub process' memory, so real processes and a real
- * `SIGKILL` are the only honest reproduction: an in-process "crash" would assert
- * the test's own bookkeeping instead of the hub's.
- */
+import { builtSource, mainProcess } from "./process-helpers.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport, } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { getBlocks } from "@uberblick/schema";
