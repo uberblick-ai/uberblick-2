@@ -2,7 +2,7 @@
 
 import { createMcpEngine } from "../src/engine.js";
 import { ServingReplicaHeldError } from "../src/serving-role.js";
-import { testConfig } from "./helpers.js";
+import { testConfig } from "./shared.js";
 
 const databasePath = process.argv[2] as string;
 const sessionId = process.argv[3] as string;

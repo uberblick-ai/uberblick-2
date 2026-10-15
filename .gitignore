@@ -5,8 +5,8 @@ node_modules/
 dist/
 site/out/
 *.tsbuildinfo
-# the `ub` bundle packages/cli's test globalSetup builds once per run, so the
-# spawning suites do not transpile three packages in every child
+# CLI and MCP test process entries built once per run by global setup, so
+# spawning suites do not transpile source packages in every child
 .test-build/
 
 # local data / persistence (hub SQLite, mcp mirror)

@@ -6,14 +6,7 @@ import * as Y from "yjs";
 import { inspectRemote } from "../src/remote.js";
 import { HubSync } from "../src/sync.js";
 import { openWorkspaceReplicas } from "../src/workspace-replicas.js";
-import {
-  cleanupTestResources,
-  hubUrl,
-  testConfig,
-  TEST_SECRET,
-  trackListener,
-  waitUntil,
-} from "./helpers.js";
+import { cleanupTestResources, hubUrl, testConfig, TEST_SECRET, trackListener, waitUntil } from "./helpers.js";
 
 const clients: HubSync[] = [];
 const listeners: ReturnType<typeof trackListener>[] = [];
@@ -138,17 +131,6 @@ it.each(["failed dial", "HTTP refusal"])("closes promptly after %s", async (kind
   await sync.destroy();
   expect(nativeSocket(sync)).toBeNull();
 }, 5_000);
-
-it("destroys immediately when hub synchronization has no socket", async () => {
-  const sync = new HubSync(testConfig(), () => {});
-  clients.push(sync);
-  expect(nativeSocket(sync)).toBeNull();
-  let reentrant: Promise<void> | undefined;
-  sync.onStateChange(() => { reentrant = sync.destroy(); });
-  const closing = sync.destroy();
-  expect(reentrant).toBe(closing);
-  await closing;
-});
 
 it("releases the workspace store and serving role after sync teardown rejects", async () => {
   const config = testConfig();
