@@ -5,8 +5,10 @@
  */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { renderedText } from "./contrast-helpers.js";
@@ -467,16 +469,37 @@ test("editor insertion and the source control work by pointer and keyboard in bo
     await expect(openSource).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(source).toBeVisible();
-    await page.keyboard.press("End");
+    await expect.poll(() => source.evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
+    // ProseMirror's focus sync can undo an End key; a checked scripted caret survives it.
+    await setNativeSelection(source, () => source.evaluate((element) => {
+      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+      if (root === null) throw new Error("e2e: chart source has no editor");
+      const texts = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let last: Node | null = null;
+      while (texts.nextNode()) last = texts.currentNode;
+      if (last === null) throw new Error("e2e: chart source has no text");
+      const range = document.createRange();
+      range.setStart(last, last.textContent?.length ?? 0);
+      range.collapse(true);
+      const position = root.editor.view.posAtDOM(range.startContainer, range.startOffset);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return { anchor: position, head: position };
+    }));
     await page.keyboard.insertText(" ");
-    await expect(source).toHaveText(`${JSON.stringify(MAPPING)} `);
+    // toHaveText trims, so compare the exact source.
+    await expect.poll(() => source.textContent()).toBe(`${JSON.stringify(MAPPING)} `);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.press("ArrowLeft");
     await expectReady(page);
     await expectCornerControls(page);
     await canvasEvidence(page.locator(".ub-chart"), info, `chart-${appearance}`);
-    const stored = await session.call<DocPayload>("get_doc", { uuid });
-    expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(`${JSON.stringify(MAPPING)} `);
+    // The browser edit reaches the writer's replica through `ub open` and the hub.
+    await expect.poll(async () => {
+      const stored = await session.call<DocPayload>("get_doc", { uuid });
+      return stored.blocks.find((entry) => entry.type === "chart")?.text;
+    }).toBe(`${JSON.stringify(MAPPING)} `);
   }
 });
 

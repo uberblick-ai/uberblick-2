@@ -1,6 +1,7 @@
 /** Fenced source stays aligned, scrolls inside its panel, and keeps usable chrome. */
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { setNativeSelection } from "./native-selection.js";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
@@ -153,11 +154,15 @@ async function expectSourceControl(control: Locator, source: Locator, floor: num
 
 async function expectPinned(control: Locator, scroller: Locator): Promise<void> {
   await scroller.scrollIntoViewIfNeeded();
-  await scroller.evaluate((element) => { element.scrollLeft = 0; });
-  const before = await control.boundingBox();
-  await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
-  expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-  expect(await control.boundingBox()).toEqual(before);
+  // A debounced Mermaid draw can shift the page between the two reads, so the
+  // pair repeats until one layout holds; a control that scrolls never passes.
+  await expect(async () => {
+    await scroller.evaluate((element) => { element.scrollLeft = 0; });
+    const before = await control.boundingBox();
+    await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+    expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    expect(await control.boundingBox()).toEqual(before);
+  }).toPass({ timeout: 20_000 });
 }
 
 async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> {
@@ -274,9 +279,16 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
           const range = document.createRange();
           range.setStart(first, 0);
           range.setEnd(first, caretOnly ? 0 : 4);
+          const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+          if (root === null) throw new Error("e2e: source has no editor");
+          const expected = {
+            anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+            head: root.editor.view.posAtDOM(range.endContainer, range.endOffset),
+          };
           const selection = document.getSelection();
           selection?.removeAllRanges();
           selection?.addRange(range);
+          return expected;
         }, collapsed));
         await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
         const before = await editorSelection(page);

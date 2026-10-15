@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
+import { closeIfOpen, createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
 import { setNativeSelection } from "./native-selection.js";
 
@@ -278,8 +278,7 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await expect(page.locator(".ub-thread-card")).toContainText("pha words suffix");
   await expect(page.locator(".ub-thread-card")).toContainText("Clamped cell discussion");
   await expect(page.locator(".ub-thread-card .ub-thread")).toHaveAttribute("aria-current", "true");
-  const closeThreads = page.getByRole("button", { name: "Close threads", exact: true });
-  if (await closeThreads.isVisible()) await activate(closeThreads, info);
+  await closeIfOpen(page.getByRole("button", { name: "Close threads", exact: true }), { touch: info.project.use.hasTouch === true });
   await selectCell(first, 0, 5, "mouse");
   await expect(toolbar(page)).toBeVisible();
   await page.keyboard.press("ArrowRight");
