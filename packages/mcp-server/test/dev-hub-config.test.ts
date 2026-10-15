@@ -7,12 +7,15 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { createClient, testRoom, token, WORKSPACE } from "../../hub/test/helpers.js";
+import { closeHubSocket } from "../src/hub-connection.js";
+import { cleanupTestResources, type TestCleanup } from "./helpers.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../hub", import.meta.url));
 const STORED_SECRET = "dev-preload-file-secret";
 const OVERRIDE_SECRET = "dev-preload-environment-secret";
 const roots: string[] = [];
 const running: HubProcess[] = [];
+const clients: TestCleanup[] = [];
 
 interface Fixture {
   root: string;
@@ -114,17 +117,23 @@ function checkoutArgs(): string[] {
 async function authenticate(hub: HubProcess, secret: string): Promise<void> {
   const port = await hub.listening;
   const client = createClient({ port, room: testRoom(), token: await token("read-write", { secret }) });
+  let closing: Promise<void> | undefined;
+  const close = () => closing ??= closeHubSocket(client.provider.configuration.websocketProvider.webSocket, () => client.destroy());
+  clients.push(close);
   try {
     await client.synced;
   } finally {
-    client.destroy();
+    await close();
   }
   expect(hub.stdout() + hub.stderr()).not.toContain(secret);
 }
 
 afterEach(async () => {
-  for (const hub of running.splice(0)) await hub.stop();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  await cleanupTestResources({
+    clients: clients.splice(0),
+    hubs: running.splice(0).map((hub) => () => hub.stop()),
+    after: roots.splice(0).map((root) => () => rmSync(root, { recursive: true, force: true })),
+  });
 });
 
 it("starts the checkout hub from its nearest project and private credentials alone", async () => {

@@ -9,15 +9,17 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
-import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { hubCommand, hubProcessHost } from "../src/hub.js";
 import type { Io } from "../src/io.js";
 import { REPO_ROOT, removeTempDirs, runUbAsync, unboundSandbox } from "./helpers.js";
+import { cleanUpResources, ownListener } from "./teardown.js";
 
 const directories: string[] = [];
+const listeners: (() => Promise<void>)[] = [];
+afterEach(async () => cleanUpResources(listeners.splice(0)));
 afterAll(() => {
   removeTempDirs();
   for (const directory of directories) rmSync(directory, { recursive: true, force: true });
@@ -308,21 +310,9 @@ async function listen(server: Server): Promise<string> {
 }
 
 function own(server: Server): () => Promise<void> {
-  const sockets = new Set<Socket>();
-  server.on("connection", (socket) => {
-    sockets.add(socket);
-    socket.once("close", () => sockets.delete(socket));
-  });
-  // The server also ends on its own deadline if a test assertion is interrupted.
-  const deadline = setTimeout(() => {
-    for (const socket of sockets) socket.destroy();
-    server.close();
-  }, 10_000);
-  return async () => {
-    clearTimeout(deadline);
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  };
+  const close = ownListener(server);
+  listeners.push(close);
+  return close;
 }
 
 describe("hub host health probes", () => {

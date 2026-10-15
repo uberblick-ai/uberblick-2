@@ -27,10 +27,9 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import { getBlocks } from "@uberblick/schema";
 import * as Y from "yjs";
-import {
+import { cleanupTestResources, closeChild, trackChild,
   mainTsProcess,
   PACKAGE_ROOT,
-  removeTempDirs,
   startServer,
   tempDatabasePath,
   testConfig,
@@ -84,7 +83,7 @@ async function startHubProcess(databasePath: string): Promise<HubProcess> {
       stdio: ["ignore", "ignore", "pipe"],
     },
   );
-  hubProcesses.push(child);
+  hubProcesses.push(trackChild(child));
 
   const port = await new Promise<number>((resolve, reject) => {
     child.stderr?.setEncoding("utf8");
@@ -189,16 +188,10 @@ function alive(pid: number): boolean {
 }
 
 afterEach(async () => {
-  for (const writer of writers.splice(0)) {
-    await writer.close().catch(() => {});
-  }
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const child of hubProcesses.splice(0)) {
-    child.kill("SIGKILL");
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: [...writers.splice(0), ...rigs.splice(0)].map((client) => () => client.close()),
+    hubs: hubProcesses.splice(0).map((child) => () => closeChild(child)),
+  });
 });
 
 describe("synced", () => {

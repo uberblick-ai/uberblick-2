@@ -11,12 +11,11 @@
  * `set_metadata` refuses to leave a document in.
  */
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { getDirectoryEntry, getMeta } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   hubUrl,
-  removeTempDirs,
   startHub,
   startServer,
   tempDatabasePath,
@@ -46,15 +45,12 @@ async function listedTitle(rig: Rig, uuid: string): Promise<string | undefined> 
 }
 
 afterEach(async () => {
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const hub of hubs.splice(0)) await hub.stop().catch(() => {});
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
-afterAll(() => {
-  removeTempDirs();
-});
 
 describe("set_metadata", () => {
   it("renames the document and the stub in one call, and reports durability", async () => {

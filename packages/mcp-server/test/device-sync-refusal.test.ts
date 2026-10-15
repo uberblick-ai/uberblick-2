@@ -6,8 +6,8 @@ import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
-import { client, closeClient, closeDeviceSync, config, environment, hub } from "./device-sync-fixture.js";
-import { sleep, testConfig, waitUntil, WORKSPACE } from "./helpers.js";
+import { client, closeClient, closeDeviceSync, config, environment, hub, listeners } from "./device-sync-fixture.js";
+import { sleep, testConfig, trackListener, waitUntil, WORKSPACE } from "./helpers.js";
 
 afterEach(closeDeviceSync);
 
@@ -181,23 +181,21 @@ describe("stored-login refusal", () => {
       response.writeHead(302, { Location: other.url });
       response.end();
     });
+    const tracked = trackListener(redirector);
+    listeners.push(() => tracked.close());
     redirector.on("upgrade", (_request, socket) => {
       socket.end(`HTTP/1.1 302 Found\r\nLocation: ${other.url}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     });
     await new Promise<void>((resolve) => redirector.listen(0, "127.0.0.1", resolve));
-    try {
-      const address = redirector.address();
-      if (address === null || typeof address === "string") throw new Error("no redirect server port");
-      const origin = `http://127.0.0.1:${address.port}`;
-      await writeHubLogin(origin, issuer.issue({ workspaces: [WORKSPACE] }), env);
-      const redirected = await client({ ...config(issuer, env), hubUrl: `ws://127.0.0.1:${address.port}` });
-      await waitUntil("websocket redirect refusal", () => redirected.instance.replicas.sync.state().status === "hub-down");
-      expect(redirected.instance.replicas.sync.mintCount).toBe(0);
-      expect(other.authentications).toEqual([]);
-      await closeClient(redirected);
-    } finally {
-      await new Promise<void>((resolve, reject) => redirector.close((error) => error ? reject(error) : resolve()));
-    }
+    const address = redirector.address();
+    if (address === null || typeof address === "string") throw new Error("no redirect server port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    await writeHubLogin(origin, issuer.issue({ workspaces: [WORKSPACE] }), env);
+    const redirected = await client({ ...config(issuer, env), hubUrl: `ws://127.0.0.1:${address.port}` });
+    await waitUntil("websocket redirect refusal", () => redirected.instance.replicas.sync.state().status === "hub-down");
+    expect(redirected.instance.replicas.sync.mintCount).toBe(0);
+    expect(other.authentications).toEqual([]);
+    await closeClient(redirected);
   });
 
   // A login naming the workspace meets the skew at room admission; one without

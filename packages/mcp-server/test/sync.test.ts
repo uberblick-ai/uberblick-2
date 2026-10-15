@@ -25,11 +25,10 @@ import type { Hub } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import * as Y from "yjs";
 import { MirrorStore } from "../src/store.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
   peerClient,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -74,16 +73,11 @@ function encodedDoc(uuid: string, title: string): Uint8Array {
 }
 
 afterEach(async () => {
-  for (const peer of peers.splice(0)) {
-    peer.destroy();
-  }
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    peers: peers.splice(0).map((peer) => () => peer.destroy()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function hub(options: HubOptions = {}) {

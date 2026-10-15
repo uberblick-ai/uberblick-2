@@ -17,10 +17,9 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Hub } from "@uberblick/hub";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   sleep,
   startHub,
   startServer,
@@ -37,13 +36,10 @@ const hubs: Hub[] = [];
 const rigs: Rig[] = [];
 
 afterEach(async () => {
-  for (const rig of rigs.splice(0)) {
-    await rig.close();
-  }
-  for (const hub of hubs.splice(0)) {
-    await hub.stop().catch(() => {});
-  }
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 async function hub(options: HubOptions = {}) {

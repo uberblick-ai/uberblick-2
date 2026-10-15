@@ -11,6 +11,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
+import { cleanupTestResources, closeChild, trackChild } from "./helpers.js";
 
 const WORKSPACE = randomUUID();
 const OTHER_WORKSPACE = randomUUID();
@@ -18,6 +19,7 @@ const OTHER_WORKSPACE = randomUUID();
 const WORKERS = 2;
 const directories: string[] = [];
 const hubs: Awaited<ReturnType<typeof startDeviceSyncHub>>[] = [];
+const renewalChildren: ChildProcess[] = [];
 function box(): { directory: string; env: NodeJS.ProcessEnv } {
   const directory = mkdtempSync(join(tmpdir(), `device-login-${process.env.UB_AGENTS_RUN ?? "test"}-`));
   directories.push(directory);
@@ -30,8 +32,11 @@ async function setup() {
   return { ...test, hub };
 }
 afterEach(async () => {
-  await Promise.all(hubs.splice(0).map((hub) => hub.close()));
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  await cleanupTestResources({
+    clients: renewalChildren.splice(0).map((child) => () => closeChild(child)),
+    hubs: hubs.splice(0).map((hub) => () => hub.close()),
+    after: directories.splice(0).map((directory) => () => rmSync(directory, { recursive: true, force: true })),
+  });
 });
 
 async function waitForRequest(hub: Awaited<ReturnType<typeof startDeviceSyncHub>>): Promise<void> {
@@ -65,6 +70,7 @@ process.send("ready");
     const child = spawn(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), worker, endpoint, workspace, String(rejected)], {
       cwd: test.directory, env: test.env, stdio: ["ignore", "ignore", "pipe", "ipc"], timeout: 15_000,
     });
+    renewalChildren.push(trackChild(child));
     let output = "";
     let answer: unknown;
     child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });

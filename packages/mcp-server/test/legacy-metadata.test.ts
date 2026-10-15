@@ -3,10 +3,9 @@ import type { Hub } from "@uberblick/hub";
 import * as Y from "yjs";
 import { afterEach, describe, expect, it } from "vitest";
 import { compareCorpus, inspectRemote, isIdentical, syncWorkspace } from "../src/remote.js";
-import {
+import { cleanupTestResources,
   hubUrl,
   LIVE_HUB_SETTLE,
-  removeTempDirs,
   startHub,
   startServer,
   testConfig,
@@ -25,9 +24,10 @@ async function localRig(config = testConfig()): Promise<Rig> {
 }
 
 afterEach(async () => {
-  for (const rig of rigs.splice(0)) await rig.close();
-  for (const hub of hubs.splice(0)) await hub.stop();
-  removeTempDirs();
+  await cleanupTestResources({
+    clients: rigs.splice(0).map((client) => () => client.close()),
+    hubs: hubs.splice(0).map((hub) => () => hub.stop()),
+  });
 });
 
 describe("removed changelog metadata", () => {

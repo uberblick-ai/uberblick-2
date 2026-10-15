@@ -1,5 +1,6 @@
 /** Native socket failures retain safe codes and endpoints, never peer text. */
 import { channel } from "node:diagnostics_channel";
+import { Socket } from "node:net";
 import { afterEach, expect, it, vi } from "vitest";
 import { HubConnection } from "../src/hub-connection.js";
 import { formatHubFailure } from "../src/hub-failure.js";
@@ -19,6 +20,20 @@ const dispatcherSymbol = globals[Symbol.for("undici.globalDispatcher.2")]
   : Symbol.for("undici.globalDispatcher.1");
 const originalDispatcher = globals[dispatcherSymbol];
 const cleanup: (() => Promise<void>)[] = [];
+
+function diagnosticSocket(remoteAddress: string): Socket {
+  const socket = new Socket();
+  Object.defineProperties(socket, {
+    remoteAddress: { value: remoteAddress },
+    remotePort: { value: 443 },
+  });
+  cleanup.push(async () => {
+    const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+    socket.destroy();
+    await closed;
+  });
+  return socket;
+}
 
 afterEach(async () => {
   globals[dispatcherSymbol] = originalDispatcher;
@@ -125,13 +140,13 @@ it("ignores an unrelated delayed request inheriting its dispatch context", async
       const request = {};
       channel("undici:request:create").publish({ request });
       channel("undici:client:sendHeaders").publish({
-        request, socket: { remoteAddress: "203.0.113.7", remotePort: 443 },
+        request, socket: diagnosticSocket("203.0.113.7"),
       });
       queueMicrotask(() => {
         const unrelatedRequest = {};
         channel("undici:request:create").publish({ request: unrelatedRequest });
         channel("undici:client:sendHeaders").publish({
-          request: unrelatedRequest, socket: { remoteAddress: "198.51.100.9", remotePort: 443 },
+          request: unrelatedRequest, socket: diagnosticSocket("198.51.100.9"),
         });
         finishUnrelated?.();
       });
