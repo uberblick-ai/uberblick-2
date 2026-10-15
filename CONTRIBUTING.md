@@ -262,6 +262,23 @@ On `main` the same run records whether `main` itself is clean. A pull
 request's run uses that pull request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
 
+The two unit-test jobs keep their dot logs and upload `vitest-Linux-<run>-attempt-<n>`
+and `vitest-macOS-<run>-attempt-<n>` artifacts, including on test failure. Each
+package's JUnit XML gives the test file (the suite name), full test name, result,
+duration and failure details. `package-times.json` gives package wall times.
+Rerunning failed or selected jobs (`gh run rerun <run> --failed` or `--job <job-id>`)
+keeps earlier attempts' reports beside the new reports. "Re-run all jobs" deletes
+earlier attempts' reports. A process killed before reporting, or a job timeout,
+can leave a missing report; check its log for the cause.
+Reports live in the Actions runner's temporary directory; local runs, including
+`CI=true mise run ci`, create no reports in the checkout.
+
+`pnpm test` and `pnpm run test:os` share one worker budget across concurrent
+packages. Each command divides a budget of three times the machine's available
+cores among its slots: up to four concurrent suites for `pnpm test`, and two for
+`pnpm run test:os`. `pnpm --filter <package> test` uses that package's standalone
+worker setting.
+
 Merging also requires CodeQL code scanning results: a pull request that introduces
 a security alert at high or above cannot merge. Lower-severity and non-security
 alerts do not block merging. CodeQL runs on GitHub, outside `ci.yml` and

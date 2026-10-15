@@ -23,7 +23,16 @@ export default defineConfig({
     setupFiles: ["test/setup-dom.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/web.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // The reconnect suite runs real hubs on real sockets, and its `afterEach`
@@ -33,10 +42,8 @@ export default defineConfig({
     // timeout that fires first is the one that gets to explain itself, so the
     // anonymous one is kept out of the way.
     hookTimeout: 120_000,
-    // One worker per core rather than Vitest's cores-1 default. Workers spend
-    // most of their time starting jsdom and importing the editor, not idling
-    // on the main process, and measured on a 4-core box under load the extra
-    // worker took the suite from ~37s to ~32s.
+    // Standalone runs use one worker per core for jsdom and editor imports.
+    // Root runs supply their shared budget through VITEST_MAX_WORKERS instead.
     maxWorkers: "100%",
   },
 });

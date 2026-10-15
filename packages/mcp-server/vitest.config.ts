@@ -39,11 +39,19 @@ export default defineConfig({
   test: {
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/mcp-server.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
-    // One worker per core: the rigs are CPU-bound, and oversubscribing them
-    // alongside the other packages' suites slows the run instead of filling waits.
+    // Standalone runs use one worker per core; root runs share a machine budget.
     maxWorkers: "100%",
     projects: [
       {
