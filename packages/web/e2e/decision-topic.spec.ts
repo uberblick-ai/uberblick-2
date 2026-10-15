@@ -3,6 +3,7 @@ import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 
 const { harness, openApp } = setupHarness();
@@ -271,9 +272,14 @@ for (const touch of [false, true]) {
     await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
     await expect(page.locator("input.ub-title")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
-    const exact = await writer.call<StoredDoc>("get_doc", { uuid: first.uuid });
-    expect(exact.uuid).toBe(first.uuid);
-    expect(answerText(exact)).toBe(answerText(first));
+    await page.goto(new URL(firstPath, harness().appUrl).href);
+    await selected(page, first.uuid, answerText(first));
+    await proveMcpArrival(page, writer, first.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      const exact = await writer.call<StoredDoc>("get_doc", { uuid: first.uuid });
+      expect(exact.uuid).toBe(first.uuid);
+      expect(answerText(exact)).toBe(answerText(first));
+    });
   });
 }
 

@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { docTitle, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -59,14 +60,21 @@ for (const arrivesWhileBound of [false, true]) {
     await expect(fallback.locator(".ub-foreign-list > li > code")).toHaveText(["paragraph", "figma"]);
     await expect(editor(page)).toHaveCount(0);
     await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
-    expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
-    expect(before.blocks[1]?.text).toContain("A **marked** design reference.");
-    expect(before.blocks[1]?.text).not.toContain("Tracking");
+    await proveMcpArrival(page, writer, created.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      const stored = await writer.call<StoredDoc>("get_doc", { uuid: created.uuid });
+      expect(stored.blocks).toEqual(before.blocks);
+      expect(stored.blocks[1]?.text).toContain("A **marked** design reference.");
+      expect(stored.blocks[1]?.text).not.toContain("Tracking");
+    });
 
     await page.reload();
     await expect(fallback).toBeVisible();
     await expect(editor(page)).toHaveCount(0);
-    expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
+    await proveMcpArrival(page, writer, created.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
+    });
     expect(figmaRequests).toEqual([]);
   });
 }

@@ -4,6 +4,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { alphaOf, contrast, oklab } from "../test/colour.js";
 
@@ -295,7 +296,10 @@ for (const touch of [false, true]) {
       await expect(page.locator(".ub-terminal-frame")).toHaveText(TERMINAL);
       await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(0);
       await capture(page, info, `block-frames-${touch ? "ipad-narrow" : "desktop"}-${appearance}`);
-      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      await proveMcpArrival(page, session, uuid, { path: "upstream" });
+      await expectMcp(async () => {
+        expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      });
       const codeFrame = page.locator(".ub-code:not(.ub-wireframe)");
       const ground = await codeFrame.evaluate(element => getComputedStyle(element).backgroundColor);
       for (const token of ["comment", "keyword", "name", "string", "number"]) {
@@ -372,7 +376,11 @@ for (const appearance of ["light", "dark"] as const) {
       }
       await page.keyboard.press("Enter");
       await expect(cardButton).toBeFocused();
-      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      await page.clock.resume();
+      await proveMcpArrival(page, session, uuid, { path: "upstream" });
+      await expectMcp(async () => {
+        expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      });
     });
   }
 }

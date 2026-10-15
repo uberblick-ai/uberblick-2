@@ -1,3 +1,4 @@
+import { expectOpenPages, provePageArrival } from "./settle.js";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { join } from "node:path";
@@ -100,7 +101,8 @@ test("card buttons author, sync and activate with native input", { tag: "@webkit
   }
   await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(touch ? 1 : 3);
   expect(page.url()).toBe(before);
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
 
   await writer.call("archive_doc", { uuid: created.uuid });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
@@ -109,7 +111,8 @@ test("card buttons author, sync and activate with native input", { tag: "@webkit
   else { await action.focus(); await page.keyboard.press("Enter"); }
   await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(touch ? 2 : 4);
   expect(page.url()).toBe(before);
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
   await writer.call("restore_doc", { uuid: created.uuid });
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await activate(page.locator(".ub-title"), touch);

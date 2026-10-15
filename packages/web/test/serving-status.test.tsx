@@ -6,6 +6,8 @@ import type {
   DocumentSearchClient,
   DocumentSearchStatus,
 } from "../src/shell/document-search.js";
+import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import { StatusLine } from "../src/ui/document/EditorPane.js";
 import {
   SERVING_STATUS_POLL_MS,
   SERVING_STATUS_SETTLE_MS,
@@ -68,6 +70,41 @@ function mount(api: DocumentSearchClient | null, room: string | null): {
   return { host, view };
 }
 
+function connectedRoom() {
+  const listeners = new Set<(status: RoomStatus) => void>();
+  const current: RoomStatus = {
+    connected: true, synced: true, writable: true, unsyncedChanges: 0,
+    hasReceivedServerState: true, hasAnswered: true, storeRefused: false,
+    protocolMismatch: null, authFailed: false, tokenMissing: false,
+  };
+  const connection = {
+    room: ROOM_A,
+    provider: { awareness: null },
+    status: current,
+    onStatusChange(listener: (status: RoomStatus) => void) {
+      listeners.add(listener);
+      listener(current);
+      return () => { listeners.delete(listener); };
+    },
+  } as unknown as RoomConnection;
+  return {
+    connection,
+    listeners,
+    change(patch: Partial<RoomStatus>) {
+      Object.assign(current, patch);
+      for (const listener of listeners) listener({ ...current });
+    },
+  };
+}
+
+function ServedReading({ api, connection }: { api: DocumentSearchClient; connection: RoomConnection }) {
+  const reading = useServingRoomStatus(api, connection.room, connection);
+  return <>
+    <StatusLine connection={connection} presence={[]} hubAcked={reading?.hubAcked ?? null} />
+    <output>{reading?.hubAcked === null ? "unknown" : reading?.hubAcked ? "yes" : "no"}</output>
+  </>;
+}
+
 async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -78,6 +115,62 @@ async function flush(): Promise<void> {
 describe("the locally served room's upstream reading", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("publishes raw poll and provider results on the status element before presentation settles", async () => {
+    vi.useFakeTimers();
+    const answer = deferred<DocumentSearchStatus>();
+    const api = client(() => answer.promise);
+    const room = connectedRoom();
+    const view = render(<ServedReading api={api} connection={room.connection} />);
+    const element = view.container.querySelector<HTMLElement>(".ub-status")!;
+    const presentation = view.container.querySelector("output")!;
+
+    expect(element.dataset.localSync).toBe("acknowledged");
+    expect(element.dataset.upstreamSync).toBe("pending");
+    await act(async () => answer.resolve(status(ROOM_A, true)));
+    expect(element.dataset.upstreamSync).toBe("acknowledged");
+    expect(presentation.textContent).toBe("unknown");
+
+    act(() => {
+      room.change({ unsyncedChanges: 1 });
+      // Check before act lets React flush its room-status subscription.
+      expect(element.dataset.localSync).toBe("pending");
+      expect(element.dataset.upstreamSync).toBe("pending");
+    });
+    act(() => {
+      room.change({ unsyncedChanges: 0 });
+      expect(element.dataset.localSync).toBe("acknowledged");
+      expect(element.dataset.upstreamSync).toBe("pending");
+    });
+    view.unmount();
+    expect(room.listeners.size).toBe(0);
+  });
+
+  it("ignores an in-flight upstream answer when a local edit and acknowledgement share its clock tick", async () => {
+    vi.useFakeTimers();
+    const stale = deferred<DocumentSearchStatus>();
+    const fresh = deferred<DocumentSearchStatus>();
+    const api = client(vi.fn().mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise));
+    const room = connectedRoom();
+    const view = render(<ServedReading api={api} connection={room.connection} />);
+    const element = view.container.querySelector<HTMLElement>(".ub-status")!;
+    const started = Date.now();
+
+    act(() => {
+      room.change({ unsyncedChanges: 1 });
+      room.change({ unsyncedChanges: 0 });
+    });
+    expect(Date.now()).toBe(started);
+    await act(async () => stale.resolve(status(ROOM_A, true)));
+    expect(element.dataset.localSync).toBe("acknowledged");
+    expect(element.dataset.upstreamSync).toBe("pending");
+
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    await act(async () => fresh.resolve(status(ROOM_A, true)));
+    expect(element.dataset.upstreamSync).toBe("acknowledged");
+    view.unmount();
+    expect(room.listeners.size).toBe(0);
   });
 
   it("ignores a late answer after the room changes", async () => {

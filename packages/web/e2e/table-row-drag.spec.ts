@@ -7,12 +7,13 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock, deleteBlock, directoryRoom, editBlock,
-  getBlocks, getBlocksFragment, initDoc, roomForDoc,
+  getBlocks, getBlocksFragment, getMeta, initDoc, roomForDoc,
   tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
+import { proveBrowserArrival } from "./settle.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -67,6 +68,15 @@ function indicator(page: Page): Locator { return page.locator(".ub-table-row-dro
 
 function bodyNames(table: Locator): Locator {
   return table.locator("tr:has(td) > td:first-child");
+}
+
+/** One newly assigned tag inserts one clock; every other clock stays fixed. */
+function expectOnlyTagWrite(doc: Y.Doc, before: Uint8Array): void {
+  const original = Y.decodeStateVector(before);
+  const current = Y.decodeStateVector(Y.encodeStateVector(doc));
+  const advances = [...current].map(([client, clock]) => clock - (original.get(client) ?? 0));
+  expect(advances.filter(advance => advance !== 0)).toEqual([1]);
+  for (const [client, clock] of original) expect(current.get(client)).toBeGreaterThanOrEqual(clock);
 }
 
 async function box(target: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
@@ -220,6 +230,7 @@ test("the header cannot be picked up and drops above it are rejected", async ({ 
     await expect(indicator(page)).toHaveCount(0);
     await page.mouse.up();
     await expect(bodyNames(table)).toHaveText(INITIAL);
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
     expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(SOURCE);
   } finally { fixture.close(); }
 });
@@ -329,7 +340,8 @@ for (const changed of ["row deletion", "table deletion", "row move", "ragged sha
       const afterRemote = Y.encodeStateVector(fixture.doc);
       await page.mouse.up();
       await expect(page.getByRole("menu")).toHaveCount(0);
-      expect(Y.encodeStateVector(fixture.doc)).toEqual(afterRemote);
+      await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
+      expectOnlyTagWrite(fixture.doc, afterRemote);
     } finally { fixture.close(); }
   });
 }
@@ -425,7 +437,8 @@ test("an immediate touch swipe from a row handle scrolls without picking up a ro
     await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
     await expect(indicator(page)).toHaveCount(0);
     await expect(page.getByRole("menu")).toHaveCount(0);
-    expect(Y.encodeStateVector(fixture.doc)).toEqual(sharedBefore);
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
+    expectOnlyTagWrite(fixture.doc, sharedBefore);
   } finally {
     try { await session.detach(); } finally { fixture.close(); }
   }

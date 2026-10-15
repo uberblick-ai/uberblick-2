@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /** An open page survives local serving restarts and credential changes. */
 
 import { expect, test } from "@playwright/test";
@@ -47,6 +48,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   const authenticatedGeometry = await statusGeometry(page);
 
   await harness().restartOpen({ authenticated: false });
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await expect(reason).toBeVisible();
@@ -69,6 +71,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; saved locally");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect.poll(() => documentText(observer)).toBe("before restart");
   const localGeometry = await statusGeometry(page);
@@ -76,6 +79,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   // This page retains its original imported browser key on another local-only
   // boot, as well as across both authentication transitions below.
   await harness().restartOpen({ authenticated: false });
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
@@ -89,6 +93,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   expect(await statusGeometry(page)).toEqual(localGeometry);
 
   await harness().restartOpen({ authenticated: false });
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await expect(reason).toBeVisible();
@@ -105,7 +110,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     await createDoc(seed, title, { pin: true });
     await placeCaret(seed);
     await seed.keyboard.type("the prose stays here");
-    await expect(seed.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await waitForAcknowledged(seed, { path: "relay" });
     paths.push(new URL(seed.url()).pathname);
   }
   await seed.close();
@@ -134,6 +139,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     const saved = page.locator(".ub-status-word--saved");
     const shared = page.locator(".ub-status-word--hub");
     const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
+    await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).toHaveText("saved here");
     await expect(shared).toHaveText("");
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
@@ -153,6 +159,7 @@ test("local-only status answers leave the readings and prose in place", async ({
       }
       await openDoc(page, title);
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+      await waitForAcknowledged(page, { path: "relay" });
       await expect(saved).toHaveText("saved here");
       await expect(shared).toHaveText("");
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
@@ -232,6 +239,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   }, samePageMarker);
 
   notSharedReason = "sign-in-required";
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   const notices = page.locator("[data-sonner-toast]");
@@ -251,6 +259,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while sign-in is required");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(notices).toHaveCount(0);
 
@@ -258,6 +267,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(notices).toHaveCount(1);
   await expect(notices).toContainText(/ask its administrator for membership/);
   await expect(notices).toBeInViewport();
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(shared).toHaveText("not shared with hub");
   await page.locator(".ub-title").focus();
@@ -274,6 +284,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while membership is refused");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect.poll(() => documentText(page))
     .toBe("kept here; edited while sign-in is required; edited while membership is refused");
@@ -288,6 +299,7 @@ test("device recovery notices preserve local editing and native tablet touch con
     await expect(notices).toContainText(recovery);
     await expect(notices).toHaveAttribute("data-type", "warning");
     await expect(shared).toHaveText("not shared with hub");
+    await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).toHaveText("saved here");
     await expect(page.locator(".ub-status")).not.toContainText(recovery);
     await page.getByRole("button", { name: /^Sync details/ }).tap();

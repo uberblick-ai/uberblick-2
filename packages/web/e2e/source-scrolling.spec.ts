@@ -2,7 +2,7 @@
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { setNativeSelection } from "./native-selection.js";
+import { setNativeSelection, setPointerSelection } from "./native-selection.js";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
@@ -377,7 +377,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
     const rect = range.getBoundingClientRect();
     return { x: rect.left, y: rect.top + rect.height / 2 };
   });
-  await setNativeSelection(code, async () => {
+  await setPointerSelection(code, async () => {
     if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
     else await page.mouse.click(end.x, end.y);
   });

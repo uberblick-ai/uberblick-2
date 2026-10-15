@@ -7,6 +7,8 @@ import type {
   ReplicaUnavailable,
 } from "../../shell/document-search.js";
 import { useCalmSyncState } from "./calm.js";
+import type { RoomConnection } from "../../collab/rooms.js";
+import { observeSyncState } from "./sync-state.js";
 
 /** Keep the status current without turning every render into an HTTP request. */
 export const SERVING_STATUS_POLL_MS = 1_000;
@@ -45,6 +47,7 @@ export interface ServingRoomStatus {
 export function useServingRoomStatus(
   client: DocumentSearchClient | null | undefined,
   room: string | null,
+  connection: RoomConnection | null = null,
 ): ServingRoomStatus | null {
   const [answer, setAnswer] = useState<RoomAnswer | null>(null);
   const current =
@@ -66,10 +69,12 @@ export function useServingRoomStatus(
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight: AbortController | null = null;
+    const sync = connection?.room === room ? observeSyncState(connection) : null;
 
     const poll = async (): Promise<void> => {
       const request = new AbortController();
       inFlight = request;
+      const answerSync = sync?.request();
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         const expired = new Promise<never>((_resolve, reject) => {
@@ -83,6 +88,7 @@ export function useServingRoomStatus(
           expired,
         ]);
         if (!active) return;
+        answerSync?.(status.rooms[room]?.hubAcked ?? null);
         setAnswer({
           client,
           room,
@@ -92,6 +98,7 @@ export function useServingRoomStatus(
         });
       } catch {
         if (!active) return;
+        answerSync?.(null);
         setAnswer((previous) => ({
           client,
           room,
@@ -113,8 +120,9 @@ export function useServingRoomStatus(
       active = false;
       if (timer !== undefined) clearTimeout(timer);
       inFlight?.abort();
+      sync?.release();
     };
-  }, [client, room]);
+  }, [client, room, connection]);
 
   if (client === null || client === undefined || room === null) return null;
   return {

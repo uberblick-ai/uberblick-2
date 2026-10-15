@@ -6,11 +6,12 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
   appendBlock, deleteBlock, directoryRoom, editBlock,
-  getBlocks, getBlocksFragment, initDoc, roomForDoc,
+  getBlocks, getBlocksFragment, getMeta, initDoc, roomForDoc,
   tableCellText, tableRows, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
 import { setupHarness } from "./app-helpers.js";
+import { proveBrowserArrival } from "./settle.js";
 
 const { harness, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |";
@@ -164,6 +165,7 @@ for (const direction of ["left", "right"] as const) {
       await expect(move).toBeDisabled();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("menu")).toHaveCount(0);
+      await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
       expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(remaining);
     } finally { fixture.close(); }
   });
@@ -185,9 +187,10 @@ test("a single-column menu cannot move or delete its last column", async ({ page
     await page.keyboard.press("Enter");
     await expect(table.locator("th")).toHaveText(["A"]);
     await expect(table.locator("td")).toHaveText(["alpha"]);
-    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("button", { name: "Column 1 actions", exact: true })).toBeFocused();
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
+    expect(getBlocks(fixture.doc).find((block) => block.id === fixture.id)?.text).toBe(source);
   } finally { fixture.close(); }
 });
 

@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /**
  * The collaboration proof points, in a real browser against a real hub.
  *
@@ -391,7 +392,9 @@ test("a peer joining leaves the status row's height and the prose where they wer
   const peers = a.locator(".ub-peers > .ub-peer-control");
   // Both sync facts settled, so the reading beside the cluster is not still
   // resolving while the two geometries are read.
+  await waitForAcknowledged(a, { path: "relay" });
   await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await waitForAcknowledged(a, { path: "upstream" });
   await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
   const geometry = async () => ({
     row: (await status.boundingBox())?.height,
@@ -489,6 +492,7 @@ test("the open document's last-updated reading follows its stub through status a
   expect(stablePosition).not.toBeNull();
   const saved = page.locator(".ub-status-word--saved");
   const upstream = page.locator(".ub-status-word--hub");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).toHaveText("saved here");
   await expect(upstream).toHaveText("synced with hub");
 
@@ -497,6 +501,7 @@ test("the open document's last-updated reading follows its stub through status a
     // The browser remains connected to `ub open`; only its silent upstream
     // replica is offline, so the local durability boundary stays saved while
     // the separately polled upstream fact turns negative.
+    await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).toHaveText("saved here");
     await expect(upstream).toHaveText("not synced with hub");
     await page.locator(".ub-sync-toggle").click();
@@ -534,6 +539,7 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
     // from the unavailable upstream.
     const fresh = await openApp(browser, path);
     await expect(editor(fresh)).toBeVisible();
+    await waitForAcknowledged(fresh, { path: "relay" });
     await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
     await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
       "not synced with hub",
@@ -542,6 +548,7 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
     // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
     await expect(editor(fresh)).toBeVisible();
+    await waitForAcknowledged(fresh, { path: "relay" });
     await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
     await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
       "not synced with hub",
@@ -568,6 +575,7 @@ test("a multi-author block survives upstream loss and converges back without dup
   await placeCaret(b);
   await type(b, "-peer");
   await expect.poll(() => blockText(a)).toBe("before-peer");
+  await waitForAcknowledged(a, { path: "upstream" });
   await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
   await harness().stopHub();
   try {
@@ -580,7 +588,8 @@ test("a multi-author block survives upstream loss and converges back without dup
     await a.reload();
     await openDoc(a, title);
     await expect.poll(() => blockText(a)).toBe("before-peer");
-    await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
+    await waitForAcknowledged(a, { path: "relay" });
+  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
     await expect(a.locator(".ub-status-word--hub")).toHaveText(
       "not synced with hub",
     );

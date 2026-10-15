@@ -157,6 +157,22 @@ what their server sends. Other tests belong in `mise run test`. Arguments after
 mise run e2e -- --repeat-each=3 outline.spec.ts
 ```
 
+Wait for saves and drawing through `e2e/settle.ts`. `waitForAcknowledged` names
+the path being proved (`relay` or `upstream`); `waitForDraw` compares the source
+and data revisions exposed by the block with the values the test wrote or read.
+The status indicator's presentation delays and renderer requests do not prove
+that a change arrived or drew. Use `expectMcp` to retry document and data
+read-backs. Before asserting that stored state, drawn output or an open-page
+count stayed unchanged, make a later positive change and observe it at the same
+reader. State which path that barrier proves. A relay acknowledgement alone
+does not prove arrival at an upstream MCP reader.
+
+`mise run lint` uses TypeScript's parser to reject one-shot MCP read assertions
+and open-page count assertions outside that helper, including local aliases.
+Scripted `setNativeSelection` callbacks return the document positions they set;
+typecheck rejects callbacks returning nothing. Use `setPointerSelection` only
+for actual pointer input, whose positions come from the resulting native range.
+
 The full suite runs in Chromium, which covers the desktop; a tagged device and
 engine set also runs in WebKit at iPad (gen 7) size. WebKit needs host system libraries,
 which CI installs separately. The task downloads engines without installing

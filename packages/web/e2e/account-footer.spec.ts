@@ -1,3 +1,4 @@
+import { expectOpenPages, provePageArrival } from "./settle.js";
 /** The footer identifies the login of this running local service, separately from presence. */
 import { devices, expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -51,7 +52,8 @@ for (const scheme of ["light", "dark"] as const) {
         const pages = page.context().pages().length;
         await placeholder.click();
         expect(page.url()).toBe(url);
-        expect(page.context().pages()).toHaveLength(pages);
+        await provePageArrival(page, { path: "browser context" });
+        await expectOpenPages(page.context(), pages);
         await expect(page.locator(".ub-user-panel")).toHaveCount(0);
 
         // A real pointer opens the existing controls, then native keyboard

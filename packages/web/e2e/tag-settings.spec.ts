@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /** Workspace settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
@@ -58,7 +59,7 @@ test("a workspace rename reaches another page live and preserves its document li
   await second.getByRole("button", { name: "+ new doc" }).click();
   await expect(second.locator(".ub-title")).toHaveValue("Untitled");
   await second.locator(".ub-title").fill("Workspace rename links");
-  await expect(second.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await waitForAcknowledged(second, { path: "relay" });
   const documentId = new URL(second.url()).pathname.split("/").at(-1);
   const oldNamePath = `/product-research-${harness().workspaceUuid}/${documentId}`;
   await second.goto(new URL(oldNamePath, harness().appUrl).href);

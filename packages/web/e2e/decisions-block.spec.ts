@@ -5,6 +5,7 @@ import type { Locator, Page } from "@playwright/test";
 import { roomForDoc } from "@uberblick/schema";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 
 const { harness, openApp } = setupHarness();
@@ -250,7 +251,10 @@ for (const touch of [false, true]) {
     await writer.call("archive_doc", { uuid: archived.uuid });
     const before = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
     const markdown = await writer.call<{ markdown: string }>("export_markdown", { uuid: owner.uuid });
-    expect(before.decisions?.find((topic) => topic.topic === linked.uuid)?.relation).toBe("linked");
+    await expectMcp(async () => {
+      const stored = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
+      expect(stored.decisions?.find((topic) => topic.topic === linked.uuid)?.relation).toBe("linked");
+    });
 
     const rooms = new Set<string>();
     const ownerPath = `/${harness().workspace}/${owner.uuid}`;
@@ -304,9 +308,12 @@ for (const touch of [false, true]) {
     await activateControl(menu.getByRole("menuitem", { name: "Decisions", exact: true }), { touch });
     await expect(menu).toBeHidden();
     await expectBlockInView(page);
-    const displayed = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
-    expect(displayed.blocks).toEqual(before.blocks);
-    expect((await writer.call<{ markdown: string }>("export_markdown", { uuid: owner.uuid })).markdown).toBe(markdown.markdown);
+    await proveMcpArrival(page, writer, owner.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      const displayed = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
+      expect(displayed.blocks).toEqual(before.blocks);
+      expect((await writer.call<{ markdown: string }>("export_markdown", { uuid: owner.uuid })).markdown).toBe(markdown.markdown);
+    });
     const recordIds = [conflict.uuid, earlierConflict.uuid, latestConflict.uuid, review.uuid, currentReview.uuid, pendingReview.uuid, alpha.uuid, zulu.uuid, stance.uuid, undecided.uuid, linked.uuid, archived.uuid];
     for (const uuid of recordIds) expect(rooms.has(roomForDoc(harness().workspaceUuid, uuid))).toBe(false);
 
@@ -370,7 +377,7 @@ test("a page without headings gains and loses its live Decisions chrome", async 
       { text: ".", marks: {} },
     ] }],
   });
-  await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid })).decisions?.find((topic) => topic.topic === linked.uuid)?.relation).toBe("linked");
+  await expectMcp(async () => { expect((await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid })).decisions?.find((topic) => topic.topic === linked.uuid)?.relation).toBe("linked"); });
   await absent(page);
   const proposal = await create(writer, "Live question", "The first answer becomes guidance when accepted.", { kind: "decision", related: owner.uuid });
   await expect(row(page, "Not yet decided", "Live question")).toBeVisible();

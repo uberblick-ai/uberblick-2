@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /**
  * Deep links, in a real browser.
  *
@@ -189,7 +190,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   await docButton(author, firstTitle).click();
   await expect(author).toHaveURL(new RegExp(`/${ws()}/${first}$`));
   await expect(author.locator(".ub-title")).toHaveValue(firstTitle);
-  await expect(author.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await waitForAcknowledged(author, { path: "relay" });
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
   const claims = await statusClaims(author);

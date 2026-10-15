@@ -34,6 +34,7 @@ import { rawSyncState, useCalmSyncState } from "../status/calm.js";
 import type { SyncState } from "../status/calm.js";
 import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
+import { bindSyncAttributes } from "../status/sync-state.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
 import { BlockMenu } from "../editor-controls/BlockMenu.js";
 import { CodeLanguageControl } from "../editor-controls/CodeLanguageControl.js";
@@ -354,6 +355,10 @@ export function StatusLine({
   statusLink?: ReactNode;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const served = hubAcked !== undefined;
+  const syncAttributes = useCallback((element: HTMLDivElement | null) => {
+    if (element !== null) return bindSyncAttributes(element, connection, served);
+  }, [connection, served]);
   const raw = rawSyncState(status);
   const state = useCalmSyncState(raw, connection);
   const reading = statusReading(status, state ?? raw);
@@ -486,7 +491,7 @@ export function StatusLine({
 
   // Refusals retain their compact word; recovery stays in notices and details.
   return (
-    <div className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
+    <div ref={syncAttributes} data-sync-room={connection.room} className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
       <div className="flex min-w-0 min-h-7 items-center gap-2">
         {statusLink ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           {statusFacts}
