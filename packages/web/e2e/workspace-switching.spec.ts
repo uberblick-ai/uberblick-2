@@ -20,8 +20,8 @@ async function switchToSecond(page: Page, keyboard = false): Promise<void> {
   } else await trigger.click();
   const items = page.getByRole("menu").getByRole("menuitem");
   await expect(items).toHaveCount(2);
-  await expect(items.first()).toContainText(running.workspaceUuid.slice(0, 8));
-  await expect(items.last()).toContainText("Second workspace");
+  await expect(items.first()).toHaveAccessibleName("Unnamed workspace");
+  await expect(items.last()).toHaveAccessibleName("Second workspace");
   if (keyboard) {
     await expect(items.first()).toBeFocused();
     await page.keyboard.press("End");
@@ -75,6 +75,7 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   await page.goto(running.appUrl);
   await expect(page).toHaveURL(new URL(`/${running.workspace}`, running.appUrl).href);
   await expect(page.getByTestId("account-menu")).toContainText("@browser-person");
+  await expect(page.locator(".ub-workspace-location")).toHaveText(new URL(running.hubUrl).host);
   const startupBinding = running.projectBinding();
   const pageInstance = await page.evaluate(() => performance.timeOrigin);
   const firstTitle = docTitle("first-workspace");
@@ -89,6 +90,7 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   await expect(editor(firstTab)).toContainText("first workspace text");
   await switchToSecond(page, true);
   await expect(page.getByTestId("account-menu")).toContainText("@second-person");
+  await expect(page.locator(".ub-workspace-location")).toHaveText(new URL(running.secondHubUrl ?? "").host);
   await expect(page.locator(".ub-docs-open").filter({ hasText: firstTitle })).toHaveCount(0);
   const secondTitle = docTitle("second-workspace");
   const secondDoc = await createDoc(page, secondTitle, { pin: true });

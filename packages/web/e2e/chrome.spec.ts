@@ -237,7 +237,7 @@ for (const scheme of ["dark"] as const) {
     );
 
     // The configured workspace uses its shared display-name reading.
-    const configured = menu.getByRole("menuitem", { name: /^Unnamed workspace · / });
+    const configured = menu.getByRole("menuitem", { name: "Unnamed workspace", exact: true });
     await expect(configured).toBeVisible();
 
     // And an item on that surface stays visible when it is the one being
