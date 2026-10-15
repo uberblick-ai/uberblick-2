@@ -190,20 +190,23 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const history = topic.inForce?.uuid !== selected;
   const topicPath = docPath(segment, topic.topic);
   const rejectionReason = connection === null ? undefined : getMeta(connection.ydoc).rejectionReason;
-  const relatedTitle = current.governs === undefined || directoryConnection === null ? undefined
-    : getDirectoryEntry(directoryConnection.ydoc, current.governs)?.title || undefined;
+  const discussionTitle = !record.discussion || directoryConnection === null ? undefined
+    : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
     decisionView
     copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
-    header={<>
-      <h1 className="ub-title">{current.title || "Untitled"}</h1>
-      {current.governs && <p className="ub-decision-related">Related page: <DocumentReference uuid={current.governs} label={relatedTitle} context={docLinks} /></p>}
-    </>}
+    header={<h1 className="ub-title">{current.title || "Untitled"}</h1>}
     beforeAnswer={<>
       <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks} />
       {record.status === "rejected" && rejectionReason && <p className="ub-decision-rejection">Rejection reason: {rejectionReason}</p>}
     </>}
     answerClassName={history ? "ub-decision-answer ub-decision-answer-history" : "ub-decision-answer"}
-    afterAnswer={<Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} />}
+    afterAnswer={<>
+      {record.discussion && docLinks !== null && <p className="ub-decision-rfc">
+        <span>RFC</span>{" "}
+        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} />
+      </p>}
+      <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} />
+    </>}
   />;
 }

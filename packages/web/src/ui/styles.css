@@ -1626,7 +1626,6 @@ h6.ub-heading {
   line-height: inherit;
 }
 
-.ub-decision-related,
 .ub-decision-record-meta {
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
@@ -1883,6 +1882,21 @@ h6.ub-heading {
 
 .ub-decision-answer .tiptap {
   min-height: 0;
+}
+
+.ub-decision-rfc {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-block: 1rem 0;
+  color: var(--muted-foreground);
+  font: normal 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+}
+
+.ub-decision-rfc .ub-doclink {
+  color: inherit;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ub-decision-history {

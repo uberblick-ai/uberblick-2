@@ -857,7 +857,7 @@ export function EditorPane({
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
   syncDetails?: boolean;
-  /** Topic pages supply their own read-only title and related-page link. */
+  /** Topic pages supply their own read-only title. */
   header?: ReactNode;
   beforeAnswer?: ReactNode;
   afterAnswer?: ReactNode;
