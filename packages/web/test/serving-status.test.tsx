@@ -80,6 +80,24 @@ describe("the locally served room's upstream reading", () => {
     vi.useRealTimers();
   });
 
+  it("exposes uncalmed evidence with the request start time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const pending = deferred<DocumentSearchStatus>();
+    const api = client(async () => await pending.promise);
+    function RawReading() {
+      return <output>{JSON.stringify(useServingRoomStatus(api, ROOM_A))}</output>;
+    }
+    const view = render(<RawReading />);
+    act(() => vi.setSystemTime(11_000));
+    await act(async () => pending.resolve(status(ROOM_A, true)));
+    expect(JSON.parse(view.container.textContent ?? "null")).toMatchObject({
+      hubAcked: null,
+      rawHubAcked: true,
+      sampledAt: 10_000,
+    });
+  });
+
   it("ignores a late answer after the room changes", async () => {
     vi.useFakeTimers();
     const a = deferred<DocumentSearchStatus>();

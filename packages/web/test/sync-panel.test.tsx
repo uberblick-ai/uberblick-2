@@ -310,11 +310,9 @@ describe("the sync panel renders the state this client holds", () => {
     ): void => {
       view.rerender(tree(connection, open, value));
     };
-    expect(within(host).queryByText(/last updated/)).toBeNull();
-    expect(facts(host)["Last updated"]).toBeUndefined();
-    act(() => void vi.advanceTimersByTime(300));
+    expect(within(host).queryByText(/Edited/)).not.toBeNull();
     expect(facts(host)["Last updated"]).toBe(
-      within(within(host).getByText(/last updated/)).getByRole("time").getAttribute("title"),
+      within(within(host).getByText(/Edited/)).getByRole("time").getAttribute("title"),
     );
     draw(first.connection, false);
     draw(first.connection, true);
@@ -322,15 +320,13 @@ describe("the sync panel renders the state this client holds", () => {
     // already visible in the status line remains available immediately.
     expect(facts(host).State).toBe("—");
     expect(facts(host)["Last updated"]).toBe(
-      within(within(host).getByText(/last updated/)).getByRole("time").getAttribute("title"),
+      within(within(host).getByText(/Edited/)).getByRole("time").getAttribute("title"),
     );
     draw(second.connection, true);
-    expect(within(host).queryByText(/last updated/)).toBeNull();
-    expect(facts(host)["Last updated"]).toBeUndefined();
-    act(() => void vi.advanceTimersByTime(300));
+    expect(within(host).queryByText(/Edited/)).not.toBeNull();
     expect(facts(host)["Last updated"]).toBeDefined();
     draw(second.connection, true, Number.NaN);
-    expect(within(host).queryByText(/last updated/)).toBeNull();
+    expect(within(host).queryByText(/Edited/)).toBeNull();
     expect(facts(host)["Last updated"]).toBeUndefined();
   });
 

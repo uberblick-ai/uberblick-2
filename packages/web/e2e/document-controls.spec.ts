@@ -59,7 +59,7 @@ async function showSidebar(page: Page, touch: boolean): Promise<void> {
 }
 
 async function syncDetails(page: Page, touch: boolean): Promise<void> {
-  const trigger = page.getByRole("button", { name: /^Sync details/ });
+  const trigger = page.locator(".ub-status-sync");
   await expectFloor(trigger, touch ? 44 : 24);
   await activate(trigger, touch);
   await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toBeVisible();

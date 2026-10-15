@@ -100,7 +100,7 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   await expect.poll(() => running.hubText(secondRoom, true)).toBe("second workspace text");
   expect(running.hubText(secondRoom)).toBeNull();
   expect(running.hubText(firstRoom, true)).toBeNull();
-  await expect(page.locator(".ub-status-word--hub")).toHaveText("synced with hub");
+  await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
   await page.locator(".ub-sync-toggle").click();
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(running.secondHubUrl ?? "");
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("Room")) dd')).toHaveText(secondRoom);

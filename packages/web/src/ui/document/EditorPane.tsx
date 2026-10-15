@@ -25,13 +25,12 @@ import { describeForeignBlocks } from "../../editor/palette.js";
 import type { LinkConflict } from "../../editor/palette.js";
 import { repairLinkConflict } from "../../editor/link-repair.js";
 import type { LinkSurvivor } from "../../editor/link-repair.js";
-import { endpointSourceLabel } from "../../config.js";
 import type { HubEndpoint } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { NotSharedReason } from "../../shell/document-search.js";
-import { notifySticky, resolveSticky } from "../../notifications.js";
+import { notifySticky, notifyTransient, resolveSticky } from "../../notifications.js";
+import { writeToClipboard } from "../../editor/source-chrome.js";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
-import type { SyncState } from "../status/calm.js";
 import { statusReading } from "../status/status-reading.js";
 import { documentSyncFacts } from "../status/sync-facts.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -42,6 +41,7 @@ import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
 import {
   useDocMeta,
+  useDocRev,
   useForeignBlocks,
   useLinkConflicts,
   usePeers,
@@ -51,7 +51,8 @@ import {
 import type { RemotePresence } from "../status/doc-chrome.js";
 import { CommentComposer } from "../comments/CommentComposer.js";
 import { PeerCluster } from "../status/PeerCluster.js";
-import { PopoverTrigger } from "../shadcn/popover.js";
+import { SyncDot } from "../status/SyncDot.js";
+import { useDocumentSyncActivity } from "../status/document-sync-activity.js";
 import { DocMetaLine } from "./DocChrome.js";
 import { threadIdFromActivation, threadIdFromTarget } from "../comments/threads.js";
 import type { SelectThread, ThreadView } from "../comments/threads.js";
@@ -308,12 +309,7 @@ function TldrCallout({
   );
 }
 
-/**
- * Debounce status redraws while reserving each mark and its longest label.
- * Persistent backlogs still read busy; counts and recovery prose belong to
- * details and notices so the compact line does not shift.
- */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
+/** The quiet edit row retains explicit refusals and truthful durability warnings. */
 export function StatusLine({
   connection,
   presence,
@@ -321,11 +317,14 @@ export function StatusLine({
   onLastUpdatedChange,
   endpoint = null,
   hubAcked,
+  rawHubAcked,
+  sampledAt,
   notSharedReason = null,
   syncDetails = false,
   onActivatePresence,
   documentLayout = false,
   statusLink,
+  revision = null,
 }: {
   connection: RoomConnection;
   /**
@@ -344,6 +343,8 @@ export function StatusLine({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  rawHubAcked?: boolean | null | undefined;
+  sampledAt?: number | null | undefined;
   notSharedReason?: NotSharedReason | null;
   /** Compose the reading as a trigger within the shell's sync Popover. */
   syncDetails?: boolean;
@@ -352,6 +353,7 @@ export function StatusLine({
   /** Reserve the capped presence width beside hydrated prose. */
   documentLayout?: boolean;
   statusLink?: ReactNode;
+  revision?: string | null;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const raw = rawSyncState(status);
@@ -359,42 +361,11 @@ export function StatusLine({
   const reading = statusReading(status, state ?? raw);
   const localWorkspace = endpoint?.url === "local";
   const facts = documentSyncFacts(status, state, reading, hubAcked, notSharedReason, localWorkspace);
-  const saveNote =
-    !status.writable && reading.detail === null ? (
-      <span className="ub-muted ub-not-saved flex-none whitespace-nowrap">not saved</span>
-    ) : null;
   // Show this room's presence independently of its blank settle-state word.
   // App room pairing excludes the directory roster.
   const peerStrip = (
     <PeerCluster presence={presence} onActivate={onActivatePresence} reserveSpace={documentLayout} />
   );
-  const mark = (tone: SyncState | null): ReactElement => (
-    <span className="ub-status-mark" aria-hidden="true">
-      {tone === "syncing" ? (
-        <span className="ub-spinner" />
-      ) : tone === null ? null : (
-        <span
-          className={`ub-dot ${tone === "synced" ? "ub-dot-live" : "ub-dot-off"}`}
-        />
-      )}
-    </span>
-  );
-  const primary = (
-    <span className="inline-flex flex-none items-center gap-2">
-      {mark(facts.primaryTone)}
-      <span
-        className={`ub-status-word${facts.twoFact ? " ub-status-word--saved" : saveNote !== null ? " ub-status-word--unsaved" : ""}`}
-      >
-        {facts.primary}
-      </span>
-    </span>
-  );
-  const hubFact = facts.twoFact && !localWorkspace ? (
-    <span className="inline-flex flex-none items-center gap-2">
-      {mark(facts.hubTone)}
-      <span className="ub-status-word ub-status-word--hub">{facts.hub}</span>
-    </span>
-  ) : null;
   const blank = facts.primary === null;
   const saveProblem = blank ? null : reading.detail ?? (!status.writable ? "Changes are not saved." : null);
   // A retained serving cause is not a hub claim while its acknowledgement is
@@ -418,49 +389,19 @@ export function StatusLine({
       resolveSticky(hubKey);
     };
   }, [connection]);
-  const hub =
-    endpoint === null || (hubAcked !== undefined && !facts.twoFact)
-      ? null
-      : `${endpoint.url ?? "unknown"} (${endpointSourceLabel(endpoint.source)})`;
-  const factLabel = [facts.primary, facts.hub].filter(
-    (value): value is string => value !== null,
-  );
-  // The serving view's intrinsic minimum protects its fixed fact slots and
-  // already exceeds the target floor, even while the status words are blank.
-  const syncReading =
-    !syncDetails ? (
-      <>
-        {primary}
-        {hubFact}
-      </>
-    ) : (
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={`ub-status-sync ub-sync-toggle inline-flex min-h-6 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer items-center gap-2 -my-[0.2rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.3rem] py-[0.2rem] [font:inherit] text-inherit hover:bg-(--card-accent) hover:text-(--secondary-foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1${hubAcked === undefined ? " flex-none min-w-6 [@media(any-pointer:coarse)]:min-w-11" : " min-w-min max-w-full flex-wrap"}`}
-          aria-label={
-            factLabel.length === 0
-              ? hub === null
-                ? "Sync details"
-                : `Sync details — hub ${hub}`
-              : hub === null
-                ? `Sync details — ${factLabel.join(", ")}`
-                : `Sync details — ${factLabel.join(", ")}${facts.twoFact ? ";" : ","} hub ${hub}`
-          }
-          title={hub === null ? "Sync details" : `Sync details — hub ${hub}`}
-        >
-          {primary}
-          {hubFact}
-        </button>
-      </PopoverTrigger>
-    );
+  const activity = useDocumentSyncActivity(connection, hubAcked, rawHubAcked, sampledAt);
+  const hasHub = endpoint !== null && endpoint.url !== "local";
+  const refusal = reading.detail !== null ? reading.word : hubProblem !== null ? "not shared with hub" : null;
+  const unsaved = !blank && reading.detail === null && !status.writable;
+  const offline = hasHub && facts.twoFact && state === "synced" && hubAcked === false && refusal === null;
+  const confirmed = hasHub && raw === "synced" && status.writable && refusal === null && notSharedReason === null && activity.confirmed;
   const now = useTimestampClock();
   const formattedUpdatedAt =
     lastUpdated === undefined ? null : formatTimestamp(lastUpdated, now);
   const updatedReading =
     formattedUpdatedAt === null ? null : (
       <span className="ub-last-updated">
-        <span aria-hidden="true">·</span> last updated{" "}
+        Edited{" "}
         <time
           dateTime={formattedUpdatedAt.dateTime}
           title={formattedUpdatedAt.title}
@@ -469,13 +410,7 @@ export function StatusLine({
         </time>
       </span>
     );
-  const shownUpdatedAt =
-    blank || formattedUpdatedAt === null ? undefined : lastUpdated;
-  const statusFacts = <>
-    {syncReading}
-    {!blank && saveNote}
-    {!blank && updatedReading}
-  </>;
+  const shownUpdatedAt = formattedUpdatedAt === null ? undefined : lastUpdated;
   // Report the displayed timestamp before paint, paired with its room
   // including cleanup. The separately mounted details panel must not restart
   // its settle window or invent an omitted stamp.
@@ -487,16 +422,25 @@ export function StatusLine({
   // Refusals retain their compact word; recovery stays in notices and details.
   return (
     <div className="ub-status min-w-0 ub-type-small text-[var(--muted-foreground)] py-[0.35rem] border-b border-[var(--border)] mb-3">
-      <div className="flex min-w-0 min-h-7 items-center gap-2">
-        {statusLink ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          {statusFacts}
+      <div className="ub-status-row">
+        {hasHub && <SyncDot key={connection.room} offline={offline} error={refusal !== null || unsaved} confirmed={confirmed}
+          lastConfirmedAt={activity.lastConfirmedAt} pulse={activity.pulse} syncDetails={syncDetails} />}
+        <div className="ub-status-left">
+          {updatedReading}
+          {refusal !== null && <span className="ub-status-word">{refusal}</span>}
+          {unsaved && <span className="ub-not-saved">not saved</span>}
+          {offline && <span className="ub-status-offline">Offline. Changes are saved on this device.</span>}
           {statusLink}
-        </div> : statusFacts}
+        </div>
         {/*
             * Use bounded circles so roster changes leave status geometry still;
             * readPresence supplies names and resolved caret locations for hover.
          */}
         {reading.detail === null && peerStrip}
+        {revision !== null && <button type="button" className="ub-doc-rev" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
+          onClick={() => { void writeToClipboard(revision).then((ok) => notifyTransient({ key: "clipboard", message: ok ? "Revision copied to clipboard" : "Copy failed", severity: ok ? "success" : "error" })); }}>
+          rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
+        </button>}
       </div>
     </div>
   );
@@ -850,6 +794,8 @@ export function EditorPane({
   onSelectThread,
   endpoint = null,
   hubAcked,
+  rawHubAcked,
+  sampledAt,
   notSharedReason = null,
   threads = [],
   threadsOpen = false,
@@ -904,6 +850,8 @@ export function EditorPane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  rawHubAcked?: boolean | null | undefined;
+  sampledAt?: number | null | undefined;
   notSharedReason?: NotSharedReason | null;
   threads?: readonly ThreadView[];
   threadsOpen?: boolean;
@@ -937,6 +885,7 @@ export function EditorPane({
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
   const observedMeta = useDocMeta(connection);
+  const revision = useDocRev(connection);
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
   const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
@@ -1032,10 +981,13 @@ export function EditorPane({
           onLastUpdatedChange={onLastUpdatedChange}
           endpoint={endpoint}
           hubAcked={hubAcked}
+          rawHubAcked={rawHubAcked}
+          sampledAt={sampledAt}
           notSharedReason={notSharedReason}
           syncDetails={syncDetails}
           onActivatePresence={revealPresence}
           statusLink={statusLink}
+          revision={revision}
         />
         {beforeAnswer}
         <div className={answerClassName}>

@@ -2097,7 +2097,99 @@ h6.ub-heading {
   border-radius: var(--radius-sm);
 }
 
-/* Fixed mark slots let sync facts change without moving adjacent readings. */
+/* The dot target keeps its place across every document sync state. */
+.ub-status-row {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ub-status-left {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
+}
+
+.ub-last-updated {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ub-status-sync,
+.ub-status-sync-slot {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ub-status-sync { cursor: pointer; }
+.ub-status-sync:focus-visible,
+.ub-doc-rev:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-sync-dot {
+  --sync-dot-rest: light-dark(oklch(0.55 0.09 145), oklch(0.63 0.10 145));
+  --sync-dot-full: light-dark(oklch(0.55 0.18 145), oklch(0.76 0.20 145));
+  background: var(--sync-dot-rest);
+}
+
+.ub-sync-dot[data-state="offline"],
+.ub-sync-dot[data-state="error"] {
+  /* A refusal or lost connection remains red even during an activity pulse. */
+  --sync-dot-rest: var(--destructive);
+  --sync-dot-full: var(--destructive);
+}
+
+.ub-sync-dot--pulse { animation: ub-sync-pulse 650ms ease-out; }
+@keyframes ub-sync-pulse {
+  from { background: var(--sync-dot-full); }
+  to { background: var(--sync-dot-rest); }
+}
+
+.ub-status .ub-doc-rev {
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.25rem 0;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ub-status-sync:hover { background: var(--card-accent); }
+  .ub-doc-rev:hover { color: var(--foreground); }
+}
+
+@media (any-pointer: coarse) {
+  .ub-status-sync,
+  .ub-status-sync-slot { width: 44px; height: 44px; }
+  .ub-status .ub-doc-rev { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ub-sync-dot--pulse { animation: none; }
+}
+
+/* Fixed mark slots remain shared with sync surfaces outside the header. */
 .ub-status-mark {
   width: 0.7rem;
   height: 0.7rem;
@@ -2108,7 +2200,6 @@ h6.ub-heading {
    even while blank. Face-independent widths keep the slots and their adjacent
    content still; ch would change with the selected face's zero advance. */
 .ub-status-word {
-  width: 9em;
   min-height: 1lh;
   flex: none;
   line-height: inherit;

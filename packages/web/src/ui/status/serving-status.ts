@@ -24,12 +24,17 @@ interface RoomAnswer {
   client: DocumentSearchClient;
   room: string;
   hubAcked: boolean | null;
+  sampledAt: number | null;
   notSharedReason: NotSharedReason | null;
   replicaUnavailable: ReplicaUnavailable | null;
 }
 
 export interface ServingRoomStatus {
   hubAcked: boolean | null;
+  /** Uncalmed room fact, for confirmation rather than offline presentation. */
+  rawHubAcked: boolean | null;
+  /** Request start: an answer begun before a write cannot confirm that write. */
+  sampledAt: number | null;
   notSharedReason: NotSharedReason | null;
   replicaUnavailable: ReplicaUnavailable | null;
 }
@@ -68,6 +73,7 @@ export function useServingRoomStatus(
     let inFlight: AbortController | null = null;
 
     const poll = async (): Promise<void> => {
+      const sampledAt = Date.now();
       const request = new AbortController();
       inFlight = request;
       let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -87,6 +93,7 @@ export function useServingRoomStatus(
           client,
           room,
           hubAcked: status.rooms[room]?.hubAcked ?? null,
+          sampledAt,
           notSharedReason: status.notSharedReason ?? null,
           replicaUnavailable: status.replicaUnavailable ?? null,
         });
@@ -96,6 +103,7 @@ export function useServingRoomStatus(
           client,
           room,
           hubAcked: null,
+          sampledAt: null,
           notSharedReason: previous?.client === client ? previous.notSharedReason : null,
           replicaUnavailable: previous?.client === client ? previous.replicaUnavailable : null,
         }));
@@ -119,6 +127,8 @@ export function useServingRoomStatus(
   if (client === null || client === undefined || room === null) return null;
   return {
     hubAcked: current === null || calm === null ? null : calm === "synced",
+    rawHubAcked: current,
+    sampledAt: answer?.client === client && answer.room === room ? answer.sampledAt : null,
     notSharedReason: answer?.client === client ? answer.notSharedReason : null,
     replicaUnavailable: answer?.client === client ? answer.replicaUnavailable : null,
   };

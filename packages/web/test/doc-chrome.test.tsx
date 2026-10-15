@@ -1,16 +1,15 @@
 /**
- * The document identity line: tags, uuid/revision, copy and document actions.
+ * The document metadata line: tags, lifecycle, copy and document actions.
  *
  * These tests pin the document-local controls without a global-header double.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { act, render, type RenderResult } from "./react-render.js";
 import * as Y from "yjs";
 import {
   appendBlock,
-  editBlock,
   getMeta,
   getMetaMap,
   initDoc,
@@ -20,6 +19,17 @@ import {
 } from "@uberblick/schema";
 import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
+import { writeToClipboard } from "../src/editor/source-chrome.js";
+import { notifyTransient } from "../src/notifications.js";
+
+vi.mock("../src/editor/source-chrome.js", async (original) => ({
+  ...await original<typeof import("../src/editor/source-chrome.js")>(),
+  writeToClipboard: vi.fn().mockResolvedValue(true),
+}));
+vi.mock("../src/notifications.js", async (original) => ({
+  ...await original<typeof import("../src/notifications.js")>(),
+  notifyTransient: vi.fn(),
+}));
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const DOC_UUID = "9f3c1a2b-0000-4000-8000-0123456789ab";
@@ -59,15 +69,31 @@ function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
   return { host: view.container, view };
 }
 
-function identityText(host: HTMLElement): string {
-  const rev = host.querySelector(".ub-doc-rev");
-  expect(rev).not.toBeNull();
-  // The identity grouping has no role or name; keep its entire text so extra
-  // full-address or revision text cannot hide between the visible fragments.
-  return (rev?.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+function openActions(host: HTMLElement): void {
+  act(() => {
+    const trigger = within(host).getByRole("button", { name: "Document actions" });
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+}
+
+async function selectCopy(name: string): Promise<void> {
+  await act(async () => screen.getByRole("menuitem", { name }).click());
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 describe("the document identity line keeps its local controls", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    Element.prototype.scrollIntoView = function scrollIntoView() {};
+    vi.mocked(writeToClipboard).mockClear();
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -96,10 +122,10 @@ describe("the document identity line keeps its local controls", () => {
       name: "Archive unavailable — the directory or sidebar room is not ready to write, or there is no live entry for this document",
     });
     expect(unavailable?.getAttribute("aria-disabled")).toBe("true");
-    expect(document.activeElement?.textContent).toBe("Pin to sidebar");
+    expect(document.activeElement?.textContent).toBe("Copy link");
     act(() => {
       document.activeElement?.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+        new KeyboardEvent("keydown", { key: "End", bubbles: true }),
       );
       vi.runOnlyPendingTimers();
     });
@@ -112,16 +138,35 @@ describe("the document identity line keeps its local controls", () => {
     expect(screen.queryByRole("alertdialog", { name: /Archive/ })).toBeNull();
   });
 
-  it("does not derive navigation from tags and keeps the shortened identity", () => {
+  it("does not derive navigation from tags or show identity above the title", () => {
     const { host } = mount(fixture());
     expect(within(host).queryByText(/^(?:Product|Decision)(?: · .+)?$/)).toBeNull();
     // The legacy group badge for this fixture's feature tag is gone too.
     expect(within(host).queryByText("Features")).toBeNull();
-    expect(identityText(host)).toMatch(
-      /^uuid 9f3c1a2b · rev [0-9a-f]{8}$/,
-    );
-    expect(within(host).getByRole("button", { name: /copies the canonical document URL/ })).not.toBeNull();
+    expect(host.querySelector(".ub-doc-ids, .ub-doc-rev")).toBeNull();
+    expect(host.textContent).not.toContain("uuid");
     expect(within(host).getByRole("button", { name: "Document actions" })).not.toBeNull();
+  });
+
+  it("starts a selected copy during the input event", async () => {
+    const { host } = mount(fixture());
+    openActions(host);
+    let dispatching = false;
+    let startedInGesture = false;
+    vi.mocked(writeToClipboard).mockImplementationOnce(async () => {
+      startedInGesture = dispatching;
+      return true;
+    });
+    act(() => {
+      dispatching = true;
+      screen.getByRole("menuitem", { name: "Copy link" }).click();
+      dispatching = false;
+    });
+    expect(startedInGesture).toBe(true);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(writeToClipboard).toHaveBeenCalledTimes(1);
   });
 
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
@@ -169,15 +214,29 @@ describe("the document identity line keeps its local controls", () => {
     }
   });
 
-  it("moves the rev when a block's content changes", () => {
+  it.each([
+    { kind: "regular", archived: false, copyPath: undefined },
+    { kind: "decision", archived: false, copyPath: `/${WORKSPACE}/topic/record/${DOC_UUID}` },
+    { kind: "regular", archived: true, copyPath: undefined },
+    { kind: "decision", archived: true, copyPath: `/${WORKSPACE}/topic` },
+  ])("copies the shown $kind document's canonical path and full id when archived=$archived", async ({ kind, archived, copyPath }) => {
     const fix = fixture();
-    const { host } = mount(fix);
-    const before = identityText(host);
-    act(() => {
-      editBlock(fix.ydoc, fix.blockIds[0] ?? "", "first block", "first block!");
-    });
-    const after = identityText(host);
-    expect(after).not.toBe(before);
-    expect(after).toMatch(/^uuid 9f3c1a2b · rev [0-9a-f]{8}$/);
+    if (kind === "decision") setKind(fix.ydoc, "decision");
+    const { container: host } = render(<DocMetaLine
+      connection={fix.connection}
+      segment={WORKSPACE}
+      meta={getMeta(fix.ydoc)}
+      archived={archived}
+      copyPath={copyPath}
+    />);
+    openActions(host);
+    if (archived) expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Copy link", "Copy document id"]);
+    await selectCopy("Copy link");
+    expect(writeToClipboard).toHaveBeenLastCalledWith(`${window.location.origin}${copyPath ?? `/${WORKSPACE}/${DOC_UUID}`}`, expect.any(Promise));
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "URL copied to clipboard", severity: "success" });
+    openActions(host);
+    await selectCopy("Copy document id");
+    expect(writeToClipboard).toHaveBeenLastCalledWith(DOC_UUID, expect.any(Promise));
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Document id copied to clipboard", severity: "success" });
   });
 });
