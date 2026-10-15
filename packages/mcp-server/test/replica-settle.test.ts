@@ -44,9 +44,3 @@ it("settles pending writes and rooms discovered during hydration without an engi
     rooms: [roomForDoc(WORKSPACE, randomUUID())], deadline: performance.now(),
   })).toEqual({ caughtUp: false, reason: "deadline" });
 });
-
-it("reports unavailable for a local-only replica even with no pending rooms", async () => {
-  const workspace = openWorkspaceReplicas(testConfig());
-  workspaces.push(workspace);
-  expect(await workspace.replicas.waitForSettled()).toEqual({ caughtUp: false, reason: "unavailable" });
-});

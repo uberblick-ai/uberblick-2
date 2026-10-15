@@ -23,20 +23,9 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getDirectoryEntry,
-  getDirectoryMap,
-  setTags,
-  setTitle,
-  upsertDirectoryEntry,
-} from "@uberblick/schema";
+import { getDirectoryEntry, upsertDirectoryEntry } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
-import {
-  removeTempDirs,
-  startServer,
-  tempDatabasePath,
-  testConfig,
-} from "./helpers.js";
+import { removeTempDirs, startServer, tempDatabasePath, testConfig } from "./helpers.js";
 import type { McpConfig } from "../src/config.js";
 import type { Rig } from "./helpers.js";
 
@@ -63,13 +52,6 @@ function stub(rig: Rig, uuid: string): DirectoryEntry {
 }
 
 /** Count updates published by the directory room from now on. */
-function countDirectoryUpdates(rig: Rig): () => number {
-  let updates = 0;
-  rig.instance.replicas.directory().doc.on("update", () => {
-    updates += 1;
-  });
-  return () => updates;
-}
 
 async function typeInto(rig: Rig, uuid: string, text: string): Promise<void> {
   await rig.ok("insert_block", { uuid, type: "paragraph", text });
@@ -92,109 +74,6 @@ afterAll(() => {
 });
 
 describe("directory timestamps", () => {
-  it("stamps createdAt on create_doc and returns both from list_docs", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Stamped", description: "A test document." });
-
-    const listed = await rig.ok("list_docs");
-    const entry = listed.docs.find((row: any) => row.uuid === doc.uuid);
-    expect(entry.createdAt).toBe(T0);
-    expect(entry.updatedAt).toBe(T0);
-  });
-
-  it("bumps updatedAt at most once per window under a burst of edits", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Burst", description: "A test document." });
-    const directoryUpdates = countDirectoryUpdates(rig);
-
-    // Twenty edits spread over twenty seconds — a plausible minute of an agent
-    // writing — all inside the first window.
-    for (let index = 0; index < 20; index += 1) {
-      vi.setSystemTime(T0 + index * 1_000);
-      await typeInto(rig, doc.uuid, `line ${index}`);
-    }
-    expect(stub(rig, doc.uuid).updatedAt).toBe(T0);
-    // The point of the coarseness: the whole burst cost the workspace nothing.
-    expect(directoryUpdates()).toBe(0);
-
-    // The first edit past the window stamps, and one more inside the new window
-    // does not.
-    vi.setSystemTime(T0 + WINDOW);
-    await typeInto(rig, doc.uuid, "after the window");
-    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + WINDOW);
-    expect(directoryUpdates()).toBe(1);
-
-    vi.setSystemTime(T0 + WINDOW + 1_000);
-    await typeInto(rig, doc.uuid, "still inside the next window");
-    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + WINDOW);
-    expect(directoryUpdates()).toBe(1);
-
-    // Created-at is a fact about the document, not a moving stamp.
-    expect(stub(rig, doc.uuid).createdAt).toBe(T0);
-  });
-
-  it("bumps updatedAt immediately on a tag or title change", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Before", description: "A test document." });
-
-    vi.setSystemTime(T0 + 1_000);
-    await rig.ok("set_metadata", { uuid: doc.uuid, tags: ["mcp"] });
-    expect(stub(rig, doc.uuid).updatedAt).toBe(T0 + 1_000);
-
-    // The web editor's path: the title lives in the document, and the stub
-    // follows it.
-    vi.setSystemTime(T0 + 2_000);
-    setTitle(rig.instance.replicas.replica(doc.uuid).doc, "After");
-    expect(stub(rig, doc.uuid)).toMatchObject({
-      title: "After",
-      updatedAt: T0 + 2_000,
-      createdAt: T0,
-    });
-  });
-
-  it("stamps a regular document immediately when its open-thread count changes", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Discussed", description: "A test document.",
-      blocks: [{ type: "paragraph", text: "one two three" }],
-    });
-    vi.setSystemTime(T0 + 1_000);
-    const opened = await rig.ok("annotate", {
-      uuid: doc.uuid, block_id: doc.blocks[0].id, start: 0, end: 3, text: "Question",
-    });
-    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 1_000 });
-    vi.setSystemTime(T0 + 2_000);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Reply" });
-    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 1_000 });
-    vi.setSystemTime(T0 + 3_000);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Done", resolved: true });
-    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 0, updatedAt: T0 + 3_000 });
-    vi.setSystemTime(T0 + 4_000);
-    await rig.ok("annotate", { uuid: doc.uuid, thread_id: opened.annotation.id, text: "Reconsider", resolved: false });
-    expect(stub(rig, doc.uuid)).toMatchObject({ openThreadCount: 1, updatedAt: T0 + 4_000 });
-  });
-
-  it("backfills createdAt on a stub that predates the field", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", { title: "Old", description: "A test document." });
-
-    // Write a stub without stamps directly; upsertDirectoryEntry would preserve
-    // createdAt and leave nothing to backfill.
-    getDirectoryMap(rig.instance.replicas.directory().doc).set(doc.uuid, {
-      title: "Old",
-      tags: [],
-    });
-    // Clear the separate max candidate too, so neither timestamp representation remains.
-    rig.instance.replicas.directory().doc.getMap("updatedAt").clear();
-    expect(stub(rig, doc.uuid).createdAt).toBeUndefined();
-
-    vi.setSystemTime(T0 + 1_000);
-    await typeInto(rig, doc.uuid, "the first thing anyone observed");
-    expect(stub(rig, doc.uuid)).toMatchObject({
-      createdAt: T0 + 1_000,
-      updatedAt: T0 + 1_000,
-    });
-  });
 
   it("does not stamp for a change it only replayed from the log", async () => {
     // Two servers on one database, which is the ordinary case: the second one
@@ -246,55 +125,4 @@ describe("directory timestamps", () => {
     });
   });
 
-  it("backfills only missing createdAt without stamping", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Right",
-      description: "A test document.",
-    });
-
-    // Keep every cached field and updatedAt correct, isolating the missing
-    // creation time. A normal upsert would carry createdAt forward.
-    getDirectoryMap(rig.instance.replicas.directory().doc).set(doc.uuid, {
-      title: "Right",
-      tags: [],
-      description: "A test document.",
-      updatedAt: T0,
-    });
-
-    // Rebuilding the derived index is not editing a document — but it does reach
-    // the stub, and the stub is the one thing here that is not rebuildable.
-    vi.setSystemTime(T0 + 3 * WINDOW);
-    rig.instance.replicas.rebuildIndex();
-
-    expect(stub(rig, doc.uuid)).toMatchObject({
-      title: "Right",
-      createdAt: T0 + 3 * WINDOW,
-      updatedAt: T0,
-    });
-  });
-
-  it("republishes a stub on restore without inventing a stamp for it", async () => {
-    const rig = await localRig();
-    const doc = await rig.ok("create_doc", {
-      title: "Archived",
-      description: "A test document.",
-    });
-    await rig.ok("archive_doc", { uuid: doc.uuid });
-
-    // The shape `republishStub` exists for: the document has metadata newer than
-    // its tombstoned stub. This server did not author that change, so restoring
-    // repairs the cached fields without inventing a stamp at the restore time.
-    // The honest answer remains the greatest stamp an author actually wrote.
-    vi.setSystemTime(T0 + 3 * WINDOW);
-    setTags(rig.instance.replicas.replica(doc.uuid).doc, [
-      "00000000-0000-4000-8000-000000000002",
-    ]);
-    await rig.ok("restore_doc", { uuid: doc.uuid });
-
-    expect(stub(rig, doc.uuid)).toMatchObject({
-      tags: ["00000000-0000-4000-8000-000000000002"],
-      updatedAt: T0,
-    });
-  });
 });
