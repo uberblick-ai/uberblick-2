@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { PopoverTrigger } from "../shadcn/popover.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../shadcn/tooltip.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -62,6 +63,6 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
       </PopoverTrigger></TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip></TooltipProvider> : <span className="ub-status-sync-slot" title={label}>{dot}</span>}
-    <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
+    {createPortal(<span className="ub-sync-announcement sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>, document.body)}
   </>;
 }

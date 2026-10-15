@@ -85,7 +85,7 @@ for (const scheme of ["light", "dark"] as const) {
     expect(await pulseCount(observer), "opening and initial sync stay quiet").toBe(0);
     await expect(page.locator(".ub-status")).not.toContainText(/uuid |saved here|synced with hub|syncing/);
     await expect(page.locator(".ub-last-updated")).toContainText("Edited ");
-    await expect(page.locator(".ub-status [role=status]")).toHaveText("");
+    await expect(page.locator(".ub-sync-announcement")).toHaveText("");
     await expectDotContrast(dot);
     await page.screenshot({ path: info.outputPath("quiet-header.png") });
     await info.attach("quiet header", { path: info.outputPath("quiet-header.png"), contentType: "image/png" });
@@ -96,7 +96,7 @@ for (const scheme of ["light", "dark"] as const) {
     await page.locator(".ub-title").focus();
     await expect.poll(() => pulseCount(page)).toBe(1);
     await expect.poll(() => pulseCount(observer)).toBe(1);
-    await expect(page.locator(".ub-status [role=status]")).toHaveText("");
+    await expect(page.locator(".ub-sync-announcement")).toHaveText("");
     await expect.poll(() => dot.evaluate((node) => node.getAnimations().filter((animation) => animation.playState === "running").length)).toBe(0);
     await expect.poll(() => observer.locator(".ub-sync-dot").evaluate((node) => node.getAnimations().filter((animation) => animation.playState === "running").length)).toBe(0);
 
@@ -159,8 +159,8 @@ for (const scheme of ["light", "dark"] as const) {
       await expect(trigger).toHaveAttribute("aria-label", /^Offline since \d{2}:\d{2}$/);
       await expect(page.locator(".ub-status")).toContainText("Offline. Changes are saved on this device.");
       await expect(dot).toHaveAttribute("data-state", "offline");
-      await expect(page.locator(".ub-status [role=status]")).toHaveAttribute("aria-live", "polite");
-      await expect(page.locator(".ub-status [role=status]")).toHaveText("Offline. Changes are saved on this device.");
+      await expect(page.locator(".ub-sync-announcement")).toHaveAttribute("aria-live", "polite");
+      await expect(page.locator(".ub-sync-announcement")).toHaveText("Offline. Changes are saved on this device.");
       await expectDotContrast(dot);
       await expect(editor(page)).toHaveAttribute("contenteditable", "true");
     } finally {
@@ -168,7 +168,7 @@ for (const scheme of ["light", "dark"] as const) {
     }
     await expect(trigger).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 });
     await expect(page.locator(".ub-status-offline")).toHaveCount(0);
-    await expect(page.locator(".ub-status [role=status]")).toHaveText("Synced with hub.");
+    await expect(page.locator(".ub-sync-announcement")).toHaveText("Synced with hub.");
     await expectDotContrast(dot);
     await expect(observer.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 });
     expect(await pulseCount(observer), "reconnect handshakes stay quiet").toBe(observerPulses);

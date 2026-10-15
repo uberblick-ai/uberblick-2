@@ -80,7 +80,7 @@ describe("hub status", () => {
     expect(view.container.textContent).toBe("Edited just now");
     expect(within(view.container).getByRole("button", { name: "Synced with hub just now" })).toBeTruthy();
     expect(view.container.querySelector(".ub-sync-dot")?.getAttribute("data-pulse")).toBe("0");
-    expect(view.container.querySelector('[role="status"]')?.textContent).toBe("");
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("");
     view.current.change({ unsyncedChanges: 4 });
     settle();
     expect(view.container.textContent).toBe("Edited just now");
@@ -105,12 +105,12 @@ describe("hub status", () => {
     const button = within(view.container).getByRole("button", { name: /^Offline since \d\d:\d\d$/ });
     expect(button.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
     expect(view.container.querySelector(".ub-status-offline")?.textContent).toBe("Offline. Changes are saved on this device.");
-    expect(view.container.querySelector('[role="status"]')?.textContent).toBe("Offline. Changes are saved on this device.");
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("Offline. Changes are saved on this device.");
     view.ack(null);
     expect(view.container.querySelector(".ub-status-offline")).toBeNull();
     expect(within(view.container).getByRole("button", { name: "Sync details" })).toBeTruthy();
     view.ack(true);
-    expect(view.container.querySelector('[role="status"]')?.textContent).toBe("Synced with hub.");
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("Synced with hub.");
   });
 
   it.each([
