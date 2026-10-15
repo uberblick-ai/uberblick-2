@@ -33,7 +33,16 @@ export default defineConfig({
         : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/mcp-server.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Allow sequential connect/sync/shutdown and restart waits on real sockets,
@@ -41,8 +50,7 @@ export default defineConfig({
     // so named waits diagnose a missing condition before the test deadline.
     testTimeout: 120_000,
     hookTimeout: 120_000,
-    // One worker per core: the rigs are CPU-bound, and oversubscribing them
-    // alongside the other packages' suites slows the run instead of filling waits.
+    // Standalone runs use one worker per core; root runs share a machine budget.
     maxWorkers: "100%",
   },
 });

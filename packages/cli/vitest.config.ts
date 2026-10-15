@@ -51,7 +51,16 @@ export default defineConfig({
         : ["test/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
     // CI output, as in packages/schema/vitest.config.ts.
-    reporters: process.env.CI ? ["dot"] : ["default"],
+    reporters: [
+      process.env.CI ? "dot" : "default",
+      ...(process.env.GITHUB_ACTIONS === "true" && process.env.RUNNER_TEMP
+        ? [["junit", {
+            outputFile: `${process.env.RUNNER_TEMP}/vitest-results/cli.xml`,
+            includeConsoleOutput: false,
+            classnameTemplate: "",
+          }] as const]
+        : []),
+    ],
     silent: "passed-only",
     execArgv: ["--no-experimental-webstorage"],
     // Builds the `ub` the spawning suites run, once for the whole run. See
@@ -74,8 +83,8 @@ export default defineConfig({
     // arrived so the failure can be diagnosed.
     testTimeout: 150_000,
     hookTimeout: 150_000,
-    // Most of a test here is spent waiting on sockets, child processes and
-    // timers, not computing, so oversubscribe to use the cores during waits.
-    maxWorkers: "150%",
+    // Standalone runs use one worker per core. The root test commands supply
+    // an integer VITEST_MAX_WORKERS from their shared machine budget.
+    maxWorkers: "100%",
   },
 });
