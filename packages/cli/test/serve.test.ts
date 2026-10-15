@@ -16,7 +16,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
-import { DEAD_HUB_URL, UB_BIN, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
+import { DEAD_HUB_URL, UB_BIN, WAIT_TIMEOUT_MS, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
 afterAll(removeTempDirs);
@@ -469,7 +469,7 @@ describe("ub mcp serve", () => {
         // would otherwise run into Vitest's outer timeout — which fails the test
         // without unwinding it, so teardown below would never run — and a slow
         // boot would eat the window the signal is supposed to be answered in.
-        expect(await within(whenServing(child), 10_000, "never started")).toBe(
+        expect(await within(whenServing(child), WAIT_TIMEOUT_MS, "never started")).toBe(
           "serving",
         );
         child.kill(signal);
@@ -477,8 +477,10 @@ describe("ub mcp serve", () => {
         // And the wrapper's own death is the signal, not a plain exit with
         // 128+n: a supervisor reading WIFSIGNALED cannot tell it from a direct
         // spawn. That is the re-raise half.
+        // SIGQUIT dumps core in the server and then in the wrapper. Allow both
+        // dumps to finish on a loaded host before declaring stdio stuck.
         expect(
-          await within(closed, 10_000, "the server outlived the wrapper"),
+          await within(closed, 60_000, "stdio did not close"),
         ).toBe(signal);
       } finally {
         closeSync(writer);
@@ -493,7 +495,7 @@ describe("ub mcp serve", () => {
         } catch {
           // ESRCH: the group is already gone, which is the expected case.
         }
-        await within(closed, 2_000, "not reaped");
+        expect(await within(closed, WAIT_TIMEOUT_MS, "not reaped")).not.toBe("not reaped");
       }
     },
   );
