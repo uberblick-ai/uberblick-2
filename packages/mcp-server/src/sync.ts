@@ -997,8 +997,7 @@ export class HubSync {
     if (provider === undefined) {
       return false;
     }
-    return provider.hasCurrentSync() && this.syncedRooms.has(room) &&
-      provider.isSynced && !provider.hasUnsyncedChanges;
+    return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
   }
 
   private stateChanged(): void {
