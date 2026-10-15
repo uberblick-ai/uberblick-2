@@ -438,7 +438,7 @@ describe("ub mcp serve", () => {
   // them rather than exiting cleanly — which is what makes them the pair that
   // proves the wrapper's lifecycle. SIGHUP is what a vanished terminal sends;
   // SIGQUIT is Ctrl-\ and a supervisor escalating past SIGTERM.
-  it.each(Array.from({ length: process.platform === "linux" && process.env.GITHUB_ACTIONS === "true" ? 30 : 2 }, (_, index) => ({
+  it.concurrent.each(Array.from({ length: process.platform === "linux" && process.env.GITHUB_ACTIONS === "true" ? 100 : 2 }, (_, index) => ({
     signal: index % 2 === 0 ? "SIGHUP" as const : "SIGQUIT" as const,
     attempt: index,
   })))(

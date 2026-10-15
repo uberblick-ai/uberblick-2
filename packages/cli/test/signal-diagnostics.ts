@@ -58,7 +58,10 @@ export function signalDiagnostics(child: ChildProcess, signal: string): {
     limits: read(`/proc/${child.pid}/limits`)?.split("\n").filter((line) => line.startsWith("Max core")),
   });
   child.on("exit", (code, killedBy) => mark("wrapper exit", { code, signal: killedBy }));
-  child.on("close", (code, killedBy) => mark("wrapper close", { code, signal: killedBy }));
+  child.on("close", (code, killedBy) => {
+    mark("wrapper close", { code, signal: killedBy });
+    snapshot();
+  });
   child.stdout?.on("end", () => mark("stdout end"));
   child.stdout?.on("close", () => mark("stdout close"));
   child.stderr?.on("end", () => mark("stderr end"));
