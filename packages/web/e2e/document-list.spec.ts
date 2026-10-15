@@ -246,8 +246,8 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     expect(searchBox?.y).toBeLessThan(typeBox?.y ?? 0);
     await expect(titleFilter).toHaveAttribute("placeholder", "Search");
     await expect(titleFilter).toHaveCSS("border-top-width", "1px");
-    await expect(titleFilter).toHaveCSS("font-size", "14px");
-    await expect(titleFilter).toHaveCSS("line-height", "20px");
+    await expect(titleFilter).toHaveCSS("font-size", touch ? "16px" : "14px");
+    await expect(titleFilter).toHaveCSS("line-height", touch ? "27px" : "20px");
     await expect(titleFilter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.getByRole("tablist")).toHaveCount(0);
     await expect(page.getByRole("columnheader")).toHaveText(["Title", "Group", "Tags", "Changed", "Actions"]);

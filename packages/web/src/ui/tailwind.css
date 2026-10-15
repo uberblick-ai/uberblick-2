@@ -34,6 +34,7 @@
 @source "./document/DocChrome.tsx";
 @source "./PickerList.tsx";
 @source "./editor-controls/CodeLanguageControl.tsx";
+@source "./editor-controls/CardButtonControls.tsx";
 @source "./document/EditorPane.tsx";
 @source "../shell/DocumentList.tsx";
 @source "./status/PeerCluster.tsx";
@@ -111,4 +112,39 @@
     background: none;
     color: inherit;
   }
+}
+
+@utility ub-type-caption {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+}
+
+@utility ub-type-small {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+}
+
+@utility ub-type-ui {
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+@utility ub-type-body {
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+}
+
+@utility ub-type-h3 {
+  font-size: var(--type-h3-size);
+  line-height: var(--type-h3-leading);
+}
+
+@utility ub-type-h2 {
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
+}
+
+@utility ub-type-title {
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-leading);
 }

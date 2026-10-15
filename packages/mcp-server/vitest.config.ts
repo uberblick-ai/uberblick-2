@@ -41,7 +41,8 @@ export default defineConfig({
     // so named waits diagnose a missing condition before the test deadline.
     testTimeout: 120_000,
     hookTimeout: 120_000,
-    // Socket, process and timer waits leave workers idle; allow oversubscription.
-    maxWorkers: "150%",
+    // One worker per core: the rigs are CPU-bound, and oversubscribing them
+    // alongside the other packages' suites slows the run instead of filling waits.
+    maxWorkers: "100%",
   },
 });

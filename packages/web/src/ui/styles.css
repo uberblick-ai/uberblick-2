@@ -137,7 +137,26 @@
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
 
-  /* UI and prose use Geist; machine text uses Geist Mono. The document title
+  /* Product type tokens stay outside Tailwind's theme namespaces. */
+  --type-caption-size: 12px;
+  --type-caption-leading: 16px;
+  --type-small-size: 13px;
+  --type-small-leading: 18px;
+  --type-ui-size: 14px;
+  --type-ui-leading: 20px;
+  --type-body-size: 16px;
+  --type-body-leading: 27px;
+  --type-h3-size: 18px;
+  --type-h3-leading: 24px;
+  --type-h2-size: 22px;
+  --type-h2-leading: 28px;
+  --type-title-size: 36px;
+  --type-title-leading: 42px;
+
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
+
+  /* UI and prose use Geist; pasteable text uses Geist Mono. The document title
      and TL;DR heading share the Fraunces display stack. System fallbacks cover
      the font-swap period. */
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
@@ -249,7 +268,7 @@ body {
   border-bottom: 1px solid var(--status-warning);
   background: var(--status-warning-subtle);
   color: var(--foreground);
-  line-height: 1.5;
+  line-height: inherit;
   text-align: center;
 }
 
@@ -264,7 +283,8 @@ body {
 .ub-notice code,
 .ub-inline-code {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .ub-rebound-notice code,
@@ -274,13 +294,11 @@ body {
 
 .ub-muted {
   color: var(--muted-foreground);
-  font-size: 0.8rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
 }
 
-/* Machine identifiers and sync details use the mono face. Keep these
-   selectors scoped: `.ub-muted` also carries running prose. */
-.ub-list-head .ub-muted,
-.ub-status,
+/* Raw stored blocks and their identifiers remain pasteable source text. */
 .ub-foreign-list {
   font-family: var(--font-mono);
 }
@@ -361,9 +379,10 @@ body {
   color: var(--sidebar-muted-foreground);
 }
 
-/* Sync detail shares the group labels' size and tint while staying mono. */
+/* Sync detail shares the group labels' size and tint. */
 .ub-list-head .ub-muted {
-  font-size: 11px;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   color: var(--sidebar-group-label);
 }
 
@@ -411,7 +430,8 @@ body {
 .ub-nav-label {
   margin: 0;
   padding: 0.25rem 0.4rem;
-  font-size: 11px;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-weight: 500;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -481,7 +501,8 @@ body {
 .ub-panel-label,
 .ub-panel-fact dt {
   color: var(--sidebar-muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
 }
 
 .ub-panel-label {
@@ -536,8 +557,8 @@ body {
 
 .ub-panel-fact dd {
   margin: 0;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
 }
 
 .ub-group + .ub-group {
@@ -654,8 +675,8 @@ body {
 }
 
 .ub-mention {
-  font-size: 0.7rem;
-  font-family: var(--font-mono);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   padding: 0 0.3rem;
 }
 
@@ -675,19 +696,19 @@ body {
 
 .ub-comment-error {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   background: var(--destructive-subtle);
   color: var(--foreground);
   border-radius: var(--radius-sm);
   padding: 0.2rem 0.35rem;
 }
 
-/* Match the prose h1's size, leading and tracking while using the display
-   family shared by the title and TL;DR heading. */
+/* H1 shares the title metrics; its face and weight belong to prose. */
 .ub-title,
 h1.ub-heading {
-  font-size: 2.05rem;
-  line-height: 1.18;
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-leading);
   letter-spacing: -0.021em;
 }
 
@@ -738,7 +759,8 @@ h1.ub-heading {
 /* Small identity initials and overflow counts keep their heavier UI weight. */
 .ub-avatar {
   font-family: var(--font-sans);
-  font-size: 0.7rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-weight: 600;
 }
 
@@ -750,7 +772,7 @@ h1.ub-heading {
   background: var(--card);
   color: var(--card-foreground);
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-  font: 0.8rem/1.2 var(--font-mono);
+  font: var(--type-small-size)/var(--type-small-leading) var(--font-sans);
 }
 
 .ub-peer-overflow-row .ub-muted {
@@ -766,7 +788,8 @@ h1.ub-heading {
      hydration moves no title. */
   min-height: 2.75rem;
   margin: 0 0 0.15rem;
-  font-size: 0.75rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   color: var(--muted-foreground);
 }
 
@@ -814,12 +837,15 @@ h1.ub-heading {
   min-height: 2rem;
 }
 
-/* Mono machine facts keep changing revisions at a stable character width. */
 .ub-doc-ids {
-  font-family: var(--font-mono);
   flex: none;
   display: inline-flex;
   align-items: center;
+}
+
+/* Short ids and the revision placeholder share a stable character width. */
+.ub-doc-id {
+  font-family: var(--font-mono);
 }
 
 /* Keep the actions target at 44px even when tags give up width. */
@@ -829,7 +855,8 @@ h1.ub-heading {
 }
 
 .ub-tool {
-  font-size: 0.75rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   padding: 0.15rem 0.45rem;
 }
 
@@ -856,28 +883,32 @@ h1.ub-heading {
   outline: none;
   min-height: 12rem;
   /* Long-form leading keeps return sweeps readable at the capped measure. */
-  line-height: 1.7;
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
   /* ProseMirror needs pre-wrap for caret placement at line ends and trailing spaces. */
   white-space: pre-wrap;
 }
 
-/* Tracking tightens with heading size. Levels 4–6 retain browser sizing
-   while sharing the heading weight and leading. */
+/* Heading space belongs to what follows, at every outline level. */
 .ub-heading {
-  font-weight: 500;
-  line-height: 1.2;
-  margin: 1.2em 0 0.4em;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  margin: 1.5em 0 0.35em;
 }
 
 h2.ub-heading {
-  font-size: 1.19rem;
-  line-height: 1.3;
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
+  margin: 1.9em 0 0.45em;
   letter-spacing: -0.012em;
 }
 
-h3.ub-heading {
-  font-size: 1.05rem;
-  line-height: 1.35;
+h3.ub-heading,
+h4.ub-heading,
+h5.ub-heading,
+h6.ub-heading {
+  font-size: var(--type-h3-size);
+  line-height: var(--type-h3-leading);
   letter-spacing: -0.008em;
 }
 
@@ -948,12 +979,13 @@ h3.ub-heading {
 .ub-card .ub-paragraph { margin: 0; color: inherit; white-space: pre-wrap; }
 .ub-card-label, .ub-card-footer {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-weight: 500;
   text-transform: uppercase;
 }
 .ub-card-label { letter-spacing: 0.08em; }
-.ub-card-title { margin-top: 6px; color: var(--foreground); font-size: 18px; font-weight: 600; }
+.ub-card-title { margin-top: 6px; color: var(--foreground); font-size: var(--type-h3-size); line-height: var(--type-h3-leading); font-weight: 600; }
 .ub-card-body { margin-top: 12px; color: var(--prose-text); }
 .ub-card-footer { margin-top: 12px; letter-spacing: 0.06em; }
 .ub-card-footer a { text-transform: none; }
@@ -1055,7 +1087,7 @@ h3.ub-heading {
   gap: 0.5rem;
   margin-bottom: 0.4rem;
   color: var(--muted-foreground);
-  font: 0.75rem/1rem var(--font-sans);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   font-style: normal;
   white-space: nowrap;
   user-select: none;
@@ -1116,10 +1148,9 @@ h3.ub-heading {
   flex-direction: column;
   gap: 0.15rem;
   margin: 0 0 0.4rem;
-  font: 0.8rem var(--font-sans);
-  line-height: 1.3;
+  font: var(--type-small-size)/var(--type-small-leading) var(--font-sans);
 }
-.ub-chart-series-header strong { font-size: 1.05rem; font-weight: 600; }
+.ub-chart-series-header strong { font-size: var(--type-h3-size); line-height: var(--type-h3-leading); font-weight: 600; }
 .ub-chart-series-plot { position: relative; height: 150px; }
 /* Generated tables keep their existing footer controls outside block chrome. */
 .ub-chart-footer > .ub-chart-open,
@@ -1129,18 +1160,19 @@ h3.ub-heading {
   border: 0;
   border-radius: var(--radius-sm);
   padding: 0.05rem 0.3rem;
-  font: 0.7rem/1 var(--font-mono);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   letter-spacing: 0.04em;
   cursor: pointer;
 }
 .ub-chart-message, .ub-chart-diagnostics, .ub-chart-notice {
-  font-size: 0.8rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   margin: 0.5rem 0 0;
 }
 .ub-chart-source {
   display: none;
   margin: 0;
-  font: 0.8rem/1.7 var(--font-mono);
+  font: var(--type-small-size)/1.7 var(--font-mono);
   white-space: pre;
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1149,7 +1181,7 @@ h3.ub-heading {
 .ub-chart[data-annotated="true"] > .ub-chart-source { display: block; }
 .ub-chart-editing > .ub-chart-panel,
 .ub-chart[data-annotated="true"] > .ub-chart-panel { display: none; }
-.ub-chart-probe { position: absolute; visibility: hidden; font-family: var(--font-sans); color: var(--muted-foreground); border-color: var(--border); }
+.ub-chart-probe { position: absolute; visibility: hidden; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); color: var(--muted-foreground); border-color: var(--border); }
 
 .ub-chart[data-view="table"] > .ub-block-caption { display: none; }
 .ub-chart[data-view="table"] > .ub-chart-source {
@@ -1201,7 +1233,7 @@ h3.ub-heading {
 }
 
 .ub-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
-.ub-data-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
+.ub-data-table { width: 100%; border-collapse: collapse; font-size: var(--type-body-size); line-height: var(--type-body-leading); }
 .ub-data-table th, .ub-data-table td {
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--border);
@@ -1216,7 +1248,7 @@ h3.ub-heading {
 .ub-data-cell[data-wrap="long"] { min-width: 12ch; }
 .ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
 .ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
-.ub-data-table th { max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
+.ub-data-table th { font-size: var(--type-ui-size); line-height: var(--type-ui-leading); max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
 .ub-data-sort {
   display: flex; align-items: center; gap: 0.3rem;
   width: 100%; min-height: 1.5rem;
@@ -1277,7 +1309,8 @@ h3.ub-heading {
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
@@ -1340,7 +1373,8 @@ h3.ub-heading {
 }
 
 .ub-table {
-  font-size: 1rem;
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
 }
 
 .ub-table th,
@@ -1358,6 +1392,8 @@ h3.ub-heading {
 }
 
 .ub-table th {
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   background: var(--muted);
   font-weight: 600;
   color: var(--foreground);
@@ -1375,7 +1411,7 @@ h3.ub-heading {
 .ub-mermaid pre,
 .ub-terminal-source,
 .ub-terminal-frame {
-  font: 0.8rem/1.7 var(--font-mono);
+  font: var(--type-small-size)/1.7 var(--font-mono);
   white-space: pre;
 }
 .ub-code > code,
@@ -1444,7 +1480,7 @@ h3.ub-heading {
 .ub-mermaid-error {
   margin: 0.5rem 0;
   color: var(--muted-foreground);
-  font: 0.75rem/1rem var(--font-sans);
+  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -1542,7 +1578,7 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
   background: var(--muted);
   color: var(--foreground);
-  font: normal 400 0.875rem/1.25 var(--font-sans);
+  font: normal 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
   letter-spacing: normal;
   text-transform: none;
   vertical-align: baseline;
@@ -1586,13 +1622,15 @@ h3.ub-heading {
 
 .ub-doclink[data-doc-link-state="archived"]::after {
   content: " · archived";
-  font-size: 0.85em;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .ub-decision-related,
 .ub-decision-attribution,
 .ub-decision-record-meta {
-  font-size: 0.875rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
 }
 
 .ub-decisions-block {
@@ -1617,8 +1655,8 @@ h3.ub-heading {
 .ub-decisions-heading h2 {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -1626,8 +1664,8 @@ h3.ub-heading {
 
 .ub-decisions-summary,
 .ub-decisions-row-meta {
-  font-size: 0.8125rem;
-  line-height: 1.125rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1666,8 +1704,8 @@ h3.ub-heading {
 }
 
 .ub-decisions-question {
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -1679,8 +1717,8 @@ h3.ub-heading {
 }
 
 .ub-decisions-state-label {
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   text-transform: uppercase;
   letter-spacing: 0.035em;
 }
@@ -1693,8 +1731,8 @@ h3.ub-heading {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
 }
 
 .ub-decisions-mark {
@@ -1784,6 +1822,8 @@ h3.ub-heading {
 }
 
 .ub-decision-history h2 {
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
   font-weight: 600;
 }
 
@@ -1819,7 +1859,8 @@ h3.ub-heading {
 .ub-decision-selection,
 .ub-decision-linked {
   margin-inline-start: 0.75rem;
-  font-size: 0.8rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
 }
 
 .ub-decision-preview {
@@ -1845,12 +1886,14 @@ h3.ub-heading {
 }
 
 .ub-foreign-list {
-  font-size: 0.85rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
 }
 
 .ub-link-repair {
   margin: 0.75rem 0;
-  font-size: 0.9rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
 }
 
 .ub-link-repair ul {
@@ -1939,7 +1982,8 @@ h3.ub-heading {
 .ub-tldr-label {
   display: block;
   color: color-mix(in oklab, var(--foreground) 55%, transparent);
-  font-size: 0.6875rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -1949,16 +1993,16 @@ h3.ub-heading {
   margin: 0;
   color: var(--foreground);
   font-family: var(--font-display);
-  font-size: 1.5rem;
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
   font-weight: 500;
-  line-height: 1.25;
 }
 
 .ub-tldr-body > p {
   margin: 0;
   color: color-mix(in oklab, var(--foreground) 88%, transparent);
-  font-size: 1rem;
-  line-height: 1.75;
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-leading);
   overflow-wrap: anywhere;
 }
 
@@ -1969,14 +2013,15 @@ h3.ub-heading {
 .ub-tldr-form > label,
 .ub-tldr-form-meta {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
 }
 
 .ub-tldr-form textarea {
   min-height: 5rem;
   resize: vertical;
   padding: 0.5rem 0.6rem;
-  line-height: 1.5;
+  line-height: inherit;
 }
 
 .ub-tldr-form-meta,
@@ -1987,8 +2032,8 @@ h3.ub-heading {
 .ub-tldr-error {
   margin: 0;
   color: var(--destructive);
-  font-size: 0.75rem;
-  line-height: 1.5;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   overflow-wrap: anywhere;
 }
 
@@ -2010,7 +2055,7 @@ h3.ub-heading {
 
 .ub-notice {
   margin: 0.4rem 0;
-  line-height: 1.6;
+  line-height: inherit;
   max-width: 52ch;
 }
 
@@ -2037,10 +2082,10 @@ h3.ub-heading {
   position: absolute;
   top: -1.15em;
   left: -1px;
-  font-size: 0.65rem;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   font-style: normal;
   font-weight: 500;
-  line-height: normal;
   white-space: nowrap;
   color: var(--cursor-label-foreground);
   padding: 0.05rem 0.25rem;
@@ -2060,28 +2105,29 @@ h3.ub-heading {
 }
 
 /* Reserve the longest reading, including "update required", and one line
-   even while blank so settled status moves no adjacent content. */
+   even while blank. Face-independent widths keep the slots and their adjacent
+   content still; ch would change with the selected face's zero advance. */
 .ub-status-word {
-  width: 15ch;
+  width: 9em;
   min-height: 1lh;
   flex: none;
-  line-height: 1.2;
+  line-height: inherit;
   text-align: left;
 }
 
 /* Saved and hub readings each reserve their longest label width while blank. */
 .ub-status-word--saved {
-  width: 12ch;
+  width: 7.2em;
 }
 
 .ub-status-word--hub {
-  width: 19ch;
+  width: 11.4em;
 }
 
 /* Inline not-saved only accompanies ordinary sync words. Reserve their
    longest reading, rather than refusal words, to keep presence in the pane. */
 .ub-status-word--unsaved {
-  width: 9ch;
+  width: 5.4em;
 }
 
 /* A lit quarter of the warning ring rotates in the fixed status-mark slot. */
@@ -2165,7 +2211,8 @@ h3.ub-heading {
 }
 
 .ub-docs-heading {
-  font-size: 1.4rem;
+  font-size: var(--type-h2-size);
+  line-height: var(--type-h2-leading);
   margin: 0;
 }
 
@@ -2180,7 +2227,7 @@ h3.ub-heading {
   min-height: 2rem;
   padding: 0.3rem 0.55rem;
   border-radius: var(--radius-sm);
-  font: 400 0.875rem/1.25rem var(--font-sans);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
 .ub-docs-tag-filter {
@@ -2202,12 +2249,12 @@ h3.ub-heading {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
   background: transparent;
-  font: 400 0.875rem/1.25rem var(--font-sans);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
 .ub-docs-search-status {
   margin: 0;
-  font: 400 0.8125rem/1.125rem var(--font-sans);
+  font: 400 var(--type-small-size)/var(--type-small-leading) var(--font-sans);
 }
 
 .ub-docs-clear-tags,
@@ -2217,7 +2264,7 @@ h3.ub-heading {
   border: 0;
   background: transparent;
   color: var(--foreground);
-  font: 400 0.875rem/1.25rem var(--font-sans);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -2267,16 +2314,16 @@ h3.ub-heading {
   padding: 0 0 0.25rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
-  font-size: 0.875rem;
-  line-height: 1.25rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   font-weight: 500;
   text-align: left;
 }
 
 .ub-docs-sort-arrow {
   color: var(--foreground);
-  font-size: 0.9rem;
-  line-height: 1;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
 }
 
 .ub-docs-title-cell {
@@ -2328,14 +2375,15 @@ h3.ub-heading {
   gap: 0.25rem;
   padding: 0 0.4rem 0.5rem;
   color: var(--muted-foreground);
-  font-size: 0.85rem;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   overflow-wrap: anywhere;
 }
 
 .ub-docs-group,
 .ub-docs-age {
-  font-size: 0.8125rem;
-  line-height: 1.125rem;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
   color: var(--muted-foreground);
 }
 
@@ -2380,7 +2428,7 @@ h3.ub-heading {
   border-radius: var(--radius-sm);
   background: var(--muted);
   color: var(--muted-foreground);
-  font: 400 0.75rem/1rem var(--font-sans);
+  font: 400 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
   white-space: nowrap;
 }
 
@@ -2420,4 +2468,29 @@ button.ub-docs-tag-chip:hover {
   padding: 0;
   text-align: right;
   vertical-align: middle;
+}
+
+/* Native fields need Body size on iPad to avoid focus zoom. The title keeps
+   its larger Title metrics; checkbox and radio glyphs have no text value. */
+@media (any-pointer: coarse) {
+  .ub-tool,
+  .ub-mention,
+  .ub-threads-toggle,
+  .ub-appearance-option,
+  .ub-archived-banner > button {
+    min-height: 2.75rem;
+  }
+
+  input:not(.ub-title, [type="checkbox"], [type="radio"]),
+  textarea:not([hidden]),
+  select,
+  .ub-tldr-form textarea {
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-leading);
+  }
+
+  input:not(.ub-title, [type="checkbox"], [type="radio"]),
+  select {
+    min-height: 2.75rem;
+  }
 }

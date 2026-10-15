@@ -77,12 +77,12 @@ export function WorkspaceSwitcher({
               {current !== null && (
                 <span className="ub-workspace-marker size-8 shrink-0 rounded-(--radius-sm) bg-(--brand)" aria-hidden="true" />
               )}
-              <span className="min-w-0 flex-1 text-sm/5">
+              <span className="min-w-0 flex-1 ub-type-ui">
                 <span className="ub-workspace-name block truncate" title={current === null ? undefined : currentLabel}>
                   {currentLabel}
                 </span>{" "}
                 {location !== null && (
-                  <span className="ub-workspace-location block truncate text-[0.8125rem]/[1.125rem] font-normal text-(--sidebar-muted-foreground)" title={location}>
+                  <span className="ub-workspace-location block truncate ub-type-small font-normal text-(--sidebar-muted-foreground)" title={location}>
                     {location}
                   </span>
                 )}
@@ -103,7 +103,7 @@ export function WorkspaceSwitcher({
                   aria-current={here ? "true" : undefined}
                   onSelect={() => onSwitch(workspace.segment)}
                 >
-                  <span className="ub-menu-text min-w-0 flex-1 truncate text-[0.8rem]">{workspaceLabel(workspace, names, workspaces)}</span>
+                  <span className="ub-menu-text min-w-0 flex-1 truncate ub-type-ui">{workspaceLabel(workspace, names, workspaces)}</span>
                   {here && <span className="ub-workspace-current shrink-0" aria-hidden="true">✓</span>}
                 </DropdownMenuItem>
               );

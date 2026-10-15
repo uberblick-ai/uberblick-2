@@ -2,6 +2,7 @@
  * real IME candidate menus remain in device-input.md. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
 import { setNativeSelection } from "./native-selection.js";
@@ -112,9 +113,16 @@ async function selectCell(
     const range = document.createRange();
     range.setStart(...position(element, start));
     range.setEnd(...position(last, end));
+    const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+    if (root === null) throw new Error("e2e: missing editor");
+    const expected = {
+      anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+      head: root.editor.view.posAtDOM(range.endContainer, range.endOffset),
+    };
     const selection = document.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
+    return expected;
   }, { start, end, input, endIndex }));
   await cell.page().evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }

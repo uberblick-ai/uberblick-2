@@ -11,8 +11,8 @@ import { Input } from "../shadcn/input.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "../shadcn/alert-dialog.js";
 
 const CARD = "flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground";
-const CELL = "border-b border-(--border) px-2 py-3 text-left text-sm last:border-b-0";
-const SELECT = "min-h-9 rounded-(--radius-sm) border border-input bg-card px-2 text-sm";
+const CELL = "border-b border-(--border) px-2 py-3 text-left last:border-b-0";
+const SELECT = "min-h-9 rounded-(--radius-sm) border border-input bg-card px-2 ub-type-ui";
 
 function failure(status: string, hub: string | null): string {
   switch (status) {
@@ -183,37 +183,37 @@ export function AccessSettings({ workspace, serving, subject }: {
 
   return <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      <h1 id="ub-settings-title" className="mt-0 mb-0 text-2xl font-medium">Access</h1>
-      <p className="m-0 text-sm">Access is read from the hub on each visit and after each change. Changes require a reachable hub.</p>
-      {!available ? <div className={CARD}><p className="m-0 text-sm" role="status">{serving?.rebound
+      <h1 id="ub-settings-title" className="mt-0 mb-0 ub-type-h2 font-medium">Access</h1>
+      <p className="m-0 ub-type-small">Access is read from the hub on each visit and after each change. Changes require a reachable hub.</p>
+      {!available ? <div className={CARD}><p className="m-0 ub-type-ui" role="status">{serving?.rebound
         ? "This project's workspace binding changed. Restart ub open to manage access."
         : "Manage access from this workspace's locally served page. Run ub open in its project."}</p></div> : <>
         <div className={CARD}>
-          <h2 className="m-0 text-base font-medium">Workspace access</h2>
-          {loading && <p className="m-0 text-sm" role="status">Reading access from the hub…</p>}
-          {ownRole !== null && <p className="m-0 text-sm" role={ownRole.status === "ok" ? "status" : "alert"}>
+          <h2 className="m-0 ub-type-h2 font-semibold">Workspace access</h2>
+          {loading && <p className="m-0 ub-type-ui" role="status">Reading access from the hub…</p>}
+          {ownRole !== null && <p className="m-0 ub-type-ui" role={ownRole.status === "ok" ? "status" : "alert"}>
             {ownRole.status === "ok" ? `Your role: ${ownRole.role}.` : failure(ownRole.status, ownRole.hub)}
           </p>}
           <Button type="button" variant="outline" className="self-start" disabled={loading || busy} onClick={() => {
             const signal = lifetime.current?.signal; if (signal !== undefined) void refresh(signal);
           }}>Refresh access</Button>
         </div>
-        {feedback !== null && <p className="m-0 text-sm" role={feedback.applied ? "status" : "alert"}>{feedback.text}</p>}
+        {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.applied ? "status" : "alert"}>{feedback.text}</p>}
         {admin && <section className={CARD} aria-labelledby="ub-members-title">
-          <h2 id="ub-members-title" className="m-0 text-base font-medium">Members</h2>
-          {members !== null && members.status !== "ok" && <p className="m-0 text-sm" role="alert">{failure(members.status, members.hub)}</p>}
+          <h2 id="ub-members-title" className="m-0 ub-type-h2 font-semibold">Members</h2>
+          {members !== null && members.status !== "ok" && <p className="m-0 ub-type-ui" role="alert">{failure(members.status, members.hub)}</p>}
           {members?.status === "ok" && <>
             <form className="flex flex-col gap-2" onSubmit={(event) => { void lookup(event); }}>
-              <label htmlFor="ub-github-account" className="text-sm font-medium">GitHub account</label>
+              <label htmlFor="ub-github-account" className="ub-type-ui font-medium">GitHub account</label>
               <div className="flex gap-2"><Input id="ub-github-account" value={handle} disabled={!membershipReady}
                 autoComplete="off" maxLength={39} placeholder="GitHub handle" onChange={(event) => {
                   setHandle(event.currentTarget.value); setResolved(null); setFeedback(null);
                 }} /><Button type="submit" disabled={!membershipReady || handle.trim() === ""}>Look up account</Button></div>
             </form>
             {resolved !== null && <div className="flex flex-col gap-2 rounded-(--radius-sm) border border-(--border) p-3">
-              <p className="m-0 text-sm">{resolved.githubUsername} (GitHub account {resolved.githubAccountId})</p>
-              {existing !== undefined ? <p className="m-0 text-sm" role="status">Already a member as {existing.role}.</p> : <>
-                <p className="m-0 text-sm">Confirm that this is the account you want to add.</p>
+              <p className="m-0 ub-type-ui">{resolved.githubUsername} (GitHub account {resolved.githubAccountId})</p>
+              {existing !== undefined ? <p className="m-0 ub-type-ui" role="status">Already a member as {existing.role}.</p> : <>
+                <p className="m-0 ub-type-ui">Confirm that this is the account you want to add.</p>
                 <RoleSelect label="Role for new account" value={grantRole} onChange={setGrantRole} disabled={!membershipReady} />
                 <Button type="button" className="self-start" disabled={!membershipReady} onClick={() => {
                   void mutate({ operation: "grant-member", workspaceId: workspace.uuid, githubAccountId: resolved.githubAccountId, role: grantRole }, `${resolved.githubUsername} added as ${grantRole}.`);
@@ -221,7 +221,7 @@ export function AccessSettings({ workspace, serving, subject }: {
               </>}
             </div>}
             <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Members">
-              <thead><tr><th className={CELL} scope="col">GitHub account</th><th className={CELL} scope="col">Role</th><th className={CELL} scope="col">Actions</th></tr></thead>
+              <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">GitHub account</th><th className={`${CELL} ub-type-ui`} scope="col">Role</th><th className={`${CELL} ub-type-ui`} scope="col">Actions</th></tr></thead>
               <tbody>{members.members?.map((member) => <MemberRow key={member.principalId} member={member} disabled={!membershipReady}
                 change={(person, next) => { void mutate({ operation: "change-role", workspaceId: workspace.uuid, principalId: person.principalId, role: next }, `${person.githubUsername}'s role changed to ${next}.`); }}
                 remove={(person) => { void mutate({ operation: "remove-member", workspaceId: workspace.uuid, principalId: person.principalId }, `${person.githubUsername} removed from this workspace. Documents already downloaded stay where they are.`); }} />)}</tbody>
@@ -231,10 +231,10 @@ export function AccessSettings({ workspace, serving, subject }: {
         {devices !== null && devices.status !== "local-only" &&
           !(devices.status !== "ok" && devices.status === ownRole?.status && devices.hub === ownRole.hub) &&
           <section className={CARD} aria-labelledby="ub-devices-title">
-          <h2 id="ub-devices-title" className="m-0 text-base font-medium">Your devices</h2>
-          {devices.status !== "ok" ? <p className="m-0 text-sm" role="alert">{failure(devices.status, devices.hub)}</p> :
-            devices.devices?.length === 0 ? <p className="m-0 text-sm">No signed-in devices.</p> : <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Your devices">
-              <thead><tr><th className={CELL} scope="col">Device</th><th className={CELL} scope="col">Signed in</th><th className={CELL} scope="col">Actions</th></tr></thead>
+          <h2 id="ub-devices-title" className="m-0 ub-type-h2 font-semibold">Your devices</h2>
+          {devices.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(devices.status, devices.hub)}</p> :
+            devices.devices?.length === 0 ? <p className="m-0 ub-type-ui">No signed-in devices.</p> : <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Your devices">
+              <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Device</th><th className={`${CELL} ub-type-ui`} scope="col">Signed in</th><th className={`${CELL} ub-type-ui`} scope="col">Actions</th></tr></thead>
               <tbody>{devices.devices?.map((device) => <tr key={device.deviceId}>
                 <th className={`${CELL} max-w-56 wrap-anywhere`} scope="row">{device.deviceName ?? device.deviceId}{device.current && <span className="mt-1 block font-normal">This computer</span>}</th>
                 <td className={CELL}><time dateTime={new Date(device.signedInAt).toISOString()}>{new Date(device.signedInAt).toLocaleString()}</time></td>

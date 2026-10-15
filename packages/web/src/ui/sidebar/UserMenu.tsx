@@ -75,7 +75,7 @@ export function UserMenu({
           <PopoverTrigger asChild>
             <SidebarMenuButton data-testid="account-menu" aria-label={`${label}; preferences`}>
               <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
-              <span className="shrink-0 text-[0.7rem] text-(--sidebar-muted-foreground)" aria-hidden="true">
+              <span className="shrink-0 ub-type-caption text-(--sidebar-muted-foreground)" aria-hidden="true">
                 ▾
               </span>
             </SidebarMenuButton>
@@ -120,7 +120,7 @@ export function UserMenu({
                   <button
                     key={option}
                     type="button"
-                    className="ub-appearance-option rounded-(--radius-sm) border border-solid border-sidebar-border bg-transparent px-[0.4rem] py-1 text-[0.8rem]/[inherit] font-[inherit] text-inherit cursor-pointer hover:aria-[pressed=false]:bg-(--sidebar-accent) hover:text-accent-foreground aria-pressed:bg-(--brand-subtle) aria-pressed:border-foreground"
+                    className="ub-appearance-option rounded-(--radius-sm) border border-solid border-sidebar-border bg-transparent px-[0.4rem] py-1 ub-type-ui font-[inherit] text-inherit cursor-pointer hover:aria-[pressed=false]:bg-(--sidebar-accent) hover:text-accent-foreground aria-pressed:bg-(--brand-subtle) aria-pressed:border-foreground"
                     aria-pressed={option === appearance}
                     onClick={() => chooseAppearance(option)}
                   >
@@ -141,7 +141,7 @@ export function UserMenu({
         </Popover>
       </SidebarMenuItem>
       <SidebarMenuItem>
-        <p className="m-0 px-2 text-xs text-(--sidebar-muted-foreground)">Account settings</p>
+        <p className="m-0 px-2 ub-type-caption text-(--sidebar-muted-foreground)">Account settings</p>
       </SidebarMenuItem>
     </SidebarMenu>
   );

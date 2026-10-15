@@ -145,7 +145,7 @@ export function CodeLanguageControl({ editor, canWrite }: {
         }}>
           <input ref={search} type="search" role="combobox" aria-label="Search languages"
             aria-autocomplete="list" aria-expanded={open} aria-controls={listId}
-            className="w-full rounded-(--radius-sm) border border-input bg-background px-2 py-1 text-foreground [font:inherit] [@media(pointer:coarse)]:text-base"
+            className="w-full rounded-(--radius-sm) border border-input bg-background px-2 py-1 text-foreground [font:inherit] [@media(pointer:coarse)]:ub-type-body"
             placeholder="Search languages" value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {

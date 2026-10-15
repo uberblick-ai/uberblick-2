@@ -79,11 +79,10 @@ async function expectSingleLine(source: Locator, scroller = source): Promise<voi
       firstTop: first.getBoundingClientRect().top,
       lastTop: last.getBoundingClientRect().top,
       fontSize: Number.parseFloat(style.fontSize),
-      previousSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize) * 0.85,
     };
   }, LONG_LINE.length);
   expect(Math.abs(layout.lastTop - layout.firstTop)).toBeLessThan(1);
-  expect(layout.fontSize).toBeLessThan(layout.previousSize);
+  expect(layout.fontSize).toBe(13);
   await expect.poll(() => scroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   await scroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
   expect(await scroller.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);

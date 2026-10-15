@@ -249,7 +249,11 @@ async function pageFits(page: Page): Promise<void> {
 
 async function capture(page: Page, info: TestInfo, label: string, colorScheme: "light" | "dark"): Promise<void> {
   if (info.project.name !== "chromium" || process.env.UB_AGENTS_SCRATCH === undefined) return;
-  await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${colorScheme}.png`) });
+  for (const appearance of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: appearance });
+    await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `${label}-${appearance}.png`) });
+  }
+  await page.emulateMedia({ colorScheme });
 }
 
 /** Like Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons. */

@@ -1526,6 +1526,117 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
   expect(fetched.fraunces).toBeGreaterThan(0);
 });
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`chrome uses Geist for readings and controls, reserving mono for copyable text — ${scheme} @webkit`, async ({ browser }, info) => {
+    const hasTouch = info.project.name === "webkit-ipad";
+    const viewport = { width: hasTouch ? 810 : 1280, height: 1080 };
+    const page = await openAppearanceApp(browser, scheme, "", hasTouch, {
+      viewport: { width: 1280, height: 1080 }, isMobile: hasTouch,
+    });
+    const uuid = await createDoc(page, `Typography ${scheme}`);
+    const uiFace = await painted(page, ".ub-list", "font-family");
+    expect(uiFace).toMatch(/^['"]?Geist['"]?,/);
+    const monoFace = await painted(page, ".ub-doc-id", "font-family");
+    expect(monoFace).toContain("Geist Mono");
+    const ui = async (locator: Locator): Promise<void> => {
+      await expect(locator).toHaveCSS("font-family", uiFace);
+    };
+    const mono = async (locator: Locator): Promise<void> => {
+      await expect(locator).toHaveCSS("font-family", monoFace);
+    };
+    await ui(page.locator(".ub-list-head .ub-muted"));
+    await page.setViewportSize(viewport);
+    await expect(page.locator(".ub-last-updated time")).toBeVisible();
+    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-ids", ".ub-copy-link", ".ub-doc-rev"]) {
+      for (const element of await page.locator(selector).all()) await ui(element);
+    }
+    await expect(page.locator(".ub-doc-meta .ub-copy-link")).toHaveAccessibleName(
+      `uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`,
+    );
+    for (const id of await page.locator(".ub-doc-id").all()) await mono(id);
+    const revision = page.locator(".ub-doc-rev .ub-doc-id");
+    await expect(revision).toHaveText(/^[0-9a-f]{8}$/);
+    await page.evaluate(() => document.fonts.ready);
+    const revisionWidths = await revision.evaluate((element) => {
+      const original = element.textContent;
+      const width = element.getBoundingClientRect().width;
+      element.textContent = "········";
+      const placeholder = element.getBoundingClientRect().width;
+      element.textContent = original;
+      const style = getComputedStyle(element);
+      const canvas = document.createElement("canvas").getContext("2d");
+      if (canvas === null) throw new Error("no canvas for font measurement");
+      canvas.font = `${style.fontSize} ${style.fontFamily}`;
+      return { width, placeholder, monoZeroEm: canvas.measureText("0").width / Number.parseFloat(style.fontSize) };
+    });
+    expect(revisionWidths.placeholder).toBeCloseTo(revisionWidths.width, 2);
+    await info.attach("typography", { body: JSON.stringify(revisionWidths), contentType: "application/json" });
+    for (const width of [767, 744]) {
+      await page.setViewportSize({ width, height: viewport.height });
+      await expect(page.locator(".ub-doc-rev")).toBeHidden();
+      await expect(page.locator(".ub-copy-link")).toBeVisible();
+    }
+    await page.setViewportSize(viewport);
+    await page.getByRole("button", { name: /^Sync details/ }).click();
+    const sync = page.getByRole("dialog", { name: "Sync and presence" });
+    await expect(sync).toBeVisible();
+    for (const fact of await sync.locator(".ub-sync-fact").all()) {
+      const identifier = ["Hub", "Room"].includes(await fact.locator("dt").innerText());
+      await (identifier ? mono : ui)(fact.locator("dd"));
+    }
+    await page.keyboard.press("Escape");
+
+    if (!(await page.getByTestId("account-menu").isVisible())) {
+      await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    }
+    await page.getByTestId("account-menu").click();
+    await ui(page.locator(".ub-panel-fact dd"));
+    await page.keyboard.press("Escape");
+    if (hasTouch) await page.getByRole("button", { name: "Close document list", exact: true }).click();
+    await placeCaret(page);
+    await page.keyboard.type("/");
+    const caret = page.getByRole("listbox", { name: "Block types" });
+    await expect(caret).toBeVisible();
+    for (const label of await caret.locator('p[role="presentation"], [role="option"] > span:last-child').all()) {
+      await ui(label);
+    }
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Backspace");
+
+    const doc = new Y.Doc();
+    const provider = new HocuspocusProvider({
+      url: harness().hubUrl, name: roomForDoc(harness().workspaceUuid, uuid), document: doc,
+      token: async () => wrapToken(await mintToken(await importRootSecret(harness().authSecret), {
+        typ: "room", sub: randomUUID(), workspace: harness().workspaceUuid,
+        scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+      })),
+    });
+    try {
+      await new Promise<void>((resolve) => provider.on("synced", resolve));
+      appendBlock(doc, { type: "code", text: "const answer = 42;" });
+      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "missing", columns: [{ field: "value" }] }) });
+      await expect(page.locator(".ub-code")).toBeVisible();
+      await mono(page.locator(".ub-code > code"));
+      await mono(page.locator(".ub-chart-source"));
+      await ui(page.locator(".ub-chart-footer .ub-chart-open"));
+      await ui(page.locator(".ub-chart-footer .ub-copy"));
+    } finally {
+      provider.destroy();
+      doc.destroy();
+    }
+
+    await page.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    for (const fact of await page.locator("[data-settings-facts] > div").all()) {
+      const label = await fact.locator("dt").innerText();
+      await (["Workspace UUID", "Address segment", "Hub"].includes(label) ? mono : ui)(fact.locator("dd"));
+      if (["Documents", "MCP connections"].includes(label)) {
+        await expect(fact.locator("dd")).toHaveCSS("font-variant-numeric", "tabular-nums");
+      }
+    }
+  });
+}
+
 /**
  * The copy-link control's touch target.
  *

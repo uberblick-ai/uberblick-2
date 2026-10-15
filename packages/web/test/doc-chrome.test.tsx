@@ -60,10 +60,11 @@ function mount(fix: Fixture): { host: HTMLElement; view: RenderResult } {
 }
 
 function identityText(host: HTMLElement): string {
-  const rev = within(host).getByText(/^· rev [0-9a-f]{8}$/);
+  const rev = host.querySelector(".ub-doc-rev");
+  expect(rev).not.toBeNull();
   // The identity grouping has no role or name; keep its entire text so extra
   // full-address or revision text cannot hide between the visible fragments.
-  return (rev.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+  return (rev?.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 describe("the document identity line keeps its local controls", () => {
