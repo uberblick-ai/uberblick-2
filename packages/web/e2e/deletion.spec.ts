@@ -11,7 +11,7 @@ import * as Y from "yjs";
 import { editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
-import { expectMcp, waitForAcknowledged } from "./settle.js";
+import { expectMcp } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -107,7 +107,7 @@ test("MCP deletion retires an open browser document and rejects an offline write
     });
 
     await retiredPage.reload();
-    await waitForAcknowledged(retiredPage, { path: "upstream" });
+    await expect(retiredPage.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     await expect(editor(retiredPage)).toHaveCount(0);
     await retiredPage.goto(new URL(`/${harness().workspace}`, harness().appUrl).href);
     await expect(retiredPage.locator(".ub-docs-row", { hasText: "Healthy working document" })).toBeVisible();
