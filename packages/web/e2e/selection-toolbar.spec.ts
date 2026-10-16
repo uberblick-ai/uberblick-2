@@ -19,7 +19,7 @@ async function openDoc(page: Page, text: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, "Selection toolbar");
   await placeCaret(page);
   await page.keyboard.insertText(text);

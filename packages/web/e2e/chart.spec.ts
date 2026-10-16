@@ -419,7 +419,7 @@ test("editor insertion and the source control work by pointer and keyboard in bo
   const session = writer();
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, "/", { contextOptions: { colorScheme: appearance } });
-    await expect(page.locator(".ub-list-head")).toBeVisible();
+    await expect(page.locator(".ub-document-sidebar")).toBeVisible();
     const uuid = await createDoc(page, `Chart source ${appearance}`);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.insertText("A source-editable chart follows.");

@@ -18,7 +18,7 @@ import type { Browser, Page } from "@playwright/test";
 import { placeCaret } from "./harness.js";
 import { fastForwardPageTimers, installPageTimers, setPageTime, withPageTimers } from "./page-timers.js";
 
-const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head", beforeNavigate: installPageTimers } });
+const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
 
 /**
  * The open document's first block, with remote-cursor widgets stripped.
@@ -415,7 +415,7 @@ test("the open document's last-updated reading follows its stub through status a
   const title = docTitle("freshness");
   await installPageTimers(page);
   await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, title, { pin: true });
 
   const reading = page.locator(".ub-last-updated");

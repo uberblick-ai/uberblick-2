@@ -68,7 +68,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
       await scan("user menu");
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "+ group", exact: true }).click();
+      await page.getByRole("button", { name: "+ New group", exact: true }).click();
       const groupName = page.getByRole("textbox", { name: "Group name" });
       await groupName.fill("Scan group");
       await groupName.press("Enter");

@@ -169,7 +169,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   browser,
 }) => {
   const author = await openApp(browser);
-  await expect(author.locator(".ub-list-head")).toBeVisible();
+  await expect(author.locator(".ub-document-sidebar")).toBeVisible();
 
   // `/` is not an address; the workspace is. The redirect comes from the
   // build-time `WORKSPACE_ID`, which is the only thing that answers `/`.
@@ -277,7 +277,7 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   await expect(page).toHaveURL(new RegExp(`/${harness().secondWorkspace}$`));
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   // The sidebar is per workspace like every other room, so the second one has
   // nothing pinned in it — not even the document just made in the first.
   await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet");
@@ -305,7 +305,7 @@ test("a development binding keeps its local key with its loopback endpoint", asy
     });
     const page = await context.newPage();
     await page.goto(fallback.appUrl);
-    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     const title = docTitle("unbound-dev");
     const uuid = await createDoc(page, title);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
@@ -368,7 +368,7 @@ test("the served configuration names the workspaces, and the build's define is o
 
   // The endpoint came out of the same document: an empty corpus that reports
   // itself *synced* is a hub that answered, not a socket that never opened.
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
 
   // Sync details says which document decided it. This is the only
   // place that can be shown end to end: `resolveClientConfig` memoises per
@@ -424,7 +424,7 @@ test("a rebound local-serving document stays visible without blocking the page",
 
   // The state is information, not an interlock: an ordinary write still takes
   // the same path to the local serving process underneath it.
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(notice).toBeVisible();
 
