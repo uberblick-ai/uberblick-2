@@ -45,14 +45,14 @@ test("a workspace rename reaches another page live and preserves its document li
   };
   const first = await open();
   const second = await open();
-  const name = first.getByLabel("Workspace name");
+  const name = first.getByLabel("Name", { exact: true });
   const save = first.getByRole("button", { name: "Save", exact: true });
 
   await name.fill("Product Research");
   await save.click();
   await expectSuccess(first, "Saved “Product Research”.");
   await expect(save).toBeFocused();
-  await expect(second.getByLabel("Workspace name")).toHaveValue("Product Research");
+  await expect(second.getByLabel("Name", { exact: true })).toHaveValue("Product Research");
   await expect(second.getByRole("button", { name: "Back to Product Research", exact: true })).toBeVisible();
 
   await second.getByRole("button", { name: "Back to Product Research", exact: true }).click();
@@ -77,9 +77,10 @@ test("a workspace rename reaches another page live and preserves its document li
   // bare identity still opens the same document, including the previous name.
   await expect(first).toHaveURL(new URL(settingsPath, harness().appUrl).href);
   const facts = first.locator("[data-settings-facts]");
-  await expect(facts.locator('div:has(> dt:text-is("Workspace UUID")) > dd')).toHaveText(
+  await expect(facts.locator('div:has(> dt:text-is("Workspace ID")) > dd > span > span')).toHaveText(
     harness().workspaceUuid,
   );
+  await first.getByRole("button", { name: "Connection details", exact: true }).click();
   await expect(facts.locator('div:has(> dt:text-is("Address segment")) > dd')).toHaveText(
     harness().workspace,
   );
@@ -204,7 +205,7 @@ test("settings successes use shared notices and preserve native submission focus
   await page.evaluate(() => document.addEventListener("submit", () => {
     (window as unknown as { settingsSubmissionOrigin: Element | null }).settingsSubmissionOrigin = document.activeElement;
   }, true));
-  const name = page.getByLabel("Workspace name");
+  const name = page.getByLabel("Name", { exact: true });
   const save = page.getByRole("button", { name: "Save", exact: true });
   await expect(name).toBeEnabled();
   await name.fill(" ");
