@@ -1,22 +1,29 @@
 import { screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import { undo } from "y-prosemirror";
 import {
-  appendBlock, cardButtons, cardPartTexts, editBlock, getBlocks, getBlocksFragment, insertBlock,
+  appendBlock, cardButtons, cardPartTexts, createAnnotation, deleteBlock, editBlock, getBlocks,
+  getBlocksFragment, insertBlock, listAnnotations, resolveAnnotationRange,
 } from "@uberblick/schema";
 import { openCardButton } from "../src/editor/card-button.js";
+import { cardTitleOffset } from "../src/editor/card.js";
 import { CardButtonControls } from "../src/ui/editor-controls/CardButtonControls.js";
 import { mountEditor } from "./helpers.js";
 import { act, renderSettled } from "./react-render.js";
 
-async function fixture(source = "title: Action\n\nBody"): Promise<{
+async function fixture(source = "title: Action\n\nBody", options: {
+  before?: string; after?: string; canWrite?: () => boolean;
+} = {}): Promise<{
   ydoc: Y.Doc; card: Y.XmlElement; editor: ReturnType<typeof mountEditor>["editor"];
 }> {
   const ydoc = new Y.Doc();
+  if (options.before !== undefined) appendBlock(ydoc, { type: "paragraph", text: options.before });
   appendBlock(ydoc, { type: "card", text: source });
-  const card = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
+  const card = getBlocksFragment(ydoc).get(options.before === undefined ? 0 : 1) as Y.XmlElement;
+  if (options.after !== undefined) appendBlock(ydoc, { type: "paragraph", text: options.after });
   const { editor } = mountEditor(ydoc);
-  await renderSettled(<CardButtonControls editor={editor} canWrite={() => true} />);
+  await renderSettled(<CardButtonControls editor={editor} canWrite={options.canWrite ?? (() => true)} />);
   return { ydoc, card, editor };
 }
 
@@ -30,6 +37,117 @@ function fill(text: string, href: string): void {
 }
 
 describe("card action controls", () => {
+  it("removes the whole rich card and restores its highlights and buttons in an undo step isolated from typing", async () => {
+    const { ydoc, card, editor } = await fixture(
+      "label: **Release**\ntitle: *Ship v0.5*\nfooter: [Details](https://example.invalid/details)\nbutton: [First](codex://new) filled violet\nbutton: [Second](https://example.invalid/second) outline green\n\nBody with `code` and **formatting**",
+      { before: "Before", after: "After" },
+    );
+    const id = card.getAttribute("id")!;
+    let threadId = "";
+    act(() => {
+      threadId = createAnnotation(ydoc, id, 0, 4, "Reader", "Discuss this card", { part: "body" }).id;
+    });
+    const original = editor.state.doc.toJSON();
+    const originalRange = resolveAnnotationRange(ydoc, threadId);
+    const beforeCard = editor.state.doc.child(0).nodeSize;
+    act(() => {
+      editor.commands.setTextSelection(beforeCard + cardTitleOffset(editor.state.doc.child(1)));
+      editor.view.dispatch(editor.state.tr.insertText("Updated "));
+    });
+    const typedBefore = editor.state.doc.toJSON();
+    const neighbours = [getBlocksFragment(ydoc).get(0), getBlocksFragment(ydoc).get(2)];
+    act(() => screen.getByRole<HTMLButtonElement>("button", { name: "Remove card" }).focus());
+    await click("Remove card");
+    expect(getBlocksFragment(ydoc).toArray()).toEqual(neighbours);
+    expect(editor.view.hasFocus()).toBe(true);
+    expect(editor.state.selection.$from.parent.textContent).toBe("After");
+    expect(editor.state.selection.$from.parentOffset).toBe(0);
+    expect(resolveAnnotationRange(ydoc, threadId)).toBeNull();
+    expect(listAnnotations(ydoc).map((thread) => thread.id)).toContain(threadId);
+    expect(editor.view.dom.querySelector(`[data-comment-thread="${threadId}"]`)).toBeNull();
+    const removed = editor.state.doc.toJSON();
+    act(() => editor.view.dispatch(editor.state.tr.insertText("after ")));
+    expect(editor.state.doc.lastChild?.textContent).toBe("after After");
+    act(() => { expect(undo(editor.state)).toBe(true); });
+    expect(editor.state.doc.toJSON()).toEqual(removed);
+    act(() => { expect(undo(editor.state)).toBe(true); });
+    expect(editor.state.doc.toJSON()).toEqual(typedBefore);
+    expect(resolveAnnotationRange(ydoc, threadId)).toEqual(originalRange);
+    expect(editor.view.dom.querySelector(`[data-comment-thread="${threadId}"]`)?.textContent).toBe("Body");
+    act(() => { expect(undo(editor.state)).toBe(true); });
+    expect(editor.state.doc.toJSON()).toEqual(original);
+  });
+
+  it.each([
+    { name: "first", after: "Next", expected: "Next", offset: 0 },
+    { name: "middle", before: "Previous", after: "Next", expected: "Next", offset: 0 },
+    { name: "last", before: "Previous", expected: "Previous", offset: 8 },
+    { name: "only", expected: "", offset: 0 },
+  ])("moves the caret to the correct paragraph when removing the $name block", async ({ expected, offset, ...options }) => {
+    const { before, after } = options;
+    const { editor } = await fixture(undefined, options);
+    const original = editor.state.doc.toJSON();
+    await click("Remove card");
+    expect(editor.state.doc.childCount).toBe(before !== undefined && after !== undefined ? 2 : 1);
+    expect(editor.state.doc.firstChild?.type.name).toBe("paragraph");
+    expect(editor.state.selection.empty).toBe(true);
+    expect(editor.state.selection.$from.parent.textContent).toBe(expected);
+    expect(editor.state.selection.$from.parentOffset).toBe(offset);
+    expect(editor.view.hasFocus()).toBe(true);
+    if (before === undefined && after === undefined) expect(editor.state.doc.firstChild?.attrs.id).toEqual(expect.any(String));
+    act(() => { expect(undo(editor.state)).toBe(true); });
+    expect(editor.state.doc.toJSON()).toEqual(original);
+  });
+
+  it("resolves the card by id after remote insertion and shares removal without changing other blocks", async () => {
+    const { ydoc, card, editor } = await fixture(undefined, { after: "Next" });
+    const peer = new Y.Doc();
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+      act(() => {
+        insertBlock(peer, null, { type: "paragraph", text: "Remote preface" });
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+      });
+      const others = editor.state.doc.content.content.filter((node) => node.attrs.id !== card.getAttribute("id"))
+        .map((node) => node.toJSON());
+      await click("Remove card");
+      expect(editor.state.doc.content.content.map((node) => node.toJSON())).toEqual(others);
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+      expect(getBlocks(peer)).toEqual(getBlocks(ydoc));
+      expect(getBlocks(peer).map((block) => block.text)).toEqual(["Remote preface", "Next"]);
+    } finally { peer.destroy(); }
+  });
+
+  it("ignores a stale activation after another client removed the card", async () => {
+    const { ydoc, card, editor } = await fixture(undefined, { before: "Previous", after: "Next" });
+    const peer = new Y.Doc();
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
+      const remove = screen.getByRole<HTMLButtonElement>("button", { name: "Remove card" });
+      act(() => {
+        deleteBlock(peer, card.getAttribute("id")!);
+        Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(peer));
+        const before = editor.state.doc.toJSON();
+        remove.click();
+        expect(editor.state.doc.toJSON()).toEqual(before);
+      });
+      expect(getBlocks(ydoc).map((block) => block.text)).toEqual(["Previous", "Next"]);
+    } finally { peer.destroy(); }
+  });
+
+  it.each(["permission", "editable"])("rechecks %s at activation before removing a card", async (guard) => {
+    let writable = true;
+    const { editor } = await fixture(undefined, { canWrite: () => writable });
+    const remove = screen.getByRole<HTMLButtonElement>("button", { name: "Remove card" });
+    const original = editor.state.doc.toJSON();
+    act(() => {
+      if (guard === "permission") writable = false;
+      else editor.setEditable(false);
+      remove.click();
+    });
+    expect(editor.state.doc.toJSON()).toEqual(original);
+  });
+
   it("adds literal author text, refuses unsafe destinations visibly, edits and removes without changing prose", async () => {
     const { card } = await fixture();
     const body = cardPartTexts(card, "body")[0]!;
@@ -141,6 +259,7 @@ describe("card action controls", () => {
     try {
       act(() => editor.setEditable(false));
       expect(screen.queryByRole("button", { name: "Edit buttons" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Remove card" })).toBeNull();
       await click("Read report");
       expect(opened).toHaveBeenCalledWith("https://example.invalid/report", "_blank", "noopener,noreferrer");
     } finally { opened.mockRestore(); }
