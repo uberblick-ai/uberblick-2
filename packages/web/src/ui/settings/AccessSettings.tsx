@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactElement } from "react";
 import type { LocalServing } from "../../config.js";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { notifyTransient } from "../../notifications.js";
 import { createWorkspaceAccessClient } from "../../shell/workspace-access.js";
 import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../../shell/workspace-access.js";
 import type { Workspace } from "../route.js";
@@ -12,7 +13,12 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 
 const CARD = "flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground";
 const CELL = "border-b border-(--border) px-2 py-3 text-left last:border-b-0";
-const SELECT = "min-h-9 rounded-(--radius-sm) border border-input bg-card px-2 ub-type-ui";
+const SELECT = "min-h-9 [@media(any-pointer:coarse)]:min-h-11 rounded-(--radius-sm) border border-input bg-card px-2 ub-type-ui";
+const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] ub-type-ui text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
+
+function roleName(role: AccessRole): string {
+  return role === "admin" ? "Admin" : "Member";
+}
 
 function failure(status: string, hub: string | null): string {
   switch (status) {
@@ -27,7 +33,7 @@ function failure(status: string, hub: string | null): string {
     case "account-not-found": return "No such GitHub account. Check the handle and look it up again.";
     case "lookup-unavailable": return "GitHub account lookup is unavailable. Retry the lookup; no access was granted.";
     case "device-not-found": return "The hub refused this change: that device is no longer signed in. Refresh the list.";
-    case "member-not-found": return "The hub refused this change: that account is no longer a member. Refresh the list.";
+    case "member-not-found": return "The hub refused this change: that account is no longer a member.";
     case "credential-store":
     case "credential-store-refused":
     case "credential-store-unreadable": return "The login on this computer could not be read. Check your credential store, then retry.";
@@ -41,16 +47,19 @@ function RoleSelect({ value, onChange, label, disabled }: {
 }): ReactElement {
   return <select className={SELECT} aria-label={label} value={value} disabled={disabled}
     onChange={(event) => onChange(event.currentTarget.value === "admin" ? "admin" : "member")}>
-    <option value="member">member</option><option value="admin">admin</option>
+    <option value="member">Member</option><option value="admin">Admin</option>
   </select>;
 }
 
-function ConfirmAction({ trigger, triggerLabel, title, description, action, disabled, onConfirm }: {
+function ConfirmAction({ trigger, triggerLabel, title, description, action, disabled, onConfirm, quiet = false }: {
   trigger: string; triggerLabel?: string; title: string; description: string; action: string;
-  disabled: boolean; onConfirm: () => void;
+  disabled: boolean; onConfirm: () => void; quiet?: boolean;
 }): ReactElement {
   return <AlertDialog>
-    <AlertDialogTrigger asChild><Button type="button" variant="outline" size="sm" disabled={disabled} aria-label={triggerLabel}>{trigger}</Button></AlertDialogTrigger>
+    <AlertDialogTrigger asChild>{quiet
+      ? <button type="button" className={ROW_ACTION} disabled={disabled} aria-label={triggerLabel}>{trigger}</button>
+      : <Button type="button" variant="outline" size="sm" disabled={disabled} aria-label={triggerLabel}>{trigger}</Button>}
+    </AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogTitle>{title}</AlertDialogTitle>
       <AlertDialogDescription>{description}</AlertDialogDescription>
@@ -62,28 +71,27 @@ function ConfirmAction({ trigger, triggerLabel, title, description, action, disa
   </AlertDialog>;
 }
 
-function MemberRow({ member, disabled, change, remove }: {
-  member: AccessMember; disabled: boolean;
+function MemberRow({ member, current, disabled, change, remove }: {
+  member: AccessMember; current: boolean; disabled: boolean;
   change: (member: AccessMember, role: AccessRole) => void; remove: (member: AccessMember) => void;
 }): ReactElement {
-  const [draft, setDraft] = useState(member.role);
-  useEffect(() => setDraft(member.role), [member]);
   return <tr>
-    <th className={CELL} scope="row">{member.githubUsername}</th>
-    <td className={CELL}>{member.role}</td>
-    <td className={CELL}><div className="flex flex-wrap items-center gap-2">
-      <RoleSelect label={`Role for ${member.githubUsername}`} value={draft} onChange={setDraft} disabled={disabled} />
-      <Button type="button" variant="outline" size="sm" disabled={disabled || draft === member.role}
-        aria-label={`Save role for ${member.githubUsername}`} onClick={() => change(member, draft)}>Save role</Button>
-      <ConfirmAction trigger={`Remove ${member.githubUsername}`} title={`Remove ${member.githubUsername}?`}
+    <th className={`${CELL} font-normal wrap-anywhere`} scope="row">{member.githubUsername}{current && <span className="ub-muted ml-2">you</span>}</th>
+    <td className={CELL}>
+      <RoleSelect label={`Role for ${member.githubUsername}`} value={member.role} onChange={(role) => {
+        if (role !== member.role) change(member, role);
+      }} disabled={disabled} />
+    </td>
+    <td className={CELL}>
+      <ConfirmAction trigger="Remove" triggerLabel={`Remove ${member.githubUsername}`} quiet title={`Remove ${member.githubUsername}?`}
         description="This person loses this workspace on every device. Documents already downloaded stay where they are."
         action="Remove member" disabled={disabled} onConfirm={() => remove(member)} />
-    </div></td>
+    </td>
   </tr>;
 }
 
-export function AccessSettings({ workspace, serving, subject }: {
-  workspace: Workspace; serving: LocalServing | null; subject: string;
+export function AccessSettings({ workspace, serving, subject, verifiedHandle }: {
+  workspace: Workspace; serving: LocalServing | null; subject: string; verifiedHandle: string | null;
 }): ReactElement {
   let servedWorkspace: string | null = null;
   try { if (serving?.workspace !== null && serving?.workspace !== undefined) servedWorkspace = parseWorkspaceId(serving.workspace).uuid; }
@@ -99,7 +107,6 @@ export function AccessSettings({ workspace, serving, subject }: {
   const [feedback, setFeedback] = useState<{ applied: boolean; text: string } | null>(null);
   const [handle, setHandle] = useState("");
   const [resolved, setResolved] = useState<{ githubAccountId: string; githubUsername: string } | null>(null);
-  const [grantRole, setGrantRole] = useState<AccessRole>("member");
 
   const request = useCallback(async (action: AccessAction, signal: AbortSignal): Promise<AccessAnswer> => {
     try { return await client(action, signal); }
@@ -145,12 +152,15 @@ export function AccessSettings({ workspace, serving, subject }: {
     const applied = result.status === "ok" || result.status === "already-member" ||
       (result.status === "closure-failed" && result.applied === true);
     const text = result.status === "already-member" && result.member !== undefined
-      ? `${result.member.githubUsername} is already a member as ${result.member.role}.`
+      ? `${result.member.githubUsername} is already a member as ${roleName(result.member.role)}.`
       : applied ? `${success}${result.status === "closure-failed" ? " The change was applied; the hub could not close every active connection." : ""}`
       : failure(result.status, result.hub);
     // An acknowledged self-removal or revocation stays acknowledged even when
     // its fresh read loses membership or this computer's credential.
-    setFeedback({ applied, text });
+    if (action.operation === "change-role" && applied) {
+      notifyTransient({ key: "workspace-role", message: "Role changed", severity: "success" });
+      if (result.status === "closure-failed") setFeedback({ applied, text });
+    } else setFeedback({ applied, text });
     await refresh(signal);
     if (!signal.aborted) setBusy(false);
   };
@@ -164,7 +174,6 @@ export function AccessSettings({ workspace, serving, subject }: {
     if (signal.aborted) return;
     if (result.status === "ok" && result.githubAccountId !== undefined && result.githubUsername !== undefined) {
       setResolved({ githubAccountId: result.githubAccountId, githubUsername: result.githubUsername });
-      setGrantRole("member");
     } else {
       setFeedback({ applied: false, text: result.status === "invalid-request"
         ? "Enter a GitHub handle, without @, a link or spaces."
@@ -185,51 +194,49 @@ export function AccessSettings({ workspace, serving, subject }: {
     <div className="ub-column gap-4">
       <div className="ub-page-header">
         <h1 id="ub-settings-title" className="ub-title">Access</h1>
-        <p className="m-0 ub-type-small">Access is read from the hub on each visit and after each change. Changes require a reachable hub.</p>
+        {!available ? <p className="m-0 ub-type-small" role="status">{serving?.rebound
+          ? "This project's workspace binding changed. Restart ub open to manage access."
+          : "Manage access from this workspace's locally served page. Run ub open in its project."}</p>
+          : ownRole !== null ? <p className="m-0 ub-type-small" role={ownRole.status === "ok" ? "status" : "alert"}>
+            {ownRole.status === "ok" ? ownRole.role === "admin"
+              ? "You are an admin of this workspace." : "You are a member of this workspace."
+              : failure(ownRole.status, ownRole.hub)}
+          </p> : loading && <p className="m-0 ub-type-small" role="status">Reading access from the hub…</p>}
       </div>
-      {!available ? <div className={CARD}><p className="m-0 ub-type-ui" role="status">{serving?.rebound
-        ? "This project's workspace binding changed. Restart ub open to manage access."
-        : "Manage access from this workspace's locally served page. Run ub open in its project."}</p></div> : <>
-        <div className={CARD}>
-          <h2 className="m-0 ub-type-h2 font-semibold">Workspace access</h2>
-          {loading && <p className="m-0 ub-type-ui" role="status">Reading access from the hub…</p>}
-          {ownRole !== null && <p className="m-0 ub-type-ui" role={ownRole.status === "ok" ? "status" : "alert"}>
-            {ownRole.status === "ok" ? `Your role: ${ownRole.role}.` : failure(ownRole.status, ownRole.hub)}
-          </p>}
-          <Button type="button" variant="outline" className="self-start" disabled={loading || busy} onClick={() => {
-            const signal = lifetime.current?.signal; if (signal !== undefined) void refresh(signal);
-          }}>Refresh access</Button>
-        </div>
+      {available && <>
         {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.applied ? "status" : "alert"}>{feedback.text}</p>}
-        {admin && <section className={CARD} aria-labelledby="ub-members-title">
-          <h2 id="ub-members-title" className="m-0 ub-type-h2 font-semibold">Members</h2>
+        {admin && <>
           {members !== null && members.status !== "ok" && <p className="m-0 ub-type-ui" role="alert">{failure(members.status, members.hub)}</p>}
           {members?.status === "ok" && <>
+            <section className="mt-4 flex flex-col gap-3" aria-labelledby="ub-add-member-title">
+            <h2 id="ub-add-member-title" className="m-0 ub-type-h2 font-semibold">Add a member</h2>
             <form className="flex flex-col gap-2" onSubmit={(event) => { void lookup(event); }}>
-              <label htmlFor="ub-github-account" className="ub-type-ui font-medium">GitHub account</label>
+              <label htmlFor="ub-github-account" className="ub-type-ui font-medium">GitHub handle</label>
               <div className="flex gap-2"><Input id="ub-github-account" value={handle} disabled={!membershipReady}
                 autoComplete="off" maxLength={39} placeholder="GitHub handle" onChange={(event) => {
                   setHandle(event.currentTarget.value); setResolved(null); setFeedback(null);
-                }} /><Button type="submit" disabled={!membershipReady || handle.trim() === ""}>Look up account</Button></div>
+                }} /><Button type="submit" variant="outline" disabled={!membershipReady || handle.trim() === ""}>Look up</Button></div>
             </form>
-            {resolved !== null && <div className="flex flex-col gap-2 rounded-(--radius-sm) border border-(--border) p-3">
-              <p className="m-0 ub-type-ui">{resolved.githubUsername} (GitHub account {resolved.githubAccountId})</p>
-              {existing !== undefined ? <p className="m-0 ub-type-ui" role="status">Already a member as {existing.role}.</p> : <>
-                <p className="m-0 ub-type-ui">Confirm that this is the account you want to add.</p>
-                <RoleSelect label="Role for new account" value={grantRole} onChange={setGrantRole} disabled={!membershipReady} />
+            {resolved !== null && <div className="flex flex-wrap items-center gap-3">
+              <p className="m-0 ub-type-ui wrap-anywhere">{resolved.githubUsername} · GitHub account {resolved.githubAccountId}</p>
+              {existing !== undefined ? <p className="m-0 ub-type-ui" role="status">Already a member as {roleName(existing.role)}.</p> :
                 <Button type="button" className="self-start" disabled={!membershipReady} onClick={() => {
-                  void mutate({ operation: "grant-member", workspaceId: workspace.uuid, githubAccountId: resolved.githubAccountId, role: grantRole }, `${resolved.githubUsername} added as ${grantRole}.`);
-                }}>Confirm and add account</Button>
-              </>}
+                  void mutate({ operation: "grant-member", workspaceId: workspace.uuid, githubAccountId: resolved.githubAccountId, role: "member" }, `${resolved.githubUsername} added as Member.`);
+                }}>Add as member</Button>}
             </div>}
+            </section>
+            <section className="mt-4 flex flex-col gap-3" aria-labelledby="ub-members-title">
+            <h2 id="ub-members-title" className="m-0 ub-type-h2 font-semibold">Members</h2>
             <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Members">
-              <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">GitHub account</th><th className={`${CELL} ub-type-ui`} scope="col">Role</th><th className={`${CELL} ub-type-ui`} scope="col">Actions</th></tr></thead>
+              <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Account</th><th className={`${CELL} ub-type-ui`} scope="col">Role</th><th className={`${CELL} ub-type-ui`} scope="col"><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>{members.members?.map((member) => <MemberRow key={member.principalId} member={member} disabled={!membershipReady}
-                change={(person, next) => { void mutate({ operation: "change-role", workspaceId: workspace.uuid, principalId: person.principalId, role: next }, `${person.githubUsername}'s role changed to ${next}.`); }}
+                current={verifiedHandle !== null && member.githubUsername.toLowerCase() === verifiedHandle.toLowerCase()}
+                change={(person, next) => { void mutate({ operation: "change-role", workspaceId: workspace.uuid, principalId: person.principalId, role: next }, "Role changed"); }}
                 remove={(person) => { void mutate({ operation: "remove-member", workspaceId: workspace.uuid, principalId: person.principalId }, `${person.githubUsername} removed from this workspace. Documents already downloaded stay where they are.`); }} />)}</tbody>
             </table></div>
+            </section>
           </>}
-        </section>}
+        </>}
         {devices !== null && devices.status !== "local-only" &&
           !(devices.status !== "ok" && devices.status === ownRole?.status && devices.hub === ownRole.hub) &&
           <section className={CARD} aria-labelledby="ub-devices-title">

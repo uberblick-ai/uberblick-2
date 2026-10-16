@@ -1073,6 +1073,7 @@ export function App(): ReactElement {
             workspaceLocation={workspaceLocation}
             serving={serving}
             subject={identity.name}
+            verifiedHandle={account.state === "signed-in" ? account.handle : null}
             endpoint={endpoint}
             connection={directory}
             catalogConnection={catalog}

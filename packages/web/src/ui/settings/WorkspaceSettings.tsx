@@ -528,6 +528,7 @@ export function WorkspaceSettings({
   agentSessions,
   serving = null,
   subject = "browser",
+  verifiedHandle = null,
 }: {
   page?: SettingsPage;
   workspace: Workspace;
@@ -538,9 +539,10 @@ export function WorkspaceSettings({
   agentSessions: number;
   serving?: LocalServing | null;
   subject?: string;
+  verifiedHandle?: string | null;
 }): ReactElement {
   return page === "access" ? (
-    <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} />
+    <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} verifiedHandle={verifiedHandle} />
   ) : page === "tags" ? (
     <TagSettings workspace={workspace} connection={catalogConnection} />
   ) : (
