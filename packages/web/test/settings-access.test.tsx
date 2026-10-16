@@ -2,6 +2,7 @@ import { act, render } from "./react-render.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import type { LocalServing } from "../src/config.js";
+import type { AccountIdentity } from "../src/shell/account.js";
 import type { AccessAction, AccessAnswer } from "../src/shell/workspace-access.js";
 import { DevicesSettings } from "../src/ui/settings/DevicesSettings.js";
 import { useAccessReading } from "../src/ui/settings/hub-administration.js";
@@ -11,7 +12,9 @@ import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/sta
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
 const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };
 const api = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
+const login = vi.fn<(signal: AbortSignal) => Promise<AccountIdentity>>().mockResolvedValue({ state: "signed-in", handle: "my-login" });
 vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient: () => api }));
+vi.mock("../src/shell/account.js", () => ({ createDeviceLoginClient: () => login }));
 
 function Reading({ serving = SERVING, fallback = false }: { serving?: LocalServing | null; fallback?: boolean }) {
   const access = useSettingsAccess(WORKSPACE, serving, "presence", "settings", true, fallback);
@@ -25,7 +28,54 @@ async function flush() { await act(async () => { await Promise.resolve(); }); }
 function value(view: ReturnType<typeof render>) { return JSON.parse(view.container.querySelector("output")?.textContent ?? "null"); }
 
 describe("independent settings permissions", () => {
-  afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); });
+  afterEach(() => {
+    vi.clearAllMocks(); vi.useRealTimers();
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login" });
+  });
+
+  it("keeps a stored login's Devices available on a cold offline load, then removes it on logout", async () => {
+    vi.useFakeTimers();
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view)).toEqual({ admin: false, pending: false, devices: true });
+    login.mockResolvedValue({ state: "signed-out" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view)).toEqual({ admin: false, pending: false, devices: false });
+  });
+
+  it("shows Devices while live role and device reads time out, without granting workspace authority", async () => {
+    vi.useFakeTimers();
+    api.mockImplementation(async () => new Promise(() => {}));
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view)).toEqual({ admin: false, pending: true, devices: true });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_TIMEOUT_MS));
+    expect(value(view)).toEqual({ admin: false, pending: false, devices: true });
+  });
+
+  it.each(["sign-in-required", "forbidden"])("hides Devices after a definitive %s even if its login is still stored", async (status) => {
+    api.mockResolvedValue({ status, hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view)).toEqual({ admin: false, pending: false, devices: false });
+  });
+
+  it("keeps a revoked login hidden over a later outage, until a successful device list proves recovery", async () => {
+    vi.useFakeTimers();
+    api.mockResolvedValue({ status: "sign-in-required", hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view).devices).toBe(false);
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view).devices).toBe(false);
+    api.mockImplementation(async (action) => action.operation === "list-devices"
+      ? { status: "ok", hub: "https://bound.example", handle: "my-login", devices: [] }
+      : { status: "ok", hub: "https://bound.example", role: "member" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view)).toEqual({ admin: false, pending: false, devices: true });
+  });
 
   it("keeps a hub admin address pending until the workspace role arrives, independently of devices", async () => {
     let finish: ((answer: AccessAnswer) => void) | undefined;

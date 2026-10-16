@@ -159,6 +159,7 @@ test.describe("a current workspace and hub admin", () => {
           status: "sign-in-required", hub: "https://other-hub.example.test",
         } }));
         await opening.route("**/api/account", (route) => route.fulfill({ json: { state: "signed-out" } }));
+        await opening.route("**/api/device-login", (route) => route.fulfill({ json: { state: "signed-out" } }));
       },
     });
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
@@ -166,6 +167,43 @@ test.describe("a current workspace and hub admin", () => {
     await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
     await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
   });
+
+  for (const offline of ["refused", "waiting"] as const) {
+    test(`stored sign-in keeps Devices available on a cold open while hub management is ${offline}`, async ({ browser }) => {
+      const pending: Route[] = [];
+      const page = await openApp(browser, `/${harness().workspace}/settings/preferences`, {
+        beforeNavigate: async (opening) => {
+          await opening.route("**/api/access", (route) => {
+            if (offline === "waiting") { pending.push(route); return; }
+            return route.fulfill({ json: { status: "hub-down", hub: harness().hubUrl } });
+          });
+        },
+      });
+      try {
+        await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+        await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
+        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+        await page.getByTestId("account-menu").click();
+        await expect(page.getByRole("menuitem")).toHaveText(["Preferences", "Devices"]);
+        await page.getByRole("menuitem", { name: "Devices", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+        await expect(page.getByText(`Computers signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
+        if (offline === "waiting") {
+          await expect(page.getByText("Reading devices from the hub…", { exact: true })).toBeVisible();
+        }
+        await expect(page.getByRole("alert").filter({ hasText: "The hub cannot be reached." })).toBeVisible();
+        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+        harness().setStoredLogin(false);
+        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
+        await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
+        await page.getByTestId("account-menu").click();
+        await expect(page.getByRole("menuitem")).toHaveText(["Preferences"]);
+      } finally {
+        harness().setStoredLogin(true);
+        for (const route of pending) await route.abort().catch(() => {});
+      }
+    });
+  }
 
   for (const status of ["hub-down", "sign-in-required", "forbidden"]) {
     test(`a ${status} workspace-role answer never exposes workspace controls by address`, async ({ browser }) => {

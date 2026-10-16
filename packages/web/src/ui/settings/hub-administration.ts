@@ -69,7 +69,12 @@ export function useAccessReading(workspace: string | null, serving: LocalServing
           ? { operation, workspaceId: workspace } : { operation };
         authority = await Promise.race([request(action, signal), expired]);
       } finally { if (timeout !== undefined) clearTimeout(timeout); }
-      if (active && (!signal.aborted || timedOut) && revision.current === currentRevision) setAnswer({ client, authority });
+      if (active && (!signal.aborted || timedOut) && revision.current === currentRevision) {
+        // A later outage cannot make a known revoked login signed in again.
+        setAnswer(previous => ({ client, authority: operation === "list-devices" && authority.status !== "ok" &&
+          previous?.client === client && ["sign-in-required", "forbidden"].includes(previous.authority.status)
+          ? previous.authority : authority }));
+      }
       if (active && controller === currentController) timer = setTimeout(() => { void read(); }, SERVING_STATUS_POLL_MS);
     };
     const onFocus = (): void => { void read(); };

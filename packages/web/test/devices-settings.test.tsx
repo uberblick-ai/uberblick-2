@@ -32,6 +32,18 @@ it("shows the login identity and device table without consulting workspace membe
   expect(request).not.toHaveBeenCalled();
 });
 
+it("uses the stored public login for an offline note and the answering login for listed devices", async () => {
+  const request = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
+  const login = { hub: HUB, handle: "stored-account" };
+  const view = await renderSettled(<DevicesSettings request={request} initial={{ status: "hub-down", hub: HUB }} login={login} />);
+  expect(screen.getByText(/Computers signed in to hub.example.test as @stored-account/)).toBeDefined();
+  expect(screen.getByRole("alert").textContent).toContain("hub cannot be reached");
+  expect(screen.queryByRole("table")).toBeNull();
+  act(() => view.rerender(<DevicesSettings request={request} initial={INITIAL} login={login} />));
+  expect(screen.getByText(/Computers signed in to hub.example.test as @own-account/)).toBeDefined();
+  expect(screen.queryByText(/@stored-account/)).toBeNull();
+});
+
 it("asks before revoking only the selected device and rereads the login's devices", async () => {
   const request = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>(async (action) =>
     action.operation === "revoke-device" ? { status: "ok", hub: HUB } : { ...INITIAL, devices: [CURRENT] });

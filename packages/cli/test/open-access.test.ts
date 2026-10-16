@@ -111,6 +111,43 @@ describe("ub open: Devices identity projection", () => {
 });
 
 describe("ub open: live Access bridge", () => {
+  it("protects the stored-login read and keeps it independent of membership, hub availability and replica preparation", async () => {
+    const { app, box, hub, login, headers, origin } = await rig(null, []);
+    const read = async () => {
+      const response = await fetch(`${app.url}api/device-login`, { headers });
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      return await response.json();
+    };
+    try {
+      const verify = vi.spyOn(hub.credentials!, "verifyRequest");
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(verify).not.toHaveBeenCalled();
+      expect(JSON.stringify(await read())).not.toContain(login.credential.key);
+      for (const sample of [
+        { headers: { authorization: "" } },
+        { headers: bearer(await authMessage(SECRET)) },
+        { headers, suffix: "?token=private" },
+        { headers, suffix: `?workspace=${REBOUND_WORKSPACE}` },
+      ]) {
+        const response = await fetch(`${app.url}api/device-login${sample.suffix ?? ""}`, { headers: sample.headers });
+        expect(response.status).toBe(401);
+        await response.text();
+      }
+      const mutation = await fetch(`${app.url}api/device-login`, { method: "POST", headers });
+      expect(mutation.status).toBe(405);
+      expect(mutation.headers.get("allow")).toBe("GET");
+      await mutation.text();
+      await hub.stop();
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      await removeHubLogin(origin, box.env);
+      expect(await read()).toEqual({ state: "signed-out" });
+      await writeHubLogin(origin, login, box.env);
+      writeBinding(box, "wss://another-hub.example/ws", REBOUND_WORKSPACE);
+      expect(await read()).toEqual({ state: "unavailable" });
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("uses current hub authority independently of workspace membership and credential scope", async () => {
     const { app, post, hub, login, other, origin } = await rig(null, []);
     hub.hubAdmins!.grant(login.identity.id);

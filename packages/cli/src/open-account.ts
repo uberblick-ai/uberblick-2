@@ -14,6 +14,23 @@ function refused(reason: NotSharedReason): ServingAccount | null {
   return { state: reason === "sign-in-required" || reason === "no-hub-credentials" ? "signed-out" : "unavailable" };
 }
 
+/** Stored sign-in is local information, independent of current hub acceptance. */
+export function requestDeviceLogin(binding: AccessBinding, rebound = false): ServingAccount {
+  if (binding.hubUrl === null) return { state: "signed-out" };
+  if (rebound) return { state: "unavailable" };
+  try {
+    const current = readDeviceLogin(binding.hubUrl, binding.workspaceId, binding.env);
+    if (current.status !== "ready") {
+      return { state: current.status === "sign-in-required" ? "signed-out" : "unavailable" };
+    }
+    return isGithubUsername(current.login.identity.githubUsername)
+      ? { state: "signed-in", handle: current.login.identity.githubUsername }
+      : { state: "unavailable" };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
+
 /** Never copy login objects or upstream fields into the browser answer. */
 export async function requestAccount(
   binding: AccessBinding,

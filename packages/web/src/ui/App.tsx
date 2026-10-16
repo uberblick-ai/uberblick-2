@@ -1082,7 +1082,7 @@ export function App(): ReactElement {
           <PreferencesSettings identity={identity} />
         ) : settings && route.page === "devices" ? (
           <DevicesSettings key={`${route.workspace.uuid}:${serving?.remoteHubUrl ?? "local"}:${serving?.rebound === true}`}
-            request={settingsAccess.requestDevices} initial={settingsAccess.devices} />
+            request={settingsAccess.requestDevices} initial={settingsAccess.devices} login={settingsAccess.deviceLogin} />
         ) : settings ? (
           <WorkspaceSettings
             admin={settingsAccess.workspaceAdmin}

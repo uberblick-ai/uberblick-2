@@ -56,9 +56,10 @@ function DeviceRow({ device, now, hub, busy, revoke }: {
   </tr>;
 }
 
-export function DevicesSettings({ request, initial }: {
+export function DevicesSettings({ request, initial, login }: {
   request: (action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>;
   initial: AccessAnswer | null;
+  login?: { handle: string; hub: string } | null;
 }): ReactElement {
   const [list, setList] = useState(initial);
   const [identity, setIdentity] = useState(initial?.status === "ok" ? initial : null);
@@ -66,6 +67,7 @@ export function DevicesSettings({ request, initial }: {
   const [feedback, setFeedback] = useState<{ applied: boolean; text: string } | null>(null);
   const lifetime = useRef<AbortController | null>(null);
   const now = useTimestampClock();
+  const noteIdentity = identity ?? login;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -110,8 +112,8 @@ export function DevicesSettings({ request, initial }: {
     <div className="ub-column gap-4">
       <div className="ub-page-header">
         <h1 id="ub-settings-title" className="ub-title">Devices</h1>
-        <p className="m-0 min-h-(--type-small-leading) ub-type-small">{identity?.handle !== undefined
-          ? `Computers signed in to ${host(identity.hub)} as @${identity.handle}. Revoking one stops its sync; its downloaded documents stay.` : null}</p>
+        <p className="m-0 min-h-(--type-small-leading) ub-type-small">{noteIdentity?.handle !== undefined
+          ? `Computers signed in to ${host(noteIdentity.hub)} as @${noteIdentity.handle}. Revoking one stops its sync; its downloaded documents stay.` : null}</p>
       </div>
       {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.applied ? "status" : "alert"}>{feedback.text}</p>}
       {list === null ? <p className="m-0 ub-type-ui" role="status">Reading devices from the hub…</p> :
