@@ -71,6 +71,9 @@ import { useServingRoomStatus } from "./status/serving-status.js";
 import { useServingAccount } from "./status/serving-account.js";
 import { useHubAdministration } from "./settings/hub-administration.js";
 import { HubSettings } from "./settings/HubSettings.js";
+import { useSettingsAccess } from "./settings/settings-access.js";
+import { PreferencesSettings } from "./settings/PreferencesSettings.js";
+import { DevicesSettings } from "./settings/DevicesSettings.js";
 import { createAccountClient } from "../shell/account.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../shell/DocumentList.js";
 import type { DocumentListState } from "../shell/DocumentList.js";
@@ -410,6 +413,8 @@ export function App(): ReactElement {
   );
   const account = useServingAccount(accountClient);
   const hubAdministration = useHubAdministration(workspaceUuid, serving, identity.name, path);
+  const settingsAccess = useSettingsAccess(workspaceUuid, serving, identity.name, path,
+    hubReady && !remoteSignIn, startupServing === null);
   // Startup configuration may name an implicit loopback hub for a local-only
   // binding. The existing access reading distinguishes it from an upstream.
   let workspaceLocation: string | null = null;
@@ -861,6 +866,14 @@ export function App(): ReactElement {
     if (segment !== null) navigate(`/${segment}`);
   }, [closeSidebarDrawer, navigate, segment]);
 
+  const workspaceSettingsPage = route.kind === "settings" &&
+    (route.page === "general" || route.page === "tags" || route.page === "members");
+  useEffect(() => {
+    if (workspaceSettingsPage && !settingsAccess.workspacePending && !settingsAccess.workspaceAdmin && segment !== null) {
+      navigate(settingsPath(segment, "preferences"), "replace");
+    }
+  }, [navigate, segment, settingsAccess.workspaceAdmin, settingsAccess.workspacePending, workspaceSettingsPage]);
+
   /**
    * Hold the new document room until useRoom acquires the same refcounted
    * connection. Release the creation handle then so later navigation can
@@ -1045,9 +1058,7 @@ export function App(): ReactElement {
           workspaceLocation={workspaceLocation}
           onWorkspaceMenuOpenChange={setWorkspaceMenuOpen}
           onSwitchWorkspace={onSwitchWorkspace}
-          identity={identity}
           account={servingStatus?.notSharedReason ? { state: "unavailable" } : account}
-          agentSessions={agentSessions}
           selected={sidebarSelection}
           onSelect={onSelect}
           onCreate={onCreate}
@@ -1058,6 +1069,8 @@ export function App(): ReactElement {
           settingsOpen={settings}
           settingsPage={route.kind === "settings" ? route.page : null}
           hubAdmin={hubAdministration.admin}
+          workspaceAdmin={settingsAccess.workspaceAdmin}
+          devicesAvailable={settingsAccess.devicesAvailable}
         />
         {/*
             * Both workspace addresses render the document list directly; RoutePane
@@ -1065,8 +1078,14 @@ export function App(): ReactElement {
          */}
         {settings && (route.page === "hub-admins" || route.page === "hub-workspaces") ? (
           <HubSettings key={`${route.workspace.uuid}:${route.page}`} page={route.page} administration={hubAdministration} />
+        ) : settings && route.page === "preferences" ? (
+          <PreferencesSettings identity={identity} />
+        ) : settings && route.page === "devices" ? (
+          <DevicesSettings key={`${route.workspace.uuid}:${serving?.remoteHubUrl ?? "local"}:${serving?.rebound === true}`}
+            request={settingsAccess.requestDevices} initial={settingsAccess.devices} login={settingsAccess.deviceLogin} />
         ) : settings ? (
           <WorkspaceSettings
+            admin={settingsAccess.workspaceAdmin}
             key={route.workspace.uuid}
             page={route.page}
             workspace={route.workspace}

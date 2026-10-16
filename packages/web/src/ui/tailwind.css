@@ -28,6 +28,8 @@
 @source "./editor-controls/MentionMenu.tsx";
 @source "./settings/WorkspaceSettings.tsx";
 @source "./settings/HubSettings.tsx";
+@source "./settings/PreferencesSettings.tsx";
+@source "./settings/DevicesSettings.tsx";
 @source "./sidebar/WorkspaceSwitcher.tsx";
 @source "./sidebar/UserMenu.tsx";
 @source "./document/OutlinePane.tsx";

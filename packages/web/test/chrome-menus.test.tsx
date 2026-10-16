@@ -1,6 +1,6 @@
 /**
- * The sidebar's two anchored menus: what they say, and what choosing
- * something in them actually changes.
+ * Sidebar menus open workspace and personal destinations. Preferences apply
+ * the browser's saved appearance and collaboration identity.
  *
  * Both are driven from stubbed state — workspace names, an identity, a session
  * count — because that is what the components are: a rendering of state the
@@ -36,6 +36,7 @@ import {
 import type { ReactElement } from "react";
 import { WorkspaceSwitcher } from "../src/ui/sidebar/WorkspaceSwitcher.js";
 import { UserMenu } from "../src/ui/sidebar/UserMenu.js";
+import { PreferencesSettings } from "../src/ui/settings/PreferencesSettings.js";
 import type { AccountIdentity } from "../src/shell/account.js";
 import { useAgentSessions, useSetting } from "../src/ui/hooks.js";
 import { applyStoredAppearance } from "../src/ui/theme.js";
@@ -249,16 +250,69 @@ describe("the workspace switcher renders configuration", () => {
   });
 });
 
-describe("the account footer keeps this client's presence preferences separate", () => {
-  /** The standard identity button opens its preferences panel. */
+describe("the account footer opens personal settings", () => {
+  /** Radix opens its command menu from the keyboard. */
   function open(view: View): void {
-    click(within(view.host).getByRole("button", { name: /; preferences$/ }));
+    fireEvent.keyDown(within(view.host).getByRole("button", { name: /; preferences$/ }), { key: "Enter" });
   }
 
-  function menu(agentSessions = 0, account: AccountIdentity = { state: "signed-in", handle: "hub-person" }): ReactElement {
-    return <UserMenu identity={IDENTITY} account={account} agentSessions={agentSessions} />;
+  function menu(account: AccountIdentity = { state: "signed-in", handle: "hub-person" }, onOpenDevices?: () => void): ReactElement {
+    return <UserMenu account={account} onOpenPreferences={() => {}} onOpenDevices={onOpenDevices} />;
   }
 
+  it("shows the account in the standard button and offers only available destinations", () => {
+    const view = mount(menu());
+    const trigger = within(view.host).getByRole("button", { name: "@hub-person; preferences" });
+    expect(trigger?.textContent).toContain("@hub-person");
+    expect(trigger?.textContent).not.toContain(IDENTITY.name);
+    expect(trigger?.getAttribute("data-sidebar")).toBe("menu-button");
+    expect(trigger?.closest('[data-slot="sidebar-menu-item"]')?.parentElement?.getAttribute("data-slot"))
+      .toBe("sidebar-menu");
+    expect(within(view.host).queryByText("Account settings")).toBeNull();
+    open(view);
+    expect(within(screen.getByRole("menu")).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Preferences"]);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("MCP connections")).toBeNull();
+    view.unmount();
+  });
+
+  it("opens Preferences and Devices from their menu items independently of account availability", () => {
+    const preferences = vi.fn();
+    const devices = vi.fn();
+    const view = mount(<UserMenu account={{ state: "unavailable" }} onOpenPreferences={preferences} onOpenDevices={devices} />);
+    open(view);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Preferences" }));
+    expect(preferences).toHaveBeenCalledOnce();
+    open(view);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Devices" }));
+    expect(devices).toHaveBeenCalledOnce();
+    view.unmount();
+  });
+
+  it.each([
+    [{ state: "signed-out" }, "Not signed in"],
+    [{ state: "unavailable" }, "Account unavailable"],
+  ] as const)("shows the unverified account state without a presence name", (account, label) => {
+    const view = mount(menu(account));
+    expect(within(view.host).getByRole("button", { name: `${label}; preferences` }).textContent).toContain(label);
+    expect(view.host.textContent).not.toContain(IDENTITY.name);
+    view.unmount();
+  });
+
+  it("retires the portalled menu when the sidebar becomes inactive", () => {
+    const view = mount(menu());
+    open(view);
+    // A retired menu must unmount rather than remain hidden in the portal.
+    expect(screen.getAllByRole("menu", { hidden: true })).toHaveLength(1);
+    view.render(<UserMenu onOpenPreferences={() => {}} active={false} />);
+    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
+    view.render(menu());
+    expect(screen.queryAllByRole("menu", { hidden: true })).toHaveLength(0);
+    view.unmount();
+  });
+});
+
+describe("the Preferences page stores this client's choices", () => {
   function swatch(name: string): HTMLButtonElement {
     return within(screen.getByRole("group", { name: "Presence colour" })).getByRole("button", { name });
   }
@@ -271,79 +325,33 @@ describe("the account footer keeps this client's presence preferences separate",
     return within(screen.getByRole("group", { name: "Appearance" })).getByRole("button", { name: label });
   }
 
-  it("shows the account in the standard button and keeps Account settings inert", () => {
-    const view = mount(menu());
-    const trigger = within(view.host).getByRole("button", { name: "@hub-person; preferences" });
-    expect(trigger?.textContent).toContain("@hub-person");
-    expect(trigger?.textContent).not.toContain(IDENTITY.name);
-    expect(trigger?.getAttribute("data-sidebar")).toBe("menu-button");
-    expect(trigger?.closest('[data-slot="sidebar-menu-item"]')?.parentElement?.getAttribute("data-slot"))
-      .toBe("sidebar-menu");
-    const placeholder = within(view.host).getByText("Account settings");
-    expect(placeholder?.textContent).toBe("Account settings");
-    expect(placeholder?.closest("button, a, [role=button], [role=link]")).toBeNull();
-    expect(placeholder?.hasAttribute("tabindex")).toBe(false);
-    click(placeholder);
-    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
-    open(view);
-    expect((within(screen.getByRole("dialog")).getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe(IDENTITY.name);
-    // The tab's dealt colour is the blue one, and nothing was chosen yet.
-    expect(chosenSwatch()).toBe("blue");
-    view.unmount();
-  });
-
-  it.each([
-    [{ state: "signed-out" }, "Not signed in"],
-    [{ state: "unavailable" }, "Account unavailable"],
-  ] as const)("shows the unverified account state without a presence name", (account, label) => {
-    const view = mount(menu(0, account));
-    expect(within(view.host).getByRole("button", { name: `${label}; preferences` }).textContent).toContain(label);
-    expect(view.host.textContent).not.toContain(IDENTITY.name);
-    view.unmount();
-  });
-
-  it("retires the portalled panel when the sidebar becomes inactive", () => {
-    const view = mount(menu());
-    open(view);
-    // A retired panel must unmount rather than remain hidden in the portal.
-    expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
-    view.render(<UserMenu identity={IDENTITY} agentSessions={0} active={false} />);
-    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
-    view.render(menu());
-    expect(screen.queryAllByRole("dialog", { hidden: true })).toHaveLength(0);
-    view.unmount();
-  });
-
   it("stores a chosen presence colour, and starts from it after a reload", () => {
-    const view = mount(menu());
-    open(view);
+    const view = mount(<PreferencesSettings identity={IDENTITY} />);
     click(swatch("green"));
 
     expect(getSetting("presenceColor")).toBe("#0c853d");
     expect(chosenSwatch()).toBe("green");
-    expect(within(view.host).getByRole("button", { name: "@hub-person; preferences" }).textContent).toContain("@hub-person");
+    expect(within(view.host).getByText(`How others see you while you edit: ${IDENTITY.name}`)).toBeTruthy();
     view.unmount();
 
     // The reload: a new tab, dealt a different colour, reading the same storage.
     const reloaded = mount(
-      <UserMenu identity={{ name: "adjacent heron", color: "#cb26b4" }} agentSessions={0} />,
+      <PreferencesSettings identity={{ name: "adjacent heron", color: "#cb26b4" }} />,
     );
-    open(reloaded);
     expect(chosenSwatch()).toBe("green");
-    expect((within(screen.getByRole("dialog")).getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("adjacent heron");
+    expect((within(reloaded.host).getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("adjacent heron");
     reloaded.unmount();
   });
 
   it("saves a name only on submission, keeps it after reload, and clears back to the default", () => {
     function Preferences(): ReactElement {
       const chosenName = useSetting("presenceName");
-      return <UserMenu identity={{ ...IDENTITY, name: chosenName ?? IDENTITY.name }} agentSessions={0} />;
+      return <PreferencesSettings identity={{ ...IDENTITY, name: chosenName ?? IDENTITY.name }} />;
     }
     const editName = (name: string): void => {
       fireEvent.change(screen.getByRole("textbox", { name: "Presence name" }), { target: { value: name } });
     };
     const view = mount(<Preferences />);
-    open(view);
     editName("  Pat Editor  ");
     expect(getSetting("presenceName")).toBeNull();
     click(screen.getByRole("button", { name: "Save name" }));
@@ -353,7 +361,6 @@ describe("the account footer keeps this client's presence preferences separate",
     view.unmount();
 
     const reloaded = mount(<Preferences />);
-    open(reloaded);
     expect((screen.getByRole("textbox", { name: "Presence name" }) as HTMLInputElement).value).toBe("Pat Editor");
     editName(" \t ");
     click(screen.getByRole("button", { name: "Save name" }));
@@ -363,8 +370,7 @@ describe("the account footer keeps this client's presence preferences separate",
   });
 
   it("flips the token set, and remembers which one", () => {
-    const view = mount(menu());
-    open(view);
+    const view = mount(<PreferencesSettings identity={IDENTITY} />);
     expect(appearanceOption("System")?.getAttribute("aria-pressed")).toBe("true");
 
     click(appearanceOption("Dark"));
@@ -390,24 +396,12 @@ describe("the account footer keeps this client's presence preferences separate",
     vi.stubGlobal("navigator", {
       storage: { estimate: async () => ({ usage: 2_500_000, quota: 1e9 }) },
     });
-    const view = mount(menu());
-    open(view);
+    const view = mount(<PreferencesSettings identity={IDENTITY} />);
     await act(async () => {});
-    const panel = within(screen.getByRole("dialog"));
-    expect(panel.getAllByRole("term", { hidden: true }).map((row) => row.textContent)).toEqual([
-      "MCP connections",
-    ]);
-    expect(panel.getAllByRole("definition", { hidden: true })[0]?.textContent).toBe("0");
-    view.unmount();
-  });
-
-  it("reports the agent sessions it is given", () => {
-    const view = mount(menu(2));
-    open(view);
-    // Definition-list rows have no role of their own; begin at the visible term.
-    const terms = within(screen.getByRole("dialog")).getAllByRole("term", { hidden: true });
-    const connections = terms[terms.length - 1]?.parentElement;
-    expect(connections?.textContent).toBe("MCP connections2");
+    const page = within(view.host);
+    expect(page.getByRole("heading", { level: 1, name: "Preferences" })).toBeTruthy();
+    expect(page.getByText("Saved in this browser only.")).toBeTruthy();
+    expect(page.queryAllByRole("term", { hidden: true })).toEqual([]);
     view.unmount();
   });
 });

@@ -22,13 +22,14 @@ function account(value: unknown): AccountIdentity {
   throw new Error("Invalid account answer");
 }
 
-export function createAccountClient(
+function createIdentityClient(
+  path: string,
   workspace: string,
   subject: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): AccountClient {
   return async (signal) => {
-    const response = await fetchImpl("/api/account", {
+    const response = await fetchImpl(path, {
       cache: "no-store",
       redirect: "error",
       headers: {
@@ -40,4 +41,21 @@ export function createAccountClient(
     if (!response.ok) throw new Error("Account unavailable");
     return account(await response.json());
   };
+}
+
+export function createAccountClient(
+  workspace: string,
+  subject: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): AccountClient {
+  return createIdentityClient("/api/account", workspace, subject, fetchImpl);
+}
+
+/** Local stored sign-in stays readable while live management requests wait. */
+export function createDeviceLoginClient(
+  workspace: string,
+  subject: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): AccountClient {
+  return createIdentityClient("/api/device-login", workspace, subject, fetchImpl);
 }

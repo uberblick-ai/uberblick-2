@@ -1,5 +1,5 @@
 import { waitForAcknowledged } from "./settle.js";
-/** Workspace settings through the real browser, serving replica, and hub. */
+/** Settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
 import { EXAMPLE_TAGS } from "@uberblick/schema";
@@ -7,7 +7,7 @@ import type { Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { setupHarness } from "./app-helpers.js";
 
-const { harness, openApp } = setupHarness();
+const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
 function successNotice(page: Page, message: string) {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
@@ -53,9 +53,9 @@ test("a workspace rename reaches another page live and preserves its document li
   await expectSuccess(first, "Saved “Product Research”.");
   await expect(save).toBeFocused();
   await expect(second.getByLabel("Name", { exact: true })).toHaveValue("Product Research");
-  await expect(second.getByRole("button", { name: "Back to Product Research", exact: true })).toBeVisible();
+  await expect(second.locator(".ub-settings-back")).toHaveText("Product Research");
 
-  await second.getByRole("button", { name: "Back to Product Research", exact: true }).click();
+  await second.locator(".ub-settings-back").click();
   await second.getByRole("button", { name: "+ New page" }).click();
   await expect(second.locator(".ub-title")).toHaveValue("Untitled");
   await second.locator(".ub-title").fill("Workspace rename links");
@@ -134,7 +134,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.getByRole("button", { name: "Retire product" })).toBeFocused();
 
   await first
-    .getByRole("navigation", { name: "Workspace settings" })
+    .getByRole("navigation", { name: "Settings" })
     .getByRole("button", { name: "General" })
     .click();
   await expect(first).toHaveURL(
@@ -237,7 +237,7 @@ test("settings successes use shared notices and preserve native submission focus
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Tags", exact: true }).click();
   const field = page.getByLabel("Create a tag");
   const create = page.getByRole("button", { name: "Create", exact: true });
   const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;

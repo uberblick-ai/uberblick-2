@@ -261,15 +261,15 @@ for (const scheme of ["dark"] as const) {
     // Settings stays in the fixed footer; the switcher only lists workspaces.
     await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveCount(0);
     await expect(menu.locator('[data-slot="dropdown-menu-separator"]')).toHaveCount(0);
-    await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: "Settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
-    // The user panel: the same surface, opened from the foot of the column.
+    // The account menu uses the same surface from the foot of the column.
     await page.getByTestId("account-menu").click();
-    const panel = page.locator("[data-slot=popover-content]");
+    const panel = page.getByRole("menu");
     await expect(panel).toBeVisible();
-    await matchesTheSidebar(page, "[data-slot=popover-content]");
-    await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
+    await matchesTheSidebar(page, "[data-slot=dropdown-menu-content]");
+    await expect(panel.getByRole("menuitem", { name: "Preferences", exact: true })).toBeVisible();
   });
 }
 
@@ -279,7 +279,8 @@ for (const scheme of ["light"] as const) {
   }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.getByTestId("account-menu").click();
-    const panel = page.locator("[data-slot=popover-content]");
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+    const panel = page.locator("[data-settings-page]");
     await expect(panel).toBeVisible();
     await page.evaluate(
       () =>
@@ -302,9 +303,9 @@ for (const scheme of ["light"] as const) {
     const boxes = (): Promise<Array<[number, number, number, number]>> =>
       options.evaluateAll((elements) =>
         elements.map((element) => {
-          const frame = element.closest<HTMLElement>("[data-slot=popover-content]");
+          const frame = element.closest<HTMLElement>("[data-settings-page]");
           if (frame === null) {
-            throw new Error("e2e: appearance option geometry has no popover frame");
+            throw new Error("e2e: appearance option geometry has no preferences frame");
           }
           const box = element.getBoundingClientRect();
           const origin = frame.getBoundingClientRect();
@@ -312,7 +313,8 @@ for (const scheme of ["light"] as const) {
         }),
       );
     const treatment = (option: Locator) =>
-      option.evaluate((element) => {
+      option.evaluate(async (element) => {
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
         const style = getComputedStyle(element);
         return [style.backgroundColor, style.borderColor, style.color];
       });
@@ -345,6 +347,7 @@ for (const scheme of ["light"] as const) {
     await matching.click();
 
     await expect(matching).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => paintedIn(matching, "border-top-color")).toBe(selectedCue);
     expect(await cue(matching)).toBe(selectedCue);
     expect(await paintedIn(system, "border-top-color")).not.toBe(selectedCue);
     expect(await boxes()).toEqual(before);
@@ -360,7 +363,8 @@ for (const scheme of ["light", "dark"] as const) {
   }) => {
     const page = await openAppearanceApp(browser, scheme);
     await page.getByTestId("account-menu").click();
-    const panel = page.locator("[data-slot=popover-content]");
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+    const panel = page.locator("[data-settings-page]");
     await expect(panel).toBeVisible();
     const swatches = panel
       .getByRole("group", { name: "Presence colour" })
@@ -432,13 +436,13 @@ test("settings panes reject the pointer and follow browser history", async ({
   const settings = page.locator(".ub-settings-sidebar");
 
   const settingsEntry = page.getByRole("button", {
-    name: "Workspace settings",
+    name: "Settings",
     exact: true,
   });
   await settingsEntry.click();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
-  const back = settings.getByRole("button", { name: /^Back to / });
+  const back = settings.locator(".ub-settings-back");
   await expect(back).toBeVisible();
   await expectPaneRejectsPointer(documents);
 
@@ -462,12 +466,11 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(settingsEntry).toBeFocused();
 
   await page.getByTestId("account-menu").click();
-  const userPanel = page.locator("[data-slot=popover-content]");
+  const userPanel = page.getByRole("menu");
   await expect(userPanel).toBeVisible();
   await page.goForward();
   await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
-  // The shared account control stays available in both modes. Radix dismisses
-  // its popover when the sidebar hands focus to the incoming header.
+  // Radix dismisses the menu when the sidebar focuses the incoming header.
   await expect(userPanel).toBeHidden();
   await expect(back).toBeFocused();
   await page.goBack();
@@ -475,7 +478,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(settingsEntry).toBeFocused();
 
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expectNoSidebarMotion(page);
 });
 
@@ -483,7 +486,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   const page = await openAppearanceApp(browser, "light");
   await page.setViewportSize({ width: 820, height: 832 });
   await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));
@@ -645,9 +648,10 @@ for (const scheme of ["light"] as const) {
     const user = page.getByTestId("account-menu");
     const userRest = await checkHoverAndFocus(user, "shadcn");
     await user.tap();
-    const panel = page.locator(".ub-user-panel");
-    await expect(panel).toBeVisible();
+    await expect(page.getByRole("menu")).toBeVisible();
     expect(await treatment(user)).toEqual(userRest);
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).tap();
+    const panel = page.locator("[data-settings-page]");
     const appearance = panel.getByRole("group", { name: "Appearance" });
     const system = appearance.getByRole("button", { name: "System", exact: true });
     await expect(system).toHaveAttribute("aria-pressed", "true");
@@ -656,9 +660,9 @@ for (const scheme of ["light"] as const) {
     await checkHoverAndFocus(matching);
     await matching.tap();
     await expect(matching).toHaveAttribute("aria-pressed", "true");
-    expect(await treatment(matching)).toEqual(selected);
-    await page.keyboard.press("Escape");
-    await expect(panel).toBeHidden();
+    await expect.poll(() => treatment(matching)).toEqual(selected);
+    await page.goBack();
+    await openSidebar();
 
     const allDocs = page.locator(".ub-all-open-entry");
     await checkHoverAndFocus(allDocs);
@@ -671,7 +675,7 @@ for (const scheme of ["light"] as const) {
     await settings.tap();
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await openSidebar(true);
-    const navigation = page.locator(".ub-settings-nav");
+    const navigation = page.locator(".ub-settings-sidebar");
     const tags = navigation.getByRole("button", { name: "Tags", exact: true });
     await checkHoverAndFocus(tags);
     await tags.tap();
@@ -713,7 +717,10 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   const prose = await painted(page, ".ub-editor .ub-paragraph", "color");
 
   await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   await page.getByRole("button", { name: "Dark", exact: true }).click();
+  await page.goBack();
+  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   // Two surfaces, neither of which knows a theme exists: both are painted from
@@ -722,7 +729,9 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-editor .ub-paragraph", "color")).not.toBe(prose);
   const dark = await painted(page, ".ub-list", "background-color");
   // And the vendored surface came with them, over a scheme it was not given.
-  await matchesTheSidebar(page, "[data-slot=popover-content]");
+  await page.getByTestId("account-menu").click();
+  await matchesTheSidebar(page, "[data-slot=dropdown-menu-content]");
+  await page.keyboard.press("Escape");
 
   await page.reload();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
@@ -731,7 +740,9 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
 
   // Back to the system's answer, which is this context's light.
   await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   await page.getByRole("button", { name: "System", exact: true }).click();
+  await page.goBack();
   await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
@@ -1611,9 +1622,9 @@ for (const scheme of ["light", "dark"] as const) {
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
     }
     await page.getByTestId("account-menu").click();
-    await ui(page.locator(".ub-panel-fact dd"));
-    await page.keyboard.press("Escape");
-    if (hasTouch) await page.getByRole("button", { name: "Close document list", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+    await ui(page.getByText("Saved in this browser only.", { exact: true }));
+    await page.goBack();
     await placeCaret(page);
     await page.keyboard.type("/");
     const caret = page.getByRole("listbox", { name: "Block types" });

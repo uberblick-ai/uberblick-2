@@ -8,6 +8,7 @@ import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/m
 import { build } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
+import { requestAccess } from "../src/open-access.js";
 import { PACKAGE_ROOT, REPO_ROOT, pointAt, waitUntil } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, configDir, freePort, get, hubs, open, startHub,
   WORKSPACE, REBOUND_WORKSPACE, SECRET, silentListener, writeBinding } from "./open-fixtures.js";
@@ -55,7 +56,98 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
   return { box, env, hub, login, other, github, origin, app, headers, post };
 }
 
+function storedLogin(handle: string): StoredHubLogin {
+  const principalId = crypto.randomUUID();
+  return { identity: { id: principalId, githubAccountId: "1234", githubUsername: handle }, credential: {
+    key: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+    record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE],
+      issuedAt: Date.now(), revokedAt: null },
+  } };
+}
+
+describe("ub open: Devices identity projection", () => {
+  const origin = "https://devices-hub.example";
+
+  it("uses the login that answers after credential recovery replaces the first login", async () => {
+    const { box } = configured();
+    const original = storedLogin("original-person");
+    const replacement = storedLogin("replacement-person");
+    await writeHubLogin(origin, original, box.env);
+    const device = { deviceId: replacement.credential.record.deviceId, signedInAt: replacement.credential.record.issuedAt, current: true };
+    const fetch = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json({ status: "sign-in-required" }, { status: 401 }))
+      .mockImplementationOnce(async () => {
+        await writeHubLogin(origin, replacement, box.env);
+        return Response.json({ status: "already-replaced" }, { status: 401 });
+      })
+      .mockResolvedValueOnce(Response.json({ status: "ok", devices: [device], handle: "upstream-person",
+        identity: original.identity, credential: original.credential, token: "private-token" }));
+    const answer = await requestAccess({ workspaceId: WORKSPACE, hubUrl: `${origin}/proxy/ws`, env: box.env },
+      { operation: "list-devices" }, new AbortController().signal);
+    expect(answer).toEqual({ status: 200, body: { status: "ok", hub: origin, handle: "replacement-person", devices: [device] } });
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      `${origin}/auth/manage`, `${origin}/auth/credential/renew`, `${origin}/auth/manage`,
+    ]);
+    expect(JSON.stringify(answer)).not.toContain(original.credential.key);
+    expect(JSON.stringify(answer)).not.toContain(replacement.credential.key);
+  });
+
+  it("exposes no identity for failed or malformed device answers", async () => {
+    const { box } = configured();
+    const login = storedLogin("account-person");
+    await writeHubLogin(origin, login, box.env);
+    const binding = { workspaceId: WORKSPACE, hubUrl: `${origin}/proxy/ws`, env: box.env };
+    const fetch = vi.spyOn(globalThis, "fetch");
+    for (const [status, body, expected] of [
+      [403, { status: "forbidden", handle: "upstream-person", credential: login.credential }, "forbidden"],
+      [503, { status: "not-configured", handle: "upstream-person" }, "not-configured"],
+      [200, { status: "ok", devices: [], handle: "upstream-person" }, "hub-down"],
+    ] as const) {
+      fetch.mockResolvedValueOnce(Response.json(body, { status }));
+      expect((await requestAccess(binding, { operation: "list-devices" }, new AbortController().signal)).body)
+        .toEqual({ status: expected, hub: origin });
+    }
+  });
+});
+
 describe("ub open: live Access bridge", () => {
+  it("protects the stored-login read and keeps it independent of membership, hub availability and replica preparation", async () => {
+    const { app, box, hub, login, headers, origin } = await rig(null, []);
+    const read = async () => {
+      const response = await fetch(`${app.url}api/device-login`, { headers });
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      return await response.json();
+    };
+    try {
+      const verify = vi.spyOn(hub.credentials!, "verifyRequest");
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(verify).not.toHaveBeenCalled();
+      expect(JSON.stringify(await read())).not.toContain(login.credential.key);
+      for (const sample of [
+        { headers: { authorization: "" } },
+        { headers: bearer(await authMessage(SECRET)) },
+        { headers, suffix: "?token=private" },
+        { headers, suffix: `?workspace=${REBOUND_WORKSPACE}` },
+      ]) {
+        const response = await fetch(`${app.url}api/device-login${sample.suffix ?? ""}`, { headers: sample.headers });
+        expect(response.status).toBe(401);
+        await response.text();
+      }
+      const mutation = await fetch(`${app.url}api/device-login`, { method: "POST", headers });
+      expect(mutation.status).toBe(405);
+      expect(mutation.headers.get("allow")).toBe("GET");
+      await mutation.text();
+      await hub.stop();
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      await removeHubLogin(origin, box.env);
+      expect(await read()).toEqual({ state: "signed-out" });
+      await writeHubLogin(origin, login, box.env);
+      writeBinding(box, "wss://another-hub.example/ws", REBOUND_WORKSPACE);
+      expect(await read()).toEqual({ state: "unavailable" });
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("uses current hub authority independently of workspace membership and credential scope", async () => {
     const { app, post, hub, login, other, origin } = await rig(null, []);
     hub.hubAdmins!.grant(login.identity.id);
@@ -143,7 +235,7 @@ describe("ub open: live Access bridge", () => {
     hub.credentials!.issue({ principalId: other.identity.id, deviceId: crypto.randomUUID(),
       deviceName: "foreign-server", workspaces: [WORKSPACE] });
     try {
-      expect(await post({ operation: "list-devices" })).toEqual({ code: 200, body: { status: "ok", hub: origin,
+      expect(await post({ operation: "list-devices" })).toEqual({ code: 200, body: { status: "ok", hub: origin, handle: "this-person",
         devices: expect.arrayContaining([
           { deviceId: login.credential.record.deviceId, signedInAt: login.credential.record.issuedAt, current: true },
           { deviceId: named.record.deviceId, signedInAt: named.record.issuedAt, current: false, deviceName: "agent-server" },
@@ -367,7 +459,7 @@ describe("ub open: live Access bridge", () => {
       expect((await post({ operation: "remove-member", workspaceId: WORKSPACE, principalId: login.identity.id })).body)
         .toMatchObject({ status: "closure-failed", applied: true });
       expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
-      expect((await post({ operation: "list-devices" })).body.status).toBe("ok");
+      expect((await post({ operation: "list-devices" })).body).toMatchObject({ status: "ok", handle: "this-person" });
       expect((await post({ operation: "revoke-device", deviceId: login.credential.record.deviceId })).body.status).toBe("ok");
       expect((await post({ operation: "list-devices" })).body.status).toBe("sign-in-required");
       expect(app.stderr()).not.toContain("private material");
@@ -375,7 +467,7 @@ describe("ub open: live Access bridge", () => {
   });
 
   it("keeps account-scoped own-device operations available with an empty workspace credential", async () => {
-    const { app, post, login, box, hub } = await rig(null, []);
+    const { app, post, login, box, hub, headers } = await rig(null, []);
     try {
       // A renewal cooldown is credential coordination, never Access state.
       // Its failure must not replace a new live management answer.
@@ -387,9 +479,15 @@ describe("ub open: live Access bridge", () => {
       const verify = vi.spyOn(hub.credentials!, "verifyRequest");
       expect((await post({ operation: "own-role", workspaceId: WORKSPACE })).body.status).toBe("forbidden");
       expect(verify).toHaveBeenCalledWith(expect.any(String), { operation: "own-role", workspaceId: WORKSPACE });
-      expect((await post({ operation: "list-devices" })).body).toMatchObject({ status: "ok", devices: [
+      const listed = (await post({ operation: "list-devices" })).body;
+      expect(listed).toMatchObject({ status: "ok", handle: "this-person", devices: [
         { deviceId: login.credential.record.deviceId, current: true },
       ] });
+      expect(JSON.stringify(listed)).not.toContain(login.credential.key);
+      expect(listed).not.toHaveProperty("identity");
+      expect(listed).not.toHaveProperty("credential");
+      expect(await (await fetch(`${app.url}api/account`, { headers })).json())
+        .toEqual({ state: "unavailable" });
       expect((await post({ operation: "revoke-device", deviceId: login.credential.record.deviceId })).body.status).toBe("ok");
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });

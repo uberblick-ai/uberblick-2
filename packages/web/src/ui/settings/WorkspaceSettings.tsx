@@ -519,6 +519,7 @@ function TagSettings({
 }
 
 export function WorkspaceSettings({
+  admin,
   page = "general",
   workspace,
   workspaceLocation = null,
@@ -529,6 +530,7 @@ export function WorkspaceSettings({
   serving = null,
   subject = "browser",
 }: {
+  admin: boolean;
   page?: SettingsPage;
   workspace: Workspace;
   workspaceLocation?: string | null;
@@ -539,7 +541,10 @@ export function WorkspaceSettings({
   serving?: LocalServing | null;
   subject?: string;
 }): ReactElement {
-  return page === "access" ? (
+  if (!admin) return <section className="ub-pane ub-page-pane" data-settings-page>
+    <div className="ub-column"><p role="status">Reading workspace permissions…</p></div>
+  </section>;
+  return page === "members" ? (
     <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} />
   ) : page === "tags" ? (
     <TagSettings workspace={workspace} connection={catalogConnection} />

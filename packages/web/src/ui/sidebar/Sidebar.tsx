@@ -17,7 +17,6 @@ import {
   unpinDoc,
 } from "@uberblick/schema";
 import type { DirectoryEntry, SidebarGroup } from "@uberblick/schema";
-import type { AwarenessUser } from "../../collab/identity.js";
 import type { AccountIdentity } from "../../shell/account.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useDirectory, useRoomStatus, useStoredFlag } from "../hooks.js";
@@ -93,11 +92,7 @@ type SidebarProps = {
   onWorkspaceMenuOpenChange?: (open: boolean) => void;
   /** Go to a workspace. Switching is navigating; see `WorkspaceSwitcher`. */
   onSwitchWorkspace: (segment: string) => void;
-  /** This tab's awareness identity, separate from its served hub account. */
-  identity: AwarenessUser;
   account?: AccountIdentity;
-  /** Agent sessions in the workspace, for the user menu's readout. */
-  agentSessions: number;
   selected: string | null;
   onSelect: (uuid: string) => void;
   onCreate: () => void;
@@ -114,6 +109,8 @@ type SidebarProps = {
   /** The selected settings destination, when settings is open. */
   settingsPage: SettingsPage | null;
   hubAdmin?: boolean;
+  workspaceAdmin?: boolean;
+  devicesAvailable?: boolean;
 };
 
 export function Sidebar(props: SidebarProps): ReactElement {
@@ -166,9 +163,7 @@ function SidebarContent({
   workspaceLocation,
   onWorkspaceMenuOpenChange,
   onSwitchWorkspace,
-  identity,
   account,
-  agentSessions,
   selected,
   onSelect,
   onCreate,
@@ -179,6 +174,8 @@ function SidebarContent({
   settingsOpen,
   settingsPage,
   hubAdmin = false,
+  workspaceAdmin = false,
+  devicesAvailable = false,
 }: SidebarProps & {
   drawer: boolean;
   sidebarRoot: RefObject<HTMLElement | null>;
@@ -351,6 +348,8 @@ function SidebarContent({
           active={settingsOpen && !collapsed}
           page={settingsPage}
           hubAdmin={hubAdmin}
+          workspaceAdmin={workspaceAdmin}
+          devicesAvailable={devicesAvailable}
           onSelect={onOpenSettings}
           onBack={onBackToWorkspace}
         />
@@ -365,18 +364,20 @@ function SidebarContent({
             <span>{reading.detail === null ? "Offline" : reading.word.charAt(0).toUpperCase() + reading.word.slice(1)}</span>
           </div>
         )}
-        {workspace !== null && (
+        {workspace !== null && !settingsOpen && (
           <button
             type="button"
             className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
             data-swap-focus
-            onClick={() => onOpenSettings("general")}
+            onClick={() => onOpenSettings(workspaceAdmin ? "general" : "preferences")}
           >
             <GearIcon />
-            Workspace settings
+            Settings
           </button>
         )}
-        <UserMenu identity={identity} account={account} agentSessions={agentSessions} active={!collapsed} />
+        <UserMenu key={settingsOpen ? settingsPage : "documents"} account={account} active={!collapsed}
+          onOpenPreferences={() => onOpenSettings("preferences")}
+          onOpenDevices={devicesAvailable ? () => onOpenSettings("devices") : undefined} />
       </SidebarFooter>
       </SidebarDragProvider>
     </>
@@ -389,6 +390,8 @@ function SettingsNavigation({
   active,
   page,
   hubAdmin,
+  workspaceAdmin,
+  devicesAvailable,
   onSelect,
   onBack,
 }: {
@@ -396,34 +399,36 @@ function SettingsNavigation({
   active: boolean;
   page: SettingsPage | null;
   hubAdmin: boolean;
+  workspaceAdmin: boolean;
+  devicesAvailable: boolean;
   onSelect: (page: SettingsPage) => void;
   onBack: () => void;
 }): ReactElement {
   return (
     <nav
       className={`${SIDEBAR_PANE_CLASSES} ub-settings-sidebar z-1 [transform:translateX(100%)] opacity-0 group-data-[mode=settings]/sidebar:[transform:translateX(0)] group-data-[mode=settings]/sidebar:opacity-100`}
-      aria-label="Workspace settings"
+      aria-label="Settings"
       aria-hidden={!active}
       inert={!active}
     >
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
         <button
           type="button"
-          className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-settings-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           data-swap-focus
           onClick={onBack}
         >
-          <span className="grid size-7 shrink-0 place-items-center rounded-(--radius-sm) bg-(--brand-subtle) text-(--brand) [&_svg]:size-4" aria-hidden="true">
+          <span className="grid size-7 shrink-0 place-items-center [&_svg]:size-4" aria-hidden="true">
             <BackIcon />
           </span>
           <span className="min-w-0 truncate">
-            Back to {label}
+            {label}
           </span>
         </button>
       </SidebarHeader>
       <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
-        <section className="ub-nav ub-settings-nav">
-          <p className="ub-nav-label">Workspace settings</p>
+        {workspaceAdmin && <section className="ub-nav ub-settings-nav" aria-label="Workspace">
+          <p className="ub-nav-label">Workspace</p>
           <ul>
             <li>
               <button
@@ -451,13 +456,24 @@ function SettingsNavigation({
               <button
                 type="button"
                 className={SIDEBAR_NAV_CLASSES}
-                aria-current={page === "access" ? "page" : undefined}
-                onClick={() => onSelect("access")}
+                aria-current={page === "members" ? "page" : undefined}
+                onClick={() => onSelect("members")}
               >
-                <GearIcon />
-                Access
+                <MembersIcon />
+                Members
               </button>
             </li>
+          </ul>
+        </section>}
+        <section className="ub-nav ub-settings-nav" aria-label="User">
+          <p className="ub-nav-label">User</p>
+          <ul>
+            <li><button type="button" className={SIDEBAR_NAV_CLASSES}
+              aria-current={page === "preferences" ? "page" : undefined}
+              onClick={() => onSelect("preferences")}><PreferencesIcon />Preferences</button></li>
+            {devicesAvailable && <li><button type="button" className={SIDEBAR_NAV_CLASSES}
+              aria-current={page === "devices" ? "page" : undefined}
+              onClick={() => onSelect("devices")}><DevicesIcon />Devices</button></li>}
           </ul>
         </section>
         {hubAdmin && <section className="ub-nav ub-settings-nav" aria-label="Hub">
@@ -465,10 +481,10 @@ function SettingsNavigation({
           <ul>
             <li><button type="button" className={SIDEBAR_NAV_CLASSES}
               aria-current={page === "hub-admins" ? "page" : undefined}
-              onClick={() => onSelect("hub-admins")}><GearIcon />Admins</button></li>
+              onClick={() => onSelect("hub-admins")}><AdminsIcon />Admins</button></li>
             <li><button type="button" className={SIDEBAR_NAV_CLASSES}
               aria-current={page === "hub-workspaces" ? "page" : undefined}
-              onClick={() => onSelect("hub-workspaces")}><GearIcon />Workspaces</button></li>
+              onClick={() => onSelect("hub-workspaces")}><GridIcon />Workspaces</button></li>
           </ul>
         </section>}
       </SidebarScrollContent>
@@ -604,6 +620,30 @@ function BackIcon(): ReactElement {
       />
     </svg>
   );
+}
+
+function MembersIcon(): ReactElement {
+  return <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
+    <circle cx="6" cy="5" r="2.2" /><path d="M2 13v-1a4 4 0 0 1 8 0v1 M11 3a2.2 2.2 0 0 1 0 4.4 M12 9a3 3 0 0 1 2 3v1" />
+  </svg>;
+}
+
+function PreferencesIcon(): ReactElement {
+  return <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
+    <path d="M2 4h12 M2 8h12 M2 12h12" /><path d="M5 2v4 M11 6v4 M7 10v4" strokeWidth="2.5" />
+  </svg>;
+}
+
+function DevicesIcon(): ReactElement {
+  return <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
+    <rect x="2" y="2.5" width="12" height="8" rx="1" /><path d="M8 10.5v3 M5 13.5h6" />
+  </svg>;
+}
+
+function AdminsIcon(): ReactElement {
+  return <svg className="ub-nav-icon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.2">
+    <path d="M8 1.5 13 3v4c0 3-3 5.5-5 7-2-1.5-5-4-5-7V3z M5.5 7.5 7.3 9.3 10.5 6" />
+  </svg>;
 }
 
 /**

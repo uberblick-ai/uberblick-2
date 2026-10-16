@@ -43,7 +43,7 @@ import { acquireInitLock, tryAcquireInitLock } from "./init-lock.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
-import { requestAccount } from "./open-account.js";
+import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
 import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
@@ -460,6 +460,7 @@ const SEARCH_PATH = "/api/search";
 const STATUS_PATH = "/api/status";
 const ACCESS_PATH = "/api/access";
 const ACCOUNT_PATH = "/api/account";
+const DEVICE_LOGIN_PATH = "/api/device-login";
 const TOKEN_QUERY_PARAMS = ["token", "access_token", "auth", "authToken"];
 
 type ApiAuthenticator = (authMessage: string) => Promise<string | null>;
@@ -543,6 +544,7 @@ async function serveApiRequest(
   statusForWorkspace: (workspace: string) => ServingSyncStatus,
   env: NodeJS.ProcessEnv,
   expectedOrigin: string,
+  document: () => string,
 ): Promise<void> {
   const queriedToken = TOKEN_QUERY_PARAMS.some((name) =>
     target.searchParams.has(name),
@@ -560,6 +562,16 @@ async function serveApiRequest(
   const workspace = replicas.workspaces.get(workspaceId);
   if (workspace === undefined) {
     apiResponse(request, response, 401, { error: "unauthorized" });
+    return;
+  }
+  if (target.pathname === DEVICE_LOGIN_PATH) {
+    if (request.method !== "GET") {
+      apiResponse(request, response, 405, { error: "method_not_allowed" }, { allow: "GET" });
+      return;
+    }
+    const rebound = replicas.workspaces.keys().next().value === workspaceId &&
+      JSON.parse(document()).rebound === true;
+    apiResponse(request, response, 200, requestDeviceLogin({ workspaceId, hubUrl: workspace.binding.hubUrl, env }, rebound));
     return;
   }
   let engine: UberblickMcpEngine;
@@ -685,6 +697,7 @@ function serveBoundRequest(
     status,
     env,
     expectedOrigin,
+    document,
   ).catch(() => {
     if (!response.headersSent) {
       apiResponse(request, response, 500, { error: "internal_error" });

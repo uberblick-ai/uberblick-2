@@ -12,11 +12,13 @@ const { harness, openApp } = setupHarness({
 
 async function rename(page: Page, name: string): Promise<void> {
   await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   const field = page.getByRole("textbox", { name: "Presence name", exact: true });
   await field.fill(name);
   await page.getByRole("button", { name: "Save name", exact: true }).click();
   await expect(field).toHaveValue(name.trim() || gitName);
-  await page.keyboard.press("Escape");
+  await page.goBack();
+  await expect(editor(page)).toBeVisible();
 }
 
 async function comment(page: Page, block: number, passage: string, text: string, author: string): Promise<void> {
@@ -82,17 +84,20 @@ test("the chosen name survives reload and a same-port ub open restart in this br
   await page.reload();
   await expect(editor(page)).toBeVisible();
   await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Presence name", exact: true })).toHaveValue("Persistent Display Name");
-  await page.keyboard.press("Escape");
+  await page.goBack();
 
   await harness().restartOpen({ authenticated: true });
   await page.reload();
   await expect(editor(page)).toBeVisible();
   await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Presence name", exact: true })).toHaveValue("Persistent Display Name");
 
   // A separate browser profile still begins with the CLI default.
   const fresh = await openApp(browser);
   await fresh.getByTestId("account-menu").click();
+  await fresh.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   await expect(fresh.getByRole("textbox", { name: "Presence name", exact: true })).toHaveValue(gitName);
 });
