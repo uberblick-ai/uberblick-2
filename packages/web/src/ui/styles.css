@@ -719,6 +719,14 @@ h1.ub-heading {
   font-family: var(--font-display);
 }
 
+textarea.ub-title {
+  field-sizing: content;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 .ub-page-header {
   display: flex;
   flex-direction: column;
@@ -2883,7 +2891,7 @@ button.ub-docs-tag-chip:hover {
   }
 
   input:not(.ub-title, [type="checkbox"], [type="radio"]),
-  textarea:not([hidden]),
+  textarea:not(.ub-title, [hidden]),
   select,
   .ub-tldr-form textarea {
     font-size: var(--type-body-size);

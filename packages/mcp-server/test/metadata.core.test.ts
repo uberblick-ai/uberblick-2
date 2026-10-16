@@ -219,9 +219,10 @@ describe("set_metadata", () => {
     const target = await document(rig, { title: "Decision reference" });
     const decided = await document(rig, { kind: "decision", status: "decided" });
     const before = await rig.ok("get_doc", { uuid: decided.uuid });
-    for (const [field, value] of [["title", "Refused rename"], ["tldr", null]] as const) {
+    for (const [field, value] of [["tldr", null], ["discussion", null]] as const) {
       const refused = await refuseUnchanged(rig, {
         uuid: decided.uuid,
+        title: "Must stay unchanged",
         description: "An otherwise valid description.",
         tags: [MCP.name],
         links: [target.uuid],
@@ -235,8 +236,11 @@ describe("set_metadata", () => {
       });
       expect(await rig.ok("get_doc", { uuid: decided.uuid })).toEqual(before);
     }
+    const renamed = await rig.ok("set_metadata", { uuid: decided.uuid, title: "Reworded topic" });
+    expect(metadata(renamed)).toEqual({ ...metadata(before), title: "Reworded topic" });
     const allowed = await rig.ok("set_metadata", {
       uuid: decided.uuid,
+      title: "Updated topic question",
       description: "Updated decision discovery copy.",
       tags: [MCP.name],
       links: [target.uuid],
@@ -244,7 +248,7 @@ describe("set_metadata", () => {
     const read = await rig.ok("get_doc", { uuid: decided.uuid });
     expect(metadata(allowed)).toEqual(metadata(read));
     expect(read).toMatchObject({
-      title: before.title,
+      title: "Updated topic question",
       tldr: before.tldr,
       description: "Updated decision discovery copy.",
       tags: [MCP],

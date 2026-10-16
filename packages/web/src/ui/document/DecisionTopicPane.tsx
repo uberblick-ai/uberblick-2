@@ -1,9 +1,11 @@
 import type { ComponentProps, MouseEvent, ReactElement } from "react";
-import { decisionCurrentRecord, decisionTopicState, getDirectoryEntry, getMeta } from "@uberblick/schema";
+import { decisionCurrentRecord, decisionTopicState, getDirectoryEntry, getMeta, parseRoom, resolveDecisionTopics, setTitle } from "@uberblick/schema";
 import type { DecisionTopicResolution, DirectoryEntry } from "@uberblick/schema";
 import type { DocLinkContext } from "../../editor/doc-links.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { EditorPane } from "./EditorPane.js";
+import { DocumentTitle } from "./DocumentTitle.js";
+import { useDocMeta, useRoomStatus } from "../hooks.js";
 import { decisionRecordPath, docPath } from "../route.js";
 import type { Navigate } from "../route.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -206,6 +208,29 @@ function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, 
   </section>;
 }
 
+function TopicTitle({ topic, current, selected, connection, directoryConnection, archived }: {
+  topic: DecisionTopicResolution; current: DirectoryEntry; selected: string;
+  connection: RoomConnection | null; directoryConnection: RoomConnection | null; archived: boolean;
+}): ReactElement {
+  const observedMeta = useDocMeta(connection);
+  const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
+  const { writable } = useRoomStatus(connection);
+  const currentRoom = selected === current.uuid && connection !== null &&
+    parseRoom(connection.room).uuid === current.uuid && meta?.uuid === current.uuid && meta.kind === "decision";
+  return <DocumentTitle
+    value={currentRoom ? meta.title : current.title}
+    readOnly={!currentRoom || archived || topic.archived || !writable || directoryConnection === null}
+    onChange={(value) => {
+      if (!currentRoom || archived || connection === null || !connection.status.writable || directoryConnection === null) return;
+      const liveMeta = getMeta(connection.ydoc);
+      const liveTopic = resolveDecisionTopics(directoryConnection.ydoc).find((entry) => entry.topic === topic.topic);
+      if (liveMeta.uuid !== current.uuid || liveMeta.kind !== "decision" || liveTopic === undefined ||
+        liveTopic.archived || decisionCurrentRecord(liveTopic)?.uuid !== current.uuid) return;
+      setTitle(connection.ydoc, value);
+    }}
+  />;
+}
+
 /** A topic uses one selected room; its history reads directory caches only. */
 export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, explicit, directoryConnection, ...editorProps }:
   ComponentProps<typeof EditorPane> & {
@@ -226,7 +251,8 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   return <EditorPane {...editorProps}
     decisionView
     copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
-    header={<h1 className="ub-title">{current.title || "Untitled"}</h1>}
+    header={<TopicTitle topic={topic} current={current} selected={selected} connection={connection}
+      directoryConnection={directoryConnection} archived={editorProps.archived} />}
     beforeAnswer={<>
       <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks} />
       {record.status === "rejected" && rejectionReason && <p className="ub-decision-rejection">Rejection reason: {rejectionReason}</p>}

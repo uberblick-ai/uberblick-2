@@ -191,7 +191,7 @@ test("touch selection on a decided record starts a thread and its highlight open
   await expect(paragraph).toHaveText("Selected words remain readable after deciding.");
 });
 
-test("an open decision keeps its title, prose and tables read-only through later states", async ({ browser }) => {
+test("an open decision keeps prose and tables read-only through later states while its title stays editable", async ({ browser }) => {
   const writer = session();
   const prose = "Approved content survives every editor input.";
   const uuid = await record(writer, "open", [
@@ -215,8 +215,8 @@ test("an open decision keeps its title, prose and tables read-only through later
   await expect(view).toHaveAttribute("contenteditable", "false");
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
   expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);
-  await expect(page.getByRole("heading", { name: "Decided editor", exact: true })).toBeVisible();
-  await expect(page.locator("input.ub-title")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Decided editor");
+  await expect(page.getByRole("textbox", { name: "Document title" })).toBeEditable();
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
@@ -253,7 +253,7 @@ test("an open decision keeps its title, prose and tables read-only through later
   await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
   for (const status of ["open", "rejected", "withdrawn"] as const) {
     peer.decide(status);
-    await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
+    await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
     await expect(view).toHaveAttribute("contenteditable", "false");
     await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
     expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);

@@ -525,7 +525,7 @@ export function DocumentList({
                         {entry.title === "" ? <em>Untitled</em> : entry.title}
                       </span>
                       {entry.topicState === undefined
-                        ? <LifecycleBadge kind={entry.kind} status={entry.status} />
+                        ? <LifecycleBadge kind={entry.kind} />
                         : <span className="ub-type-ui text-(--muted-foreground)">{TOPIC_STATES[entry.topicState]}</span>}
                       {entry.topicState !== undefined && entry.approvalChanged && (
                         <span className="ub-type-ui text-(--muted-foreground)">Changed after approval</span>

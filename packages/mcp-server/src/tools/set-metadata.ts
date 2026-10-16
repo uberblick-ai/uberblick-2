@@ -85,11 +85,10 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
   }
   const discussionUuid = discussion === undefined || discussion === null ? discussion :
     forField("discussion", () => discussionTarget(context, discussion));
-  // The document-level gate already ran; title and tldr also request
-  // the decided-record content lock.
-  const contentField = title !== undefined ? "title" : tldr !== undefined ? "tldr" : undefined;
-  if (contentField !== undefined) {
-    forField(contentField, () => context.requireWritableDoc(uuid, true));
+  // The document-level gate already ran; only tldr requests the
+  // decided-record content lock. Titles name the topic rather than its answer.
+  if (tldr !== undefined) {
+    forField("tldr", () => context.requireWritableDoc(uuid, true));
   }
   if (current.kind === "decision" && tldr !== undefined && tldr !== null) {
     throw new ToolError("decision_tldr_unsupported", "Decision records hold their answer in content blocks and cannot have a TL;DR.", { uuid, field: "tldr" });

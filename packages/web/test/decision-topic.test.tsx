@@ -1,6 +1,6 @@
 /** Topic navigation reads one record room while directory caches supply history. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import * as Y from "yjs";
 import {
   appendBlock,
@@ -9,6 +9,7 @@ import {
   decisionDirectoryFields,
   directoryRoom,
   getBlocks,
+  getMeta,
   getMetaMap,
   initDoc,
   pinDoc,
@@ -252,6 +253,94 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("renames the current %s record while its answer stays read-only", async (status) => {
+    const ydoc = record(FIRST, "Original question", status, "Stored answer.");
+    const host = (await open()).container;
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(false);
+    expect(host.querySelector(".ub-lifecycle-badge")?.textContent).toBe("Decision");
+    await act(async () => fireEvent.change(title, { target: { value: "Clearer question" } }));
+    expect(getMeta(ydoc).title).toBe("Clearer question");
+    expect(getBlocks(ydoc)[0]?.text).toBe("Stored answer.");
+    expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
+  });
+
+  it("renames only the answer in force during review, then keeps the current title read-only in history", async () => {
+    story();
+    const host = (await open()).container;
+    const title = () => within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    await act(async () => fireEvent.change(title(), { target: { value: "Renamed current question" } }));
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Renamed current question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, OPEN)).ydoc).title).toBe("Open proposal");
+    await choose(host, FIRST);
+    expect(title().value).toBe("Renamed current question");
+    expect(title().readOnly).toBe(true);
+    expect(host.querySelector(".ub-lifecycle-badge")?.textContent).toBe("Decision");
+    await act(async () => fireEvent.change(title(), { target: { value: "Historical rename" } }));
+    expect(getMeta(room(roomForDoc(WORKSPACE, FIRST)).ydoc).title).toBe("Original title");
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Renamed current question");
+    await act(async () => within(host).getByRole("link", { name: "Go to the current answer" }).click());
+    expect(title().readOnly).toBe(false);
+  });
+
+  it("renames the latest record during a conflict and keeps the other answer's title", async () => {
+    record(FIRST, "Initial question", "decided", "Initial stance.", { agent: true });
+    record(CURRENT, "Left question", "decided", "Left answer.", { supersedes: FIRST, order: 1 });
+    const latest = record(NEXT, "Right question", "decided", "Right answer.", { supersedes: FIRST, order: 2 });
+    const host = (await open()).container;
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(false);
+    await act(async () => fireEvent.change(title, { target: { value: "Renamed conflict question" } }));
+    expect(getMeta(latest).title).toBe("Renamed conflict question");
+    expect(getMeta(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).title).toBe("Left question");
+    await choose(host, CURRENT);
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).readOnly).toBe(true);
+  });
+
+  it("refuses title writes when the room is unwritable or the live directory archives the topic", async () => {
+    const ydoc = record(FIRST, "Original question", "decided", "Stored answer.");
+    const connection = room(roomForDoc(WORKSPACE, FIRST));
+    Object.defineProperty(connection, "status", { value: { ...LIVE, writable: false }, configurable: true });
+    Object.defineProperty(connection, "onStatusChange", { value: (listener: (status: RoomStatus) => void) => {
+      listener(connection.status);
+      return () => {};
+    } });
+    const view = await open();
+    const title = within(view.container).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(true);
+    await act(async () => fireEvent.change(title, { target: { value: "Refused rename" } }));
+    expect(getMeta(ydoc).title).toBe("Original question");
+    view.unmount();
+    Object.defineProperty(connection, "status", { value: LIVE });
+    const live = (await open()).container;
+    const liveTitle = within(live).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(liveTitle.readOnly).toBe(false);
+    await act(async () => {
+      tombstoneDirectoryEntry(directory(), FIRST);
+      fireEvent.change(liveTitle, { target: { value: "Archived rename before render" } });
+    });
+    expect(getMeta(ydoc).title).toBe("Original question");
+    expect(liveTitle.readOnly).toBe(true);
+  });
+
+  it("refuses a stale title event when the current record changes before rendering", async () => {
+    const first = record(FIRST, "Original question", "decided", "Stored answer.");
+    const host = (await open()).container;
+    const oldTitle = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    await act(async () => {
+      record(CURRENT, "Replacement question", "decided", "Replacement answer.", { supersedes: FIRST, order: 1 });
+      fireEvent.change(oldTitle, { target: { value: "Stale rename" } });
+    });
+    expect(getMeta(first).title).toBe("Original question");
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.value).toBe("Replacement question");
+    expect(title.readOnly).toBe(false);
+    const connection = room(roomForDoc(WORKSPACE, CURRENT));
+    Object.defineProperty(connection, "status", { value: { ...LIVE, writable: false } });
+    await act(async () => fireEvent.change(title, { target: { value: "Rename after refusal before render" } }));
+    expect(getMeta(connection.ydoc).title).toBe("Replacement question");
+  });
+
   it("shows live related topics as page chrome without acquiring record rooms or changing page content", async () => {
     story();
     const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
@@ -363,7 +452,7 @@ describe("decision topic navigation and history", () => {
   it("opens a superseded link at the current answer and keeps the named record reachable", async () => {
     story();
     const host = (await open()).container;
-    expect(within(host).getByRole("heading", { level: 1 }).textContent).toBe("Current topic title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current topic title");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(answer(host).textContent).toContain("Use the current answer.");
     expectAnswerState(host, "In force");
@@ -481,7 +570,7 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
     expect(host.querySelector(".ub-decision-rejection")?.textContent).toContain("It loses compatibility.");
     expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("Alex · 3 weeks ago");
-    expect(within(host).getByRole("heading", { level: 1 }).textContent).toBe("Current topic title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current topic title");
     await copy(host);
     expect(writeText).toHaveBeenLastCalledWith(`${window.location.origin}${rejectedPath}`);
     await choose(host, FIRST);
@@ -511,7 +600,7 @@ describe("decision topic navigation and history", () => {
     }));
     expect(selection(host)).toBe(NEXT);
     expect(answer(host).textContent).toContain("The newly approved answer.");
-    expect(within(host).getByRole("heading", { level: 1 }).textContent).toBe("New current title");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("New current title");
     expect(host.querySelector(".ub-decision-rfc")).toBeNull();
     expect(item(host, CURRENT).textContent).toContain("Linked record");
     expect(window.location.pathname).toBe(docPath(WORKSPACE, CURRENT));
@@ -849,7 +938,7 @@ describe("decision hydration never exposes editable content", () => {
     expect(bindings).not.toHaveLength(0);
     expect(bindings.every((editable) => !editable)).toBe(true);
     expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector("input.ub-title")).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-title")?.readOnly).toBe(false);
     expectAnswerState(host, "Not yet decided");
   });
 
@@ -863,12 +952,13 @@ describe("decision hydration never exposes editable content", () => {
     });
     const host = (await open()).container;
     expect(host.querySelector(".ProseMirror")).toBeNull();
+    expect(host.querySelector(".ub-title")).toBeNull();
     expect(bindings).toHaveLength(0);
     await act(async () => record(FIRST, "Directory before room", "open", "Arrived open answer."));
     expect(bindings).not.toHaveLength(0);
     expect(bindings.every((editable) => !editable)).toBe(true);
     expect(host.querySelector(".ProseMirror")?.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector("input.ub-title")).toBeNull();
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-title")?.readOnly).toBe(false);
     expect(answer(host).textContent).toContain("Arrived open answer.");
   });
 });

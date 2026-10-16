@@ -17,6 +17,7 @@ import {
   setTitle,
 } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
+import { DocumentTitle } from "./DocumentTitle.js";
 import { bindGuardedEditor } from "../../editor/guarded-binding.js";
 import { docLinkFromTarget } from "../../editor/doc-links.js";
 import type { DocLinkContext } from "../../editor/doc-links.js";
@@ -862,7 +863,7 @@ export function EditorPane({
   threadsOpen?: boolean;
   onToggleThreads?: (() => void) | undefined;
   syncDetails?: boolean;
-  /** Topic pages supply their own read-only title. */
+  /** Topic pages supply their current-record title. */
   header?: ReactNode;
   beforeAnswer?: ReactNode;
   afterAnswer?: ReactNode;
@@ -962,18 +963,14 @@ export function EditorPane({
             setTldrEditorRoom(null);
           }}
         />
-        {header ?? <input
-          className="ub-title"
+        {header ?? <DocumentTitle
           value={meta?.title ?? ""}
-          placeholder="Untitled"
-          // `readOnly`, not `disabled`: the title is still the document's name
-          // and still worth selecting and copying — it just cannot be retyped.
           readOnly={contentReadOnly || !writable}
           // Guard the live write too: a document may become a decision before
           // this readOnly render updates.
-          onChange={(event) => {
+          onChange={(value) => {
             if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
-            setTitle(connection.ydoc, event.target.value);
+            setTitle(connection.ydoc, value);
           }}
         />}
         {/* The editor draws only for a document that is here: `RoutePane` sends

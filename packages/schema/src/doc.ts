@@ -250,6 +250,10 @@ function readSupersedes(
 export function setTitle(ydoc: Y.Doc, title: string): void {
   const meta = getMetaMap(ydoc);
   ydoc.transact(() => {
+    // Freeze the old hash input before renaming; never re-approve answer content.
+    if (meta.get("kind") === "decision" && typeof meta.get("approvalTitle") !== "string") {
+      meta.set("approvalTitle", getMeta(ydoc).title);
+    }
     meta.set("title", title);
   });
 }

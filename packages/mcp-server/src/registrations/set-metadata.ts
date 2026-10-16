@@ -18,8 +18,8 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
       "Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create " +
       "RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. " +
       "Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null " +
-      "tldr with decision_tldr_unsupported; open records accept null. Decisions have no TL;DR; metadata returns tldr: null. Decided records refuse title/tldr/discussion; " +
-      "description/tags/links writable. See lifecycle's Decision answers and topics section for decision answer guidance. " +
+      "tldr with decision_tldr_unsupported; open records accept null. Decisions have no TL;DR; metadata returns tldr: null. Decided records refuse tldr/discussion; " +
+      "title/description/tags/links writable. Title renames preserve approval. See lifecycle's Decision answers and topics section. " +
       "Stub answerPreview uses the first answer paragraph/list; " +
       "get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived " +
       "documents refuse metadata; lifecycle uses set_status." +

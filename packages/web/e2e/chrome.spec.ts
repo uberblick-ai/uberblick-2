@@ -2345,7 +2345,7 @@ for (const scheme of ["light", "dark"] as const) {
       setKind(doc, "decision");
       setStatus(doc, "open");
       const badge = page.locator(".ub-doc-meta .ub-lifecycle-badge");
-      await expect(badge).toHaveText("Decision · open");
+      await expect(badge).toHaveText("Decision");
       await badge.scrollIntoViewIfNeeded();
       expect(oklab(await paintedIn(badge, "color")).chroma).toBeLessThan(accentChroma);
       expect(oklab(await paintedIn(badge, "border-top-color")).chroma).toBeLessThan(accentChroma);
@@ -3082,7 +3082,7 @@ test("decision archive and restore follow the whole topic and its first record",
     map.set(first, { ...(map.get(first) as object), deleted: true });
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-    await expect(page.locator("input.ub-title")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     expect(getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
     await page.getByRole("button", { name: "Restore", exact: true }).click();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
