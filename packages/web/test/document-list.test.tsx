@@ -36,6 +36,7 @@ import {
   listDirectory,
   pinDoc,
   readSidebar,
+  restoreDirectoryEntry,
   roomForDoc,
   sidebarRoom,
   settingsRoom,
@@ -46,7 +47,7 @@ import {
 } from "@uberblick/schema";
 import type { DirectoryEntry } from "@uberblick/schema";
 import { allPath, canonicalPath, parseRoute } from "../src/ui/route.js";
-import { DocumentList, sortDirectory } from "../src/shell/DocumentList.js";
+import { DocumentList, INITIAL_DOCUMENT_LIST_STATE, sortDirectory } from "../src/shell/DocumentList.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { formatTimestamp } from "../src/ui/timestamps.js";
 import * as config from "../src/config.js";
@@ -227,6 +228,84 @@ async function traverseHistory(direction: "back" | "forward"): Promise<void> {
 function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry {
   return { title: "", tags: [], ...over };
 }
+
+describe("the All documents count", () => {
+  function countLine(host: HTMLElement): string | null | undefined {
+    return within(host).getByRole("heading", { name: "All documents" }).nextElementSibling?.textContent;
+  }
+
+  it("counts live regular documents and follows create, archive and restore", async () => {
+    const peer = peerOf(directoryDoc());
+    upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
+    upsertDirectoryEntry(peer, { uuid: TWO, title: "Cache choice", kind: "decision", status: "open" });
+    upsertDirectoryEntry(peer, { uuid: GONE, title: "Archived" });
+    tombstoneDirectoryEntry(peer, GONE);
+    const host = await openApp(allPath(WORKSPACE));
+    expect(countLine(host)).toBe("1 document");
+
+    await act(async () => upsertDirectoryEntry(peer, { uuid: THREE, title: "New document" }));
+    expect(countLine(host)).toBe("2 documents");
+    await act(async () => tombstoneDirectoryEntry(peer, ONE));
+    expect(countLine(host)).toBe("1 document");
+    await act(async () => restoreDirectoryEntry(peer, ONE));
+    expect(countLine(host)).toBe("2 documents");
+    await act(async () => {
+      tombstoneDirectoryEntry(peer, ONE);
+      tombstoneDirectoryEntry(peer, THREE);
+    });
+    expect(countLine(host)).toBe("0 documents");
+  });
+
+  it("keeps the workspace count when search, type, tag and state filters change", async () => {
+    const entries = [
+      entry({ uuid: ONE, title: "Overview" }),
+      entry({ uuid: TWO, title: "Editing" }),
+      entry({ uuid: THREE, title: "Cache choice", kind: "decision", status: "open" }),
+    ];
+    const props = {
+      connection: room(directoryRoom(WORKSPACE)), entries, groups: [],
+      searchClient: { search: async () => [ONE, THREE] },
+      onSelect: () => {}, onTogglePin: null,
+    };
+    const host = await mount(<DocumentList {...props} />);
+    expect(countLine(host)).toBe("2 documents");
+    await act(async () => typeInto(filter(host), "overview"));
+    expect(rowTitles(host)).toEqual(["Overview"]);
+    expect(countLine(host)).toBe("2 documents");
+    await act(async () => within(host).getByRole("button", { name: "Decisions" }).click());
+    expect(rowTitles(host)).toEqual(["Cache choice"]);
+    expect(countLine(host)).toBe("2 documents");
+    await act(async () => mounted?.rerender(<DocumentList {...props} state={{
+      ...INITIAL_DOCUMENT_LIST_STATE, mode: "decision", stateFilter: "conflict", selectedTags: ["missing-tag"],
+    }} />));
+    expect(rowTitles(host)).toEqual([]);
+    expect(countLine(host)).toBe("2 documents");
+  });
+
+  it("shows no number until directory state arrives and keeps it after disconnect", async () => {
+    const waiting = { ...LIVE, connected: false, synced: false, hasReceivedServerState: false, hasAnswered: false };
+    let publishStatus = (_next: RoomStatus): void => {};
+    const connection = {
+      ...room(directoryRoom(WORKSPACE)), status: waiting,
+      onStatusChange: (listener: (next: RoomStatus) => void) => {
+        publishStatus = listener;
+        listener(waiting);
+        return () => {};
+      },
+    } as unknown as RoomConnection;
+    const host = await mount(<DocumentList
+      connection={connection} entries={[entry({ uuid: ONE, title: "Overview" })]} groups={[]}
+      searchClient={{ search: async () => [] }} onSelect={() => {}} onTogglePin={null}
+    />);
+    expect(countLine(host)).toBe("");
+    await act(async () => publishStatus({ ...waiting, hasAnswered: true, storeRefused: true }));
+    expect(countLine(host)).toBe("");
+    await act(async () => publishStatus(LIVE));
+    expect(countLine(host)).toBe("1 document");
+    await act(async () => publishStatus({ ...LIVE, connected: false, synced: false }));
+    expect(countLine(host)).toBe("1 document");
+  });
+});
 
 describe("the shared timestamp rule", () => {
   const NOW = Date.UTC(2026, 7, 27, 12);

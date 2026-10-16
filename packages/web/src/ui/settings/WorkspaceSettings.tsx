@@ -79,9 +79,9 @@ function GeneralSettings({
   const documents = directoryReceived ? listDirectory(connection.ydoc).length : null;
 
   return (
-    <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
-      <div className="mx-auto w-full max-w-3xl">
-        <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
+    <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
+      <div className="ub-column">
+        <h1 id="ub-settings-title" className="ub-title">
           General
         </h1>
         <WorkspaceNameForm key={workspace.uuid} workspace={workspace} connection={catalogConnection} />
@@ -327,9 +327,9 @@ function TagSettings({
 
   if (!seeded) {
     return (
-      <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
-        <div className="mx-auto w-full max-w-3xl">
-          <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
+      <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
+        <div className="ub-column">
+          <h1 id="ub-settings-title" className="ub-title">
             Tags
           </h1>
           <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
@@ -418,9 +418,9 @@ function TagSettings({
   );
 
   return (
-    <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
-      <div className="mx-auto w-full max-w-3xl">
-        <h1 id="ub-settings-title" className="mt-0 mb-4 ub-type-h2 font-medium">
+    <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
+      <div className="ub-column">
+        <h1 id="ub-settings-title" className="ub-title">
           Tags
         </h1>
         <div className="flex flex-col gap-4 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
