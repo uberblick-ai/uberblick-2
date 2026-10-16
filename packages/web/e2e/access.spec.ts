@@ -16,24 +16,17 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   const access = harness().access;
   if (access === undefined) throw new Error("Access fixture is missing");
   const page = await openApp(browser, `/${harness().workspace}/settings`);
-  await page.getByRole("button", { name: "Access", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Members", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Members", exact: true })).toBeVisible();
   await expect(page.getByText("You are an admin of this workspace.", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Add a member", level: 2, exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Workspace access", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Refresh/ })).toHaveCount(0);
   const members = page.getByRole("table", { name: "Members", exact: true });
-  const devices = page.getByRole("table", { name: "Your devices", exact: true });
   await expect(members.getByRole("rowheader").filter({ hasText: "browser-person" })).toBeVisible();
   await expect(members.getByRole("row").filter({ hasText: "browser-person" }).getByText("you", { exact: true })).toBeVisible();
   await expect(members.getByRole("columnheader")).toHaveText(["Account", "Role", "Actions"]);
-  await expect(devices.getByText("This computer", { exact: true })).toBeVisible();
-  await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(2);
-  await expect(devices.getByText(access.otherDeviceId, { exact: true })).toHaveCount(0);
-  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toBeVisible();
-  await expect(devices.getByText(access.foreignDeviceId, { exact: true })).toHaveCount(0);
-  await expect(devices.getByText("private-foreign-device", { exact: true })).toHaveCount(0);
-  for (const button of await devices.getByRole("button").all()) await expect(button).toHaveText("Revoke device");
+  await expect(page.getByRole("table", { name: "Devices", exact: true })).toHaveCount(0);
 
   for (const handle of ["@octocat", "https://github.com/octocat", "octo cat"]) {
     await page.getByLabel("GitHub handle", { exact: true }).fill(handle);
@@ -93,47 +86,61 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(page.getByRole("alert")).toHaveText("The hub refused this change: the last admin cannot be removed or demoted.");
   await expect(members.getByRole("rowheader").filter({ hasText: "browser-person" })).toBeVisible();
 
-  const otherDevice = access.otherDeviceId;
-  const otherTrigger = page.getByRole("button", { name: `Revoke device ${otherDevice}`, exact: true });
-  await expect(otherTrigger).toHaveText("Revoke device");
+  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  const devices = page.getByRole("table", { name: "Devices", exact: true });
+  await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+  await expect(page.getByText(`Computers signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
+  await expect(devices.getByRole("columnheader")).toHaveText(["Device", "Signed in", "Revoke"]);
+  await expect(devices.getByText("This computer", { exact: true })).toBeVisible();
+  await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(2);
+  await expect(devices.getByText(access.legacyDeviceId.slice(0, 8), { exact: true })).toBeVisible();
+  await expect(devices.getByText("Unnamed device", { exact: true })).toBeVisible();
+  await expect(devices.getByText("private-foreign-device", { exact: true })).toHaveCount(0);
+  await expect(devices.locator("time").first()).toHaveText(/just now|ago/);
+  await expect(devices.locator("time").first()).toHaveAttribute("title", /.+/);
+  const otherTrigger = devices.getByRole("button", { name: `Revoke ${access.deviceName} (${access.otherDeviceId})`, exact: true });
+  await expect(otherTrigger).toHaveText("Revoke");
   await otherTrigger.click();
-  const revoke = page.getByRole("alertdialog", { name: "Revoke device?", exact: true });
+  const revoke = page.getByRole("alertdialog", { name: `Revoke ${access.deviceName}?`, exact: true });
   await expect(revoke).toContainText(/one device of yours/);
   await expect(revoke).toContainText(/Documents already downloaded stay/);
-  await revoke.getByRole("button", { name: "Revoke device", exact: true }).click();
+  await revoke.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(otherTrigger).toHaveCount(0);
   await expect(devices.getByRole("rowheader").filter({ hasText: access.deviceName })).toHaveCount(1);
-  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toBeVisible();
+  await expect(devices.getByText(access.legacyDeviceId.slice(0, 8), { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: `Revoke device ${access.legacyDeviceId}`, exact: true }).click();
-  await page.getByRole("alertdialog", { name: "Revoke device?", exact: true })
-    .getByRole("button", { name: "Revoke device", exact: true }).click();
-  await expect(devices.getByText(access.legacyDeviceId, { exact: true })).toHaveCount(0);
+  await devices.getByRole("button", { name: `Revoke Unnamed device (${access.legacyDeviceId})`, exact: true }).click();
+  await page.getByRole("alertdialog", { name: `Revoke Unnamed device (${access.legacyDeviceId.slice(0, 8)})?`, exact: true })
+    .getByRole("button", { name: "Revoke", exact: true }).click();
+  await expect(devices.getByText(access.legacyDeviceId.slice(0, 8), { exact: true })).toHaveCount(0);
 
   // The current-device acknowledgement survives the refused follow-up reads.
   const current = devices.getByRole("row").filter({ hasText: "This computer" });
   await current.getByRole("button").click();
   const currentRevoke = page.getByRole("alertdialog", { name: "Revoke this computer?", exact: true });
   await expect(currentRevoke).toContainText(/ub auth login/);
-  await currentRevoke.getByRole("button", { name: "Revoke device", exact: true }).click();
+  await currentRevoke.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(page.getByText(/sync with the hub stops/i)).toBeVisible();
   await expect(page.getByText(/Sign-in is required/).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Add as member", exact: true })).toHaveCount(0);
 });
 
-test("a lost hub offers no management and each visit reads the hub again", async ({ browser }) => {
-  const page = await openApp(browser, `/${harness().workspace}/settings/access`);
+test("a lost hub refuses a role change and redirects on reload until authority returns", async ({ browser }) => {
+  const page = await openApp(browser, `/${harness().workspace}/settings/members`);
   await expect(page.getByRole("table", { name: "Members", exact: true })).toBeVisible();
   await harness().stopHub();
   await page.getByLabel("Role for other-admin", { exact: true }).selectOption("member");
   await expect(page.getByText(/hub cannot be reached/i).first()).toBeVisible();
   await expect(page.getByRole("table", { name: "Members", exact: true })).toHaveCount(0);
   await expect(roleToast(page)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+  await expect(page.getByRole("table", { name: "Members", exact: true })).toHaveCount(0);
+  await expect(roleToast(page)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Look up", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Refresh/ })).toHaveCount(0);
-  await page.getByRole("button", { name: "General", exact: true }).click();
   await harness().startHub();
-  await page.getByRole("button", { name: "Access", exact: true }).click();
+  await page.goto(new URL(`/${harness().workspace}/settings/members`, harness().appUrl).href);
   await expect(page.getByRole("table", { name: "Members", exact: true })).toBeVisible();
   await expect(page.getByLabel("Role for other-admin", { exact: true })).toHaveValue("admin");
 });
@@ -146,7 +153,7 @@ for (const profile of [
   test(`member controls work with ${profile.name}`, { tag: profile.touch ? "@webkit-touch" : [] }, async ({ browser }, info) => {
     test.setTimeout(120_000);
     for (const colorScheme of ["light", "dark"] as const) {
-      const page = await openApp(browser, `/${harness().workspace}/settings/access`, {
+      const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
         contextOptions: {
           ...(profile.touch ? devices["iPad (gen 7)"] : { hasTouch: false, isMobile: false }),
           viewport: { width: profile.width, height: 1080 }, colorScheme, reducedMotion: "reduce",
@@ -208,6 +215,7 @@ for (const profile of [
       }
       await expect.poll(() => pending !== undefined).toBe(true);
       await expect(role).toBeDisabled();
+      await expect(role).toHaveValue("admin");
       await expect(handle).toBeDisabled();
       await expect(lookUp).toBeDisabled();
       for (const trigger of await members.getByRole("button").all()) await expect(trigger).toBeDisabled();

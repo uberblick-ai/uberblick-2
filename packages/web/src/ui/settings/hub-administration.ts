@@ -19,28 +19,31 @@ function boundWorkspace(serving: LocalServing | null): string | null {
   catch { return null; }
 }
 
-export function useHubAdministration(workspace: string | null, serving: LocalServing | null,
-  subject: string, path: string): HubAdministration {
+/** Independent live readings share lifecycle mechanics, never permission results. */
+export function useAccessReading(workspace: string | null, serving: LocalServing | null,
+  subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices"): HubAdministration {
   const available = workspace !== null && boundWorkspace(serving) === workspace;
+  const binding = serving?.remoteHubUrl;
   const client = useMemo(() => available && workspace !== null
-    ? createWorkspaceAccessClient(workspace, subject) : null, [available, subject, workspace]);
+    ? { send: createWorkspaceAccessClient(workspace, subject), binding } : null, [available, binding, subject, workspace]);
   const revision = useRef(0);
   const [answer, setAnswer] = useState<{ client: NonNullable<typeof client>; authority: AccessAnswer } | null>(null);
   const request = useCallback(async (action: AccessAction, signal: AbortSignal): Promise<AccessAnswer> => {
+    if (action.operation !== operation) revision.current += 1;
     let result: AccessAnswer;
-    try { result = client === null ? { status: "local-only", hub: null } : await client(action, signal); }
+    try { result = client === null ? { status: "local-only", hub: null } : await client.send(action, signal); }
     catch { result = { status: "hub-down", hub: null }; }
-    if (!signal.aborted && client !== null && action.operation !== "own-hub-role" &&
+    if (action.operation !== operation) revision.current += 1;
+    if (!signal.aborted && client !== null && action.operation !== operation &&
       result.status !== "ok" && ["forbidden", "sign-in-required", "local-only"].includes(result.status)) {
-      revision.current += 1;
       setAnswer({ client, authority: result });
     }
     return result;
-  }, [client]);
+  }, [client, operation]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Navigation rereads current hub authority even when the bound client stays the same.
   useEffect(() => {
-    if (client === null) return;
+    if (client === null || workspace === null) return;
     let active = true;
     let controller: AbortController | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -62,9 +65,16 @@ export function useHubAdministration(workspace: string | null, serving: LocalSer
             resolve({ status: "hub-down", hub: null });
           }, SERVING_STATUS_TIMEOUT_MS);
         });
-        authority = await Promise.race([request({ operation: "own-hub-role" }, signal), expired]);
+        const action: AccessAction = operation === "own-role"
+          ? { operation, workspaceId: workspace } : { operation };
+        authority = await Promise.race([request(action, signal), expired]);
       } finally { if (timeout !== undefined) clearTimeout(timeout); }
-      if (active && (!signal.aborted || timedOut) && revision.current === currentRevision) setAnswer({ client, authority });
+      if (active && (!signal.aborted || timedOut) && revision.current === currentRevision) {
+        // A later outage cannot make a known revoked login signed in again.
+        setAnswer(previous => ({ client, authority: operation === "list-devices" && authority.status !== "ok" &&
+          previous?.client === client && ["sign-in-required", "forbidden"].includes(previous.authority.status)
+          ? previous.authority : authority }));
+      }
       if (active && controller === currentController) timer = setTimeout(() => { void read(); }, SERVING_STATUS_POLL_MS);
     };
     const onFocus = (): void => { void read(); };
@@ -79,9 +89,14 @@ export function useHubAdministration(workspace: string | null, serving: LocalSer
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [client, path, request]);
+  }, [client, operation, path, request, workspace]);
 
   const authority: AccessAnswer | null = client === null ? { status: "local-only", hub: null }
     : answer?.client === client ? answer.authority : null;
   return { authority, admin: authority?.status === "ok" && authority.role === "admin", request };
+}
+
+export function useHubAdministration(workspace: string | null, serving: LocalServing | null,
+  subject: string, path: string): HubAdministration {
+  return useAccessReading(workspace, serving, subject, path, "own-hub-role");
 }

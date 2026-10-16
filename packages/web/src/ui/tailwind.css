@@ -29,6 +29,8 @@
 @source "./settings/WorkspaceSettings.tsx";
 @source "./settings/AccessSettings.tsx";
 @source "./settings/HubSettings.tsx";
+@source "./settings/PreferencesSettings.tsx";
+@source "./settings/DevicesSettings.tsx";
 @source "./sidebar/WorkspaceSwitcher.tsx";
 @source "./sidebar/UserMenu.tsx";
 @source "./document/OutlinePane.tsx";

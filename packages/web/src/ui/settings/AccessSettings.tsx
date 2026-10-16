@@ -5,13 +5,12 @@ import type { LocalServing } from "../../config.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { notifyTransient } from "../../notifications.js";
 import { createWorkspaceAccessClient } from "../../shell/workspace-access.js";
-import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../../shell/workspace-access.js";
+import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../../shell/workspace-access.js";
 import type { Workspace } from "../route.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle, AlertDialogTrigger } from "../shadcn/alert-dialog.js";
 
-const CARD = "flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground";
 const CELL = "border-b border-(--border) px-2 py-3 text-left last:border-b-0";
 const SELECT = "min-h-9 [@media(any-pointer:coarse)]:min-h-11 rounded-(--radius-sm) border border-input bg-card px-2 ub-type-ui";
 const ROW_ACTION = "min-h-8 [@media(any-pointer:coarse)]:min-h-11 cursor-pointer rounded-(--radius-sm) border-0 bg-transparent px-2 font-[inherit] ub-type-ui text-muted-foreground hover:enabled:bg-accent hover:enabled:text-foreground disabled:opacity-50";
@@ -32,7 +31,6 @@ function failure(status: string, hub: string | null): string {
     case "last-admin": return "The hub refused this change: the last admin cannot be removed or demoted.";
     case "account-not-found": return "No such GitHub account. Check the handle and look it up again.";
     case "lookup-unavailable": return "GitHub account lookup is unavailable. Retry the lookup; no access was granted.";
-    case "device-not-found": return "The hub refused this change: that device is no longer signed in. Refresh the list.";
     case "member-not-found": return "The hub refused this change: that account is no longer a member.";
     case "credential-store":
     case "credential-store-refused":
@@ -75,11 +73,13 @@ function MemberRow({ member, current, disabled, change, remove }: {
   member: AccessMember; current: boolean; disabled: boolean;
   change: (member: AccessMember, role: AccessRole) => void; remove: (member: AccessMember) => void;
 }): ReactElement {
+  const [role, setRole] = useState(member.role);
+  useEffect(() => setRole(member.role), [member]);
   return <tr>
     <th className={`${CELL} font-normal wrap-anywhere`} scope="row">{member.githubUsername}{current && <span className="ub-muted ml-2">you</span>}</th>
     <td className={CELL}>
-      <RoleSelect label={`Role for ${member.githubUsername}`} value={member.role} onChange={(role) => {
-        if (role !== member.role) change(member, role);
+      <RoleSelect label={`Role for ${member.githubUsername}`} value={role} onChange={(next) => {
+        if (next !== member.role) { setRole(next); change(member, next); }
       }} disabled={disabled} />
     </td>
     <td className={CELL}>
@@ -100,7 +100,6 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
   const client = useMemo(() => createWorkspaceAccessClient(workspace.uuid, subject), [workspace.uuid, subject]);
   const lifetime = useRef<AbortController | null>(null);
   const [ownRole, setOwnRole] = useState<AccessAnswer | null>(null);
-  const [devices, setDevices] = useState<AccessAnswer | null>(null);
   const [members, setMembers] = useState<AccessAnswer | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -114,13 +113,9 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
   }, [client]);
   const refresh = useCallback(async (signal: AbortSignal): Promise<void> => {
     setLoading(true);
-    // Neither workspace membership nor a failed role read controls own devices.
-    const [role, ownDevices] = await Promise.all([
-      request({ operation: "own-role", workspaceId: workspace.uuid }, signal),
-      request({ operation: "list-devices" }, signal),
-    ]);
+    const role = await request({ operation: "own-role", workspaceId: workspace.uuid }, signal);
     if (signal.aborted) return;
-    setOwnRole(role); setDevices(ownDevices); setMembers(null); setResolved(null);
+    setOwnRole(role); setMembers(null); setResolved(null);
     if (role.status === "ok" && role.role === "admin") {
       const list = await request({ operation: "list-members", workspaceId: workspace.uuid }, signal);
       if (signal.aborted) return;
@@ -132,16 +127,14 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
   useEffect(() => {
     const controller = new AbortController(); lifetime.current = controller;
     setBusy(false);
-    setOwnRole(null); setDevices(null); setMembers(null); setResolved(null);
+    setOwnRole(null); setMembers(null); setResolved(null);
     if (available) void refresh(controller.signal);
     else setLoading(false);
     return () => { controller.abort(); lifetime.current = null; };
   }, [available, refresh]);
 
-  const hub = ownRole?.hub ?? devices?.hub ?? null;
   const admin = ownRole?.status === "ok" && ownRole.role === "admin";
   const membershipReady = admin && members?.status === "ok" && !loading && !busy;
-  const devicesReady = devices?.status === "ok" && !loading && !busy;
 
   const mutate = async (action: AccessAction, success: string): Promise<void> => {
     const signal = lifetime.current?.signal;
@@ -155,11 +148,10 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
       ? `${result.member.githubUsername} is already a member as ${roleName(result.member.role)}.`
       : applied ? `${success}${result.status === "closure-failed" ? " The change was applied; the hub could not close every active connection." : ""}`
       : failure(result.status, result.hub);
-    // An acknowledged self-removal or revocation stays acknowledged even when
-    // its fresh read loses membership or this computer's credential.
+    // An acknowledged self-removal stays acknowledged when its fresh read
+    // loses workspace membership.
     if (action.operation === "change-role" && applied) {
       notifyTransient({ key: "workspace-role", message: "Role changed", severity: "success" });
-      if (result.status === "closure-failed") setFeedback({ applied, text });
     } else setFeedback({ applied, text });
     await refresh(signal);
     if (!signal.aborted) setBusy(false);
@@ -184,16 +176,11 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
   };
 
   const existing = resolved === null ? undefined : members?.members?.find((member) => member.githubAccountId === resolved.githubAccountId);
-  const revoke = (device: AccessDevice): void => {
-    void mutate({ operation: "revoke-device", deviceId: device.deviceId }, device.current
-      ? `This computer was revoked. Its sync with the hub stops until ub auth login ${hub ?? "<hub>"} is run again. Documents already downloaded stay where they are.`
-      : "Device revoked. Documents already downloaded stay where they are.");
-  };
 
   return <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
     <div className="ub-column gap-4">
       <div className="ub-page-header">
-        <h1 id="ub-settings-title" className="ub-title">Access</h1>
+        <h1 id="ub-settings-title" className="ub-title">Members</h1>
         {!available ? <p className="m-0 ub-type-small" role="status">{serving?.rebound
           ? "This project's workspace binding changed. Restart ub open to manage access."
           : "Manage access from this workspace's locally served page. Run ub open in its project."}</p>
@@ -237,22 +224,6 @@ export function AccessSettings({ workspace, serving, subject, verifiedHandle }: 
             </section>
           </>}
         </>}
-        {devices !== null && devices.status !== "local-only" &&
-          !(devices.status !== "ok" && devices.status === ownRole?.status && devices.hub === ownRole.hub) &&
-          <section className={CARD} aria-labelledby="ub-devices-title">
-          <h2 id="ub-devices-title" className="m-0 ub-type-h2 font-semibold">Your devices</h2>
-          {devices.status !== "ok" ? <p className="m-0 ub-type-ui" role="alert">{failure(devices.status, devices.hub)}</p> :
-            devices.devices?.length === 0 ? <p className="m-0 ub-type-ui">No signed-in devices.</p> : <div className="overflow-x-auto"><table className="w-full border-collapse" aria-label="Your devices">
-              <thead><tr><th className={`${CELL} ub-type-ui`} scope="col">Device</th><th className={`${CELL} ub-type-ui`} scope="col">Signed in</th><th className={`${CELL} ub-type-ui`} scope="col">Actions</th></tr></thead>
-              <tbody>{devices.devices?.map((device) => <tr key={device.deviceId}>
-                <th className={`${CELL} max-w-56 wrap-anywhere`} scope="row">{device.deviceName ?? device.deviceId}{device.current && <span className="mt-1 block font-normal">This computer</span>}</th>
-                <td className={CELL}><time dateTime={new Date(device.signedInAt).toISOString()}>{new Date(device.signedInAt).toLocaleString()}</time></td>
-                <td className={CELL}><ConfirmAction trigger="Revoke device" triggerLabel={`Revoke device ${device.deviceId}`} title={device.current ? "Revoke this computer?" : "Revoke device?"}
-                  description={`This one device of yours loses access to this hub. Documents already downloaded stay where they are.${device.current ? ` This computer's sync with the hub stops until ub auth login ${hub ?? "<hub>"} is run again.` : ""}`}
-                  action="Revoke device" disabled={!devicesReady} onConfirm={() => revoke(device)} /></td>
-              </tr>)}</tbody>
-            </table></div>}
-        </section>}
       </>}
     </div>
   </section>;

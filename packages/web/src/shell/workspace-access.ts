@@ -3,6 +3,7 @@ import { mintHubAuthMessage } from "../collab/rooms.js";
 import type { RequestAction } from "@uberblick/schema/token";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { validateWorkspaceName } from "@uberblick/schema";
+import { isGithubUsername } from "@uberblick/schema/github-identity";
 
 export type AccessAction = Exclude<RequestAction, { operation: "renew-credential" | "promote-workspace" }>;
 export type AccessRole = "member" | "admin";
@@ -43,6 +44,7 @@ export interface AccessAnswer {
   member?: AccessMember;
   members?: AccessMember[];
   devices?: AccessDevice[];
+  handle?: string;
   admins?: HubAdmin[];
   workspaces?: HubWorkspace[];
   workspaceId?: string;
@@ -149,7 +151,8 @@ function answer(value: unknown, action: AccessAction): AccessAnswer {
       parsed.members = body.members.map(member);
       break;
     case "list-devices":
-      if (!Array.isArray(body.devices)) throw new Error("Invalid access answer");
+      if (!Array.isArray(body.devices) || !isGithubUsername(body.handle)) throw new Error("Invalid access answer");
+      parsed.handle = body.handle;
       parsed.devices = body.devices.map((value) => {
         const device = object(value);
         if (device === null || typeof device.deviceId !== "string" ||

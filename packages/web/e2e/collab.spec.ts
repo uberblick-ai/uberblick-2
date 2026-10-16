@@ -340,11 +340,12 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // Awareness only carries a cursor while that editor has focus, so A's caret
   // has to be in the block for there to be anything to render.
   await a.getByTestId("account-menu").click();
+  await a.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   const name = await a.getByRole("textbox", { name: "Presence name", exact: true }).inputValue();
   const color = await a.locator('.ub-swatch[aria-pressed="true"]').evaluate(
     (element) => getComputedStyle(element).backgroundColor,
   );
-  await a.keyboard.press("Escape");
+  await a.goBack();
   await placeCaret(a);
   // Only the peer's cursor is ever decorated; a client never renders its own.
   const label = b.locator(".ub-editor .ProseMirror-yjs-cursor > div");
@@ -360,6 +361,7 @@ test("a peer's cursor renders in the other context with its name and colour", as
   // waits for a reconnect. The colour is read back off A's selected swatch, so this
   // asserts the two ends agree rather than pinning a hex.
   await a.getByTestId("account-menu").click();
+  await a.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   // Anything but the one it was dealt, which is random per tab.
   const dealt = await a
     .locator('.ub-swatch[aria-pressed="true"]')
@@ -372,8 +374,8 @@ test("a peer's cursor renders in the other context with its name and colour", as
   );
   expect(chosen).not.toBe(color);
   // Back into the block: awareness only carries a cursor while the editor has
-  // focus, and opening the panel took it.
-  await a.keyboard.press("Escape");
+  // focus, and opening Preferences took it.
+  await a.goBack();
   await placeCaret(a);
   await expect(label).toHaveCSS("background-color", chosen);
 });

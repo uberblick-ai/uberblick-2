@@ -600,10 +600,11 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
   const lightCanvas = await renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const lightInk = await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1));
   const lightTableInk = await renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
-  await page.getByTestId("account-menu").click();
-  await page.getByRole("button", { name: "Dark", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  // System appearance changes repaint the mounted chart and table without
+  // navigating away from either generated view.
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme", /.*/);
+  await page.emulateMedia({ colorScheme: "dark" });
+  expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(true);
   await expect.poll(() => renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL())).not.toBe(lightCanvas);
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1))).not.toBe(lightInk);
   await expect.poll(() => renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color)).not.toBe(lightTableInk);

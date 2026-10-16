@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from "vitest";
-import { createAccountClient } from "../src/shell/account.js";
+import { createAccountClient, createDeviceLoginClient } from "../src/shell/account.js";
 
 vi.mock("../src/collab/rooms.js", () => ({
   mintHubAuthMessage: vi.fn(async () => "browser-key-proof"),
@@ -14,6 +14,21 @@ function client(body: unknown, status = 200) {
 }
 
 describe("the served account answer", () => {
+  it("reads stored login state through its protected local route with the same safe projection", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ state: "signed-in", handle: "octocat", credential: "private", identity: "private" }));
+    const read = createDeviceLoginClient("workspace", "presence-name", fetchImpl as typeof fetch);
+    const signal = new AbortController().signal;
+    await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat" });
+    expect(fetchImpl).toHaveBeenCalledWith("/api/device-login", expect.objectContaining({
+      cache: "no-store", redirect: "error", signal,
+      headers: { Accept: "application/json", Authorization: "Bearer browser-key-proof" },
+    }));
+    fetchImpl.mockResolvedValueOnce(Response.json({ state: "unavailable", handle: "stale-person" }));
+    await expect(read(signal)).resolves.toEqual({ state: "unavailable" });
+    fetchImpl.mockResolvedValueOnce(Response.json({ state: "signed-in", handle: "bad handle" }));
+    await expect(read(signal)).rejects.toThrow("Invalid account answer");
+  });
+
   it("uses the browser proof and projects only a verified handle", async () => {
     const { read, fetchImpl } = client({ state: "signed-in", handle: "octocat", credential: "ignored" });
     const signal = new AbortController().signal;

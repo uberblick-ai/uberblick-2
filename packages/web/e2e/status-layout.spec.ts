@@ -330,7 +330,7 @@ for (const upstream of [true, false]) {
             await showList.focus();
             await waiting.keyboard.press("Enter");
           }
-          await waiting.getByRole("button", { name: "Workspace settings", exact: true }).click();
+          await waiting.getByRole("button", { name: "Settings", exact: true }).click();
           await expect(waiting.locator(".ub-status")).toHaveCount(0);
           await expect(waiting.locator("[data-sonner-toast]")).toHaveCount(0);
           expect(await waiting.evaluate(() => performance.timeOrigin)).toBe(pageInstance);

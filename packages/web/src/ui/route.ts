@@ -19,7 +19,7 @@ export interface Workspace {
 }
 
 /** The destinations inside workspace settings. */
-export type SettingsPage = "general" | "tags" | "access" | "hub-admins" | "hub-workspaces";
+export type SettingsPage = "general" | "tags" | "members" | "preferences" | "devices" | "hub-admins" | "hub-workspaces";
 
 /**
  * Invalid describes link syntax, never an unseen valid document UUID.
@@ -45,7 +45,7 @@ export const SETTINGS_SEGMENT = "settings";
 
 /** Child addresses inside workspace settings. */
 export const TAG_SETTINGS_SEGMENT = "tags";
-export const ACCESS_SETTINGS_SEGMENT = "access";
+export const MEMBERS_SETTINGS_SEGMENT = "members";
 
 /**
  * Malformed percent escapes must return invalid-link state instead of
@@ -115,10 +115,8 @@ export function parseRoute(pathname: string, configured: string | null): Route {
     if (segments.length === 3 && page === TAG_SETTINGS_SEGMENT) {
       return { kind: "settings", workspace, page: "tags" };
     }
-    if (segments.length === 3 && page === ACCESS_SETTINGS_SEGMENT) {
-      return { kind: "settings", workspace, page: "access" };
-    }
-    if (segments.length === 3 && (page === "hub-admins" || page === "hub-workspaces")) {
+    if (segments.length === 3 && (page === MEMBERS_SETTINGS_SEGMENT || page === "preferences" ||
+      page === "devices" || page === "hub-admins" || page === "hub-workspaces")) {
       return { kind: "settings", workspace, page };
     }
     return {

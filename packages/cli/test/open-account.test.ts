@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestAccount } from "../src/open-account.js";
+import { requestAccount, requestDeviceLogin } from "../src/open-account.js";
 import { cleanUp, configured, configDir, WORKSPACE } from "./open-fixtures.js";
 
 const ORIGIN = "https://account-hub.example";
@@ -30,6 +30,34 @@ async function rig() {
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 
 describe("ub open: account projection", () => {
+  it("reads only the bound hub's stored public login without membership or a hub request", async () => {
+    const { box, stored, binding } = await rig();
+    const accountScoped = { ...stored, credential: { ...stored.credential, record: { ...stored.credential.record, workspaces: [] } } };
+    await writeHubLogin(ORIGIN, accountScoped, box.env);
+    const fetch = vi.spyOn(globalThis, "fetch");
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "account-person" });
+    expect(requestDeviceLogin({ ...binding, hubUrl: "https://another-hub.example" })).toEqual({ state: "signed-out" });
+    expect(requestDeviceLogin({ ...binding, hubUrl: null })).toEqual({ state: "signed-out" });
+    expect(requestDeviceLogin(binding, true)).toEqual({ state: "unavailable" });
+    await removeHubLogin(ORIGIN, box.env);
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-out" });
+    await writeHubLogin(ORIGIN, login("replacement-person"), box.env);
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "replacement-person" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("withholds the stored handle for refused, unreadable or invalid login records", async () => {
+    const { box, binding } = await rig();
+    const path = join(configDir(box), "credentials.json");
+    chmodSync(path, 0o644);
+    expect(requestDeviceLogin(binding)).toEqual({ state: "unavailable" });
+    chmodSync(path, 0o600);
+    writeFileSync(path, "{");
+    expect(requestDeviceLogin(binding)).toEqual({ state: "unavailable" });
+    writeFileSync(path, JSON.stringify({ hubLogins: { [ORIGIN]: login("bad handle") } }));
+    expect(requestDeviceLogin(binding)).toEqual({ state: "unavailable" });
+  });
+
   it("projects only the handle and state after a live bound-workspace check", async () => {
     const { stored, read } = await rig();
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", role: "admin",

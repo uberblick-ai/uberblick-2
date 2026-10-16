@@ -98,11 +98,15 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
     const header = element.querySelector<HTMLElement>('[data-slot="sidebar-header"]');
     const content = element.querySelector<HTMLElement>('[data-slot="sidebar-content"]');
     const footer = sidebar?.querySelector<HTMLElement>('[data-slot="sidebar-footer"]');
-    const settings = footer?.querySelector<HTMLElement>(".ub-settings-entry");
     const account = footer?.querySelector<HTMLElement>('[data-testid="account-menu"]');
     const hide = sidebar?.querySelector<HTMLElement>(".ub-sidebar-hide");
-    if (!sidebar || !header || !content || !footer || !settings || !account || !hide) {
+    if (!sidebar || !header || !content || !footer || !account || !hide) {
       throw new Error("e2e: incomplete sidebar frame");
+    }
+    const settings = footer.querySelector<HTMLElement>(".ub-settings-entry");
+    const settingsOpen = sidebar.dataset.mode === "settings";
+    if (settingsOpen ? settings !== null : settings === null) {
+      throw new Error("e2e: settings footer entry does not match the sidebar mode");
     }
     const box = (node: Element) => {
       const rect = node.getBoundingClientRect();
@@ -122,7 +126,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
         return rect.top < bounds.top || rect.bottom > bounds.bottom
           || rect.left < bounds.left || rect.right > bounds.right;
       }).map((control) => control.className);
-    return { header: box(header), content: box(content), footer: box(footer), settings: box(settings),
+    return { header: box(header), content: box(content), footer: box(footer), settings: settings === null ? null : box(settings),
       account: box(account), hide: hideBox, bounds, covered, outside, sidebarTop: sidebar.scrollTop,
       paneTop: element.scrollTop, contentTop: content.scrollTop };
   });
@@ -135,7 +139,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
   expect(before.hide.top).toBeGreaterThanOrEqual(before.header.top);
   expect(before.hide.bottom).toBeLessThanOrEqual(before.header.bottom);
   expect(before.content.bottom).toBeLessThanOrEqual(before.footer.top);
-  expect(before.settings.bottom).toBeLessThanOrEqual(before.account.top);
+  if (before.settings !== null) expect(before.settings.bottom).toBeLessThanOrEqual(before.account.top);
   expect(before.footer.bottom).toBeLessThanOrEqual(before.bounds.bottom);
   await activeContent(page).evaluate(async (content) => {
     content.scrollTop = content.scrollHeight;

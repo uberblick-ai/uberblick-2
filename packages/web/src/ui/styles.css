@@ -414,15 +414,12 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* Settings navigation labels retain their small-caps voice. */
 .ub-nav-label {
   margin: 0;
   padding: 0.25rem 0.4rem;
   font-size: var(--type-caption-size);
   line-height: var(--type-caption-leading);
   font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
   color: var(--sidebar-group-label);
 }
 
@@ -467,35 +464,12 @@ body {
   text-align: left;
 }
 
-.ub-user-panel {
-  display: grid;
-  gap: 0.6rem;
-}
-
-.ub-user-heading {
-  margin: 0;
-  font-weight: 500;
-}
-
 /* Remove the fieldset's UA box and minimum inline size. */
-.ub-panel-group,
 .ub-docs-mode-fieldset {
   margin: 0;
   padding: 0;
   border: 0;
   min-inline-size: 0;
-}
-
-.ub-panel-label,
-.ub-panel-fact dt {
-  color: var(--sidebar-muted-foreground);
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
-}
-
-.ub-panel-label {
-  padding: 0;
-  margin-bottom: 0.3rem;
 }
 
 /* Keep the eight presence choices in one equal-width row. */
@@ -526,27 +500,6 @@ body {
 
 .ub-appearance {
   gap: 0.25rem;
-}
-
-.ub-panel-facts {
-  display: grid;
-  gap: 0.2rem;
-  margin: 0;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--sidebar-border);
-}
-
-.ub-panel-fact {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.ub-panel-fact dd {
-  margin: 0;
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
 }
 
 .ub-group + .ub-group {

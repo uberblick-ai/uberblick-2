@@ -15,7 +15,7 @@ async function showSidebar(page: Page, settings = false): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280 && await drawer(page).count() === 0) {
     await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).click();
   }
-  await expect(page.locator(settings ? ".ub-settings-nav" : ".ub-document-sidebar")).toBeVisible();
+  await expect(page.locator(settings ? ".ub-settings-sidebar" : ".ub-document-sidebar")).toBeVisible();
 }
 
 async function addGroup(page: Page, name: string): Promise<void> {
@@ -102,7 +102,7 @@ for (const { coarse, width } of [
       };
       const create = page.getByRole("button", { name: "+ New page", exact: true });
       const allDocs = page.getByRole("button", { name: "All documents", exact: true });
-      const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
+      const settings = page.getByRole("button", { name: "Settings", exact: true });
       const add = page.getByRole("button", { name: "+ New group", exact: true });
       const dashboard = page.getByRole("button", { name: "Dashboard", exact: true });
       const headings = page.locator(".ub-group-toggle");
@@ -183,15 +183,15 @@ for (const { coarse, width } of [
       await activate(settings);
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
       await showSidebar(page, true);
-      const navigation = page.locator(".ub-settings-nav");
-      const entries = ["General", "Tags", "Access"].map((label) =>
+      const navigation = page.locator(".ub-settings-sidebar");
+      const entries = ["General", "Tags", "Members", "Preferences"].map((label) =>
         navigation.getByRole("button", { name: label, exact: true }));
       await expectNavigationGeometry(page, entries, coarse);
       await expect(navigation.getByRole("button", { name: "General", exact: true })).toHaveAttribute("aria-current", "page");
-      await activate(navigation.getByRole("button", { name: "Access", exact: true }));
-      await expect(page.getByRole("heading", { name: "Access", exact: true })).toBeVisible();
+      await activate(navigation.getByRole("button", { name: "Members", exact: true }));
+      await expect(page.getByRole("heading", { level: 1, name: "Members", exact: true })).toBeVisible();
       await showSidebar(page, true);
-      await expect(navigation.getByRole("button", { name: "Access", exact: true })).toHaveAttribute("aria-current", "page");
+      await expect(navigation.getByRole("button", { name: "Members", exact: true })).toHaveAttribute("aria-current", "page");
       await page.locator(".ub-settings-back").click();
       await showSidebar(page);
 

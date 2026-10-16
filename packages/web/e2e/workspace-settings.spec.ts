@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { activateControl, createDoc, setupHarness } from "./app-helpers.js";
 import { waitForAcknowledged } from "./settle.js";
 
-const { harness, openApp } = setupHarness();
+const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
 function value(page: Page, label: string): Locator {
   return page.locator("[data-settings-facts] > div").filter({
