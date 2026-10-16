@@ -94,7 +94,7 @@ export function OutlinePane({
       if (pane === null) return;
       const { top, width } = pane.getBoundingClientRect();
       setPaneWidth(width);
-      const title = pane.querySelector<HTMLElement>("[data-outline-title]");
+      const title = pane.querySelector<HTMLElement>(".ub-title");
       setTitleOffset(Math.max(0, (title?.getBoundingClientRect().top ?? top) - top));
       // Several short final sections can share the same clamped scroll position.
       if (

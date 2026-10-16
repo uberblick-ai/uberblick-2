@@ -71,7 +71,7 @@ it("tracks the editor pane when it replaces a waiting pane without changing head
   pane.getBoundingClientRect = () => new DOMRect(0, 100, 600, 400);
   Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 1000 } });
   const title = document.createElement("div");
-  title.dataset.outlineTitle = "";
+  title.className = "ub-title";
   title.getBoundingClientRect = () => new DOMRect(0, 150 - pane.scrollTop, 600, 40);
   const heading = document.createElement("h2");
   heading.id = headingId;

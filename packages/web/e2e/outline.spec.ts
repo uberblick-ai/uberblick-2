@@ -129,8 +129,10 @@ test("a threadless page has a full-column row that follows document scrolling", 
   expect(listMetrics.scrollHeight).toBeGreaterThan(listMetrics.clientHeight);
 
   await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect.poll(async () => (await panel.boundingBox())?.y)
-    .toBeCloseTo(((await trigger.boundingBox())?.y ?? 0) + ((await trigger.boundingBox())?.height ?? 0), 0);
+  await expect.poll(async () => {
+    const [list, row] = await Promise.all([panel.boundingBox(), trigger.boundingBox()]);
+    return list === null || row === null ? Number.POSITIVE_INFINITY : list.y - row.y - row.height;
+  }).toBeCloseTo(0, 0);
 
   const first = rows.first();
   const second = rows.nth(1);
