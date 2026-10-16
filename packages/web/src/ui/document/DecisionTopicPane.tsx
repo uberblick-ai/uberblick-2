@@ -15,8 +15,8 @@ function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate):
   navigate(event.currentTarget.pathname);
 }
 
-function DocumentReference({ uuid, label, context }: {
-  uuid: string; label?: string | undefined; context: DocLinkContext | null;
+function DocumentReference({ uuid, label, context, compact = false }: {
+  uuid: string; label?: string | undefined; context: DocLinkContext | null; compact?: boolean;
 }): ReactElement | null {
   if (context === null) return null;
   const link = context.lookup(uuid);
@@ -26,17 +26,10 @@ function DocumentReference({ uuid, label, context }: {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       context.open(uuid);
-    }}>{label ?? link.title ?? uuid}</a>;
-}
-
-function recordState(topic: DecisionTopicResolution, record: DirectoryEntry): string {
-  if (topic.conflicts.some((entry) => entry.uuid === record.uuid)) return "Conflicting answer";
-  if (topic.superseded.some((entry) => entry.uuid === record.uuid)) return "Superseded";
-  if (record.status === "rejected") return "Rejected";
-  if (record.status === "withdrawn") return "Withdrawn";
-  if (record.status === "open") return "Open proposal";
-  if (topic.inForce?.uuid === record.uuid) return record.agentStance ? "Agent stance" : "In force";
-  return "Decided";
+    }}>{compact ? <>
+      <span className="ub-decision-rfc-title">{label ?? link.title ?? uuid}</span>
+      {link.state === "archived" && <span className="ub-decision-archived">archived</span>}
+    </> : label ?? link.title ?? uuid}</a>;
 }
 
 const ANSWER_STATES = {
@@ -62,11 +55,22 @@ function answerState(topic: DecisionTopicResolution, record: DirectoryEntry): An
   return record.status ?? "decided";
 }
 
+function recordDate(record: DirectoryEntry): string | number | undefined {
+  return record.status === "open" || record.status === "withdrawn" || record.agentStance
+    ? record.createdAt : record.decidedAt;
+}
+
+function AnswerPill({ state, timeline = false }: { state: AnswerState; timeline?: boolean }): ReactElement {
+  return <span className={`ub-decision-answer-state${timeline ? " ub-decision-record-state" : ""}`} data-state={state}>
+    <span className="ub-decisions-mark" aria-hidden="true" /><span className="ub-decision-state-label">{ANSWER_STATES[state]}</span>
+  </span>;
+}
+
 function RecordedAttribution({ record, state, now }: {
   record: DirectoryEntry; state: AnswerState; now: number;
 }): ReactElement | null {
   const opened = record.status === "open" || record.status === "withdrawn";
-  const date = opened || record.agentStance ? record.createdAt : record.decidedAt;
+  const date = recordDate(record);
   const time = date === undefined ? null : formatTimestamp(date, now, true);
   const label = opened ? (time === null ? null : "Opened")
     : record.agentStance ? (state === "agent-stance" ? null : "Agent stance")
@@ -128,9 +132,7 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
     <div className="ub-decision-answer-header">
       <div className="ub-decision-answer-heading">
         <span className="ub-decision-answer-caption">ANSWER</span>
-        <span className="ub-decision-answer-state" data-state={state}>
-          <span className="ub-decisions-mark" aria-hidden="true" />{ANSWER_STATES[state]}
-        </span>
+        <AnswerPill state={state} />
       </div>
       <RecordedAttribution record={record} state={state} now={now} />
     </div>
@@ -143,32 +145,61 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
   </>;
 }
 
-function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks }: {
+function recordEvent(record: DirectoryEntry, inForce: boolean, now: number): string | null {
+  if (record.agentStance) return inForce ? null : "Agent stance, never confirmed";
+  if (!record.decidedBy?.trim()) return null;
+  if (record.status === "decided") return `${record.decidedBy} decided`;
+  if (record.status !== "rejected") return null;
+  const created = record.createdAt === undefined ? null : formatTimestamp(record.createdAt, now, true);
+  return `${record.decidedBy} rejected the proposal${created === null ? "" : ` from ${created.label}`}`;
+}
+
+function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks, directoryConnection }: {
   topic: DecisionTopicResolution; selected: string; linkedRecord: string | null;
   segment: string; navigate: Navigate; docLinks: DocLinkContext | null;
+  directoryConnection: RoomConnection | null;
 }): ReactElement {
   const now = useTimestampClock();
+  const records = topic.records.toReversed();
+  const inForceIndex = records.findIndex((record) => record.uuid === topic.inForce?.uuid);
   return <section className="ub-decision-history" aria-label="Decision history">
-    <h2>History</h2>
+    <h2>HISTORY</h2>
     <ol className="ub-decision-timeline">
-      {topic.records.map((record) => {
-        const date = record.status === "decided" || record.status === "rejected" ? record.decidedAt : record.createdAt;
+      {records.map((record, index) => {
+        const date = recordDate(record);
         const time = date === undefined ? null : formatTimestamp(date, now, true);
         const chosen = record.uuid === selected;
-        return <li key={record.uuid} data-record={record.uuid} data-selected={chosen}>
+        const state = answerState(topic, record);
+        const inForce = topic.inForce?.uuid === record.uuid;
+        const event = recordEvent(record, inForce, now);
+        const rfcTitle = !record.discussion || directoryConnection === null ? undefined
+          : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
+        return <li key={record.uuid} data-record={record.uuid} data-selected={chosen} data-state={state}
+          data-in-force={inForce} data-rail-green={inForceIndex >= 0 && index <= inForceIndex}>
           <a className="ub-decision-record" href={decisionRecordPath(segment, topic.topic, record.uuid)}
             aria-current={chosen ? "true" : undefined}
             onClick={(event) => navigateLink(event, navigate)}>
-            <span className="ub-decision-record-state">{recordState(topic, record)}</span>
-            {chosen && <span className="ub-decision-selection"> Selected</span>}
-            {linkedRecord === record.uuid && <span className="ub-decision-linked"> Linked record</span>}
-            {record.answerPreview && <span className="ub-decision-preview">{record.answerPreview}</span>}
-            <span className="ub-decision-record-meta">
+            <span className="ub-decision-record-date">
               {time !== null && <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}
-              {record.commentCount !== undefined && <span>{record.commentCount} {record.commentCount === 1 ? "comment" : "comments"}</span>}
             </span>
+            <span className="ub-decision-rail-dot" aria-hidden="true" />
+            <span className="ub-decision-record-line">
+              <AnswerPill state={state} timeline />
+              {event && <span className="ub-decision-event">{event}</span>}
+              {linkedRecord === record.uuid && <span className="ub-decision-linked">Linked record</span>}
+              {chosen && <span className="ub-decision-selection">viewing</span>}
+            </span>
+            {record.answerPreview && <span className="ub-decision-preview">{record.answerPreview}</span>}
+            {record.commentCount !== undefined && <span className="ub-decision-record-comments" role="img"
+              aria-label={`${record.commentCount} ${record.commentCount === 1 ? "comment" : "comments"}`}>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l-3 2V11.5a10 10 0 0 1 20 0Z" />
+              </svg>{record.commentCount}
+            </span>}
           </a>
-          {record.discussion && <DocumentReference uuid={record.discussion} label="Open RFC" context={docLinks} />}
+          {record.discussion && docLinks !== null && <span className="ub-decision-record-rfc">
+            <DocumentReference uuid={record.discussion} label={rfcTitle} context={docLinks} compact />
+          </span>}
         </li>;
       })}
     </ol>
@@ -206,7 +237,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
         <span>RFC</span>{" "}
         <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} />
       </p>}
-      <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} />
+      <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} directoryConnection={directoryConnection} />
     </>}
   />;
 }
