@@ -20,6 +20,7 @@ import {
   decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
+  getMeta,
   initDoc,
   isDirectoryEntryDeleted,
   readSidebar,
@@ -44,6 +45,7 @@ import {
 } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
+import { notifyTransient } from "../notifications.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
@@ -151,6 +153,8 @@ export function RoutePane({
   presence,
   endpoint = null,
   hubAcked,
+  rawHubAcked,
+  sampledAt,
   notSharedReason = null,
   meta,
   author,
@@ -197,6 +201,8 @@ export function RoutePane({
   endpoint?: HubEndpoint | null;
   /** `ub open`'s upstream reading; undefined when this page talks to a hub. */
   hubAcked?: boolean | null | undefined;
+  rawHubAcked?: boolean | null | undefined;
+  sampledAt?: number | null | undefined;
   notSharedReason?: NotSharedReason | null;
   /**
    * Null metadata means unread. Empty metadata earns the waiting screen only
@@ -305,6 +311,8 @@ export function RoutePane({
               presence={presence}
               endpoint={endpoint}
               hubAcked={hubAcked}
+              rawHubAcked={rawHubAcked}
+              sampledAt={sampledAt}
               notSharedReason={notSharedReason}
               onLastUpdatedChange={onLastUpdatedChange}
               syncDetails={syncDetails}
@@ -325,7 +333,7 @@ export function RoutePane({
 
   const editorProps: ComponentProps<typeof EditorPane> = {
     connection, segment: route.workspace.segment, presence, endpoint,
-    hubAcked, notSharedReason, author, catalogConnection, archived, updatedAt,
+    hubAcked, rawHubAcked, sampledAt, notSharedReason, author, catalogConnection, archived, updatedAt,
     onLastUpdatedChange, docLinks, pinned, onTogglePin, onArchive,
     onArchiveConfirmationFocusChange, focusRestore, onRestoreFocused, onRestore,
     onSelectThread, threads, threadsOpen, onToggleThreads, syncDetails,
@@ -599,6 +607,10 @@ export function App(): ReactElement {
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
+  const archiveUndoReleases = useRef(new Set<() => void>());
+  useEffect(() => () => {
+    for (const release of archiveUndoReleases.current) release();
+  }, []);
   // Read the selected stub directly while its directory observer catches up.
   const selectedDirectoryEntry =
     directory === null || selected === null
@@ -634,6 +646,7 @@ export function App(): ReactElement {
   const servingStatus = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? directory?.room ?? null,
+    chromeRoom ?? directory,
   );
   /**
    * The title retains departed agents exactly while their named editor
@@ -712,7 +725,42 @@ export function App(): ReactElement {
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     restoreFocusRoom.current = doc.room;
     archiveDocument(directory.ydoc, sidebar.ydoc, selected);
-  }, [directory, doc, sidebar, selected]);
+    const uuid = selected;
+    const title = getMeta(doc.ydoc).title || "Untitled";
+    const key = `archive:${directory.room}:${uuid}`;
+    // Keep the original directory alive while Undo is offered, including
+    // navigation to a document in another workspace.
+    const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
+    let closed = false;
+    const close = (): void => {
+      closed = true;
+      held.release();
+      archiveUndoReleases.current.delete(close);
+    };
+    archiveUndoReleases.current.add(close);
+    notifyTransient({
+      key,
+      message: `Archived “${title}”.`,
+      severity: "success",
+      onClose: close,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+          if (!held.connection.status.writable) {
+            notifyTransient({
+              key,
+              message: `“${title}” is still archived. Open its link and choose Restore when the connection is ready.`,
+              severity: "error",
+            });
+            return;
+          }
+          restoreFocusRoom.current = null;
+          restoreDirectoryEntry(held.connection.ydoc, uuid);
+        },
+      },
+    });
+  }, [directory, doc, sidebar, selected, defaultIdentity]);
 
   /**
    * Canonicalize the default route, trailing slash and document UUID case
@@ -1069,6 +1117,8 @@ export function App(): ReactElement {
               presence={titlePresence}
               endpoint={statusEndpoint}
               hubAcked={serving === null ? undefined : servingStatus?.hubAcked ?? null}
+              rawHubAcked={serving === null ? undefined : servingStatus?.rawHubAcked ?? null}
+              sampledAt={servingStatus?.sampledAt}
               notSharedReason={servingStatus?.notSharedReason ?? null}
               meta={meta}
               author={identity.name}

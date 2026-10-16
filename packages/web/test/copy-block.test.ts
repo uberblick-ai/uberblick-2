@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { appendBlock } from "@uberblick/schema";
-import { codeBlockChrome, sourceBlockView } from "../src/editor/source-chrome.js";
+import { codeBlockChrome, sourceBlockView, writeToClipboard } from "../src/editor/source-chrome.js";
 import type { NodeViewRendererProps } from "@tiptap/core";
 import { DecorationSet } from "@tiptap/pm/view";
 import { mountEditor, snapshotFragment } from "./helpers.js";
@@ -48,6 +48,47 @@ function stubClipboard(): string[] {
 
 afterEach(() => {
   Reflect.deleteProperty(navigator, "clipboard");
+});
+
+describe("copying from a modal surface", () => {
+  it("starts the native clipboard write synchronously before waiting for focus release", async () => {
+    const written = stubClipboard();
+    let release = (): void => {};
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    const result = writeToClipboard(SHELL, ready);
+    try {
+      expect(written).toEqual([SHELL]);
+    } finally {
+      release();
+    }
+    expect(await result).toBe(true);
+  });
+
+  it.each(["missing", "refused"])("waits for focus release before selection copy when the native API is %s", async (clipboard) => {
+    if (clipboard === "refused") {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn().mockRejectedValue(new Error("Permission denied")) },
+      });
+    }
+    const execCommand = vi.fn(() => document.activeElement instanceof HTMLTextAreaElement);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    let release = (): void => {};
+    const ready = new Promise<void>((resolve) => { release = resolve; });
+    const result = writeToClipboard(SHELL, ready);
+    try {
+      await Promise.resolve();
+      expect(execCommand).not.toHaveBeenCalled();
+      expect(document.querySelector("textarea")).toBeNull();
+      release();
+      expect(await result).toBe(true);
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(document.querySelector("textarea")).toBeNull();
+    } finally {
+      release();
+      Reflect.deleteProperty(document, "execCommand");
+    }
+  });
 });
 
 describe("copying a source block", () => {
@@ -89,7 +130,7 @@ describe("copying a source block", () => {
     expect(snapshotFragment(ydoc)).toEqual(before);
     await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledTimes(2));
     for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
-      expect(notice).toEqual({ key: "clipboard", message: "Copied to clipboard", severity: "success" });
+      expect(notice).toEqual({ key: "clipboard", message: "Source copied", severity: "success" });
     }
     expect(buttons.map(button => button.textContent)).toEqual(["Copy", "Copy"]);
 
@@ -189,7 +230,7 @@ describe("copying a source block", () => {
       await vi.waitFor(() => expect(execCommand).toHaveBeenCalled());
       expect(copied).toBe(SHELL);
       await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
-        key: "clipboard", message: "Copied to clipboard", severity: "success",
+        key: "clipboard", message: "Source copied", severity: "success",
       }));
       expect(document.activeElement).toBe(origin);
       expect([origin.selectionStart, origin.selectionEnd]).toEqual([2, 7]);
@@ -218,7 +259,7 @@ describe("copying a source block", () => {
     try {
       element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
       await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
-        key: "clipboard", message: "Copy failed", severity: "error",
+        key: "clipboard", message: "Couldn't copy the source. Select the source text and copy it instead.", severity: "error",
       }));
       expect(execCommand).toHaveBeenCalledWith("copy");
       expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("Copy");

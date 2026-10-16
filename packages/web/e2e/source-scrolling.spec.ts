@@ -2,7 +2,7 @@
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { setNativeSelection } from "./native-selection.js";
+import { setNativeSelection, setPointerSelection } from "./native-selection.js";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 
@@ -307,7 +307,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         }
         await expect(notices).toHaveCount(1);
         await expect(notices).toBeVisible();
-        await expect(notices.locator("[data-description]")).toHaveText("Copied to clipboard");
+        await expect(notices.locator("[data-title]")).toHaveText("Source copied");
         await expect(notices).toHaveAttribute("data-type", "success");
         await expect(page.locator("html")).toHaveAttribute("data-copied-source", sourceText);
         await expect.poll(() => editorSelection(page)).toEqual(before);
@@ -377,7 +377,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
     const rect = range.getBoundingClientRect();
     return { x: rect.left, y: rect.top + rect.height / 2 };
   });
-  await setNativeSelection(code, async () => {
+  await setPointerSelection(code, async () => {
     if (info.project.use.hasTouch === true) await page.touchscreen.tap(end.x, end.y);
     else await page.mouse.click(end.x, end.y);
   });
@@ -420,7 +420,7 @@ test("code preserves an empty caret and trailing spaces, reveals typed line ends
   else await copy.click();
   await expect(copy).toHaveText("Copy");
   const copied = page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
-    has: page.locator("[data-description]", { hasText: /^Copied to clipboard$/ }),
+    has: page.locator("[data-title]", { hasText: /^Source copied$/ }),
   });
   await expect(copied).toHaveAttribute("data-type", "success");
   await expect(page.locator("html")).toHaveAttribute("data-copied-source", edited);

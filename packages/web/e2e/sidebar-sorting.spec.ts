@@ -14,8 +14,8 @@ const test = base.extend<{ peers: [Page, Page] }>({
       page.on("pageerror", (error) => errors.push(error.message));
     };
     const pages = await Promise.all([
-      openApp(browser, "/", { contextOptions: { hasTouch: true }, beforeNavigate, readySelector: ".ub-list-head" }),
-      openApp(browser, "/", { beforeNavigate, readySelector: ".ub-list-head" }),
+      openApp(browser, "/", { contextOptions: { hasTouch: true }, beforeNavigate, readySelector: ".ub-document-sidebar" }),
+      openApp(browser, "/", { beforeNavigate, readySelector: ".ub-document-sidebar" }),
     ]);
     await use(pages as [Page, Page]);
     expect(errors).toEqual([]);
@@ -29,7 +29,7 @@ const row = (page: Page, name: string): Locator => page.getByRole("button", { na
 const groups = (page: Page): Locator => page.locator(".ub-group:not([inert]) .ub-group-label");
 
 async function addGroup(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   await page.getByRole("textbox", { name: "Group name" }).fill(name);
   await page.getByRole("textbox", { name: "Group name" }).press("Enter");
   await expect(group(page, name)).toBeVisible();
@@ -118,7 +118,7 @@ for (const width of [1400, 820]) {
         type: ending === "touchCancel" ? "touchCancel" : "touchEnd", touchPoints: [],
       });
       await expect(a.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
-      await expect(a.locator('body > [role="status"]')).toContainText(
+      await expect(a.locator('body > div[role="status"]')).toContainText(
         ending === "drop" ? `Kept ${label} in place.` : `Cancelled moving ${label}.`,
       );
     };
@@ -231,9 +231,9 @@ test("leaving a cross-group target cancels; a later peer unpin stays safe", asyn
   const path = new URL(a.url()).pathname;
   await hover(a, row(a, "alpha"), titles(a, "Other"));
   await a.mouse.move(900, 500, { steps: 16 });
-  await expect(a.locator('body > [role="status"]')).toContainText("No drop target");
+  await expect(a.locator('body > div[role="status"]')).toContainText("No drop target");
   await a.mouse.up();
-  await expect(a.locator('body > [role="status"]')).toContainText("Cancelled moving alpha");
+  await expect(a.locator('body > div[role="status"]')).toContainText("Cancelled moving alpha");
   expect(new URL(a.url()).pathname).toBe(path);
   for (const page of [a, b]) {
     await expect(titles(page, "Pinned")).toHaveText(["alpha", "beta"]);
@@ -256,12 +256,12 @@ test("leaving an in-group target restores the optimistic order; a committed drop
   // Leave straight up: crossing alpha on the way out would undo the preview
   // before release and let this test pass even without the cancellation fix.
   await a.mouse.move(first.x + first.width / 2, 2, { steps: 16 });
-  await expect(a.locator('body > [role="status"]')).toContainText("No drop target");
+  await expect(a.locator('body > div[role="status"]')).toContainText("No drop target");
   await expect(titles(a, "Pinned")).toHaveText(["beta", "alpha"]);
   await expect(titles(b, "Pinned")).toHaveText(["alpha", "beta"]);
   await a.mouse.up();
   for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["alpha", "beta"]);
-  await expect(a.locator('body > [role="status"]')).toContainText("Cancelled moving beta");
+  await expect(a.locator('body > div[role="status"]')).toContainText("Cancelled moving beta");
   await dragOnto(a, row(a, "beta"), titles(a, "Pinned").first());
   for (const page of [a, b]) await expect(titles(page, "Pinned")).toHaveText(["beta", "alpha"]);
   expect(new URL(a.url()).pathname).toBe(path);
@@ -292,7 +292,7 @@ test("expanded headers still accept pointer drops and keyboard uses visible rows
   await expect(titles(b, "Other")).toHaveText(["gamma", "alpha"]);
   await startKeyboard(a, row(a, "beta"));
   await a.keyboard.press("ArrowDown");
-  await expect(a.locator('body > [role="status"]')).toContainText("Over gamma");
+  await expect(a.locator('body > div[role="status"]')).toContainText("Over gamma");
   await a.keyboard.press("Space");
   for (const page of [a, b]) await expect(titles(page, "Other")).toHaveText(["beta", "gamma", "alpha"]);
   await expect(row(a, "beta")).toBeFocused();
@@ -330,7 +330,7 @@ test("a peer order change cancels the active drag without rolling back shared da
   await expect(groups(a)).toHaveText(["Second", "First"]);
   await expect(groups(b)).toHaveText(["First", "Second"]);
   await addGroup(b, "Peer update");
-  await expect(a.locator('body > [role="status"]')).toContainText("Cancelled moving group First");
+  await expect(a.locator('body > div[role="status"]')).toContainText("Cancelled moving group First");
   for (const page of [a, b]) await expect(groups(page)).toHaveText(["First", "Second", "Peer update"]);
 });
 

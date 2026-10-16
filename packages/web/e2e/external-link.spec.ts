@@ -1,3 +1,4 @@
+import { expectOpenPages, provePageArrival } from "./settle.js";
 /** Native editor activation and selection require a real browser. */
 import { expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
@@ -40,7 +41,7 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>, target 
     await expect(popup).toHaveURL(target);
     expect(await popup.evaluate(() => window.opener)).toBeNull();
     expect(await popup.evaluate(() => document.referrer)).toBe("");
-    expect(page.context().pages()).toHaveLength(pagesBefore + 1);
+    await expectOpenPages(page.context(), pagesBefore + 1);
   } finally {
     await popup.close();
     await page.bringToFront();
@@ -67,7 +68,8 @@ test("primary, Ctrl and Cmd clicks open isolated tabs while Shift-click extends 
   await link.click({ modifiers: ["Shift"] });
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
   await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
 
   // In read-only prose, Shift extends an existing native range; a fresh pane
   // has no caret or range to extend. Select outside the anchor first.
@@ -82,7 +84,8 @@ test("primary, Ctrl and Cmd clicks open isolated tabs while Shift-click extends 
   expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).not.toBe("");
   await link.click({ modifiers: ["Shift"] });
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toMatch(/^before e/);
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
 });
 
 async function textPoint(target: Locator, offset: number): Promise<{ x: number; y: number }> {
@@ -112,7 +115,8 @@ test("dragging a link selects text and the toolbar still edits its URL", { tag: 
   const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
   expect(selected.length).toBeGreaterThan(0);
   await expect(toolbar).toBeVisible();
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
 
   await page.getByRole("button", { name: "External link", exact: true }).click();
   const field = page.getByLabel("External link URL");
@@ -122,7 +126,8 @@ test("dragging a link selects text and the toolbar still edits its URL", { tag: 
   await expect(page.locator('a.ub-link[href="https://example.invalid/edited-link"]')).toHaveText(selected);
   await expect(editor(page)).toHaveText(TEXT);
 
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
 });
 
 async function commentSentence(page: Page): Promise<void> {
@@ -146,7 +151,7 @@ async function expectNoSelectedThread(page: Page): Promise<void> {
 async function archiveDoc(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 

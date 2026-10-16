@@ -20,7 +20,7 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
       "representative may have zero or unknown count. Use include_superseded: true with has_open_threads " +
       "to find each matching document, then get_doc for threads and annotate to reply or resolve. " +
       "Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional " +
-      "approximate timestamps. Decision answerPreview is legacy TL;DR or first paragraph/list, null for none; " +
+      "approximate timestamps. Decision rows have no TL;DR; answerPreview is the first answer paragraph/list, null for none; " +
       "discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. " +
       "Both are absent when unknown. get_doc marks related or linked topics." +
       helpPointer("list_docs"),

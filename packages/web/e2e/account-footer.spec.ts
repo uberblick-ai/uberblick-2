@@ -1,3 +1,4 @@
+import { expectOpenPages, provePageArrival } from "./settle.js";
 /** The footer identifies the login of this running local service, separately from presence. */
 import { devices, expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -20,7 +21,7 @@ for (const scheme of ["light", "dark"] as const) {
     test.skip(info.project.name === "webkit-ipad", "The paired explicit iPad context owns touch coverage.");
     const page = await openApp(browser, "/", {
       contextOptions: { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 832 }, colorScheme: scheme, reducedMotion: "reduce" },
-      readySelector: ".ub-list-head",
+      readySelector: ".ub-document-sidebar",
     });
     for (const width of [1280, 810]) {
       await page.setViewportSize({ width, height: 832 });
@@ -51,7 +52,8 @@ for (const scheme of ["light", "dark"] as const) {
         const pages = page.context().pages().length;
         await placeholder.click();
         expect(page.url()).toBe(url);
-        expect(page.context().pages()).toHaveLength(pages);
+        await provePageArrival(page, { path: "browser context" });
+        await expectOpenPages(page.context(), pages);
         await expect(page.locator(".ub-user-panel")).toHaveCount(0);
 
         // A real pointer opens the existing controls, then native keyboard
@@ -127,7 +129,7 @@ test("a page outside ub open has no account reading or generated account name", 
   let accountRequests = 0;
   const page = await openApp(browser, "/", {
     upstream: true,
-    readySelector: ".ub-list-head",
+    readySelector: ".ub-document-sidebar",
     beforeNavigate: async (opening) => {
       opening.on("request", (request) => {
         if (new URL(request.url()).pathname === "/api/account") accountRequests += 1;
@@ -145,7 +147,7 @@ test("a page outside ub open has no account reading or generated account name", 
 test("live serving refusal hides a stored handle until the hub accepts the serving run again", async ({ browser }) => {
   let reason: "sign-in-required" | "no-workspace-access" | null = null;
   const page = await openApp(browser, "/", {
-    readySelector: ".ub-list-head",
+    readySelector: ".ub-document-sidebar",
     beforeNavigate: async (opening) => {
       await opening.route("**/api/status", async (route) => {
         const response = await route.fetch();
@@ -167,7 +169,7 @@ test("live serving refusal hides a stored handle until the hub accepts the servi
 });
 
 test("the same ub open follows login removal and return for its frozen hub after a project rebind", async ({ browser }) => {
-  const page = await openApp(browser, "/", { readySelector: ".ub-list-head" });
+  const page = await openApp(browser, "/", { readySelector: ".ub-document-sidebar" });
   await expect(account(page)).toContainText(`@${handle}`);
   const instance = await page.evaluate(() => performance.timeOrigin);
   const unauthenticated = await page.request.get(new URL("/api/account", harness().appUrl).href);

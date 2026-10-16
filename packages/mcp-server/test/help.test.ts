@@ -169,13 +169,19 @@ it("keeps tool-specific modes, refusals and recovery in the tool's own expanded 
   }
 });
 
-it("describes short decision answers, page context and previews without repository authority", async () => {
+it("routes decision answer guidance to lifecycle while keeping page context and previews", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();
   for (const topic of ["lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
     const { text } = await rig.ok("get_help", { topic });
-    for (const rule of ["answer blocks", "brief reason", "related", "linked", "answerPreview", "RFC"]) {
+    for (const rule of ["related", "linked", "answerPreview"]) {
       expect(text, `${topic}: ${rule}`).toContain(rule);
+    }
+    if (topic !== "update_data") expect(text, topic).toContain("RFC");
+    if (topic !== "lifecycle") {
+      expect(text, topic).toContain("Decision answers and topics");
+      expect(text, topic).toContain("uberblick://help/lifecycle");
+      expect(text, topic).not.toMatch(/brief reasons?|short answer blocks|one to three short|60 words|yes\/no flag/);
     }
     expect(text, topic).not.toMatch(/decision line|boundary table|owner's recorded GitHub decision|reasons and guidance/);
     const description = tools.find((tool) => tool.name === topic)?.description;
@@ -184,13 +190,60 @@ it("describes short decision answers, page context and previews without reposito
       expect(description, topic).not.toMatch(/decision line|boundary table|governs requires/);
     }
   }
+  const createDoc = tools.find((tool) => tool.name === "create_doc")!;
+  for (const guidance of [
+    (createDoc.inputSchema.oneOf as { title: string }[])[0]!.title,
+    (createDoc.inputSchema.properties!.title as { description: string }).description,
+    ...tools.filter((tool) => ["create_doc", "set_metadata", "update_data"].includes(tool.name))
+      .map((tool) => tool.description!),
+  ]) {
+    expect(guidance).toContain("lifecycle's Decision answers and topics section");
+    expect(guidance).not.toMatch(/brief reasons?|short answer blocks|one to three short|60 words|yes\/no flag/);
+  }
   const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  const answers = lifecycle.split("## Decision answers and topics\n")[1]!.split("### Connect RFC discussion")[0]!;
+  for (const rule of [
+    "Lead the answer with the choice in one plain sentence naming the chosen option",
+    'without hedging such as "should consider" or "where possible"',
+    "Give the reason in one clause or sentence",
+    "Keep the whole answer, across all its blocks, to 60 words or fewer",
+    "editorial guidance, not a validated word limit",
+    "what is stored, what wins and what is refused",
+    "transactions, merge or conflict handling, function and key names, step-by-step write order",
+    "to the related regular page or the code",
+    "one to three answer blocks",
+    'For "How is deliberate TL;DR absence stored compatibly?"',
+    "Good — in-force answer", "Bad — superseded stance, abbreviated",
+    "Remove writes null and true in one transaction", "Y.Map whole-value conflict resolution",
+  ]) expect(answers, rule).toContain(rule);
+  const good = "Keep the TL;DR as text or null, and store deliberate absence in a separate yes/no flag next to it. " +
+    "Text always wins: the flag only counts on a regular document with no TL;DR text. " +
+    "Older clients keep working, and nothing needs migrating.";
+  expect(answers).toContain(good);
+  const outsideAnswers = lifecycle.replace(answers, "");
+  expect(outsideAnswers).not.toMatch(/60 words|yes\/no flag|Y.Map whole-value conflict resolution/);
+  expect(answers).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
   for (const code of [
     "decision_block_unsupported", "decision_answer_too_long", "decision_answer_empty",
     "decision_tldr_unsupported", "decision_data_unsupported", "related_not_regular_document",
   ]) expect(lifecycle, code).toContain(code);
   expect(lifecycle).toContain("answer: {who, when, where}");
   expect(lifecycle).toContain("missing preview is unknown");
+});
+
+it("describes decision reads and writes without a legacy TL;DR exception", async () => {
+  const rig = await local();
+  for (const topic of ["workspaces", "lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text, topic).toContain("no TL;DR");
+    expect(text, topic).not.toMatch(/legacy TL;DR|legacy decision summaries remain readable/);
+  }
+  for (const topic of ["get_doc", "set_metadata"]) {
+    expect((await rig.ok("get_help", { topic })).text, topic).toContain("tldr: null");
+  }
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  expect(lifecycle).toContain("first answer paragraph or list");
+  expect(lifecycle).toContain("stored values are ignored without changing them");
 });
 
 it("explains deliberate TL;DR removal and explicit opt-in in help and field contracts", async () => {

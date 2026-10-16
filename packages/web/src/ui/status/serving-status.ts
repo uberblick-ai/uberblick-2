@@ -7,6 +7,8 @@ import type {
   ReplicaUnavailable,
 } from "../../shell/document-search.js";
 import { useCalmSyncState } from "./calm.js";
+import type { RoomConnection } from "../../collab/rooms.js";
+import { observeSyncState } from "./sync-state.js";
 
 /** Keep the status current without turning every render into an HTTP request. */
 export const SERVING_STATUS_POLL_MS = 1_000;
@@ -24,12 +26,17 @@ interface RoomAnswer {
   client: DocumentSearchClient;
   room: string;
   hubAcked: boolean | null;
+  sampledAt: number | null;
   notSharedReason: NotSharedReason | null;
   replicaUnavailable: ReplicaUnavailable | null;
 }
 
 export interface ServingRoomStatus {
   hubAcked: boolean | null;
+  /** Uncalmed room fact, for confirmation rather than offline presentation. */
+  rawHubAcked: boolean | null;
+  /** Request start: an answer begun before a write cannot confirm that write. */
+  sampledAt: number | null;
   notSharedReason: NotSharedReason | null;
   replicaUnavailable: ReplicaUnavailable | null;
 }
@@ -45,6 +52,7 @@ export interface ServingRoomStatus {
 export function useServingRoomStatus(
   client: DocumentSearchClient | null | undefined,
   room: string | null,
+  connection: RoomConnection | null = null,
 ): ServingRoomStatus | null {
   const [answer, setAnswer] = useState<RoomAnswer | null>(null);
   const current =
@@ -66,10 +74,13 @@ export function useServingRoomStatus(
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight: AbortController | null = null;
+    const sync = connection?.room === room ? observeSyncState(connection) : null;
 
     const poll = async (): Promise<void> => {
+      const sampledAt = Date.now();
       const request = new AbortController();
       inFlight = request;
+      const answerSync = sync?.request();
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         const expired = new Promise<never>((_resolve, reject) => {
@@ -83,19 +94,23 @@ export function useServingRoomStatus(
           expired,
         ]);
         if (!active) return;
+        answerSync?.(status.notSharedReason || status.replicaUnavailable ? null : status.rooms[room]?.hubAcked ?? null);
         setAnswer({
           client,
           room,
           hubAcked: status.rooms[room]?.hubAcked ?? null,
+          sampledAt,
           notSharedReason: status.notSharedReason ?? null,
           replicaUnavailable: status.replicaUnavailable ?? null,
         });
       } catch {
         if (!active) return;
+        answerSync?.(null);
         setAnswer((previous) => ({
           client,
           room,
           hubAcked: null,
+          sampledAt: null,
           notSharedReason: previous?.client === client ? previous.notSharedReason : null,
           replicaUnavailable: previous?.client === client ? previous.replicaUnavailable : null,
         }));
@@ -113,12 +128,15 @@ export function useServingRoomStatus(
       active = false;
       if (timer !== undefined) clearTimeout(timer);
       inFlight?.abort();
+      sync?.release();
     };
-  }, [client, room]);
+  }, [client, room, connection]);
 
   if (client === null || client === undefined || room === null) return null;
   return {
     hubAcked: current === null || calm === null ? null : calm === "synced",
+    rawHubAcked: current,
+    sampledAt: answer?.client === client && answer.room === room ? answer.sampledAt : null,
     notSharedReason: answer?.client === client ? answer.notSharedReason : null,
     replicaUnavailable: answer?.client === client ? answer.replicaUnavailable : null,
   };

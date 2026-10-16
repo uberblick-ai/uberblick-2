@@ -42,7 +42,7 @@ export const tldrArg = z
   )
   .nullable()
   .describe(
-    `One or two sentences of plain English for a person opening the document. At most ${MAX_TLDR_LENGTH} characters; null clears it.`,
+    `One or two sentences of plain English for a person opening a regular document. At most ${MAX_TLDR_LENGTH} characters; null clears it. Decisions have no TL;DR.`,
   );
 
 export const decisionAnswerArg = z.object({

@@ -13,7 +13,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
+import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, figmaCaptionTexts, isBlockType, readsAsMark, isSupportedCard, isSupportedFigma, isSupportedTable, tableRows, tableCellTexts } from "@uberblick/schema";
 import type { CardPart } from "@uberblick/schema";
 import { uberblickSchema } from "./create-editor.js";
 
@@ -108,9 +108,11 @@ export function findForeignBlocks(fragment: Y.XmlFragment): ForeignBlock[] {
       foreign.push({ index, nodeName: child.nodeName, id, preview: previewOf(child) });
       continue;
     }
-    // Figma has no editor node; even an element without children is unsafe to bind.
     if (child.nodeName === "figma") {
-      foreign.push({ index, nodeName: "figma", id, preview: previewOf(child) });
+      if (!isSupportedFigma(child)) foreign.push({ index, nodeName: "#figma-shape", id, preview: previewOf(child) });
+      else if (figmaCaptionTexts(child).some((text) => linkConflictsIn(text).length > 0)) {
+        foreign.push({ index, nodeName: LINK_CONFLICT, id, preview: previewOf(child) });
+      }
       continue;
     }
     if (child.nodeName === "table") {
@@ -163,8 +165,8 @@ export interface LinkConflict extends LinkConflictRange {
   textIndex: number;
   /** Position of the table cell, absent for prose. Display, never lookup. */
   cell?: { row: number; column: number };
-  /** Card prose part, absent for other block types. Display, never lookup. */
-  part?: CardPart;
+  /** Structured prose part, absent for other block types. Display, never lookup. */
+  part?: CardPart | "caption";
   /** The element's `id` attribute, when it has one. Display, never lookup. */
   blockId: string | null;
   /** The text holding the range, and the handle the repair writes through. */
@@ -231,6 +233,20 @@ function cardLinkConflicts(child: Y.XmlElement, index: number, blockId: string |
   ));
 }
 
+function figmaLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
+  return figmaCaptionTexts(child).flatMap((text, textIndex) =>
+    linkConflictsIn(text).map((range) => ({ ...range, index, textIndex, part: "caption", blockId, text })),
+  );
+}
+
+function tableLinkConflicts(child: Y.XmlElement, index: number, blockId: string | null): LinkConflict[] {
+  return tableRows(child).flatMap((row, rowIndex) => row.flatMap((cell, column) =>
+    tableCellTexts(cell).flatMap((text, textIndex) => linkConflictsIn(text).map((range) => ({
+      ...range, index, textIndex, cell: { row: rowIndex, column }, blockId, text,
+    }))),
+  ));
+}
+
 export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
   const conflicts: LinkConflict[] = [];
   const children = fragment.toArray();
@@ -243,16 +259,12 @@ export function findLinkConflicts(fragment: Y.XmlFragment): LinkConflict[] {
       conflicts.push(...cardLinkConflicts(child, index, blockId));
       continue;
     }
+    if (child.nodeName === "figma") {
+      conflicts.push(...figmaLinkConflicts(child, index, blockId));
+      continue;
+    }
     if (child.nodeName === "table") {
-      for (const [rowIndex, row] of tableRows(child).entries()) {
-        for (const [column, cell] of row.entries()) {
-          for (const [textIndex, text] of tableCellTexts(cell).entries()) {
-            for (const range of linkConflictsIn(text)) {
-              conflicts.push({ ...range, index, textIndex, cell: { row: rowIndex, column }, blockId, text });
-            }
-          }
-        }
-      }
+      conflicts.push(...tableLinkConflicts(child, index, blockId));
       continue;
     }
     if (!blockAllowsMark(child.nodeName, "link")) continue;

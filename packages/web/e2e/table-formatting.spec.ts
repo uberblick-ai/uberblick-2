@@ -191,7 +191,7 @@ test("header and body selections offer formatting then Comment and keep the sele
 
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
   await selectCell(body, 0, 4, "mouse");
   await expect(popup(page)).toHaveCount(0);

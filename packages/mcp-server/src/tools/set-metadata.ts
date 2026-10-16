@@ -26,7 +26,7 @@ export const inputSchema = strictInput({
   uuid: uuidArg,
   title: titleArg.optional(),
   description: descriptionArg.optional(),
-  tldr: tldrArg.optional().describe(`Person-facing summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true.`),
+  tldr: tldrArg.optional().describe(`Person-facing regular-document summary, at most ${MAX_TLDR_LENGTH} characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.`),
   tldr_opt_in: z.boolean().optional().describe("Pass true with a non-null tldr to lift a person's deliberate TL;DR removal. Requires a non-null tldr; false does not lift the mark."),
   tags: z.array(z.string().min(1)).optional(),
   links: z.array(linkArg).optional(),
@@ -85,7 +85,7 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
   }
   const discussionUuid = discussion === undefined || discussion === null ? discussion :
     forField("discussion", () => discussionTarget(context, discussion));
-  // The document-level gate already ran; title and legacy TL;DR also request
+  // The document-level gate already ran; title and tldr also request
   // the decided-record content lock.
   const contentField = title !== undefined ? "title" : tldr !== undefined ? "tldr" : undefined;
   if (contentField !== undefined) {

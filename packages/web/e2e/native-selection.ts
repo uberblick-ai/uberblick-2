@@ -8,10 +8,18 @@ type SelectionTarget = { anchor: number; head: number };
  * Focus reconciliation can overwrite a native range before the editor imports it.
  * A scripted range returns its positions; only real pointer input may return none.
  */
-export async function setNativeSelection(target: Locator, select: () => Promise<void> | Promise<SelectionTarget>): Promise<void> {
+export async function setNativeSelection(target: Locator, select: () => Promise<SelectionTarget>): Promise<void> {
   await expect.poll(async () => {
     const expected = await select();
-    return selectionAgrees(target, typeof expected === "object" ? expected : undefined);
+    return selectionAgrees(target, expected);
+  }).toBe(true);
+}
+
+/** Pointer input has no scripted positions; verify the resulting native range. */
+export async function setPointerSelection(target: Locator, select: () => Promise<void>): Promise<void> {
+  await expect.poll(async () => {
+    await select();
+    return selectionAgrees(target, undefined);
   }).toBe(true);
 }
 

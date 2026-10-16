@@ -26,7 +26,7 @@ import type { McpSession } from "./mcp-agent.js";
 
 // The readable-period proof must fit inside the production grace.
 const READABLE_MS = 25_000;
-const { harness, openApp } = setupHarness({ app: { upstream: true, readySelector: ".ub-list-head" } });
+const { harness, openApp } = setupHarness({ app: { upstream: true, readySelector: ".ub-document-sidebar" } });
 let mcpAgent: McpAgent | null = null;
 
 function agent(): McpAgent {
@@ -225,7 +225,7 @@ for (const settings of [
       await expect(avatar).toBeVisible();
       // Navigate inside the mounted app; reopening before expiry must not
       // resurrect a departure from the room's earlier visit.
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       await expect(page.locator(".ub-docs")).toBeVisible();
       await expect(cursor).toHaveCount(0);
       await expect(peer).toHaveCount(0);

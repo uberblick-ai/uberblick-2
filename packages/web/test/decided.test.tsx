@@ -271,8 +271,7 @@ describe("read-only decision records", () => {
     if (title instanceof HTMLInputElement) act(() => typeInto(title, "A wording fix"));
     else expect(title.textContent).toBe("Chosen protocol");
     expect(getMeta(ydoc).title).toBe("Chosen protocol");
-    expect(host.querySelector(".ub-tldr-body > p")?.textContent).toBe("Keep one shared protocol.");
-    act(() => host.querySelector<HTMLElement>(".ub-tldr-body > p")?.click());
+    expect(host.querySelector(".ub-tldr")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
     expect(host.querySelector(".ub-tldr-form")).toBeNull();
 
@@ -289,7 +288,7 @@ describe("read-only decision records", () => {
     expect(menuItem("Edit TL;DR")).toBeUndefined();
   });
 
-  it("follows live status without rebinding or losing scroll while legacy TL;DR stays read-only", async () => {
+  it("follows live status without rebinding or losing scroll while legacy TL;DR stays hidden", async () => {
     const ydoc = stage("open");
     const peer = new Y.Doc();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(ydoc));
@@ -330,7 +329,8 @@ describe("read-only decision records", () => {
     }
     expect(button(composer, "Comment")).toBeDefined();
     expect(textAt(ydoc).toDelta()).toEqual(beforeText);
-    expect(getMeta(ydoc).tldr).toBe("Keep one shared protocol.");
+    expect(getMeta(ydoc).tldr).toBeNull();
+    expect(ydoc.getMap("meta").get("tldr")).toBe("Keep one shared protocol.");
     expect(updates).toHaveBeenCalledTimes(updatesAtDecision);
 
     for (const status of ["open", "rejected", "withdrawn"] as const) {
@@ -423,7 +423,7 @@ describe("read-only decision records", () => {
     act(() => openActions(host));
     act(() => menuItem("Archive document")?.click());
     const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]')!;
-    act(() => button(dialog, "Archive document").click());
+    act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);
     expect(item.querySelector(".ub-thread-actions")).toBeNull();
     const editor = binding.mock.results[0]?.value.editor;

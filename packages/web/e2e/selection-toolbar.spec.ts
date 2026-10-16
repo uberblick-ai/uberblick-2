@@ -19,7 +19,7 @@ async function openDoc(page: Page, text: string): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, "Selection toolbar");
   await placeCaret(page);
   await page.keyboard.insertText(text);
@@ -144,7 +144,7 @@ test("a human selection keeps its range through pointer, keyboard, link and comm
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await expectModalOverControl(page, coveredControl, "alert-dialog");
   await page.getByRole("alertdialog").getByRole("button", {
-    name: "Archive document",
+    name: "Archive",
   }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(toolbar).toHaveCount(0);

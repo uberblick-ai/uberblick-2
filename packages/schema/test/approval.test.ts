@@ -84,6 +84,19 @@ describe("decision approval content", () => {
     doc.destroy();
   });
 
+  it.each([undefined, null, "", 42, "   ", "A legacy answer"])("preserves historical normalization of stored TL;DR %j while reads hide it", (stored) => {
+    const doc = decision();
+    getMetaMap(doc).set("tldr", stored);
+    const normalized = typeof stored === "string" && stored !== "" ? stored : null;
+    const historical = blockRev({
+      type: "paragraph",
+      text: JSON.stringify(["The topic", normalized, ["First reason", "Second reason"]]),
+    });
+    expect(getMeta(doc).tldr).toBeNull();
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    doc.destroy();
+  });
+
   it("approves all data content, including invalid records and unknown schema versions", () => {
     const doc = decision();
     const data = doc.getMap("data");
@@ -113,11 +126,21 @@ describe("decision approval content", () => {
     doc.getMap("data").set(JSON.stringify(["record", "legacy", "kept"]), { old: true });
     approve(doc);
     const fingerprint = decisionApprovalFingerprint(doc);
+    const before = Y.encodeStateAsUpdate(doc);
+    const hydrated = new Y.Doc();
+    Y.applyUpdate(hydrated, before);
     const directory = new Y.Doc();
-    repair(directory, doc);
-    expect(getDirectoryEntry(directory, UUID)).toMatchObject({ answerPreview: "The decision.", approvalChanged: false });
-    expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
-    expect(decisionApprovalChanged(doc)).toBe(false);
+    repair(directory, hydrated);
+    expect(getDirectoryEntry(directory, UUID)).toMatchObject({ answerPreview: "First reason", approvalChanged: false });
+    expect(getDirectoryEntry(directory, UUID)).not.toHaveProperty("tldr");
+    expect(getMeta(hydrated).tldr).toBeNull();
+    expect(getMetaMap(hydrated).get("tldr")).toBe("The decision.");
+    expect(decisionApprovalFingerprint(hydrated)).toBe(fingerprint);
+    expect(decisionApprovalChanged(hydrated)).toBe(false);
+    expect(Y.encodeStateAsUpdate(hydrated)).toEqual(before);
+    doc.destroy();
+    hydrated.destroy();
+    directory.destroy();
   });
 
   it("fingerprints equivalent structured JSON independently of property insertion order", () => {

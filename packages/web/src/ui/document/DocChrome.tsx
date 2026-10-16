@@ -1,6 +1,6 @@
 /**
- * The document identity line above its prose: catalog-backed tags, stable
- * identity, copy affordance and document actions.
+ * The document metadata line above its prose: catalog-backed tags, lifecycle
+ * and document actions.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
@@ -17,7 +17,7 @@ import type { DocMeta, TagAssignment, TagCatalogEntry } from "@uberblick/schema"
 import { writeToClipboard } from "../../editor/source-chrome.js";
 import { notifyTransient } from "../../notifications.js";
 import type { RoomConnection } from "../../collab/rooms.js";
-import { useDocRev, useRoomStatus } from "../hooks.js";
+import { useRoomStatus } from "../hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
 import { PickerList } from "../PickerList.js";
 import { shareUrl } from "../route.js";
@@ -286,51 +286,42 @@ function TagStrip({
   );
 }
 
-/**
- * Share this copy control with the waiting screen. Keep the workspace
- * spelling from the URL, and use writeToClipboard for supported plain-HTTP
- * deployments. Announce failure; hydrated chrome supplies a short UUID label,
- * while waiting keeps the explicit label.
- */
+function copyAddress(room: string, segment: string, copyPath?: string): string {
+  return copyPath?.replace(/^\//, "") ?? `${segment}/${parseRoom(room).uuid}`;
+}
+
+async function copyText(text: string, message: string, failure: string, fallbackReady?: Promise<void>): Promise<void> {
+  const ok = await writeToClipboard(text, fallbackReady);
+  notifyTransient({
+    key: "clipboard",
+    message: ok ? message : failure,
+    severity: ok ? "success" : "error",
+  });
+}
+
+/** The waiting screen has no actions menu, so it keeps an explicit control. */
 export function CopyLink({
   room,
   segment,
-  shortUuid,
   copyPath,
 }: {
   room: string;
   segment: string;
-  shortUuid?: string;
   copyPath?: string | undefined;
 }): ReactElement {
-  const label = shortUuid === undefined ? "Copy link" : `uuid ${shortUuid}`;
-  const identity = shortUuid !== undefined;
-
   // Derive the copied address and its accessible name from the same value.
-  const address = copyPath?.replace(/^\//, "") ?? `${segment}/${parseRoom(room).uuid}`;
-
-  const copy = async (): Promise<void> => {
-    const ok = await writeToClipboard(shareUrl(address, window.location.origin));
-    notifyTransient({
-      key: "clipboard",
-      message: ok ? "URL copied to clipboard" : "Copy failed",
-      severity: ok ? "success" : "error",
-    });
-  };
+  const address = copyAddress(room, segment, copyPath);
 
   return (
     <span className="ub-copy-wrap">
       <button
         type="button"
-        className={`ub-copy-link inline-flex min-h-11 cursor-pointer items-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 ${identity ? "min-w-[12em] justify-start" : "min-w-[max(2.75rem,6em)] justify-center"}`}
-        // `title` is not reliably announced, so the accessible name carries the
-        // action and the address that lands on the clipboard even where the
-        // visible label is only the document's short uuid.
-        aria-label={`${label} — copies the canonical document URL for ${address}`}
-        title={`${label} — copies the canonical document URL for ${address}`}
-        onClick={() => void copy()}
+        className="ub-copy-link inline-flex min-h-11 min-w-[max(2.75rem,6em)] cursor-pointer items-center justify-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+        aria-label={`Copy link — copies the canonical document URL for ${address}`}
+        title={`Copy link — copies the canonical document URL for ${address}`}
+        onClick={() => void copyText(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
       >
-        {identity ? <span>uuid <span className="ub-doc-id">{shortUuid}</span></span> : label}
+        Copy link
       </button>
     </span>
   );
@@ -339,9 +330,7 @@ export function CopyLink({
 /**
  * Reserve the identity row above the title before metadata arrives,
  * preventing navigation jumps. Selected tags scroll within one fixed-height
- * control; UUID and revision stay at the end. The short UUID supports
- * recognition, the sync panel exposes full identity, and docRev folds block
- * revisions into a fixed-width slot.
+ * control; document actions stay at the end.
  */
 export function DocMetaLine({
   connection,
@@ -384,7 +373,6 @@ export function DocMetaLine({
   onEditTldr?: (() => void) | undefined;
   onRemoveTldr?: (() => void) | undefined;
 }): ReactElement {
-  const rev = useDocRev(connection);
   return (
     <p className="ub-doc-meta">
       {/* Nothing to say about a room that has not answered yet, and nothing to
@@ -399,30 +387,22 @@ export function DocMetaLine({
             readOnly={archived || readOnly}
             canWrite={() => connection.status.writable}
           />
-          <span className="ub-doc-ids">
-            <CopyLink
-              room={connection.room}
-              segment={segment}
-              copyPath={copyPath}
-              shortUuid={meta.uuid.slice(0, 8)}
-            />
-            <span className="ub-doc-rev"> · rev <span className="ub-doc-id">{rev ?? "········"}</span></span>
-          </span>
-          {!archived && (
-            <DocumentActions
-              key={connection.room}
-              title={titleOf(meta)}
-              pinned={pinned}
-              onTogglePin={onTogglePin}
-              onArchive={onArchive}
-              onConfirmationFocusChange={onArchiveConfirmationFocusChange}
-              hasTldr={hasTldr}
-              tldrOptOut={meta.tldrOptOut === true}
-              contentReadOnly={contentReadOnly || meta.kind === "decision"}
-              onEditTldr={readOnly ? null : (onEditTldr ?? null)}
-              onRemoveTldr={readOnly ? null : (onRemoveTldr ?? null)}
-            />
-          )}
+          <DocumentActions
+            key={`${connection.room}/${archived}`}
+            title={titleOf(meta)}
+            uuid={meta.uuid}
+            address={copyAddress(connection.room, segment, copyPath)}
+            archived={archived}
+            pinned={pinned}
+            onTogglePin={onTogglePin}
+            onArchive={onArchive}
+            onConfirmationFocusChange={onArchiveConfirmationFocusChange}
+            hasTldr={hasTldr}
+            tldrOptOut={meta.tldrOptOut === true}
+            contentReadOnly={contentReadOnly || meta.kind === "decision"}
+            onEditTldr={readOnly ? null : (onEditTldr ?? null)}
+            onRemoveTldr={readOnly ? null : (onRemoveTldr ?? null)}
+          />
         </>
       )}
     </p>
@@ -439,6 +419,9 @@ const ARCHIVE_UNAVAILABLE =
 
 function DocumentActions({
   title,
+  uuid,
+  address,
+  archived,
   pinned,
   onTogglePin,
   onArchive,
@@ -450,6 +433,9 @@ function DocumentActions({
   onRemoveTldr,
 }: {
   title: string;
+  uuid: string;
+  address: string;
+  archived: boolean;
   pinned: boolean;
   onTogglePin: (() => void) | null;
   onArchive: (() => void) | null;
@@ -462,6 +448,12 @@ function DocumentActions({
 }): ReactElement {
   const [confirming, setConfirming] = useState(false);
   const openingTldrEditor = useRef(false);
+  const pendingCopy = useRef<(() => void) | null>(null);
+
+  const copyFromMenu = (text: string, message: string, failure: string): void => {
+    const closed = new Promise<void>((resolve) => { pendingCopy.current = resolve; });
+    void copyText(text, message, failure, closed);
+  };
 
   useEffect(
     () => () => onConfirmationFocusChange?.(false),
@@ -495,6 +487,10 @@ function DocumentActions({
           <DropdownMenuContent
             align="end"
             onCloseAutoFocus={(event) => {
+              // The plain-HTTP selection fallback needs focus after the menu's
+              // modal focus trap has released it.
+              pendingCopy.current?.();
+              pendingCopy.current = null;
               if (!openingTldrEditor.current) return;
               openingTldrEditor.current = false;
               // The selected action reveals a textarea outside this portal.
@@ -503,56 +499,68 @@ function DocumentActions({
             }}
           >
             <DropdownMenuItem
-              disabled={onTogglePin === null}
-              className={pinned ? "ub-action-pinned text-(--brand-ink)!" : ""}
-              onSelect={() => onTogglePin?.()}
+              onSelect={() => copyFromMenu(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
             >
-              {onTogglePin === null
-                ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is not ready to write`
-                : pinned
-                  ? "Unpin from sidebar"
-                  : "Pin to sidebar"}
+              Copy link
             </DropdownMenuItem>
-            {!contentReadOnly && (
+            <DropdownMenuItem
+              onSelect={() => copyFromMenu(uuid, "Document id copied", "Couldn't copy the document id. Try again in a browser with clipboard access.")}
+            >
+              Copy document id
+            </DropdownMenuItem>
+            {!archived && (
               <>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  disabled={onEditTldr === null}
-                  onSelect={() => {
-                    openingTldrEditor.current = true;
-                    onEditTldr?.();
+                  disabled={onTogglePin === null}
+                  onSelect={() => onTogglePin?.()}
+                >
+                  {onTogglePin === null
+                    ? `${pinned ? "Unpin" : "Pin"} unavailable — sidebar is not ready to write`
+                    : pinned
+                      ? "Unpin from sidebar"
+                      : "Pin to sidebar"}
+                </DropdownMenuItem>
+                {!contentReadOnly && (
+                  <>
+                    <DropdownMenuItem
+                      disabled={onEditTldr === null}
+                      onSelect={() => {
+                        openingTldrEditor.current = true;
+                        onEditTldr?.();
+                      }}
+                    >
+                      {onEditTldr === null
+                        ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
+                        : `${hasTldr ? "Edit" : "Add"} TL;DR`}
+                    </DropdownMenuItem>
+                    {!tldrOptOut && (
+                      <DropdownMenuItem
+                        disabled={onRemoveTldr === null}
+                        onSelect={() => onRemoveTldr?.()}
+                      >
+                        {onRemoveTldr === null
+                          ? "Remove TL;DR unavailable — document is read-only"
+                          : "Remove TL;DR"}
+                      </DropdownMenuItem>
+                    )}
+                  </>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  aria-disabled={onArchive === null}
+                  onSelect={(event) => {
+                    if (onArchive === null) {
+                      event.preventDefault();
+                      return;
+                    }
+                    setConfirming(true);
                   }}
                 >
-                  {onEditTldr === null
-                    ? `${hasTldr ? "Edit" : "Add"} TL;DR unavailable — document is read-only`
-                    : `${hasTldr ? "Edit" : "Add"} TL;DR`}
+                  {onArchive === null ? ARCHIVE_UNAVAILABLE : "Archive document"}
                 </DropdownMenuItem>
-                {!tldrOptOut && (
-                  <DropdownMenuItem
-                    disabled={onRemoveTldr === null}
-                    onSelect={() => onRemoveTldr?.()}
-                  >
-                    {onRemoveTldr === null
-                      ? "Remove TL;DR unavailable — document is read-only"
-                      : "Remove TL;DR"}
-                  </DropdownMenuItem>
-                )}
               </>
             )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              aria-disabled={onArchive === null}
-              variant="destructive"
-              className="ub-action-danger text-[light-dark(oklch(0.51_0.20_27.325),var(--destructive))]!"
-              onSelect={(event) => {
-                if (onArchive === null) {
-                  event.preventDefault();
-                  return;
-                }
-                setConfirming(true);
-              }}
-            >
-              {onArchive === null ? ARCHIVE_UNAVAILABLE : "Archive document"}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <AlertDialogContent
@@ -564,16 +572,15 @@ function DocumentActions({
             }
           }}
         >
-          <AlertDialogTitle>Archive {title}?</AlertDialogTitle>
+          <AlertDialogTitle>Archive “{title}”?</AlertDialogTitle>
           <AlertDialogDescription>
             {onArchive === null
               ? `${ARCHIVE_UNAVAILABLE}. Nothing has been archived.`
-              : "Its content is preserved, but the document becomes read-only and leaves normal listings until you Restore it."}
+              : "It leaves the document list and search. You can restore it later."}
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
               disabled={onArchive === null}
               onClick={(event) => {
                 // Lost readiness refuses Archive in place; keep the reason
@@ -586,7 +593,7 @@ function DocumentActions({
                 onArchive();
               }}
             >
-              Archive document
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

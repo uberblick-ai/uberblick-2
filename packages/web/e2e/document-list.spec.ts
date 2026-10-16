@@ -19,7 +19,7 @@ import type { Locator, Page } from "@playwright/test";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 
-const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-document-sidebar" } });
 
 let mcpAgent: McpAgent | null = null;
 
@@ -110,7 +110,7 @@ test("the workspace address is the list, and it holds what another browser creat
   expect(box?.width).toBeCloseTo(tableBox?.width ?? 0, 0);
 
   // The sidebar's fixed entry is the same list at its own address.
-  const entry = reader.getByRole("button", { name: "All docs" });
+  const entry = reader.getByRole("button", { name: "All documents" });
   await entry.click();
   await expect(reader).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
   // The icon is painted; its name and pressed state belong to jsdom.
@@ -164,7 +164,7 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
     "Decision · open",
   );
-  await page.getByRole("button", { name: "All docs" }).click();
+  await page.getByRole("button", { name: "All documents" }).click();
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(0);
   await page.getByRole("button", { name: "Decisions", exact: true }).click();
   await expect(
@@ -337,6 +337,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
     await expect(editor(page)).toHaveText(currentAnswer);
     await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
+    await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-selection`)).toHaveText("viewing");
 
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
@@ -350,7 +351,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await page.goForward();
     await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
     if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).tap();
-    await activateControl(page.getByRole("button", { name: "All docs", exact: true }), { touch });
+    await activateControl(page.getByRole("button", { name: "All documents", exact: true }), { touch });
     await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(titleFilter).toHaveValue("");
     await expect(state).toHaveCount(0);

@@ -38,7 +38,7 @@ import type { SettingsPage, Workspace } from "../route.js";
 /** The group a pin lands in when the sidebar has none yet. */
 const FIRST_GROUP_NAME = "Pinned";
 
-/** What `+ group` creates, before the reader types over it. */
+/** What `+ New group` creates, before the reader types over it. */
 const NEW_GROUP_NAME = "New group";
 
 const GROUP_ACTION_CLASSES = "ub-group-act flex-none min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 border-0 bg-transparent cursor-pointer rounded-(--radius-sm) px-[0.3rem] py-[0.15rem] font-[inherit] ub-type-caption [font-weight:inherit] [font-style:inherit] text-(--sidebar-muted-foreground) opacity-0 [@media(hover:none)]:opacity-100 [@media(hover:hover)]:[.ub-group-head:hover_&]:opacity-100 [.ub-group-head:focus-within_&]:opacity-100 hover:text-foreground hover:bg-sidebar-accent transition-opacity duration-[120ms] ease-[ease] motion-reduce:transition-none";
@@ -187,6 +187,9 @@ function SidebarContent({
   const status = useRoomStatus(connection);
   const sidebarStatus = useRoomStatus(sidebar);
   const reading = statusReading(status, rawSyncState(status));
+  const showDirectoryProblem = workspace !== null && connection !== null && (
+    reading.detail !== null || (status.hasAnswered && reading.tone === "offline")
+  );
   const sidebarWritable = sidebar !== null && sidebarStatus.writable;
   const ydoc = sidebarWritable ? sidebar.ydoc : null;
   const canWriteSidebar = (): boolean => sidebar?.status.writable === true;
@@ -268,6 +271,7 @@ function SidebarContent({
         <nav
           className={`${SIDEBAR_PANE_CLASSES} ub-document-sidebar [transform:translateX(0)] opacity-100 group-data-[mode=settings]/sidebar:[transform:translateX(-25%)] group-data-[mode=settings]/sidebar:opacity-0`}
           aria-label="Documents"
+          data-directory-state={connection === null ? undefined : reading.tone}
           aria-hidden={settingsOpen || collapsed}
           inert={settingsOpen || collapsed}
         >
@@ -283,40 +287,7 @@ function SidebarContent({
             />
           </SidebarHeader>
           <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
-            <div className="ub-list-head">
-              <button
-                type="button"
-                className={`${SIDEBAR_ROW_CLASSES} disabled:text-(--sidebar-muted-foreground) disabled:cursor-default`}
-                onClick={onCreate}
-                disabled={!status.writable}
-                title={
-                  status.writable
-                    ? undefined
-                    : "New document unavailable while the directory is read-only"
-                }
-              >
-                {status.writable ? "+ new doc" : "new doc unavailable"}
-              </button>
-              {/*
-                  * Refusals take precedence over ordinary directory readings, which describe
-                  * working or reconnecting rooms. Keep directory readings uncalmed.
-               */}
-              <span className="ub-muted">
-                {reading.detail !== null
-                  ? reading.word
-                  : status.connected
-                    ? status.synced
-                      ? "directory synced"
-                      : "syncing…"
-                    : "offline"}
-              </span>
-            </div>
             <Navigation allOpen={allOpen} onOpenAll={onOpenAll} />
-            {!sidebarWritable && (
-              <p className="ub-muted ub-sidebar-unwritable">
-                Sidebar changes unavailable while offline.
-              </p>
-            )}
             {groups.length === 0 && (
               <p className="ub-muted ub-empty">
                 Nothing pinned yet. Pin the open document from its Document actions
@@ -336,7 +307,7 @@ function SidebarContent({
                   onDeleteCloseFocus={() => {
                     const root = sidebarRoot.current;
                     const target = root?.querySelector<HTMLButtonElement>(".ub-group-add:not(:disabled)")
-                      ?? root?.querySelector<HTMLButtonElement>(".ub-document-sidebar .ub-nav button");
+                      ?? root?.querySelector<HTMLButtonElement>(".ub-all-open-entry");
                     target?.focus();
                   }}
                   editing={renaming?.id === group.id}
@@ -345,19 +316,34 @@ function SidebarContent({
                   onCommit={(name) => commitRename(group.id, name)}
                 />
             ))}
-            <button
-              type="button"
-              className={`ub-group-add ${SIDEBAR_ROW_CLASSES} self-start mt-[0.35rem] disabled:opacity-50 disabled:cursor-default`}
-              onClick={addGroup}
-              disabled={ydoc === null}
-              title={
-                ydoc === null
-                  ? "Group changes unavailable while the sidebar is offline"
-                  : undefined
-              }
-            >
-              + group
-            </button>
+            <div className="ub-sidebar-create flex min-w-0 gap-1 mt-[0.35rem]">
+              <button
+                type="button"
+                className={`${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:text-(--sidebar-muted-foreground) disabled:cursor-default`}
+                onClick={onCreate}
+                disabled={!status.writable}
+                title={
+                  status.writable
+                    ? undefined
+                    : "New document unavailable while the directory is read-only"
+                }
+              >
+                + New page
+              </button>
+              <button
+                type="button"
+                className={`ub-group-add ${SIDEBAR_ROW_CLASSES} min-w-0 flex-1 whitespace-nowrap disabled:opacity-50 disabled:cursor-default`}
+                onClick={addGroup}
+                disabled={ydoc === null}
+                title={
+                  ydoc === null
+                    ? "Group changes unavailable while the sidebar is offline"
+                    : undefined
+                }
+              >
+                + New group
+              </button>
+            </div>
           </SidebarScrollContent>
         </nav>
         <SettingsNavigation
@@ -370,6 +356,15 @@ function SidebarContent({
         />
       </div>
       <SidebarFooter className="border-t border-sidebar-border" aria-hidden={collapsed} inert={collapsed}>
+        {showDirectoryProblem && (
+          <div
+            className="ub-directory-status flex min-w-0 items-center gap-2 px-2 py-1.5 ub-type-ui text-(--sidebar-muted-foreground)"
+            title={reading.detail ?? "Changes are saved on this device and sync when the hub is back."}
+          >
+            <span className="ub-dot ub-sync-dot shrink-0" data-state={reading.tone} aria-hidden="true" />
+            <span>{reading.detail === null ? "Offline" : reading.word.charAt(0).toUpperCase() + reading.word.slice(1)}</span>
+          </div>
+        )}
         {workspace !== null && (
           <button
             type="button"
@@ -495,8 +490,8 @@ function Navigation({
 }): ReactElement {
   return (
     <section className="ub-nav">
-      <p className="ub-nav-label">Navigation</p>
       <ul>
+        <Soon icon={<DashboardIcon />}>Dashboard</Soon>
         <li>
           <button
             type="button"
@@ -505,10 +500,9 @@ function Navigation({
             onClick={onOpenAll}
           >
             <GridIcon />
-            All docs
+            All documents
           </button>
         </li>
-        <Soon icon={<DashboardIcon />}>Dashboard</Soon>
       </ul>
     </section>
   );
@@ -526,14 +520,12 @@ function Soon({
     <li>
       <button
         type="button"
-        className="ub-nav-soon flex min-h-8.5 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
+        className="ub-nav-soon flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
         aria-disabled="true"
+        title="Coming soon"
       >
         {icon}
-        <span>
-          {children}{" "}
-          <span className="block ub-type-small">Coming soon</span>
-        </span>
+        <span>{children}</span>
       </button>
     </li>
   );
@@ -740,7 +732,7 @@ function GroupSection({
             }}
           >
             <Input
-              className="ub-group-rename font-medium tracking-[0.12em] uppercase [--input:var(--sidebar-input)] [--background:var(--sidebar)]"
+              className="ub-group-rename font-medium [--input:var(--sidebar-input)] [--background:var(--sidebar)]"
               defaultValue={group.name}
               aria-label="Group name"
               // Focus before selecting so replacement typing reaches this
@@ -760,7 +752,7 @@ function GroupSection({
           <button
             type="button"
             {...rowClickGuard}
-            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] ub-type-caption font-medium tracking-[0.12em] uppercase text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
+            className="ub-group-toggle flex flex-1 min-w-0 min-h-6 [@media(any-pointer:coarse)]:min-h-11 items-center gap-1 rounded-(--radius-sm) border-0 bg-transparent px-[0.4rem] py-1 text-left font-[inherit] ub-type-caption font-medium text-(--sidebar-group-label) cursor-pointer select-none [-webkit-touch-callout:none] hover:text-sidebar-foreground"
             ref={sortable.handleRef}
             aria-describedby={ydoc === null ? undefined : instructions}
             aria-expanded={!collapsed}
@@ -768,7 +760,6 @@ function GroupSection({
           >
             <Chevron />
             <span className="ub-group-label">{group.name}</span>
-            <span className="ub-group-rule" aria-hidden="true" />
           </button>
         )}
         {!editing && ydoc !== null && (

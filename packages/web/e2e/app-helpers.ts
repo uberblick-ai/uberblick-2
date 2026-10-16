@@ -118,7 +118,7 @@ export function docTitle(label: string): string {
 /** Wait for the new document, even when a previous editor is already visible. */
 export async function createDoc(page: Page, title: string, options: { pin?: boolean } = {}): Promise<string> {
   const before = openPath(page);
-  await activateControl(page.getByRole("button", { name: "+ new doc" }));
+  await activateControl(page.getByRole("button", { name: "+ New page" }));
   await expect.poll(() => openPath(page)).not.toBe(before);
   await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(editor(page)).toBeVisible();

@@ -12,6 +12,7 @@ import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { renderedText } from "./contrast-helpers.js";
+import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -45,7 +46,7 @@ test("all eight panel caption colours keep AA on the blue tint in both appearanc
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       contextOptions: { viewport: { width: 1366, height: 900 }, colorScheme: appearance },
     });
-    await expectReady(page);
+    await expectReady(page, session, uuid);
     const panels = page.locator(".ub-chart-series-panel");
     await expect(panels).toHaveCount(8);
     const colours = await panels.locator(".ub-chart-series-header").evaluateAll(elements =>
@@ -255,15 +256,15 @@ async function measurements(session: McpSession, uuid: string, latency = 125): P
   });
 }
 
-async function expectReady(page: Page): Promise<void> {
-  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
+async function expectReady(page: Page, session: McpSession, uuid: string): Promise<void> {
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.getByRole("img", { name: "API latency", exact: true })).toBeVisible();
 }
 
 /**
  * Read Tiptap's existing editor reference and y-sync plugin, never a product
  * test hook. A data-map observation marks when the browser has applied an
- * update; a description mutation marks the completion of the synchronous
+ * update; the drawn revision marks the completion of the synchronous
  * Chart.js draw. Instrumentation subscribes read-only and is removed on page
  * destruction. The measured interval includes the scheduled animation frame,
  * whole-area validation, projection, canvas update and text alternative.
@@ -288,7 +289,7 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
     const probe = {
       localUpdates: 0, appliedAt: 0, availableAt: 0, availableEntries: 0,
       first: null as number | null,
-      durations: [] as number[], texts: [] as string[], paints: [] as string[], lastDescription: "",
+      durations: [] as number[], texts: [] as string[], paints: [] as string[], lastRevision: "",
       ink: [] as PaintedText[], points: [] as PaintedPoint[],
     };
     (window as unknown as { chartProbe: typeof probe }).chartProbe = probe;
@@ -345,9 +346,10 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         data = doc.share.get("data");
         data?.observe(applied);
       }
-      const text = document.querySelector(".ub-chart-description")?.textContent ?? "";
-      if (text !== "" && text !== probe.lastDescription) {
-        probe.lastDescription = text;
+      const drawn = document.querySelector<HTMLElement>('.ub-chart[data-draw-state="success"]');
+      const revision = drawn?.dataset.dataRev ?? "";
+      if (revision !== "" && revision !== probe.lastRevision) {
+        probe.lastRevision = revision;
         if (probe.appliedAt !== 0) {
           const duration = performance.now() - probe.appliedAt;
           if (probe.first === null && probe.availableAt !== 0) {
@@ -357,7 +359,8 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
         }
       }
     });
-    mutations.observe(document, { childList: true, subtree: true, characterData: true });
+    mutations.observe(document, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ["data-source-rev", "data-data-rev", "data-draw-state"] });
     const clearRect = CanvasRenderingContext2D.prototype.clearRect;
     CanvasRenderingContext2D.prototype.clearRect = function (...args: Parameters<typeof clearRect>): void {
       if (this.canvas.closest(".ub-chart") !== null && args[0] === 0 && args[1] === 0
@@ -419,7 +422,7 @@ test("editor insertion and the source control work by pointer and keyboard in bo
   const session = writer();
   for (const appearance of ["light", "dark"] as const) {
     const page = await openApp(browser, "/", { contextOptions: { colorScheme: appearance } });
-    await expect(page.locator(".ub-list-head")).toBeVisible();
+    await expect(page.locator(".ub-document-sidebar")).toBeVisible();
     const uuid = await createDoc(page, `Chart source ${appearance}`);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.insertText("A source-editable chart follows.");
@@ -430,36 +433,35 @@ test("editor insertion and the source control work by pointer and keyboard in bo
     await expect(source).toBeVisible();
     await source.click();
     // Select only this source; the block menu may insert a starter mapping.
-    await source.evaluate((element) => {
+    await setNativeSelection(source, () => source.evaluate((element) => {
+      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+      if (root === null) throw new Error("e2e: chart source has no editor");
       const range = document.createRange();
       range.selectNodeContents(element);
       const selection = document.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);
-    });
+      return { anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+        head: root.editor.view.posAtDOM(range.endContainer, range.endOffset) };
+    }));
     await page.keyboard.insertText(JSON.stringify(MAPPING));
     await expect(source).toHaveText(JSON.stringify(MAPPING));
     // A newly created browser document may be known to the agent directory
     // before its room is hydrated; the writer waits for the authored source.
-    await expect.poll(async () => {
-      try {
-        const doc = await session.call<DocPayload>("get_doc", { uuid });
-        return doc.blocks.find((entry) => entry.type === "chart")?.text;
-      } catch (error) {
-        if (error instanceof Error && /doc_not_hydrated|doc_not_found/.test(error.message)) return null;
-        throw error;
-      }
-    }).toBe(JSON.stringify(MAPPING));
+    await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+      expect(doc.blocks.find((entry) => entry.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+    });
     await measurements(session, uuid);
+    await waitForDocumentDraw(page, session, uuid);
     await editor(page).locator(":scope > p").first().click();
-    await expectReady(page);
+    await expectReady(page, session, uuid);
     await expectCornerControls(page);
     await expect(source).toBeHidden();
     await page.locator(".ub-chart-screen").click();
     await expect(source).toBeVisible();
     await expect(page.locator(".ub-chart .ub-copy")).toBeVisible();
     await editor(page).locator(":scope > p").first().click();
-    await expectReady(page);
+    await expectReady(page, session, uuid);
     const openSource = page.getByRole("button", { name: "Open chart source", exact: true });
     // Native Tab order, rather than focusing the button by script.
     for (let count = 0; count < 20; count += 1) {
@@ -492,14 +494,14 @@ test("editor insertion and the source control work by pointer and keyboard in bo
     await expect.poll(() => source.textContent()).toBe(`${JSON.stringify(MAPPING)} `);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.press("ArrowLeft");
-    await expectReady(page);
+    await waitForDocumentDraw(page, session, uuid, { source: `${JSON.stringify(MAPPING)} ` });
+    await expectReady(page, session, uuid);
     await expectCornerControls(page);
     await canvasEvidence(page.locator(".ub-chart"), info, `chart-${appearance}`);
     // The browser edit reaches the writer's replica through `ub open` and the hub.
-    await expect.poll(async () => {
-      const stored = await session.call<DocPayload>("get_doc", { uuid });
-      return stored.blocks.find((entry) => entry.type === "chart")?.text;
-    }).toBe(`${JSON.stringify(MAPPING)} `);
+    await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), stored => {
+      expect(stored.blocks.find((entry) => entry.type === "chart")?.text).toBe(`${JSON.stringify(MAPPING)} `);
+    });
   }
 });
 
@@ -534,6 +536,7 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
   await measurements(session, uuid);
   await session.call("update_data", { uuid, operations: [{ collection: "evidence", schema: { version: 1, schema: { type: "object" } }, replaceRecords: records }] });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { beforeNavigate: (loading) => installProbe(loading, uuid) });
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   await expect(page.locator(".ub-chart-panel").first()).toHaveAttribute("data-state", "ready");
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
   await expect(canvas).toBeVisible();
@@ -553,6 +556,7 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
       { collection: "evidence", upsert: [{ id: "d", value: { name: "Arriving update", value: 42, day: "2026-01-04", url: target } }] },
     ],
   });
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   await expect(canvas).toHaveAccessibleDescription(/Latency.*250.*ms/);
   await expect(canvas).toHaveAccessibleDescription(/Errors.*9.*requests/);
   await expect(table).toContainText("Arriving update");
@@ -564,6 +568,7 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
   const updatedTableMapping = { ...tableMapping, title: "Live evidence", pageSize: 5, sort: { field: "value", direction: "desc" },
     columns: tableMapping.columns.map((column) => column.field === "name" ? { ...column, label: "Observation" } : column) };
   await editMapping(session, uuid, JSON.stringify(updatedTableMapping), 1);
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   const renamed = page.getByRole("img", { name: "Live API health", exact: true });
   const renamedTable = page.getByRole("table", { name: "Live evidence", exact: true });
   await expect(renamed).toBeVisible();
@@ -571,21 +576,27 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
   await expect(renamedTable.getByRole("columnheader", { name: "Observation", exact: true })).toBeVisible();
   await expect(renamedTable.locator("tbody tr")).toHaveCount(records.length);
   await expect(renamedTable.locator("tbody tr").first()).toContainText("Arriving update");
-  expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMeasurements);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    expect(await session.call("get_data", { uuid })).toEqual(beforeMapping);
+    expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(beforeMeasurements);
+  });
   await session.call("update_data", {
     uuid, operations: [
       { collection: "measurements", upsert: [{ id: "latest", value: { day: "2026-01-02", latency: 375, errors: 11 } }] },
       { collection: "evidence", upsert: [{ id: "d", value: { name: "Later update", value: 43, day: "2026-01-04", url: target } }] },
     ],
   });
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
   await expect(renamedTable).toContainText("Later update");
   await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
   await session.call("update_data", { uuid, operations: [{ collection: "evidence", deleteRecords: ["e", "f"] }] });
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
   await expect(renamedTable).toContainText("Later update");
-  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
+  // The arrival proof deliberately writes one tag transaction to this document.
+  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
   const lightCanvas = await renamed.evaluate((element) => (element as HTMLCanvasElement).toDataURL());
   const lightInk = await page.evaluate(() => (window as unknown as { chartProbe: { paints: string[] } }).chartProbe.paints.at(-1));
   const lightTableInk = await renamedTable.evaluate((element) => getComputedStyle(element.querySelector("td") ?? element).color);
@@ -604,22 +615,26 @@ test("MCP updates and mapping edits redraw charts and tables, preserve data and 
   expect(paintedText.some((text) => /Jan [12], 2026/.test(text))).toBe(false);
   expect(navigations).toBe(0);
   await page.reload();
+  await waitForDocumentDraw(page, session, uuid, { index: "all" });
   await expect(renamed).toHaveAccessibleDescription(/Response time.*375.*ms/);
   await expect(renamedTable).toBeVisible();
   await expect(renamedTable.locator("tbody tr")).toHaveCount(4);
   await expect(renamedTable.locator("tbody tr").first()).toContainText("Later update");
   const reopened = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(reopened, session, uuid, { index: "all" });
   await expect(reopened.getByRole("img", { name: "Live API health", exact: true })).toHaveAccessibleDescription(/Response time.*375.*ms/);
   const reopenedTable = reopened.getByRole("table", { name: "Live evidence", exact: true });
   await expect(reopenedTable).toBeVisible();
   await expect(reopenedTable.locator("tbody tr")).toHaveCount(4);
   await expect(reopenedTable).toContainText("Later update");
-  const stored = await session.call<DocPayload>("get_doc", { uuid });
-  expect(stored.blocks.filter((entry) => entry.type === "chart").map((entry) => entry.text)).toEqual([
-    JSON.stringify(updatedMapping), JSON.stringify(updatedTableMapping),
-  ]);
-  const data = await session.call<{ records: { id: string; value: unknown }[] }>("get_data", { uuid, collection: "measurements" });
-  expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
+  await expectMcp(async () => {
+    const stored = await session.call<DocPayload>("get_doc", { uuid });
+    expect(stored.blocks.filter((entry) => entry.type === "chart").map((entry) => entry.text)).toEqual([
+      JSON.stringify(updatedMapping), JSON.stringify(updatedTableMapping),
+    ]);
+    const data = await session.call<{ records: { id: string; value: unknown }[] }>("get_data", { uuid, collection: "measurements" });
+    expect(data.records.find((entry) => entry.id === "latest")?.value).toEqual({ day: "2026-01-02", latency: 375, errors: 11 });
+  });
 });
 
 test("a record limit follows the latest x values with a neutral count and unchanged source", { tag: "@webkit" }, async ({ browser }) => {
@@ -636,7 +651,7 @@ test("a record limit follows the latest x values with a neutral count and unchan
     beforeNavigate: (loading) => installProbe(loading, uuid),
     contextOptions: { locale: "en-US" },
   });
-  await expectReady(page);
+  await expectReady(page, session, uuid);
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
   const notice = page.locator(".ub-chart-notice");
   const diagnostics = page.locator(".ub-chart-diagnostics");
@@ -653,6 +668,7 @@ test("a record limit follows the latest x values with a neutral count and unchan
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
     { id: "0-newest", value: { day: "2026-01-04", latency: 150 } },
   ] }] });
+  await waitForDocumentDraw(page, session, uuid);
   await expect(canvas).toHaveAccessibleDescription(/2 plotted records\. First Day: Jan 3, 2026\. Last: Jan 4, 2026\./);
   await expect(canvas).toHaveAccessibleDescription(/Latency: 150 ms/);
   await expectObservationGeometry(page, [
@@ -660,12 +676,17 @@ test("a record limit follows the latest x values with a neutral count and unchan
   ], /^Jan \d+$/, true);
   await expect(notice).toHaveText("Showing the latest 2 of 4 records");
   await expect(diagnostics).toHaveText("1 records not plotted (1 wrong-type or invalid x).");
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+    expect(doc.blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(mapping));
+  });
 
   await editMapping(session, uuid, JSON.stringify({ ...mapping, limit: 4 }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(canvas).toHaveAccessibleDescription(/4 plotted records/);
   await expect(notice).toBeHidden();
   await editMapping(session, uuid, JSON.stringify({ ...mapping, limit: 0 }));
+  await waitForDocumentDraw(page, session, uuid, { outcome: "error" });
   await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
   await expect(notice).toBeHidden();
 });
@@ -696,7 +717,7 @@ test("daily observation labels fit at desktop and iPad widths in both appearance
           locale: "en-US", colorScheme: appearance,
         },
       });
-      await expectReady(page);
+      await expectReady(page, session, uuid);
       expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(touch);
       const labels = await expectObservationGeometry(page, observations, /^Oct \d+$/, true);
       expect(new Set(labels.map((label) => label.y)).size).toBe(1);
@@ -726,7 +747,7 @@ test("crowded daily endpoint labels stay inside the canvas after resizing", { ta
     beforeNavigate: (loading) => installProbe(loading, uuid),
     contextOptions: { viewport: { width: 1280, height: 800 }, locale: "en-US" },
   });
-  await expectReady(page);
+  await expectReady(page, session, uuid);
   await page.evaluate(() => document.fonts.ready);
   const canvas = page.locator(".ub-chart canvas");
   // At 312px the retained endpoint tick must fit its padding.
@@ -762,7 +783,7 @@ test("observation ink, independent unit axes and nearest-x tooltips keep sparse 
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     beforeNavigate: (loading) => installProbe(loading, uuid), contextOptions: { locale: "en-US" },
   });
-  await expectReady(page);
+  await expectReady(page, session, uuid);
   await expectCornerControls(page);
   await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
@@ -784,6 +805,7 @@ test("observation ink, independent unit axes and nearest-x tooltips keep sparse 
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
     { id: "middle", value: { day: "2026-01-02", latency: null, errors: 9 } },
   ] }] });
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.locator(".ub-chart-diagnostics")).toContainText("Latency: 1 absent or null");
   const points = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points);
   const box = await canvas.boundingBox();
@@ -804,6 +826,7 @@ test("observation ink, independent unit axes and nearest-x tooltips keep sparse 
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
     { id: "only", value: { day: "2026-01-03T09:30:00Z", latency: 125, errors: 4 } },
   ] }] });
+  await waitForDocumentDraw(page, session, uuid);
   await expect(canvas).toHaveAccessibleDescription(/1 plotted record\./);
   await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
   const single = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.points);
@@ -816,6 +839,7 @@ test("observation ink, independent unit axes and nearest-x tooltips keep sparse 
 
   await editMapping(session, uuid, JSON.stringify({ version: 1, type: "table", collection: "measurements",
     columns: [{ field: "day" }, { field: "latency", format: "number" }] }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.getByRole("table")).toBeVisible();
   await expect(page.locator(".ub-chart-title")).toBeHidden();
   await page.locator(".ub-chart").hover();
@@ -827,6 +851,7 @@ test("observation ink, independent unit axes and nearest-x tooltips keep sparse 
   expect(sourceBox.y).toBeGreaterThanOrEqual(tableBox.y + tableBox.height);
   await editMapping(session, uuid, JSON.stringify({ ...MAPPING, title: "" }));
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
+  await waitForDocumentDraw(page, session, uuid, { outcome: "error" });
   await expect(page.locator(".ub-chart-message")).toContainText("No plottable records");
   await expect(page.locator(".ub-chart-diagnostics")).toBeHidden();
   await expectCornerControls(page);
@@ -857,7 +882,7 @@ test("each value axis keeps a zero baseline only while its plotted values are no
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     beforeNavigate: (loading) => installProbe(loading, uuid), contextOptions: { locale: "en-US" },
   });
-  await expectReady(page);
+  await expectReady(page, session, uuid);
   const canvas = page.getByRole("img", { name: "API latency", exact: true });
   for (const [index, fixture] of cases.entries()) {
     await test.step(fixture.name, async () => {
@@ -904,6 +929,7 @@ test("narrow-band compact ticks preserve the step on both value axes in both app
       beforeNavigate: (loading) => installProbe(loading, uuid),
       contextOptions: { locale: "en-US", colorScheme: appearance },
     });
+    await waitForDocumentDraw(page, session, uuid);
     const canvas = page.getByRole("img", { name: "Service metrics", exact: true });
     await expect(canvas).toHaveAccessibleDescription(/Uptime: -99\.9 %/);
     const painted = () => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
@@ -948,6 +974,7 @@ for (const viewport of ["desktop"] as const) {
           contextOptions: { viewport: { width: 1366, height: 768 },
             locale: "en-US", colorScheme: appearance },
         });
+        await waitForDocumentDraw(page, session, uuid);
         const image = page.getByRole("img", { name: "Delivery trend", exact: true });
         await expect(image).toBeVisible();
         await expect(image).toHaveAccessibleDescription(/Autonomous deliveries: 91 %/);
@@ -996,7 +1023,9 @@ for (const viewport of ["desktop"] as const) {
         expect(labels[2]).toEqual(labels[0]);
         expect(ticks[1]).toEqual(ticks[0]);
         expect(ticks[2]).toEqual(ticks[0]);
-        expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
+        await proveMcpArrival(page, session, uuid, { path: "upstream" });
+        // The later tag transaction is the only local update this reader sees.
+        expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
         await canvasEvidence(page.locator(".ub-chart"), info, `chart-panels-${viewport}-${appearance}`);
       }
     });
@@ -1020,6 +1049,7 @@ test("panel tick labels match their gridlines and retain extreme markers across 
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     beforeNavigate: loading => installProbe(loading, uuid), contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
   });
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.getByRole("img", { name: "Panel tick precision", exact: true })).toBeVisible();
   const canvases = page.locator(".ub-chart-series-panel canvas");
   await expect(canvases).toHaveCount(6);
@@ -1050,6 +1080,7 @@ test("panels compare units, retain empty series and switch layouts without rende
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     beforeNavigate: loading => installProbe(loading, uuid), contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
   });
+  await waitForDocumentDraw(page, session, uuid);
   const image = page.getByRole("img", { name: "Panel ranges", exact: true });
   await expect(image).toBeVisible();
   await expect(page.locator(".ub-chart-series-panel")).toHaveCount(4);
@@ -1083,17 +1114,28 @@ test("panels compare units, retain empty series and switch layouts without rende
   await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
   await page.mouse.move(box.x + (first.points[0]?.x ?? 0), box.y + box.height / 3);
   await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts)).toContain("First: -20 ms");
-  expect(await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts)).not.toContain("Second: 0 ms");
+  await test.step("later tooltip ink reaches the canvas reader after the first panel hover", async () => {
+    const next = await page.locator(".ub-chart-series-panel canvas").nth(1).boundingBox();
+    if (next === null) throw new Error("e2e: second panel canvas has no box");
+    await page.mouse.move(next.x + (second.points[1]?.x ?? 0), next.y + next.height / 3);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts)).toContain("Second: 10 ms");
+    // Keep the first hover's ink: the later distinct tooltip proves this reader
+    // has processed that hover before checking it never drew another panel.
+    expect(await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts)).not.toContain("Second: 0 ms");
+  });
   await editMapping(session, uuid, JSON.stringify({ ...mapping, layout: "overlay" }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.locator(".ub-chart-series-panel")).toHaveCount(0);
   await expect(image).toBeVisible();
   await expect(page.locator(".ub-chart-screen canvas")).toBeVisible();
   await editMapping(session, uuid, JSON.stringify({ ...mapping, y: mapping.y.slice(0, 2) }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.locator(".ub-chart-series-panel")).toHaveCount(2);
   await page.setViewportSize({ width: 810, height: 1080 });
   await editMapping(session, uuid, JSON.stringify({ ...mapping, title: "", y: [
     { ...mapping.y[0], unit: "milliseconds elapsed per completed request" }, ...mapping.y.slice(1),
   ] }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.locator(".ub-chart-series-panel")).toHaveCount(4);
   await expect(page.locator(".ub-chart-title")).toBeHidden();
   await expectCornerControls(page);
@@ -1113,9 +1155,11 @@ test("panels compare units, retain empty series and switch layouts without rende
   if (header === null || source === null) throw new Error("e2e: titleless panel controls have no box");
   expect(source.y + source.height).toBeLessThanOrEqual(header.y);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
+  await waitForDocumentDraw(page, session, uuid, { outcome: "error" });
   await expect(page.locator(".ub-chart-message")).toContainText("No plottable records");
   await expect(page.locator(".ub-chart-screen")).toBeHidden();
-  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
 });
 
 interface Timings {
@@ -1163,11 +1207,17 @@ async function workload(session: McpSession, bounded: boolean, layout: "overlay"
       });
     }
   }
-  const summary = await session.call<{ data: { bytes: number } }>("get_data", { uuid });
-  return { uuid, bytes: summary.data.bytes };
+  let bytes = 0;
+  await expectMcp(async () => {
+    const summary = await session.call<{ data: { bytes: number } }>("get_data", { uuid });
+    bytes = summary.data.bytes;
+    if (!bounded) expect(bytes).toBeGreaterThan(2_500_000);
+  });
+  return { uuid, bytes };
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, bounded: boolean, bytes: number): Promise<Timings> {
+  await waitForDocumentDraw(page, session, uuid);
   const title = bounded ? "Bound chart" : "API health year";
   const canvas = page.getByRole("img", { name: title, exact: true });
   await expect(canvas).toBeVisible();
@@ -1191,13 +1241,15 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, bou
         value: { day, ...Object.fromEntries(Array.from({ length: series }, (_, index) => [`value${index}`, value + index])) },
       }] }],
     });
+    await waitForDocumentDraw(page, session, uuid);
     await expect(canvas).toHaveAccessibleDescription(new RegExp(`Metric 0: ${value} ms`));
-    await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: { durations: number[] } }).chartProbe.durations.length)).toBe(previous + 1);
+    expect(await page.evaluate(() => (window as unknown as { chartProbe: { durations: number[] } }).chartProbe.durations.length)).toBe(previous + 1);
     const duration = await page.evaluate(() => (window as unknown as { chartProbe: { durations: number[] } }).chartProbe.durations.at(-1));
     if (duration === undefined) throw new Error("e2e: chart redraw had no browser-applied data timestamp");
     redraws.push(duration);
   }
-  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(0);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
   return { first: first ?? Infinity, redraws, availableEntries, bytes, records: bounded ? 5000 : 365, series, cpuThrottle: 2 };
 }
 
@@ -1224,7 +1276,6 @@ test("whole-area validation and Chart.js record representative and bounded Chrom
     { bounded: false, layout: "overlay" }, { bounded: true, layout: "overlay" }, { bounded: true, layout: "panels" },
   ] as const) {
     const { uuid, bytes } = await workload(session, bounded, layout);
-    if (!bounded) expect(bytes).toBeGreaterThan(2_500_000);
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       beforeNavigate: async (loading) => {
         // A conservative CPU allowance on shared CI hardware, with the actual

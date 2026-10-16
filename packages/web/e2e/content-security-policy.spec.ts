@@ -7,6 +7,7 @@ import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { SETTINGS_KEY } from "../src/settings.js";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { waitForDocumentDraw } from "./settle.js";
 
 const { harness, openApp, trackContext } = setupHarness();
 let agent: McpAgent | null = null;
@@ -89,11 +90,14 @@ test("workspace, supported renderers and the every-type document emit no report-
     }],
   });
   const allTypes = await writer.call<{ uuid: string }>("create_doc", {
-    title: "CSP every block type", description: "Includes the currently unsupported Figma view.",
+    title: "CSP every block type", description: "Includes the live Figma view.",
     blocks: [...blocks, figma],
   });
-  const page = await openApp(browser, "/", { beforeNavigate: watchViolations });
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  const page = await openApp(browser, "/", { beforeNavigate: async (target) => {
+    await watchViolations(target);
+    await target.route("https://embed.figma.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" }));
+  } });
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   await expectNoViolations(page);
 
   for (const uuid of [rendered.uuid, allTypes.uuid]) {
@@ -106,6 +110,7 @@ test("workspace, supported renderers and the every-type document emit no report-
     await expect(page.locator(".ub-title")).toHaveValue(uuid === rendered.uuid ? "CSP supported blocks" : "CSP every block type");
     if (uuid === rendered.uuid) {
       await expect(editor(page)).toBeVisible();
+      await waitForDocumentDraw(page, writer, uuid, { index: "all" });
       for (const selector of [
         ".ub-code > code", ".ub-wireframe-drawing .wf-root", ".ub-mermaid-panel svg",
         ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
@@ -116,10 +121,11 @@ test("workspace, supported renderers and the every-type document emit no report-
       await expect(page.getByRole("menu")).toBeVisible();
       await page.keyboard.press("Escape");
     } else {
-      // Figma's current safe fallback makes the entire document read-only.
-      await expect(page.locator(".ub-foreign-banner")).toContainText("unsupported type (figma)");
-      await expect(page.locator(".ub-foreign-list > li > code")).toHaveText([...blocks, figma].map((block) => block.type));
-      await expect(editor(page)).toHaveCount(0);
+      await expect(editor(page)).toBeVisible();
+      await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+      await expect(page.locator(".ub-figma")).toBeVisible();
+      await page.locator(".ub-figma").scrollIntoViewIfNeeded();
+      await expect(page.locator(".ub-figma iframe")).toHaveAttribute("src", /^https:\/\/embed\.figma\.com\//);
     }
     await expectNoViolations(page);
   }
@@ -159,6 +165,6 @@ test("the classic bootstrap applies stored dark settings before the app module a
     expect(first).toEqual({ theme: appearance.theme, appMounted: false });
     expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(false);
   } finally { releaseModule?.(); }
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   expect(await page.locator("html").getAttribute("data-theme")).toBe(appearance.theme);
 });

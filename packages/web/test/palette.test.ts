@@ -50,6 +50,8 @@ describe("the editor palette and stored block types", () => {
       "chart",
       "code",
       "doc",
+      "figma",
+      "figmaCaption",
       "heading",
       "list-item",
       "mermaid",
@@ -290,7 +292,7 @@ describe("document links in table cells", () => {
 });
 
 describe("foreign blocks already in the document", () => {
-  it.each([false, true])("preserves figma without binding when it arrives %s", (arrivesWhileBound) => {
+  it.each([false, true])("preserves an unsupported figma shape without binding when it arrives %s", (arrivesWhileBound) => {
     const ydoc = new Y.Doc();
     const peer = new Y.Doc();
     initDoc(ydoc, { uuid: "figma-palette", title: "Design reference" });
@@ -323,9 +325,8 @@ describe("foreign blocks already in the document", () => {
       expect(stored.getAttributes()).toEqual(figma.getAttributes());
       expect(stored.length).toBe(0);
       const foreign = findForeignBlocks(getBlocksFragment(ydoc));
-      expect(foreign).toMatchObject([{ index: 1, nodeName: "figma", id: "figma-reference" }]);
-      expect(describeForeignBlocks(foreign)).toContain("unsupported type (figma)");
-      expect(uberblickSchema.nodes.figma).toBeUndefined();
+      expect(foreign).toMatchObject([{ index: 1, nodeName: "#figma-shape", id: "figma-reference" }]);
+      expect(describeForeignBlocks(foreign)).toContain("unsupported type (#figma-shape)");
     } finally { binding?.destroy(); host.remove(); ydoc.destroy(); peer.destroy(); }
   });
 

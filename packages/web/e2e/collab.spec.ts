@@ -1,3 +1,4 @@
+import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /**
  * The collaboration proof points, in a real browser against a real hub.
  *
@@ -16,8 +17,9 @@ import { expect, test } from "@playwright/test";
 import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
 import type { Browser, Page } from "@playwright/test";
 import { placeCaret } from "./harness.js";
+import { fastForwardPageTimers, installPageTimers, setPageTime, withPageTimers } from "./page-timers.js";
 
-const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { harness, openApp, trackContext } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
 
 /**
  * The open document's first block, with remote-cursor widgets stripped.
@@ -124,12 +126,14 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.press("Enter");
   await expect(calloutB.getByRole("alert")).toHaveText("A TL;DR is at most 300 characters.");
   await expect(summaryB).toHaveValue("x".repeat(301));
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   await summaryB.press("End");
   await summaryB.press("Shift+Enter");
   await b.keyboard.insertText("A second line.");
   await expect(summaryB).toHaveValue("A short summary for readers.\nA second line.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   // Leaving an unchanged field closes it; a draft must stay local until saved.
@@ -141,6 +145,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.fill("Changed in the other tab.");
   await b.locator(".ub-title").click();
   await expect(summaryB).toHaveValue("Changed in the other tab.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.press("Enter");
   await expect(calloutA).toContainText("Changed in the other tab.");
@@ -197,6 +202,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled with Escape.");
   await summary.press("Escape");
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
@@ -205,6 +211,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled by tapping Cancel.");
   await a.getByRole("button", { name: "Cancel", exact: true }).tap();
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
@@ -307,15 +314,15 @@ test("the upstream fact recovers after an acknowledged typing burst", async ({
   const observer = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
   await expect(editor(observer)).toBeVisible();
   await placeCaret(page);
-  const upstream = page.locator(".ub-status-word--hub");
-  await expect(upstream).toHaveText("synced with hub");
+  const upstream = page.locator(".ub-status-sync");
+  await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /));
 
   const burst = "calm".repeat(60);
   await page.keyboard.type(burst, { delay: 15 });
   // A browser connected directly to the upstream hub seeing the complete burst
   // is the boundary after which the served page's drawn fact must recover.
   await expect.poll(() => blockText(observer)).toBe(burst);
-  await expect(upstream).toHaveText("synced with hub");
+  await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /));
 });
 
 test("a peer's cursor renders in the other context with its name and colour", async ({
@@ -391,8 +398,9 @@ test("a peer joining leaves the status row's height and the prose where they wer
   const peers = a.locator(".ub-peers > .ub-peer-control");
   // Both sync facts settled, so the reading beside the cluster is not still
   // resolving while the two geometries are read.
-  await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
-  await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
+  await waitForAcknowledged(a, { path: "upstream" });
+  await expect(a.locator(".ub-not-saved")).not.toBeVisible();
+  await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
   const geometry = async () => ({
     row: (await status.boundingBox())?.height,
     prose: (await firstBlock.boundingBox())?.y,
@@ -412,20 +420,18 @@ test("the open document's last-updated reading follows its stub through status a
   trackContext(context);
   const page = await context.newPage();
   const title = docTitle("freshness");
-  const realNow = Date.now();
-
-  // Install at the real time before loading, so every room authenticates with a
-  // valid token. One minute is enough to prove the shared clock repaints this
-  // surface without pushing a freshly minted token outside its valid window.
-  await page.clock.install({ time: realNow });
+  await installPageTimers(page);
   await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, title, { pin: true });
 
   const reading = page.locator(".ub-last-updated");
   const time = reading.locator("time");
-  await page.clock.fastForward(60_000);
-  await expect(reading).toContainText("last updated 1 minute ago");
+  // Move wall time separately: driving status timers must not move token issue
+  // times further into the future. Frame scheduling stays native throughout.
+  await setPageTime(page, await page.evaluate(() => Date.now()) + 60_000);
+  await fastForwardPageTimers(page, 60_000);
+  await expect(reading).toContainText("Edited 1 minute ago");
   const firstDateTime = await time.getAttribute("dateTime");
   expect(firstDateTime).not.toBeNull();
   expect(Number.isFinite(Date.parse(firstDateTime ?? ""))).toBe(true);
@@ -457,7 +463,7 @@ test("the open document's last-updated reading follows its stub through status a
 
   const renamed = `${title} fresh`;
   await page.locator(".ub-title").fill(renamed);
-  await expect(reading).toContainText("last updated just now");
+  await expect(reading).toContainText("Edited just now");
   await expect(time).not.toHaveAttribute("dateTime", firstDateTime ?? "");
   const currentDateTime = await time.getAttribute("dateTime");
   expect(currentDateTime).not.toBeNull();
@@ -466,7 +472,7 @@ test("the open document's last-updated reading follows its stub through status a
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page
     .getByRole("alertdialog")
-    .getByRole("button", { name: "Archive document" })
+    .getByRole("button", { name: "Archive", exact: true })
     .click();
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore).toBeVisible();
@@ -474,7 +480,7 @@ test("the open document's last-updated reading follows its stub through status a
   // That focus may scroll the pane, so it is the settle boundary before the
   // position this test expects the later upstream outage to preserve.
   await expect(restore).toBeFocused();
-  await expect(reading).toContainText("last updated just now");
+  await expect(reading).toContainText("Edited just now");
   await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
 
   // `Restore` is painted from this tab's local Y.Doc before its directory
@@ -487,18 +493,20 @@ test("the open document's last-updated reading follows its stub through status a
   ).toBeVisible();
   const stablePosition = await reading.boundingBox();
   expect(stablePosition).not.toBeNull();
-  const saved = page.locator(".ub-status-word--saved");
-  const upstream = page.locator(".ub-status-word--hub");
-  await expect(saved).toHaveText("saved here");
-  await expect(upstream).toHaveText("synced with hub");
+  const saved = page.locator(".ub-not-saved");
+  const upstream = page.locator(".ub-status-sync");
+  await waitForAcknowledged(page, { path: "relay" });
+  await expect(saved).not.toBeVisible();
+  await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /));
 
   await harness().stopHub();
   try {
     // The browser remains connected to `ub open`; only its silent upstream
     // replica is offline, so the local durability boundary stays saved while
     // the separately polled upstream fact turns negative.
-    await expect(saved).toHaveText("saved here");
-    await expect(upstream).toHaveText("not synced with hub");
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Offline since /));
     await page.locator(".ub-sync-toggle").click();
     const panel = page.getByRole("dialog", { name: "Sync and presence" });
     const fact = (label: string) =>
@@ -507,16 +515,16 @@ test("the open document's last-updated reading follows its stub through status a
     await expect(fact("State")).toHaveText("saved here");
     await expect(fact("Hub state")).toHaveText("not synced with hub");
     await page.locator(".ub-sync-toggle").click();
-    await expect(reading).toContainText("last updated just now");
+    await expect(reading).toContainText("Edited just now");
     await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
     expect(await reading.boundingBox()).toEqual(stablePosition);
   } finally {
     await harness().startHub();
   }
-  await expect(upstream).toHaveText("synced with hub", {
+  await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /, {
     timeout: 40_000,
-  });
-  await expect(reading).toContainText("last updated just now");
+  }));
+  await expect(reading).toContainText("Edited just now");
   await expect(time).toHaveAttribute("dateTime", currentDateTime ?? "");
   expect(await reading.boundingBox()).toEqual(stablePosition);
 });
@@ -534,18 +542,16 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
     // from the unavailable upstream.
     const fresh = await openApp(browser, path);
     await expect(editor(fresh)).toBeVisible();
-    await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
-    await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
-      "not synced with hub",
-    );
+    await waitForAcknowledged(fresh, { path: "relay" });
+    await expect(fresh.locator(".ub-not-saved")).not.toBeVisible();
+    await withPageTimers(fresh, () => expect(fresh.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
 
     // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
     await expect(editor(fresh)).toBeVisible();
-    await expect(fresh.locator(".ub-status-word--saved")).toHaveText("saved here");
-    await expect(fresh.locator(".ub-status-word--hub")).toHaveText(
-      "not synced with hub",
-    );
+    await waitForAcknowledged(fresh, { path: "relay" });
+    await expect(fresh.locator(".ub-not-saved")).not.toBeVisible();
+    await withPageTimers(fresh, () => expect(fresh.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
   } finally {
     await harness().startHub();
   }
@@ -568,22 +574,20 @@ test("a multi-author block survives upstream loss and converges back without dup
   await placeCaret(b);
   await type(b, "-peer");
   await expect.poll(() => blockText(a)).toBe("before-peer");
-  await expect(a.locator(".ub-status-word--hub")).toHaveText("synced with hub");
+  await waitForAcknowledged(a, { path: "upstream" });
+  await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
   await harness().stopHub();
   try {
-    await expect(a.locator(".ub-status-word--hub")).toHaveText(
-      "not synced with hub",
-    );
+    await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
 
     // Reload with no upstream. Both rooms hydrate from the process-local store,
     // and the browser still has a real durability boundary to acknowledge it.
     await a.reload();
     await openDoc(a, title);
     await expect.poll(() => blockText(a)).toBe("before-peer");
-    await expect(a.locator(".ub-status-word--saved")).toHaveText("saved here");
-    await expect(a.locator(".ub-status-word--hub")).toHaveText(
-      "not synced with hub",
-    );
+    await waitForAcknowledged(a, { path: "relay" });
+    await expect(a.locator(".ub-not-saved")).not.toBeVisible();
+    await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
 
     await placeCaret(a);
     await type(a, "-offline");

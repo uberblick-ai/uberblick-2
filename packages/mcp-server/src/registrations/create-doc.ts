@@ -12,12 +12,12 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
       "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. " +
       "Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. " +
       "Decision title names stable topic, never answer; successors keep it. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". " +
-      "1–3 short answer blocks with brief reasons; successors give new answer. No \"Topic:\" line or specification: details/guidance on related page, discussion in RFC. " +
+      "For decision answers, see lifecycle's Decision answers and topics section. " +
       "Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. " +
       "related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
       "discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. " +
       "Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. " +
-      "answerPreview: legacy TL;DR/first paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics." +
+      "Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics." +
       helpPointer("create_doc"),
     outputSchema: outputSchemas.create_doc,
     inputSchema,

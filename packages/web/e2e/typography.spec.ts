@@ -164,6 +164,11 @@ test.describe("document and workspace typography", () => {
         expect(measure.size).toBe("16px");
         expect(measure.cap).toBeCloseTo(measure.width, 1);
         expect(measure.proseLeft).toBeCloseTo(measure.columnLeft + measure.gutter, 1);
+        const documentTitle = await page.locator(".ub-title").evaluate((title) => ({
+          left: title.getBoundingClientRect().left,
+          gap: (title.nextElementSibling?.getBoundingClientRect().top ?? 0) - title.getBoundingClientRect().bottom,
+          tracking: getComputedStyle(title).letterSpacing,
+        }));
         await expectScale(page, `document ${viewport.width}px`);
         const documentImage = info.outputPath(`document-${viewport.width}.png`);
         await page.screenshot({ path: documentImage });
@@ -193,6 +198,17 @@ test.describe("document and workspace typography", () => {
         ] as const) {
           await page.goto(new URL(`/${harness().workspace}/${suffix}`, harness().appUrl).href);
           await expect(page.locator(ready ?? "body")).toBeVisible();
+          if (surface === "decision") {
+            const title = page.locator(".ub-title");
+            await expectStep(title, 36, 42);
+            await expect(title).toHaveCSS("font-family", /Fraunces/);
+            await expect(title).toHaveCSS("font-weight", "500");
+            await expect(title).toHaveCSS("letter-spacing", documentTitle.tracking);
+            const metrics = await title.evaluate((node) => ({ left: node.getBoundingClientRect().left,
+              gap: (node.nextElementSibling?.getBoundingClientRect().top ?? 0) - node.getBoundingClientRect().bottom }));
+            expect(Math.abs(metrics.left - documentTitle.left)).toBeLessThanOrEqual(1);
+            expect(Math.abs(metrics.gap - documentTitle.gap)).toBeLessThanOrEqual(1);
+          }
           if (surface === "All documents") {
             await expect(page.locator(".ub-docs-open").filter({ hasText: "A readable document outline" })).toBeVisible();
             await expectStep(page.getByRole("columnheader").first(), 14, 20);

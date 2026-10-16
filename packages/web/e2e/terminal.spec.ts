@@ -85,7 +85,7 @@ async function writeDemo(
   if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, "demos");
 
   const blocks = page.locator(".ub-editor .ProseMirror > *");

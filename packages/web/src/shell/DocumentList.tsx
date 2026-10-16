@@ -284,6 +284,14 @@ function noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced, ha
   return synced ? "No documents in this workspace yet." : "Nothing here yet — the directory has not synced on this client.";
 }
 
+function DocumentListHeader({ entries, received }: { entries: readonly DirectoryEntry[]; received: boolean }): ReactElement {
+  const count = entries.filter((entry) => !entry.deleted && inMode(entry, "working")).length;
+  return <header className="ub-page-header">
+    <h1 className="ub-title ub-docs-heading">All documents</h1>
+    <p className="ub-page-subtitle ub-docs-count">{received ? `${count} ${count === 1 ? "document" : "documents"}` : null}</p>
+  </header>;
+}
+
 export function DocumentList({
   connection,
   entries,
@@ -388,9 +396,9 @@ export function DocumentList({
   const emptyMessage = noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced: status.synced, hasFilters, hasDocuments: entries.some((entry) => !entry.deleted) });
 
   return (
-    <section className="ub-pane">
+    <section className="ub-pane ub-page-pane">
       <div className="ub-column ub-docs">
-        <h1 className="ub-docs-heading">Documents</h1>
+        <DocumentListHeader entries={entries} received={status.hasReceivedServerState} />
         <label className="ub-docs-search-label">
           <span className="ub-sr-only">Search</span>
           <input

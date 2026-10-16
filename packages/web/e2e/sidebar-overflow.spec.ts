@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
     json: { state: "signed-in", handle: "a".repeat(39) },
   }));
   await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
 });
 
 test.afterEach(() => {
@@ -154,7 +154,7 @@ async function expectFixedFrame(page: Page, scrollable = false): Promise<void> {
 }
 
 async function addGroup(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   const field = page.getByRole("textbox", { name: "Group name" });
   await expect(field).toBeFocused();
   await expectHorizontalFit(page);

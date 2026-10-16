@@ -1,3 +1,4 @@
+import { expectOpenPages, provePageArrival } from "./settle.js";
 /** GitHub pills change presentation while native links, selection and storage stay intact. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
@@ -48,7 +49,7 @@ async function expectPopup(page: Page, activate: () => Promise<unknown>): Promis
     await expect(popup).toHaveURL(TARGET);
     expect(await popup.evaluate(() => window.opener)).toBeNull();
     expect(await popup.evaluate(() => document.referrer)).toBe("");
-    expect(page.context().pages()).toHaveLength(count + 1);
+    await expectOpenPages(page.context(), count + 1);
   } finally {
     await popup.close();
     await page.bringToFront();
@@ -96,7 +97,7 @@ async function selectLinkText(link: Locator, from: number, to: number): Promise<
 async function archiveDoc(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 
@@ -272,7 +273,8 @@ test("pill clicks follow the address in editable and read-only prose while Shift
   await pill.click({ modifiers: ["Shift"] });
   await expect.poll(() => page.evaluate(() => document.getSelection()?.toString() ?? "")).toMatch(/^before /);
   await expect(page.getByRole("toolbar", { name: "Text formatting and comment" })).toBeVisible();
-  expect(page.context().pages()).toHaveLength(1);
+  await provePageArrival(page, { path: "browser context" });
+  await expectOpenPages(page.context(), 1);
   await placeCaret(page);
   await archiveDoc(page);
   await page.reload();

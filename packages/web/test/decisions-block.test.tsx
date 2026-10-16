@@ -77,7 +77,7 @@ describe("the compact Decisions block", () => {
   });
 
   it("uses only cached previews and leaves null and unknown caches out", () => {
-    const unknown = record(SECOND, "Unknown cache", { tldr: "Legacy summary does not fill the cache" });
+    const unknown = { ...record(SECOND, "Unknown cache"), tldr: "Legacy summary does not fill the cache" };
     delete unknown.answerPreview;
     const host = block([
       record(FIRST, "Null cache", { answerPreview: null }),

@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /** Workspace settings through the real browser, serving replica, and hub. */
 
 import { expect, test } from "@playwright/test";
@@ -10,13 +11,13 @@ const { harness, openApp } = setupHarness();
 
 function successNotice(page: Page, message: string) {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
-    has: page.locator("[data-description]", { hasText: message }),
+    has: page.locator("[data-title]", { hasText: message }),
   });
 }
 
 async function expectSuccess(page: Page, message: string): Promise<void> {
   await expect(successNotice(page, message)).toHaveAttribute("data-type", "success");
-  await expect(successNotice(page, message).locator("[data-description]")).toHaveText(message);
+  await expect(successNotice(page, message).locator("[data-title]")).toHaveText(message);
   await expect(page.locator("[data-settings-page]").getByText(message, { exact: true })).toHaveCount(0);
   await expect.poll(() => successNotice(page, message).evaluate((element) => {
     const box = element.getBoundingClientRect();
@@ -55,10 +56,10 @@ test("a workspace rename reaches another page live and preserves its document li
   await expect(second.getByRole("button", { name: "Back to Product Research", exact: true })).toBeVisible();
 
   await second.getByRole("button", { name: "Back to Product Research", exact: true }).click();
-  await second.getByRole("button", { name: "+ new doc" }).click();
+  await second.getByRole("button", { name: "+ New page" }).click();
   await expect(second.locator(".ub-title")).toHaveValue("Untitled");
   await second.locator(".ub-title").fill("Workspace rename links");
-  await expect(second.locator(".ub-status-word--saved")).toHaveText("saved here");
+  await waitForAcknowledged(second, { path: "relay" });
   const documentId = new URL(second.url()).pathname.split("/").at(-1);
   const oldNamePath = `/product-research-${harness().workspaceUuid}/${documentId}`;
   await second.goto(new URL(oldNamePath, harness().appUrl).href);
@@ -146,7 +147,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   // control, overlaid without shifting the title, and the same identity on a
   // second client.
   await first.locator(".ub-settings-back").click();
-  await first.getByRole("button", { name: "+ new doc" }).click();
+  await first.getByRole("button", { name: "+ New page" }).click();
   const documentUrl = first.url();
   const title = first.locator(".ub-title");
   const titleBefore = await title.boundingBox();

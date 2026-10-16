@@ -112,6 +112,8 @@
   --block-blue-tint: light-dark(oklch(0.97 0.006 240), oklch(0.22 0.012 240));
   --block-violet-bar: light-dark(oklch(0.55 0.07 305), oklch(0.7 0.07 305));
   --block-violet-tint: light-dark(oklch(0.97 0.006 305), oklch(0.22 0.012 305));
+  --block-teal-bar: light-dark(oklch(0.55 0.07 185), oklch(0.7 0.07 185));
+  --block-teal-tint: light-dark(oklch(0.97 0.006 185), oklch(0.22 0.012 185));
 
   /* Cursor labels and user tiles keep white ink in both appearances:
      the inline #rrggbb awareness palette in src/collab/identity.ts gives it
@@ -136,6 +138,7 @@
   --pane-trailing-space: 1rem;
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
+  --page-title-gap: 0.5rem;
 
   /* Product type tokens stay outside Tailwind's theme namespaces. */
   --type-caption-size: 12px;
@@ -356,7 +359,6 @@ body {
   filter: grayscale(1);
 }
 
-.ub-list-head,
 .ub-doc-meta,
 .ub-waiting-meta,
 .ub-tldr-form-meta,
@@ -366,24 +368,12 @@ body {
   gap: 0.5rem;
 }
 
-.ub-list-head {
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
-}
-
 /*
  * Keep sidebar small text at its AA floor before the equal-specificity header
  * rule, which owns its label tint.
  */
 .ub-list .ub-muted {
   color: var(--sidebar-muted-foreground);
-}
-
-/* Sync detail shares the group labels' size and tint. */
-.ub-list-head .ub-muted {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
-  color: var(--sidebar-group-label);
 }
 
 /* Keep font resets scoped to product selectors: unlayered rules outrank
@@ -426,7 +416,7 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* Navigation and group labels share an inset and small-caps voice. */
+/* Settings navigation labels retain their small-caps voice. */
 .ub-nav-label {
   margin: 0;
   padding: 0.25rem 0.4rem;
@@ -585,13 +575,16 @@ body {
   transform: rotate(90deg);
 }
 
-/* The rule fills the header space left by the label without shrinking
-   below its minimum visible length. */
-.ub-group-rule {
-  flex: 1;
-  min-width: 0.5rem;
-  margin: 0 0.25rem;
-  border-top: 1px solid var(--sidebar-border);
+.ub-group-rename {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+}
+
+@media (any-pointer: coarse) {
+  .ub-group-rename {
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-leading);
+  }
 }
 
 .ub-comment-buttons .ub-tool:disabled,
@@ -607,20 +600,23 @@ body {
   overflow-y: auto;
 }
 
-/* Cap the left-anchored document pane at its inset, reading measure and
-   rail gap, so wider windows add space after the rail. It may still shrink. */
-.ub-document-pane {
+/* Main pages share the document's inset and reading measure. Surplus width
+   stays after the column and, on documents, after the rail. */
+.ub-page-pane {
   flex: 0 1 calc(
     var(--pane-document-inset) + var(--measure) + var(--document-rail-gap)
   );
   padding-inline: var(--pane-document-inset) var(--document-rail-gap);
-  transition:
-    padding-inline-start 180ms ease,
-    flex-basis 180ms ease;
+  transition: padding-inline-start 180ms ease;
 }
 
-/* Cap the column at the reading measure. Document columns keep a fixed
-   inset; other panes center theirs. Left padding reserves `--block-gutter`. */
+/* Documents also move their rail with the changing inset. Other pages need
+   no width animation, including when loading fonts changes the ch measure. */
+.ub-document-pane {
+  transition-property: padding-inline-start, flex-basis;
+}
+
+/* Left padding reserves the document block gutter on every main page. */
 .ub-column {
   width: 100%;
   max-width: var(--measure);
@@ -628,7 +624,7 @@ body {
   padding-left: var(--block-gutter);
 }
 
-.ub-document-pane > .ub-column {
+.ub-page-pane > .ub-column {
   margin-inline: 0;
 }
 
@@ -713,11 +709,28 @@ h1.ub-heading {
 }
 
 .ub-title {
+  flex: none;
+  min-width: 0;
+  margin: 0 0 var(--page-title-gap);
   font-weight: 500;
   border-bottom: 1px solid transparent;
   padding: 0.2rem 0;
   color: inherit;
   font-family: var(--font-display);
+}
+
+.ub-page-header {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ub-page-subtitle {
+  min-height: var(--type-small-leading);
+  margin: 0;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  color: var(--muted-foreground);
 }
 
 .ub-title:focus {
@@ -793,12 +806,11 @@ h1.ub-heading {
   color: var(--muted-foreground);
 }
 
-/* Brand strokes and brand text use their separate accent and ink tokens. */
 .ub-badge {
-  border: 1px solid var(--brand);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
-  color: var(--brand-ink);
+  color: var(--muted-foreground);
 }
 
 .ub-lifecycle-badge {
@@ -1067,6 +1079,7 @@ h6.ub-heading {
 .ub-terminal { --block-bar: var(--block-green-bar); --block-tint: var(--block-green-tint); }
 .ub-chart { --block-bar: var(--block-blue-bar); --block-tint: var(--block-blue-tint); }
 .ub-mermaid { --block-bar: var(--block-violet-bar); --block-tint: var(--block-violet-tint); }
+.ub-figma { --block-bar: var(--block-teal-bar); --block-tint: var(--block-teal-tint); }
 
 .ub-block-frame:not([data-view="table"]) {
   position: relative;
@@ -1123,6 +1136,30 @@ h6.ub-heading {
   .ub-block-actions > button:hover { color: var(--foreground); }
 }
 .ub-code-language-trigger { pointer-events: auto; }
+
+.ub-figma-viewer { position: relative; width: 100%; min-height: 240px; height: var(--figma-height, 480px); }
+.ub-figma-viewer > iframe { display: block; width: 100%; height: 100%; border: 0; }
+.ub-figma-placeholder { display: grid; place-content: center; height: 100%; color: var(--muted-foreground); font-family: var(--font-sans); }
+.ub-figma-shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
+.ub-figma-shield > span { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); white-space: nowrap; }
+.ub-figma[data-figma-active="true"] { box-shadow: 0 0 0 2px var(--ring); }
+.ub-figma .ub-block-actions > a { display: inline-flex; align-items: center; padding: 0.05rem 0.3rem; color: var(--muted-foreground); text-decoration: none; font: inherit; }
+.ub-figma .ub-block-actions > :disabled { opacity: 0.5; cursor: default; }
+.ub-figma-fields { display: grid; gap: 0.5rem; font-family: var(--font-sans); }
+.ub-figma-fields > label { display: grid; gap: 0.2rem; font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); }
+.ub-figma-fields [role="alert"] { color: var(--destructive); }
+.ub-figma-resize { display: block; width: 100%; height: 12px; margin-top: 0.3rem; padding: 0; border: 0; background: transparent; color: transparent; cursor: ns-resize; touch-action: none; }
+.ub-figma-resize::after { content: ""; display: block; width: 3rem; height: 3px; margin: auto; border-radius: 2px; background: var(--muted-foreground); }
+@media (any-pointer: coarse) { .ub-figma-resize { height: 24px; } .ub-figma .ub-block-actions > :is(button, a) { min-height: 44px; } }
+.ub-figma-print { display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ub-figma:fullscreen { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; background: var(--background); }
+.ub-figma:fullscreen .ub-figma-viewer { flex: 1; min-height: 0; height: auto; }
+.ub-figma:fullscreen .ub-figma-resize { display: none; }
+.ub-figma [hidden] { display: none; }
+@media print {
+  .ub-figma-viewer, .ub-figma-fields, .ub-figma-resize, .ub-figma .ub-block-caption { display: none; }
+  .ub-figma-print { display: block; }
+}
 @media (any-pointer: coarse) {
   .ub-block-actions > button,
   .ub-block-caption .ub-code-language-trigger { min-width: 2.75rem; min-height: 2.75rem; }
@@ -1261,7 +1298,7 @@ h6.ub-heading {
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
 }
-.ub-data-link { color: var(--brand-ink); text-decoration: underline; }
+.ub-data-link { color: var(--foreground); text-decoration: underline; }
 
 .tableWrapper {
   max-width: 100%;
@@ -1552,7 +1589,7 @@ h6.ub-heading {
 
 .ub-link,
 .ub-doclink {
-  color: var(--brand-ink);
+  color: var(--foreground);
   text-underline-offset: 0.15em;
 }
 
@@ -1624,13 +1661,6 @@ h6.ub-heading {
   content: " · archived";
   font-size: inherit;
   line-height: inherit;
-}
-
-.ub-decision-related,
-.ub-decision-attribution,
-.ub-decision-record-meta {
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
 }
 
 .ub-decisions-block {
@@ -1745,20 +1775,20 @@ h6.ub-heading {
   border-radius: 50%;
 }
 
-.ub-decisions-row[data-state="in-force"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="in-force"] .ub-decisions-mark {
   border-color: var(--status-success);
   background: var(--status-success);
 }
 
-.ub-decisions-row[data-state="under-review"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="under-review"] .ub-decisions-mark {
   background: linear-gradient(90deg, var(--muted-foreground) 50%, transparent 50%);
 }
 
-.ub-decisions-row[data-state="agent-stance"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="agent-stance"] .ub-decisions-mark {
   border-width: 2px;
 }
 
-.ub-decisions-row[data-state="conflict"] .ub-decisions-mark {
+:is(.ub-decisions-row, .ub-decision-answer-state)[data-state="conflict"] .ub-decisions-mark {
   border-color: var(--destructive);
   background: var(--destructive);
   border-radius: 2px;
@@ -1783,25 +1813,94 @@ h6.ub-heading {
   }
 }
 
-.ub-decision-topic-state {
-  font-weight: 600;
-  margin-block: 1.25rem 0.5rem;
-}
-
 .ub-decision-notice {
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.ub-decision-answer-label {
+.ub-decision-answer-header {
+  container: decision-answer / inline-size;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin-block: 1rem 0.5rem;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  margin-block: 1.25rem 0.75rem;
+  font-family: var(--font-sans);
 }
 
-.ub-decision-answer-label a {
+.ub-decision-answer-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ub-decision-answer-caption {
+  color: var(--muted-foreground);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+  font-weight: 500;
+  letter-spacing: 0.035em;
+}
+
+.ub-decision-answer-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+  font-weight: 500;
+}
+
+.ub-decision-answer-state .ub-decisions-mark {
+  flex: none;
+  align-self: center;
+  margin-block-start: 0;
+}
+
+.ub-decision-answer-state[data-state="not-yet-decided"],
+.ub-decision-answer-state[data-state="open-proposal"] {
+  border-style: dashed;
+}
+
+.ub-decision-answer-state[data-state="rejected"] {
+  color: var(--destructive);
+}
+
+.ub-decision-answer-state[data-state="rejected"] .ub-decisions-mark {
+  border-color: var(--destructive);
+  background: var(--destructive);
+}
+
+.ub-decision-attribution {
+  margin-inline-start: auto;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+}
+
+@container decision-answer (max-width: 34rem) {
+  .ub-decision-attribution {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+.ub-decision-earlier-answer,
+.ub-decision-current-answer {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  margin-block: 0.5rem;
+}
+
+.ub-decision-current-answer a {
   text-decoration: underline;
 }
 
@@ -1817,62 +1916,279 @@ h6.ub-heading {
   min-height: 0;
 }
 
+.ub-decision-rfc {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-block: 1rem 0;
+  color: var(--muted-foreground);
+  font: normal 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+}
+
+.ub-decision-rfc .ub-doclink {
+  color: inherit;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .ub-decision-history {
+  container: decision-history / inline-size;
   margin-block-start: 2rem;
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
 .ub-decision-history h2 {
-  font-size: var(--type-h2-size);
-  line-height: var(--type-h2-leading);
-  font-weight: 600;
+  margin-block: 0 0.75rem;
+  color: var(--muted-foreground);
+  font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  letter-spacing: 0.1em;
 }
 
 .ub-decision-timeline {
   list-style: none;
-  padding-inline-start: 1rem;
-  border-inline-start: 1px solid var(--border);
+  margin: 0;
+  padding: 0;
 }
 
 .ub-decision-timeline > li {
+  --rail-top: calc(0.5rem + 15px);
+  --rail-left: calc(7.625rem + 1px);
+  position: relative;
+  display: grid;
+  grid-template-columns: 6rem 1rem minmax(0, 1fr) auto;
+  column-gap: 0.625rem;
+  row-gap: 0.25rem;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 0.5rem 0.75rem;
-  margin-block: 0.75rem;
+  padding: 0.5rem;
+}
+
+.ub-decision-timeline > li::before,
+.ub-decision-timeline > li::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--rail-left);
+  inline-size: 1px;
+  background: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.ub-decision-timeline > li::before {
+  inset-block: -1px calc(100% - var(--rail-top));
+}
+
+.ub-decision-timeline > li::after {
+  inset-block: var(--rail-top) -1px;
+}
+
+.ub-decision-timeline > li[data-rail-green="true"]::before,
+.ub-decision-timeline > li[data-rail-green="true"]:not([data-in-force="true"])::after {
+  background: var(--status-success);
+}
+
+.ub-decision-timeline > li:first-child::before,
+.ub-decision-timeline > li:last-child::after {
+  display: none;
 }
 
 .ub-decision-timeline > li[data-selected="true"] {
-  border-color: var(--foreground);
+  border-color: var(--border);
   background: var(--card-accent);
 }
 
 .ub-decision-record {
-  display: block;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  align-content: start;
+  row-gap: 0.25rem;
   color: inherit;
   text-decoration: none;
+  min-inline-size: 0;
   min-height: 2.75rem;
 }
 
+/* Stretch the native record link while keeping its sibling RFC link independent. */
+.ub-decision-record::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ub-decision-record-date {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  z-index: 1;
+  text-align: end;
+  color: var(--muted-foreground);
+  font: 400 var(--type-small-size)/var(--type-small-leading) var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ub-decision-rail-dot {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 50%;
+  background: var(--background);
+}
+
+.ub-decision-timeline > li[data-state="not-yet-decided"] .ub-decision-rail-dot,
+.ub-decision-timeline > li[data-state="open-proposal"] .ub-decision-rail-dot {
+  border-style: dashed;
+}
+
+.ub-decision-timeline > li[data-state="rejected"] .ub-decision-rail-dot {
+  border-color: var(--destructive);
+}
+
+.ub-decision-timeline > li:is([data-state="superseded"], [data-state="withdrawn"]) .ub-decision-rail-dot {
+  inline-size: 0.375rem;
+  block-size: 0.375rem;
+  background: var(--muted-foreground);
+}
+
+.ub-decision-timeline > li[data-state="conflict"] .ub-decision-rail-dot {
+  border-color: var(--destructive);
+  background: var(--destructive);
+  border-radius: 2px;
+}
+
+.ub-decision-timeline > li[data-in-force="true"] .ub-decision-rail-dot {
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  border-color: var(--status-success);
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 3px var(--status-success);
+}
+
+.ub-decision-record-line {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  block-size: 30px;
+  white-space: nowrap;
+}
+
 .ub-decision-record-state {
-  font-weight: 600;
+  min-inline-size: 0;
+  flex: 0 1 auto;
+}
+
+.ub-decision-state-label,
+.ub-decision-event,
+.ub-decision-linked,
+.ub-decision-preview,
+.ub-decision-rfc-title {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-decision-event {
+  flex: 1;
 }
 
 .ub-decision-selection,
 .ub-decision-linked {
-  margin-inline-start: 0.75rem;
+  color: var(--muted-foreground);
   font-size: var(--type-small-size);
   line-height: var(--type-small-leading);
 }
 
-.ub-decision-preview {
-  display: block;
-  margin-block: 0.35rem;
+.ub-decision-selection {
+  flex: none;
+  margin-inline-start: auto;
 }
 
-.ub-decision-record-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+.ub-decision-preview {
+  display: block;
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.ub-decision-timeline > li:is([data-state="rejected"], [data-state="withdrawn"], [data-state="superseded"]) .ub-decision-preview {
   color: var(--muted-foreground);
+}
+
+.ub-decision-record-comments {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.ub-decision-record-rfc {
+  grid-column: 3;
+  min-inline-size: 0;
+  display: flex;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  color: var(--muted-foreground);
+}
+
+.ub-decision-record-rfc .ub-doclink {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  color: inherit;
+}
+
+.ub-decision-record-rfc .ub-doclink[data-doc-link-state="archived"]::after {
+  content: none;
+}
+
+.ub-decision-archived {
+  flex: none;
+  margin-inline-start: 0.375rem;
+  padding-inline: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+@container decision-history (max-width: 34rem) {
+  .ub-decision-timeline > li {
+    --rail-left: calc(1rem + 1px);
+    --rail-top: calc(0.5rem + var(--type-small-leading) + 0.25rem + 15px);
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+  }
+  .ub-decision-record-date {
+    grid-column: 2;
+    min-block-size: var(--type-small-leading);
+    text-align: start;
+  }
+  .ub-decision-rail-dot { grid-column: 1; grid-row: 2; }
+  .ub-decision-record-line { grid-column: 2; grid-row: 2; }
+  .ub-decision-record-comments { grid-column: 3; grid-row: 2; }
+  .ub-decision-preview { grid-column: 2; grid-row: 3; }
+  .ub-decision-record-rfc { grid-column: 2; }
+}
+
+@media (any-pointer: coarse) {
+  .ub-decision-record-rfc .ub-doclink {
+    min-block-size: 44px;
+    align-content: center;
+  }
 }
 
 /* Banner emphasis comes from its ground and edge. Foreground prose keeps
@@ -2097,7 +2413,99 @@ h6.ub-heading {
   border-radius: var(--radius-sm);
 }
 
-/* Fixed mark slots let sync facts change without moving adjacent readings. */
+/* The dot target keeps its place across every document sync state. */
+.ub-status-row {
+  display: flex;
+  min-width: 0;
+  min-height: 28px;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ub-status-left {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.6rem;
+  row-gap: 0.25rem;
+}
+
+.ub-last-updated {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ub-status-sync,
+.ub-status-sync-slot {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.ub-status-sync { cursor: pointer; }
+.ub-status-sync:focus-visible,
+.ub-doc-rev:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.ub-sync-dot {
+  --sync-dot-rest: light-dark(oklch(0.55 0.09 145), oklch(0.63 0.10 145));
+  --sync-dot-full: light-dark(oklch(0.55 0.18 145), oklch(0.76 0.20 145));
+  background: var(--sync-dot-rest);
+}
+
+.ub-sync-dot[data-state="offline"],
+.ub-sync-dot[data-state="error"] {
+  /* A refusal or lost connection remains red even during an activity pulse. */
+  --sync-dot-rest: var(--destructive);
+  --sync-dot-full: var(--destructive);
+}
+
+.ub-sync-dot--pulse { animation: ub-sync-pulse 650ms ease-out; }
+@keyframes ub-sync-pulse {
+  from { background: var(--sync-dot-full); }
+  to { background: var(--sync-dot-rest); }
+}
+
+.ub-status .ub-doc-rev {
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.25rem 0;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .ub-status-sync:hover { background: var(--card-accent); }
+  .ub-doc-rev:hover { color: var(--foreground); }
+}
+
+@media (any-pointer: coarse) {
+  .ub-status-sync,
+  .ub-status-sync-slot { width: 44px; height: 44px; }
+  .ub-status .ub-doc-rev { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ub-sync-dot--pulse { animation: none; }
+}
+
+/* Fixed mark slots remain shared with sync surfaces outside the header. */
 .ub-status-mark {
   width: 0.7rem;
   height: 0.7rem;
@@ -2108,7 +2516,6 @@ h6.ub-heading {
    even while blank. Face-independent widths keep the slots and their adjacent
    content still; ch would change with the selected face's zero advance. */
 .ub-status-word {
-  width: 9em;
   min-height: 1lh;
   flex: none;
   line-height: inherit;
@@ -2174,7 +2581,7 @@ h6.ub-heading {
 
 /* Reduced motion removes decoration while preserving every state change. */
 @media (prefers-reduced-motion: reduce) {
-  .ub-document-pane,
+  .ub-page-pane,
   .ub-group-caret,
   .ub-group-body,
   .ub-copy {
@@ -2208,12 +2615,6 @@ h6.ub-heading {
   .ub-docs {
     --docs-pin: 2.75rem;
   }
-}
-
-.ub-docs-heading {
-  font-size: var(--type-h2-size);
-  line-height: var(--type-h2-leading);
-  margin: 0;
 }
 
 .ub-docs-mode-fieldset {

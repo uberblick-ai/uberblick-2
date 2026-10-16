@@ -88,19 +88,26 @@ describe("short decision answers", () => {
       await refuse(rig, "set_status", { uuid: ordinary.uuid, status: "decided", answer: attribution }, failure, ordinary.uuid);
       expect(getMeta(rig.instance.replicas.replica(ordinary.uuid).doc).kind).toBeUndefined();
       await rig.ok("set_status", { uuid: ordinary.uuid, status: "open" });
-      await refuse(rig, "set_status", { uuid: ordinary.uuid, status: "decided" }, failure, ordinary.uuid);
+      if (input.tldr !== undefined) {
+        expect(await rig.ok("get_doc", { uuid: ordinary.uuid })).toMatchObject({ tldr: null });
+        expect(await rig.ok("set_status", { uuid: ordinary.uuid, status: "decided" })).toMatchObject({ status: "decided" });
+        expect(getMetaMap(rig.instance.replicas.replica(ordinary.uuid).doc).get("tldr")).toBe(input.tldr);
+      } else {
+        await refuse(rig, "set_status", { uuid: ordinary.uuid, status: "decided" }, failure, ordinary.uuid);
+      }
     }
     const valid = await rig.ok("create_doc", { title: "Valid content", description: "Adoptable answer.", blocks: [paragraph] });
     expect(await rig.ok("set_status", { uuid: valid.uuid, status: "decided" })).toMatchObject({ kind: "decision", status: "decided", agentStance: true });
   });
 
-  it("refuses new TL;DR with other metadata unchanged, clears legacy TL;DR and never nudges decision writes", async () => {
+  it("refuses new TL;DR atomically, accepts null on open records and never nudges decision writes", async () => {
     const rig = await local();
     const record = await create(rig, { blocks: [paragraph] });
     expect(record).not.toHaveProperty("tldrHint");
     await refuse(rig, "set_metadata", { uuid: record.uuid, title: "Must stay unchanged", description: "Must stay unchanged too.", tldr: "New TL;DR" }, "decision_tldr_unsupported", record.uuid);
     setTldr(rig.instance.replicas.replica(record.uuid).doc, "Legacy answer");
-    await rig.ok("get_doc", { uuid: record.uuid });
+    expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ tldr: null });
+    expect(await rig.ok("set_metadata", { uuid: record.uuid, description: "Discovery copy." })).toMatchObject({ tldr: null });
     expect(await rig.ok("set_metadata", { uuid: record.uuid, tldr: null })).toMatchObject({ tldr: null });
     const edit = await rig.ok("edit_block", { uuid: record.uuid, block_id: record.blocks[0].id, old_text: paragraph.text, new_text: "Use the log." });
     const insert = await rig.ok("insert_block", { uuid: record.uuid, type: "paragraph", text: "Replay preserves history." });

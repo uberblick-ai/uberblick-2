@@ -361,7 +361,7 @@ it("omits an unconfirmed startup location and retires its answer on an unserved 
 it("leaves composing Escape after compositionend (Safari) to the group-name field", async () => {
   await openApp();
   await openDrawer();
-  await click(sidebarButton("+ group"));
+  await click(sidebarButton("+ New group"));
   const field = within(drawer() as HTMLElement).getByRole<HTMLInputElement>("textbox", { name: "Group name" });
   const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;
   const groups = readSidebar(sidebar);

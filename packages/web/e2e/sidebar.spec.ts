@@ -5,7 +5,7 @@ import { docTitle, setupHarness } from "./app-helpers.js";
 import type { Locator, Page } from "@playwright/test";
 import { createPinnedDoc, dragOnto } from "./sidebar-helpers.js";
 
-const { openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar" } });
 
 /** The titles the sidebar lists, top to bottom. */
 function pinnedTitles(page: Page): Locator {
@@ -14,7 +14,7 @@ function pinnedTitles(page: Page): Locator {
 
 test("the docked sidebar shares the pane's top edge and transfers focus", async ({ browser }) => {
   const page = await openApp(browser);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   const path = new URL(page.url()).pathname;
   const sidebar = page.locator(".ub-list");
   const pane = page.locator(".ub-pane");
@@ -92,7 +92,7 @@ test("workspace header controls work with keyboard, pointer and touch @webkit-to
 
 test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
   const page = await openApp(browser);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Documents", exact: true });
   await page.setViewportSize({ width: 1400, height: 832 });
   await paneControl.focus();
@@ -169,8 +169,8 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(info.project.use.hasTouch === true);
     if (projectWidth < 1280) await openDrawer(page);
   }
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const settings of [false, true]) {
     if (!webkit) await page.setViewportSize({ width: 1280, height: 832 });
@@ -268,8 +268,8 @@ test("desktop edges and document inset move together in both directions", async 
   browser,
 }) => {
   const page = await openApp(browser);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const width of [1280]) {
     await page.setViewportSize({ width, height: 800 });
@@ -316,7 +316,7 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   browser,
 }) => {
   const page = await openApp(browser);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   const sidebar = page.locator(".ub-list");
   const restore = page.getByRole("button", { name: "Show document list" });
   // A portalled menu must also retire when its owning sidebar closes.
@@ -374,9 +374,9 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
 
 test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
   const page = await openApp(browser);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ProseMirror")).toBeVisible();
   for (const collapse of [true, false]) {
     const { before, frames, animated, runningAnimations } = await sampleToggle(page, collapse);
@@ -402,7 +402,7 @@ test("reduced motion keeps docked toggles immediate", async ({ browser }) => {
 
 test("the drawer's menus, group editing and pointer, keyboard and touch sorting work with a hidden docked preference", async ({ browser }) => {
   const page = await openApp(browser, "/", { contextOptions: { hasTouch: true } });
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
   const first = docTitle("drawer-first");
   const second = docTitle("drawer-second");
   await createPinnedDoc(page, first);
@@ -423,7 +423,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
 
   const groups = page.locator(".ub-group-label");
   const before = await groups.allTextContents();
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   const field = page.getByRole("textbox", { name: "Group name" });
   await field.fill("Cancelled draft");
   await field.press("Escape");
@@ -433,7 +433,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
 
   const name = docTitle("drawer-group");
   const renamed = `${name}-renamed`;
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   await field.fill(name);
   await field.press("Enter");
   await page.getByRole("button", { name: `Rename group ${name}`, exact: true }).click();
@@ -462,7 +462,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await row(first).focus();
   await page.keyboard.press("Space");
   await expect(row(first).locator('xpath=ancestor::*[@data-dnd-dragging="true"][1]')).toHaveCount(1);
-  const announcements = page.locator('body > [role="status"]');
+  const announcements = page.locator('body > div[role="status"]');
   await expect(announcements).not.toHaveAttribute("aria-hidden", "true");
   await expect(announcements).toContainText(`Moving ${first}.`);
   await page.keyboard.press("ArrowUp");

@@ -1,3 +1,4 @@
+import { expectOpenPages, expectUpstreamHub, waitForAcknowledged } from "./settle.js";
 /** ub open serves each recorded replica without moving the project's binding. */
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
@@ -29,7 +30,7 @@ async function switchToSecond(page: Page, keyboard = false): Promise<void> {
     await page.keyboard.press("Enter");
   } else await items.last().click();
   await expect(page).toHaveURL(new URL(`/${running.secondWorkspace}`, running.appUrl).href);
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
 }
 
 test("opening the switcher leaves the other project's replica free to serve", async ({ page }) => {
@@ -37,7 +38,7 @@ test("opening the switcher leaves the other project's replica free to serve", as
   const fresh = await startHarness({ multiWorkspace: true });
   try {
     await page.goto(fresh.appUrl);
-    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     await page.locator(".ub-workspace").click();
     const items = page.getByRole("menu").getByRole("menuitem");
     await expect(items).toHaveCount(2);
@@ -51,7 +52,7 @@ test("opening the switcher leaves the other project's replica free to serve", as
     try {
       await secondPage.goto(secondOpen.appUrl);
       await expect(secondPage).toHaveURL(new URL(`/${fresh.secondWorkspace}`, secondOpen.appUrl).href);
-      await expect(secondPage.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+      await expect(secondPage.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
       await expect(secondPage.getByTestId("account-menu")).toContainText("@second-person");
 
       const doc = await createDoc(page, docTitle("menu-leaves-startup-serving"), { pin: true });
@@ -83,7 +84,7 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   await placeCaret(page);
   await page.keyboard.type("first workspace text");
   const firstRoom = `${running.workspaceUuid}/${firstDoc}`;
-  await expect.poll(() => running.hubText(firstRoom)).toBe("first workspace text");
+  await expectUpstreamHub(() => { expect(running.hubText(firstRoom)).toBe("first workspace text"); });
 
   const firstTab = await context.newPage();
   await firstTab.goto(page.url());
@@ -97,10 +98,8 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   await placeCaret(page);
   await page.keyboard.type("second workspace text");
   const secondRoom = `${running.secondWorkspace}/${secondDoc}`;
-  await expect.poll(() => running.hubText(secondRoom, true)).toBe("second workspace text");
-  expect(running.hubText(secondRoom)).toBeNull();
-  expect(running.hubText(firstRoom, true)).toBeNull();
-  await expect(page.locator(".ub-status-word--hub")).toHaveText("synced with hub");
+  await expectUpstreamHub(() => { expect(running.hubText(secondRoom, true)).toBe("second workspace text"); });
+  await waitForAcknowledged(page, { path: "upstream" });
   await page.locator(".ub-sync-toggle").click();
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(running.secondHubUrl ?? "");
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("Room")) dd')).toHaveText(secondRoom);
@@ -110,13 +109,16 @@ test("switching by keyboard uses the selected replica, hub and account while ano
   // edits the other replica. Both changes must reach their own upstream.
   await placeCaret(firstTab);
   await firstTab.keyboard.type("; another tab");
-  await expect.poll(() => running.hubText(firstRoom)).toBe("first workspace text; another tab");
+  await expectUpstreamHub(() => { expect(running.hubText(firstRoom)).toBe("first workspace text; another tab"); });
   await placeCaret(page);
   await page.keyboard.type("; still the second hub");
-  await expect.poll(() => running.hubText(secondRoom, true)).toBe("second workspace text; still the second hub");
+  await expectUpstreamHub(() => { expect(running.hubText(secondRoom, true)).toBe("second workspace text; still the second hub"); });
+  // Each hub reader has now observed a later browser write on its own path.
+  expect(running.hubText(secondRoom)).toBeNull();
+  expect(running.hubText(firstRoom, true)).toBeNull();
   expect(running.projectBinding()).toEqual(startupBinding);
   expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
-  expect(context.pages()).toHaveLength(2);
+  await expectOpenPages(context, 2);
   const defaultTab = await context.newPage();
   await defaultTab.goto(running.appUrl);
   await expect(defaultTab).toHaveURL(new URL(`/${running.workspace}`, running.appUrl).href);
@@ -133,7 +135,7 @@ test("a secondary replica failure is shown on its pages and clears when switchin
   });
   const page = await context.newPage();
   await page.goto(running.appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   failure = true;
   await switchToSecond(page);
   await expect(page.locator(".ub-replica-unavailable")).toContainText("serving another ub open");

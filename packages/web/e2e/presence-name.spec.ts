@@ -7,7 +7,7 @@ import { placeCaret, placeCaretIn } from "./harness.js";
 const gitName = "Git Display Name";
 const { harness, openApp } = setupHarness({
   gitUserName: gitName,
-  app: { readySelector: ".ub-list-head", contextOptions: { viewport: { width: 1440, height: 900 } } },
+  app: { readySelector: ".ub-document-sidebar", contextOptions: { viewport: { width: 1440, height: 900 } } },
 });
 
 async function rename(page: Page, name: string): Promise<void> {

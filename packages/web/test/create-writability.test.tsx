@@ -95,7 +95,7 @@ afterEach(() => {
 it("writes neither room until the new room is admitted", async () => {
   const { container: host } = await renderSettled(<App />);
 
-  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
+  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
   expect(create?.disabled).toBe(false);
   await act(async () => create?.click());
 
@@ -122,7 +122,7 @@ it("writes neither room until the new room is admitted", async () => {
 it("cancels a deferred create when the reader leaves its room", async () => {
   const { container: host } = await renderSettled(<App />);
 
-  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
+  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
   await act(async () => create?.click());
   const pending = [...rooms.values()].find(
     ({ connection }) =>
@@ -134,7 +134,7 @@ it("cancels a deferred create when the reader leaves its room", async () => {
   const uuid = parseRoom(pending.connection.room).uuid;
 
   await act(async () =>
-    within(host).getByRole("button", { name: "All docs" }).click(),
+    within(host).getByRole("button", { name: "All documents" }).click(),
   );
   await act(async () => {
     update(pending, { connected: true, synced: true, writable: true });
@@ -153,7 +153,7 @@ it.each(["document", "directory"] as const)(
   async (refused) => {
     const { container: host } = await renderSettled(<App />);
 
-    const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ new doc" });
+    const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
     await act(async () => create?.click());
     const directory = room(directoryRoom(WORKSPACE));
     const pending = [...rooms.values()].find(

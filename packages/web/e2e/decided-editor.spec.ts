@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
@@ -46,7 +47,7 @@ async function record(
   const peer = await legacyDecisionPeer(harness(), result.uuid);
   peers.push(peer);
   peer.decide(status, "Keep the approved wording.");
-  await expect.poll(async () => (await writer.call<{ status: string }>("get_doc", { uuid: result.uuid })).status).toBe(status);
+  await expectMcp(async () => { expect((await writer.call<{ status: string }>("get_doc", { uuid: result.uuid })).status).toBe(status); });
   return result.uuid;
 }
 
@@ -81,7 +82,8 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
   const before = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.locator(".ub-tldr-body > p").click();
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Keep the approved wording.", { exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   const prose = editor(page).locator(":scope > p").first();
@@ -134,8 +136,11 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     await expect(highlight).toHaveAccessibleName("Comment thread");
   }
   await expect(prose).toHaveText("Selected words remain readable after deciding.");
-  const after = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
-  expect(after.blocks).toEqual(before.blocks);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    const after = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
+    expect(after.blocks).toEqual(before.blocks);
+  });
 });
 
 test("touch selection on a decided record starts a thread and its highlight opens the writable rail", { tag: "@webkit-touch" }, async ({ browser }, info) => {
@@ -147,7 +152,7 @@ test("touch selection on a decided record starts a thread and its highlight open
       : {},
   });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.locator(".ub-tldr-body > p").tap();
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   const paragraph = editor(page).locator(":scope > p").first();
   await paragraph.tap();
@@ -197,6 +202,7 @@ test("an open decision keeps its title, prose and tables read-only through later
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   const view = editor(page);
   await expect(view).toHaveAttribute("contenteditable", "false");
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
   const originalView = await view.elementHandle();
   if (originalView === null) throw new Error("e2e: missing live editor");
   const pane = page.locator(".ub-pane");
@@ -214,6 +220,8 @@ test("an open decision keeps its title, prose and tables read-only through later
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeEnabled();
   await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
@@ -247,12 +255,16 @@ test("an open decision keeps its title, prose and tables read-only through later
     peer.decide(status);
     await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
     await expect(view).toHaveAttribute("contenteditable", "false");
+    await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
     expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
   }
-  const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
-  expect(saved.blocks[0]?.text).toBe(prose);
-  expect(saved.blocks[1]?.text).toContain("Approved cell");
-  expect(saved.blocks[1]?.text).toContain("Approved value");
-  expect(saved.blocks).toHaveLength(32);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
+    expect(saved.blocks[0]?.text).toBe(prose);
+    expect(saved.blocks[1]?.text).toContain("Approved cell");
+    expect(saved.blocks[1]?.text).toContain("Approved value");
+    expect(saved.blocks).toHaveLength(32);
+  });
 });

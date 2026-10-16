@@ -132,7 +132,7 @@ describe("decision topics through directory stubs", () => {
     ]);
     expect((await rig.ok("search", { query: "constraints" })).hits.map((hit: any) => hit.uuid).sort()).toEqual([a.uuid, b.uuid].sort());
     expect((await rig.ok("list_docs", { kind: "decision" })).docs).toMatchObject([{ uuid: b.uuid, inForce: { uuid: b.uuid } }]);
-    expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)?.tldr).toBe("The answer.");
+    expect(getDirectoryEntry(rig.instance.replicas.directory().doc, b.uuid)).not.toHaveProperty("tldr");
     expect((await rig.ok("list_docs", { kind: "decision" })).docs[0].inForce.deleted).toBe(false);
     rawDeleted(rig, a.uuid, true);
     rawDeleted(rig, b.uuid, false);
@@ -182,7 +182,8 @@ describe("decision topics through directory stubs", () => {
     const opened = await rig.ok("annotate", { uuid: record.uuid, block_id: record.blocks[0].id, start: 0, end: 2, text: "Question" });
     await rig.ok("annotate", { uuid: record.uuid, thread_id: opened.annotation.id, text: "Reply" });
     const directory = rig.instance.replicas.directory().doc;
-    expect(getDirectoryEntry(directory, record.uuid)).toMatchObject({ topic: record.uuid, tldr: "A concise answer.", agentStance: false, decidedBy: "A person", decidedAt: "2026-10-04T12:00:00Z", commentCount: 2 });
+    expect(getDirectoryEntry(directory, record.uuid)).toMatchObject({ topic: record.uuid, agentStance: false, decidedBy: "A person", decidedAt: "2026-10-04T12:00:00Z", commentCount: 2 });
+    expect(getDirectoryEntry(directory, record.uuid)).not.toHaveProperty("tldr");
     upsertDirectoryEntry(directory, { uuid: record.uuid, title: "Directory only" });
     expect(getDirectoryEntry(directory, record.uuid)?.commentCount).toBe(2);
     await rig.ok("archive_doc", { uuid: record.uuid });

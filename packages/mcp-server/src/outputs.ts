@@ -5,7 +5,7 @@ import { strictInput } from "./inputs.js";
 const count = z.number().int().nonnegative();
 const uuid = z.string().describe("Document identity; a UUID, never a title or path.");
 const description = z.string().nullable().describe("Agent-facing document description; null when unwritten.");
-const tldr = z.string().nullable().describe("Person-facing document summary; legacy decision summaries remain readable. Null when unwritten.");
+const tldr = z.string().nullable().describe("Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR.");
 const discussion = z.string().nullable().describe("Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer.");
 const status = z.enum(DECISION_STATUSES);
 const lifecycle = {
@@ -88,8 +88,7 @@ const directoryEntry = z.object({
   governs: z.string().optional(),
   topic: z.string().optional(),
   supersedes: z.string().optional(),
-  tldr: z.string().optional(),
-  answerPreview: z.string().nullable().optional().describe("Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
+  answerPreview: z.string().nullable().optional().describe("Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown."),
   discussion: discussion.optional().describe("Cached RFC discussion document UUID; null when none, absent when the cache is unknown."),
   agentStance: z.boolean().optional(),
   decidedBy: z.string().optional(),
