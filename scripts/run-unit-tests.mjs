@@ -7,20 +7,21 @@ import { join } from "node:path";
 
 const WORKERS_PER_CORE = 3;
 const OS_PACKAGES = ["@uberblick/cli", "@uberblick/mcp-server", "@uberblick/hub"];
+const HUB_SCHEMA_PACKAGES = ["@uberblick/hub", "@uberblick/schema"];
 
 export function unitTestPlan(scope, cores) {
-	if (scope !== "all" && scope !== "os") {
-		throw new Error("usage: node scripts/run-unit-tests.mjs [all|os]");
+	if (!["all", "os", "hub-schema"].includes(scope)) {
+		throw new Error("usage: node scripts/run-unit-tests.mjs [all|os|hub-schema]");
 	}
 	const args = scope === "all"
 		? ["-r"]
-		: OS_PACKAGES.flatMap((name) => ["--filter", name]);
+		: (scope === "os" ? OS_PACKAGES : HUB_SCHEMA_PACKAGES).flatMap((name) => ["--filter", name]);
 	args.push("--no-sort", "--no-bail");
 	const budget = WORKERS_PER_CORE * cores;
 	if (!Number.isSafeInteger(budget) || budget < 1) {
 		throw new Error("The worker budget must be a positive safe integer");
 	}
-	const concurrency = Math.min(scope === "os" ? 2 : 4, budget);
+	const concurrency = Math.min(scope === "all" ? 4 : 2, budget);
 	const workers = Math.floor(budget / concurrency);
 	args.push("--workspace-concurrency", String(concurrency), "test");
 	return { args, cores, budget, concurrency, workers };

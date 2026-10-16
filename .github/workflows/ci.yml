@@ -36,19 +36,10 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+  lint:
+    name: lint, typecheck and site
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      # One platform failing must not cancel the other's run.
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            name: lint, typecheck and tests
-          - os: macos-latest
-            name: macOS tests
     steps:
       # On a pull request, test the head itself rather than GitHub's merge with
       # a main that may since have moved; the integrator's merged-tree gate
@@ -74,18 +65,94 @@ jobs:
 
       # Each check runs even when an earlier one fails, so one run shows
       # everything that is red on main.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run lint
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: mise run typecheck
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
-        id: test-linux
-        run: mise run test
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'macOS' }}
-        id: test-macos
+      # The website is static HTML the build script assembles; a page that
+      # fails to build must not reach main, where Pages deploys it.
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: mise run site
+
+  unit-tests:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: cli
+            name: cli tests
+            command: mise exec -- pnpm --filter @uberblick/cli test
+          - id: mcp-server
+            name: mcp-server tests
+            command: mise exec -- pnpm --filter @uberblick/mcp-server test
+          - id: web
+            name: web tests
+            command: mise exec -- pnpm --filter @uberblick/web test
+          - id: hub-schema-scripts
+            name: hub, schema and scripts tests
+            command: mise exec -- node scripts/run-unit-tests.mjs hub-schema
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - id: install
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      - id: test-packages
+        run: ${{ matrix.command }}
+      # Script contracts still run when a package in this job fails.
+      - if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.id == 'hub-schema-scripts' }}
+        run: mise exec -- pnpm run test:scripts
+      - name: Upload per-test results
+        if: ${{ always() && (steps.test-packages.outcome == 'success' || steps.test-packages.outcome == 'failure') }}
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vitest-Linux-${{ matrix.id }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/vitest-results/
+          if-no-files-found: warn
+
+  macos:
+    name: macOS tests
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - id: install
+        run: mise run install
+        env:
+          PNPM_STORE_DIR: ~/.pnpm-store
+
+      - id: test-macos
         run: mise run test-os
       - name: Upload per-test results
-        if: ${{ always() && (steps.test-linux.outcome == 'success' || steps.test-linux.outcome == 'failure' || steps.test-macos.outcome == 'success' || steps.test-macos.outcome == 'failure') }}
+        if: ${{ always() && (steps.test-macos.outcome == 'success' || steps.test-macos.outcome == 'failure') }}
         continue-on-error: true
         timeout-minutes: 1
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -93,10 +160,16 @@ jobs:
           name: vitest-${{ runner.os }}-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/vitest-results/
           if-no-files-found: warn
-      # The website is static HTML the build script assembles; a page that
-      # fails to build must not reach main, where Pages deploys it.
-      - if: ${{ !cancelled() && steps.install.outcome == 'success' && runner.os == 'Linux' }}
-        run: mise run site
+
+  checks:
+    name: lint, typecheck and tests
+    needs: [lint, unit-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Rulesets accept skipped checks, so only success may pass this gate.
+      - run: test '${{ needs.lint.result }}' = success && test '${{ needs.unit-tests.result }}' = success
 
   # Files stay serial internally; each job gets its own bundle and harnesses.
   e2e-chromium-1:
