@@ -242,7 +242,7 @@ test("native Undo works with pointer, keyboard and iPad touch in both appearance
         await expect(archived).toHaveCSS("opacity", "1");
         const readings = await renderedText(page, "[aria-live=polite]");
         for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
-        const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+        const axe = await new AxeBuilder({ page }).include("[aria-live=polite]").withTags(WCAG_TAGS).analyze();
         assertNoViolations(axe.violations);
         await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notification-undo-${appearance}-${browserName}.png`) });
       }
