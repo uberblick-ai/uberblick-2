@@ -98,6 +98,7 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
+  useOutline,
   usePresence,
   useTitlePresence,
   useRoom,
@@ -609,6 +610,8 @@ export function App(): ReactElement {
     ? relatedDecisionTopics(topics, meta)
     : [];
   const decisionsId = relatedTopics.length > 0 && meta !== null ? `decisions-${meta.uuid}` : null;
+  const headings = useOutline(doc);
+  const hasOutline = headings.length > 0 || decisionsId !== null;
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
@@ -1203,30 +1206,32 @@ export function App(): ReactElement {
             )}
           </Popover>
         )}
-        {/*
-            * The outline trigger follows document scrolling independently of the rail.
-            * No eligible headings means no reserved flex item.
-         */}
-        <OutlinePane
-          key={doc?.room ?? "no-document"}
-          connection={doc}
-          decisionsId={decisionsId}
-          obscured={narrowThreads && threadsOpen}
-        />
-        {/* The pane owns draft state across the sheet's unmount and resize.
-            No threads means no rail or reserved gutter. */}
-        <ThreadsPane
-          connection={doc}
-          threads={threads}
-          focused={focusedThread}
-          author={identity.name}
-          readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
-          onFocus={onFocusThread}
-          narrow={narrowThreads}
-          open={threadsOpen}
-          onOpenChange={setThreadsOpen}
-          onCloseAutoFocus={restoreThreadsFocus}
-        />
+        {(hasOutline || threads.length > 0) && (
+          <div
+            className="ub-document-rail flex min-h-0 w-[var(--outline-width)] flex-none flex-col border-l border-border me-[var(--pane-trailing-space)] max-xl:absolute max-xl:inset-x-0 max-xl:top-0 max-xl:w-auto max-xl:border-0 max-xl:me-0 max-xl:pointer-events-none"
+            data-has-threads={threads.length > 0}
+          >
+            <OutlinePane
+              key={doc?.room ?? "no-document"}
+              connection={doc}
+              decisionsId={decisionsId}
+              obscured={narrowThreads && threadsOpen}
+            />
+            {/* Draft state survives the sheet's unmount and resize. */}
+            <ThreadsPane
+              connection={doc}
+              threads={threads}
+              focused={focusedThread}
+              author={identity.name}
+              readOnly={archived || !docStatus.writable || (meta?.kind === "decision" && (topic === null || topic.first === null))}
+              onFocus={onFocusThread}
+              narrow={narrowThreads}
+              open={threadsOpen}
+              onOpenChange={setThreadsOpen}
+              onCloseAutoFocus={restoreThreadsFocus}
+            />
+          </div>
+        )}
       </SidebarProvider>
     </main>
   );

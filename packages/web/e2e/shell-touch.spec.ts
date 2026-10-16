@@ -482,7 +482,7 @@ test("a Delete group confirmation refuses in place after sidebar readiness is lo
   await expect(group(page, "Reading")).toBeVisible();
 });
 
-test("the shell, sidebar, document pane and long Contents stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
+test("the shell, sidebar, document pane and long outline stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
   const page = await devicePage(browser, info);
   await expectInsideViewport(page.locator(".ub-app"));
   await expectInsideViewport(page.locator(".ub-pane"));
@@ -498,14 +498,15 @@ test("the shell, sidebar, document pane and long Contents stay within the visibl
     await page.keyboard.press("Enter");
     await expect(editor(page).locator(":scope > p")).toHaveCount(1);
   }
-  const trigger = page.getByRole("button", { name: "Contents 60", exact: true });
+  const trigger = page.getByRole("button", { name: /^On this page/ });
   const pane = page.locator(".ub-document-pane");
   await pane.evaluate((element) => { element.scrollTop = 0; });
+  const narrow = await page.evaluate(() => matchMedia("(width < 80rem)").matches);
   const inset = await trigger.boundingBox();
-  expect(inset).not.toBeNull();
   await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo(inset?.y ?? 0, 1);
+  await expect(trigger).toBeInViewport({ ratio: 1 });
+  if (narrow) await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo(inset?.y ?? 0, 1);
   await trigger.click();
   const contents = page.locator(".ub-outline-panel");
   await expectInsideViewport(contents);

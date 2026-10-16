@@ -1,17 +1,13 @@
-/** A floating view of document headings and its Decisions chrome. */
+/** Document navigation shared by the comments column and narrow document pane. */
 
-import { useEffect, useRef, useState } from "react";
-import type { ReactElement } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent, ReactElement } from "react";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useOutline } from "../hooks.js";
-import { scrollBlockIntoView } from "./outline.js";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "../shadcn/dropdown-menu.js";
+import { OUTLINE_SCROLL_INSET, scrollBlockIntoView } from "./outline.js";
+import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
+
+type OpenMode = "closed" | "hover" | "click";
 
 export function OutlinePane({
   connection,
@@ -25,101 +21,195 @@ export function OutlinePane({
   decisionsId?: string | null;
 }): ReactElement | null {
   const headings = useOutline(connection);
-  const entries = decisionsId === null ? headings : [...headings, { id: decisionsId, level: 1, text: "Decisions" }];
-  const [open, setOpen] = useState(false);
-  const closingFromTab = useRef(false);
+  const entries = useMemo(
+    () => decisionsId === null ? headings : [...headings, { id: decisionsId, level: 1, text: "Decisions" }],
+    [headings, decisionsId],
+  );
+  const [mode, setMode] = useState<OpenMode>("closed");
+  const openMode = useRef<OpenMode>("closed");
+  const restoreFocus = useRef(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const chosen = useRef<{ id: string; scrollTop: number } | null>(null);
+  const [titleOffset, setTitleOffset] = useState(0);
+  const [paneWidth, setPaneWidth] = useState(0);
 
-  // Live edits can remove the last entry without unmounting this component.
-  // Do not remember an open surface for a later entry.
-  useEffect(() => {
-    if (entries.length !== 0) return;
-    setOpen(false);
-  }, [entries.length]);
+  const clearTimer = (): void => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const changeMode = (next: OpenMode): void => {
+    clearTimer();
+    if (next === "closed") restoreFocus.current = openMode.current === "click";
+    openMode.current = next;
+    setMode(next);
+  };
+  const enter = (event: PointerEvent): void => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    clearTimer();
+    if (openMode.current === "closed") {
+      timer.current = setTimeout(() => changeMode("hover"), 250);
+    }
+  };
+  const leave = (event: PointerEvent): void => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    clearTimer();
+    if (openMode.current === "hover") {
+      timer.current = setTimeout(() => changeMode("closed"), 200);
+    }
+  };
+
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+  }, []);
 
   useEffect(() => {
-    // The state is meaningful only where CSS turns the rail into an overlay;
-    // on a wide screen the same rail state must not dismiss this sibling.
-    if (!obscured) return;
-    const closeWhenCovered = (): void => {
-      if (trigger.current?.getClientRects().length !== 0) return;
-      setOpen(false);
+    if (entries.length !== 0 && !obscured) return;
+    if (timer.current !== null) clearTimeout(timer.current);
+    openMode.current = "closed";
+    restoreFocus.current = false;
+    setMode("closed");
+  }, [entries.length, obscured]);
+
+  useLayoutEffect(() => {
+    if (entries.length === 0) return;
+    const shell = trigger.current?.closest('[data-slot="sidebar-wrapper"]') ?? document.body;
+    let pane: HTMLElement | null = null;
+    let frame = 0;
+    const update = (): void => {
+      // Hydration replaces the waiting pane without necessarily changing headings.
+      const nextPane = shell.querySelector<HTMLElement>(".ub-document-pane");
+      if (pane !== nextPane) {
+        pane?.removeEventListener("scroll", schedule);
+        sizes?.disconnect();
+        pane = nextPane;
+        if (pane !== null) {
+          pane.addEventListener("scroll", schedule, { passive: true });
+          sizes?.observe(pane);
+          const column = pane.querySelector(".ub-column");
+          if (column !== null) sizes?.observe(column);
+        }
+      }
+      if (pane === null) return;
+      const { top, width } = pane.getBoundingClientRect();
+      setPaneWidth(width);
+      const title = pane.querySelector<HTMLElement>(".ub-title");
+      setTitleOffset(Math.max(0, (title?.getBoundingClientRect().top ?? top) - top));
+      // Several short final sections can share the same clamped scroll position.
+      if (
+        chosen.current !== null && chosen.current.scrollTop === pane.scrollTop &&
+        entries.some((entry) => entry.id === chosen.current?.id)
+      ) {
+        setCurrentId(chosen.current.id);
+        return;
+      }
+      chosen.current = null;
+      const reachedEnd = pane.scrollTop > 0 && pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2;
+      let active: string | null = null;
+      for (const entry of entries) {
+        const element = document.getElementById(entry.id);
+        if (element !== null && (element.getBoundingClientRect().top <= top + OUTLINE_SCROLL_INSET || reachedEnd)) active = entry.id;
+      }
+      setCurrentId(active);
     };
-    closeWhenCovered();
-    window.addEventListener("resize", closeWhenCovered);
-    return () => window.removeEventListener("resize", closeWhenCovered);
-  }, [obscured]);
+    const schedule = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    };
+    window.addEventListener("resize", schedule);
+    const mutations = new MutationObserver(schedule);
+    mutations.observe(shell, { childList: true, subtree: true, characterData: true });
+    const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      pane?.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      mutations.disconnect();
+      sizes?.disconnect();
+    };
+  }, [entries]);
 
   if (entries.length === 0) return null;
+  const current = entries.find((entry) => entry.id === currentId);
+  const label = (text: string): string => text.trim() === "" ? "Untitled heading" : text;
 
   return (
-    <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
+    <Popover open={mode !== "closed"} onOpenChange={(open) => changeMode(open ? "click" : "closed")}>
       <div
-        // The drawer covers this edge; hiding also removes the trigger from Tab order.
-        // At drawer widths, share the opener's clearance rather than taking
-        // a column away from the status facts and presence cluster.
-        className={`ub-outline self-start shrink-0 mt-3 me-3 max-xl:absolute max-xl:start-12 max-xl:top-0 max-xl:me-0${obscured ? " max-xl:hidden" : ""}`}
+        className={`ub-outline z-5 w-full shrink-0 bg-background pt-(--outline-title-offset) pointer-events-auto max-xl:absolute max-xl:start-12 max-xl:top-0 max-xl:w-auto max-xl:pt-0 ${obscured ? "max-xl:hidden" : ""}`}
+        style={{ "--outline-title-offset": `${titleOffset}px`, "--outline-pane-width": `${paneWidth}px` } as CSSProperties}
       >
-        <DropdownMenuTrigger asChild>
+        <PopoverTrigger asChild>
           <button
             ref={trigger}
             type="button"
-            className="ub-outline-trigger inline-flex min-h-6 min-w-6 items-center gap-[0.45rem] rounded-full border border-border bg-(--card-accent) px-[0.55rem] py-1 text-secondary-foreground ub-type-caption whitespace-nowrap cursor-pointer [font-family:inherit] hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-h-11"
+            aria-haspopup="false"
+            className="ub-outline-trigger flex min-h-8 w-full min-w-0 items-center gap-2 border-b border-border bg-transparent px-0 py-2 text-left [font-family:inherit] cursor-pointer focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 [@media(any-pointer:coarse)]:min-h-11"
+            onPointerEnter={enter}
+            onPointerLeave={leave}
+            onClick={(event) => {
+              clearTimer();
+              if (openMode.current === "hover") {
+                event.preventDefault();
+                changeMode("click");
+              }
+            }}
           >
-            Contents <span className="ub-type-caption text-muted-foreground">{entries.length}</span>
+            <span className="shrink-0 ub-type-caption text-muted-foreground">On this page</span>
+            {current !== undefined && <span className="min-w-0 truncate ub-type-small text-foreground">{label(current.text)}</span>}
+            <svg className="ms-auto size-3 shrink-0 text-muted-foreground" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <path d={mode === "closed" ? "m3 4.5 3 3 3-3" : "m3 7.5 3-3 3 3"} stroke="currentColor" strokeWidth="1.5" />
+            </svg>
           </button>
-        </DropdownMenuTrigger>
+        </PopoverTrigger>
       </div>
-      <DropdownMenuContent
-        align="end"
+      <PopoverContent
+        align="start"
         side="bottom"
+        sideOffset={0}
         collisionPadding={8}
-        className="ub-outline-panel flex w-[min(20rem,calc(100vw_-_2rem))] max-h-[min(calc(100dvh_-_2rem),var(--radix-dropdown-menu-content-available-height))]! flex-col overflow-hidden! p-0!"
-        onCloseAutoFocus={(event) => {
-          if (closingFromTab.current) {
-            closingFromTab.current = false;
-            event.preventDefault();
-          }
+        role="navigation"
+        aria-label="On this page"
+        className="ub-outline-panel flex w-(--radix-popover-trigger-width)! max-h-[min(60dvh,var(--radix-popover-content-available-height))] flex-col overflow-hidden p-0!"
+        onPointerEnter={enter}
+        onPointerLeave={leave}
+        onInteractOutside={(event) => {
+          // Apply Radix's trigger exemption before it records an outside interaction.
+          if (event.target instanceof Node && trigger.current?.contains(event.target)) event.preventDefault();
         }}
-        onKeyDown={(event) => {
-          if (event.key !== "Tab") return;
-          event.preventDefault();
-          closingFromTab.current = true;
-          setOpen(false);
-          trigger.current?.focus({ preventScroll: true });
+        onOpenAutoFocus={(event) => {
+          if (openMode.current === "hover") event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!restoreFocus.current) event.preventDefault();
         }}
       >
-        <div className="ub-outline-panel-body flex min-h-0 flex-col p-3">
-          <DropdownMenuLabel className="mb-[0.4rem] mt-0 ub-type-caption! tracking-[0.06em] uppercase">On this page</DropdownMenuLabel>
-          <ul role="none" className="m-0 min-h-0 list-none overflow-y-auto p-0">
-            {entries.map((entry) => (
-              <li
-                key={entry.id}
-                role="none"
-                className={`ub-outline-l${entry.level}`}
+        <ul className="m-0 min-h-0 list-none overflow-y-auto p-2">
+          {entries.map((entry) => (
+            <li key={entry.id} className={`ub-outline-l${entry.level}`}>
+              <button
+                type="button"
+                aria-current={entry.id === currentId ? "location" : undefined}
+                className={`block w-full truncate border-0 border-s-2 border-solid bg-transparent px-2 py-2 text-left [font-family:inherit] ub-type-small hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring [@media(any-pointer:coarse)]:min-h-11 ${entry.id === currentId ? "border-(--brand) text-foreground" : "border-transparent text-muted-foreground"} ${entry.level === 2 ? "ps-5" : ""}`}
+                onMouseDown={(event) => {
+                  if (openMode.current === "hover") event.preventDefault();
+                }}
+                onClick={() => {
+                  scrollBlockIntoView(entry.id);
+                  const pane = document.querySelector<HTMLElement>(".ub-document-pane");
+                  chosen.current = { id: entry.id, scrollTop: pane?.scrollTop ?? 0 };
+                  setCurrentId(entry.id);
+                  if (openMode.current === "click") changeMode("closed");
+                }}
               >
-                <DropdownMenuItem
-                  asChild
-                  className={`block! w-full overflow-hidden px-2! py-[0.35rem]! text-muted-foreground text-left text-ellipsis whitespace-nowrap ${entry.level === 2 ? "pl-5!" : ""}`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      scrollBlockIntoView(entry.id);
-                    }}
-                  >
-                    {entry.text.trim() === "" ? (
-                      <em>Untitled heading</em>
-                    ) : (
-                      entry.text
-                    )}
-                  </button>
-                </DropdownMenuItem>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+                {label(entry.text)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }
