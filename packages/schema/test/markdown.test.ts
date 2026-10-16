@@ -94,7 +94,8 @@ describe("importMarkdown", () => {
       { type: "paragraph", text: "Run the suite:" },
       { type: "code", text: "mise run test", language: "bash" },
       {
-        type: "mermaid",
+        type: "code",
+        language: "mermaid",
         text: "graph TD\n  read-->compare\n  compare-->work",
       },
       { type: "heading", text: "Notes", level: 6 },
@@ -205,7 +206,7 @@ describe("importMarkdown", () => {
 
 describe("the terminal fence", () => {
   /**
-   * The fence's info string is the block type, exactly as `mermaid`'s is. What
+   * The fence's info string is the block type. What
    * this defends is the pair: a transcript that exported as a plain ```` ``` ````
    * fence would come back as a code block, and the demonstration would be gone.
    */

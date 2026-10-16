@@ -78,7 +78,7 @@ function directory(): { ydoc: Y.Doc; context: DocLinkContext; opened: string[] }
 }
 
 function docWith(
-  blocks: Array<{ type: "paragraph" | "code" | "mermaid" | "terminal" | "chart"; text: string }>,
+  blocks: Array<{ type: "paragraph" | "code" | "terminal" | "chart"; text: string }>,
 ): { ydoc: Y.Doc; ids: string[] } {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: DOC, title: "References" });
@@ -377,7 +377,7 @@ describe("the picker", () => {
   });
 
   /** Source blocks cannot hold the picked `docLink` mark. */
-  it.each(["code", "mermaid", "terminal", "chart"] as const)("never opens in a %s source block", (source) => {
+  it.each(["code", "terminal", "chart"] as const)("never opens in a %s source block", (source) => {
     const { context } = directory();
     const { ydoc } = docWith([{ type: source, text: "" }]);
     const mounted = mountPicker(ydoc, context);

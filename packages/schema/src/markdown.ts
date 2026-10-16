@@ -525,10 +525,6 @@ function renderBlock(
       const fence = fenceFor(block.text);
       return `${fence}${block.language ?? ""}\n${block.text}\n${fence}`;
     }
-    case "mermaid": {
-      const fence = fenceFor(block.text);
-      return `${fence}mermaid\n${block.text}\n${fence}`;
-    }
     case "terminal": {
       // The info string preserves terminal type instead of importing as code.
       const fence = fenceFor(block.text);
@@ -1553,9 +1549,7 @@ export function importMarkdown(markdown: string): ImportedDoc {
         while (body.length > 0 && body[body.length - 1] === "") body.pop();
       }
       const text = body.join("\n");
-      if (info === "mermaid") {
-        blocks.push({ type: "mermaid", text });
-      } else if (info === "terminal") {
+      if (info === "terminal") {
         blocks.push({ type: "terminal", text });
       } else if (info === "chart") {
         blocks.push({ type: "chart", text });

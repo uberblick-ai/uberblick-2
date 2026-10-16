@@ -9,7 +9,7 @@ export function registerExportMarkdown(server: ToolRegistrar, context: ToolConte
   server.registerTool("export_markdown", {
     title: "Export a document as markdown",
     description:
-      "Render a Markdown projection: code, mermaid, terminal and chart keep source fences; tables write " +
+      "Render a Markdown projection: code, terminal and chart keep source fences; tables write " +
       "padded GFM with inline cell marks. Cards export separate :::card containers with inline-Markdown " +
       "prose and button: [Text](destination) lines after footer in authored order. Each exported " +
       "button's plain label links to https or exact claude://code/new, claude-cli://open, codex://new, " +

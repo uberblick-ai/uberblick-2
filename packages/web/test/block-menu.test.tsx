@@ -196,7 +196,6 @@ describe("the registry", () => {
       "Numbered list",
       "Code",
       "Table",
-      "Mermaid",
       "Terminal demo",
       "Line chart",
       "Data table",
@@ -239,7 +238,7 @@ describe("the registry", () => {
     expect(labels("h2")).toEqual(["Heading 2"]);
     expect(labels("##")).toEqual(["Heading 2", "Heading 3"]);
     expect(labels("```")).toEqual(["Code"]);
-    expect(labels("diagram")).toEqual(["Mermaid"]);
+    expect(labels("mermaid")).toEqual([]);
     expect(labels("console")).toEqual(["Terminal demo"]);
     expect(labels("table")).toEqual(["Table", "Data table"]);
     expect(labels("nothing here")).toEqual([]);
@@ -865,8 +864,8 @@ describe("the gutter menu", () => {
       expect(visibleButton(mounted)).toBe(button);
       act(() => button.click());
       expect(screen.queryByRole("combobox", { name: "Search blocks" })).not.toBeNull();
-      pick(mounted, "Mermaid");
-      expect(getBlocks(ydoc).map((block) => block.type)).toEqual(["paragraph", "mermaid"]);
+      pick(mounted, "Terminal demo");
+      expect(getBlocks(ydoc).map((block) => block.type)).toEqual(["paragraph", "terminal"]);
     } finally {
       mounted.unmount();
     }
@@ -972,11 +971,11 @@ describe("the gutter menu", () => {
       });
       expect(mounted.card()).not.toBeNull();
 
-      pick(mounted, "Mermaid");
+      pick(mounted, "Terminal demo");
 
       expect(getBlocks(ydoc).map((block) => [block.type, block.text])).toEqual([
         ["paragraph", "Second"],
-        ["mermaid", ""],
+        ["terminal", ""],
       ]);
       soundIds(ydoc);
     } finally {
@@ -1064,14 +1063,14 @@ describe("the gutter menu", () => {
     const mounted = mountMenu(ydoc);
     try {
       openGutterMenu(mounted, 1);
-      pick(mounted, "Mermaid");
+      pick(mounted, "Terminal demo");
 
       // Inserted below the code block, not below one of its neighbours.
       const blocks = getBlocks(ydoc);
       expect(blocks.map((block) => block.type)).toEqual([
         "paragraph",
         "code",
-        "mermaid",
+        "terminal",
         "paragraph",
       ]);
       expect(blocks[1]?.id).toBe(codeId);
@@ -1110,10 +1109,10 @@ describe("the gutter menu", () => {
         Object.getOwnPropertyDescriptor(
           HTMLInputElement.prototype,
           "value",
-        )?.set?.call(field, "mer");
+        )?.set?.call(field, "term");
         field.dispatchEvent(new Event("input", { bubbles: true }));
       });
-      expect(mounted.entryLabels()).toEqual(["Mermaid"]);
+      expect(mounted.entryLabels()).toEqual(["Terminal demo"]);
 
       act(() => {
         field.dispatchEvent(

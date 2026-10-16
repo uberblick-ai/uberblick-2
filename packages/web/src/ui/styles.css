@@ -1050,7 +1050,6 @@ h6.ub-heading {
 .ub-quote { --block-bar: var(--block-rose-bar); --block-tint: var(--block-rose-tint); }
 .ub-terminal { --block-bar: var(--block-green-bar); --block-tint: var(--block-green-tint); }
 .ub-chart { --block-bar: var(--block-blue-bar); --block-tint: var(--block-blue-tint); }
-.ub-mermaid { --block-bar: var(--block-violet-bar); --block-tint: var(--block-violet-tint); }
 .ub-figma { --block-bar: var(--block-teal-bar); --block-tint: var(--block-teal-tint); }
 
 .ub-block-frame:not([data-view="table"]) {
@@ -1423,14 +1422,12 @@ h6.ub-heading {
 }
 
 .ub-code,
-.ub-mermaid pre,
 .ub-terminal-source,
 .ub-terminal-frame {
   font: var(--type-small-size)/1.7 var(--font-mono);
   white-space: pre;
 }
 .ub-code > code,
-.ub-mermaid pre,
 .ub-terminal-source,
 .ub-terminal-screen {
   overflow-x: auto;
@@ -1485,20 +1482,7 @@ h6.ub-heading {
   color: var(--syntax-number);
 }
 
-.ub-mermaid pre,
 .ub-terminal-source { margin: 0; }
-.ub-mermaid-panel { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
-.ub-mermaid > .ub-mermaid-source { display: none; }
-.ub-mermaid-editing > .ub-mermaid-source,
-.ub-mermaid[data-annotated="true"] > .ub-mermaid-source,
-.ub-mermaid[data-state="error"] > .ub-mermaid-source { display: block; }
-.ub-mermaid-error {
-  margin: 0.5rem 0;
-  color: var(--muted-foreground);
-  font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
 
 .ub-terminal-screen { display: none; cursor: text; }
 .ub-terminal-frame { margin: 0; min-height: 4.5em; color: var(--prose-text); line-height: 1.5; }
@@ -2495,7 +2479,6 @@ h6.ub-heading {
 .ub-copy:focus-visible { opacity: 1; color: var(--foreground); }
 @media (hover: hover) {
   .ub-code:hover .ub-copy,
-  .ub-mermaid:hover .ub-copy,
   .ub-terminal:hover .ub-copy,
   .ub-copy:hover { opacity: 1; color: var(--foreground); }
 }

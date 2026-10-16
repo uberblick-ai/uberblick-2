@@ -25,7 +25,6 @@ import { terminalBlockView } from "./terminal.js";
 import type * as Y from "yjs";
 import { chartBlockView } from "./chart.js";
 import { wireframeBlockView } from "./wireframe.js";
-import { mermaidBlockView } from "./mermaid.js";
 import { Card, CardParts } from "./card.js";
 import { Figma, FigmaCaption } from "./figma.js";
 
@@ -247,37 +246,6 @@ export const CodeBlock = Node.create({
   // Enter override would also intercept paragraph splits.
 });
 
-/** Persist literal Mermaid source; the drawing belongs to its NodeView. */
-export const Mermaid = Node.create({
-  name: "mermaid",
-  group: "block",
-  content: "text*",
-  marks: COMMENT_MARK,
-  code: true,
-  defining: true,
-  whitespace: "pre",
-  addAttributes() {
-    return { id: idAttribute };
-  },
-  parseHTML() {
-    return [{ tag: "div[data-block-type=mermaid]", preserveWhitespace: "full" }];
-  },
-  renderHTML({ HTMLAttributes }) {
-    return [
-      "div",
-      mergeAttributes(
-        { class: "ub-mermaid ub-block-frame", "data-block-type": "mermaid" },
-        HTMLAttributes,
-      ),
-      ["pre", {}, 0],
-    ];
-  },
-  addNodeView() {
-    return mermaidBlockView();
-  },
-  // See CodeBlock: Enter is handled by the core keymap, driven by `code: true`.
-});
-
 /**
  * Persist only transcript source; playback state belongs to the NodeView and
  * must not enter the document.
@@ -380,7 +348,6 @@ export const paletteExtensions = [
   Paragraph,
   Heading,
   CodeBlock,
-  Mermaid,
   ListItem,
   Quote,
   TableNodes,

@@ -21,6 +21,7 @@ import {
   listDeletedDirectoryUuids,
   listDirectory,
   normalizeLegacyTables,
+  removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
   resolveTagAssignments,
   roomForDoc,
@@ -777,6 +778,7 @@ export class Replicas {
     try {
       // Repairs run below the tool's content gate, including on decided
       // records and on late legacy writes from an outdated local process.
+      removeLegacyMermaidBlocks(replica.doc);
       // Same-id replacement plus duplicate repair makes simultaneous
       // converters converge rather than duplicating rows inside a table.
       normalizeLegacyTables(replica.doc);

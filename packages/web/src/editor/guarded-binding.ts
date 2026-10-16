@@ -9,7 +9,7 @@
  * scan recursively, including marks and string-only text inserts.
  */
 
-import { normalizeLegacyTables, repairDuplicateBlocks } from "@uberblick/schema";
+import { normalizeLegacyTables, removeLegacyMermaidBlocks, repairDuplicateBlocks } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import type * as Y from "yjs";
 import { createUberblickEditor } from "./create-editor.js";
@@ -27,7 +27,7 @@ export interface GuardedBinding {
 export interface GuardedBindingOptions extends CreateEditorOptions {
   /** Called when the guard tears the editor down mid-session. */
   onUnbind?: (fragment: Y.XmlFragment) => void;
-  /** Only admitted and synchronized replicas may convert legacy tables. */
+  /** Only admitted and synchronized replicas may normalize stored blocks. */
   canNormalize?: () => boolean;
 }
 
@@ -43,6 +43,7 @@ export function bindGuardedEditor(
   }
 
   if (canNormalize?.() === true) {
+    removeLegacyMermaidBlocks(ydoc);
     normalizeLegacyTables(ydoc);
     repairDuplicateBlocks(ydoc);
   }
@@ -56,7 +57,10 @@ export function bindGuardedEditor(
     // Concurrent same-id conversions use the schema's document-order winner.
     // Repair before y-prosemirror renders both copies and BlockIds gives the
     // shadow a new identity. Local editor splits retain BlockIds' normal path.
-    if (!transaction.local && canNormalize?.() === true) repairDuplicateBlocks(ydoc);
+    if (!transaction.local && canNormalize?.() === true) {
+      removeLegacyMermaidBlocks(ydoc);
+      repairDuplicateBlocks(ydoc);
+    }
     if (findForeignBlocks(fragment).length === 0) return;
     const doomed = instance;
     instance = null;

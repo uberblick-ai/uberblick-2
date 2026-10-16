@@ -422,6 +422,20 @@ export function deleteBlock(ydoc: Y.Doc, blockId: string): void {
   });
 }
 
+/** Remove retired Mermaid elements, including shadowed or malformed copies. */
+export function removeLegacyMermaidBlocks(ydoc: Y.Doc): number {
+  const fragment = getBlocksFragment(ydoc);
+  const indexes = fragment.toArray().flatMap((node, index) =>
+    node instanceof Y.XmlElement && node.nodeName === "mermaid" ? [index] : [],
+  );
+  if (indexes.length > 0) {
+    ydoc.transact(() => {
+      for (const index of indexes.reverse()) fragment.delete(index, 1);
+    });
+  }
+  return indexes.length;
+}
+
 /**
  * Remove only shadowed non-empty ids, keeping the shared document-order winner.
  * Losers' text and later edits are discarded, never merged into the winner.

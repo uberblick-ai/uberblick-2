@@ -24,7 +24,6 @@ interface Block { id: string; type: string; language?: string; text: string; rev
 interface Document { blocks: Block[] }
 const CODE = '// An ordinary code block\nconst message = JSON.stringify({ answer: 42, text: "Hello" });';
 const WIREFRAME = "banner\n  text A live wireframe preview.";
-const MERMAID = "flowchart LR\n  Start --> Finish";
 const TERMINAL = "$ ub status\nworkspace ready";
 const MAPPING = {
   version: 1, type: "line", collection: "measurements", title: "Measurements with a deliberately long caption title that must truncate inside a narrow iPad window",
@@ -33,7 +32,6 @@ const MAPPING = {
 const FRAME_TYPES = [
   [".ub-code:not(.ub-wireframe)", "slate", "TypeScript"],
   [".ub-wireframe", "slate", "Wireframe"],
-  [".ub-mermaid", "violet", "Mermaid"],
   [".ub-terminal", "green", "Terminal"],
   [".ub-chart[data-view=line]", "blue", "Chart"],
 ] as const;
@@ -51,7 +49,6 @@ async function fixture(session: McpSession, title: string): Promise<string> {
       { type: "quote", text: "A quiet quote with a rose accent." },
       { type: "code", language: "typescript", text: CODE },
       { type: "code", language: "wireframe", text: WIREFRAME },
-      { type: "mermaid", text: MERMAID },
       { type: "terminal", text: TERMINAL },
       { type: "chart", text: JSON.stringify(MAPPING) },
     ],
@@ -125,7 +122,7 @@ async function expectFrame(frame: Locator, hue: string): Promise<void> {
     expect(Math.hypot(lab.a, lab.b)).toBeLessThan(0.09);
   }
   const chrome = await frame.locator(
-    ":scope > code, .ub-block-caption, .ub-wireframe-source, .ub-mermaid-source, .ub-terminal-source, .ub-terminal-screen, .ub-chart-panel, .ub-chart-source",
+    ":scope > code, .ub-block-caption, .ub-wireframe-source, .ub-terminal-source, .ub-terminal-screen, .ub-chart-panel, .ub-chart-source",
   ).evaluateAll(elements => elements.map(element => {
     const style = getComputedStyle(element);
     return { selector: element.className || element.tagName, ground: style.backgroundColor,
@@ -245,7 +242,6 @@ for (const touch of [false, true]) {
       });
       await waitForDocumentDraw(page, session, uuid, { index: "all" });
       await expect(page.locator(".ub-wireframe .wf-root")).toBeVisible();
-      await expect(page.locator(".ub-mermaid")).toHaveAttribute("data-state", "ready");
       await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
       expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
       const quote = page.locator(".ub-quote");
@@ -269,17 +265,17 @@ for (const touch of [false, true]) {
       expect(canvasInk.some(ink => ink.text.includes("Measured value"))).toBe(true);
       expect(canvasInk.some(ink => /^Jan/.test(ink.text))).toBe(true);
       for (const ink of canvasInk) expect(contrast(ink.color, chartGround), JSON.stringify(ink)).toBeGreaterThanOrEqual(4.5);
-      for (const sourceName of ["Open wireframe source", "Open Mermaid source", "Open chart source"]) {
+      for (const sourceName of ["Open wireframe source", "Open chart source"]) {
         const action = page.getByRole("button", { name: sourceName, exact: true });
         if (touch) await action.tap();
         else {
           await action.focus();
           await page.keyboard.press("Enter");
         }
-        const kind = sourceName.includes("wireframe") ? "wireframe" : sourceName.includes("Mermaid") ? "mermaid" : "chart";
+        const kind = sourceName.includes("wireframe") ? "wireframe" : "chart";
         const selector = `.ub-${kind}`;
         await expect(page.locator(`${selector}-source`)).toBeVisible();
-        await expectCaption(page.locator(selector), kind === "wireframe" ? "Wireframe" : kind === "mermaid" ? "Mermaid" : "Chart", touch);
+        await expectCaption(page.locator(selector), kind === "wireframe" ? "Wireframe" : "Chart", touch);
         await expectAA(page, selector);
         await activateControl(editor(page).locator(":scope > p").first(), { touch });
       }
@@ -313,17 +309,14 @@ for (const touch of [false, true]) {
         expect(contrast(await colorToken(codeFrame, `--syntax-${token}`), ground), token).toBeGreaterThanOrEqual(4.5);
       }
       const wireframe = before.blocks.find(block => block.language === "wireframe");
-      const mermaid = before.blocks.find(block => block.type === "mermaid");
       const chart = before.blocks.find(block => block.type === "chart");
-      if (wireframe === undefined || mermaid === undefined || chart === undefined) throw new Error("e2e: rendered fixtures are missing");
+      if (wireframe === undefined || chart === undefined) throw new Error("e2e: rendered fixtures are missing");
       await edit(session, uuid, wireframe, "banner\n text Bad indentation");
       await expect(page.locator(".ub-wireframe-stale")).toBeVisible();
       await expect(page.locator(".ub-wireframe-diagnostics")).toBeVisible();
-      await edit(session, uuid, mermaid, "flowchart LR\n  Start -->");
-      await expect(page.locator(".ub-mermaid-error")).toBeVisible();
       await edit(session, uuid, chart, "{");
       await expect(page.locator(".ub-chart-message")).toBeVisible();
-      for (const selector of [".ub-wireframe", ".ub-mermaid", ".ub-chart"]) await expectAA(page, selector);
+      for (const selector of [".ub-wireframe", ".ub-chart"]) await expectAA(page, selector);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     });
   }

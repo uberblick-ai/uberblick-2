@@ -529,8 +529,8 @@ describe("document round-trip", () => {
       text: 'const x: number = 1;\nconsole.log(x);',
       language: "ts",
     });
-    const mermaid = appendBlock(doc, {
-      type: "mermaid",
+    const terminal = appendBlock(doc, {
+      type: "terminal",
       text: "graph TD\n  A-->B",
     });
 
@@ -543,9 +543,9 @@ describe("document round-trip", () => {
         text: 'const x: number = 1;\nconsole.log(x);',
         language: "ts",
       }),
-      withRev({ id: mermaid, type: "mermaid", text: "graph TD\n  A-->B" }),
+      withRev({ id: terminal, type: "terminal", text: "graph TD\n  A-->B" }),
     ]);
-    expect(new Set([h1, p, code, mermaid]).size).toBe(4);
+    expect(new Set([h1, p, code, terminal]).size).toBe(4);
   });
 
   /**

@@ -118,7 +118,7 @@ describe("with the hub stopped", () => {
         { type: "heading", text: "Offline notes", level: 1 },
         { type: "paragraph", text: "written with no hub in sight" },
         { type: "code", text: "const offline = true;", language: "ts" },
-        { type: "mermaid", text: "graph TD; A-->B;" },
+        { type: "code", language: "mermaid", text: "graph TD; A-->B;" },
       ],
     });
     expect(created.uuid).toBeTruthy();

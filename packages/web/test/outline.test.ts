@@ -34,7 +34,7 @@ function docWithHeadings(): Y.Doc {
   appendBlock(ydoc, { type: "heading", text: "Homebrew", level: 2 });
   appendBlock(ydoc, { type: "heading", text: "Flags", level: 3 });
   appendBlock(ydoc, { type: "code", text: "brew install", language: "sh" });
-  appendBlock(ydoc, { type: "mermaid", text: "graph TD;" });
+  appendBlock(ydoc, { type: "code", language: "mermaid", text: "graph TD;" });
   return ydoc;
 }
 

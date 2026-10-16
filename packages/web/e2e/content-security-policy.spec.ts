@@ -52,7 +52,6 @@ const blocks: BlockInput[] = [
   { type: "heading", level: 2, text: "Every block" },
   { type: "code", language: "typescript", text: "const value = 1;" },
   { type: "code", language: "wireframe", text: "dialog Preview\n  text A same-origin renderer.\n  button Continue" },
-  { type: "mermaid", text: "flowchart LR\n  Start --> Finish" },
   { type: "list-item", text: "A list entry" },
   { type: "quote", text: "Quoted prose" },
   { type: "table", text: "| Name | Count |\n| --- | --- |\n| Example | 2 |" },
@@ -112,7 +111,7 @@ test("workspace, supported renderers and the every-type document emit no report-
       await expect(editor(page)).toBeVisible();
       await waitForDocumentDraw(page, writer, uuid, { index: "all" });
       for (const selector of [
-        ".ub-code > code", ".ub-wireframe-drawing .wf-root", ".ub-mermaid-panel svg",
+        ".ub-code > code", ".ub-wireframe-drawing .wf-root",
         ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
         ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card",
       ]) await expect(page.locator(selector).first()).toBeVisible();

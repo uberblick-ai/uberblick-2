@@ -1,6 +1,6 @@
 # Shared block frame browser evidence
 
-The production `ub open` renderer shows quote, code, wireframe, Mermaid,
+The production `ub open` renderer shows quote, code, wireframe,
 terminal and chart blocks together. Each fixture uses a separate MCP writer;
 opening sources, copying and controlling playback leave the stored blocks
 unchanged. The chart consumes document-owned measurements.
@@ -14,7 +14,7 @@ unchanged. The chart consumes document-owned measurements.
 caption's containment and 12/16 UI type, and caption actions' touch targets.
 It checks actual painted text in source and rendered views, controls at rest,
 hovered and keyboard-focused, neutral focus rings, quote prose, terminal
-transcripts, chart canvas ticks and legend, and wireframe and Mermaid problem
+transcripts, chart canvas ticks and legend, and wireframe problem
 states. It measures every existing syntax token against the code tint.
 Desktop source actions and playback use keyboard activation; iPad uses touch.
 The tagged proof runs in Chromium and WebKit with explicit desktop and iPad

@@ -188,18 +188,6 @@ export const codeBlockChrome: SourceBlockChrome = {
   },
 };
 
-/** Literal Mermaid source and identity, shared with the diagram NodeView. */
-export const mermaidChrome: SourceBlockChrome = {
-  root: () => {
-    const div = document.createElement("div");
-    div.className = "ub-mermaid ub-block-frame";
-    div.setAttribute("data-block-type", "mermaid");
-    return div;
-  },
-  content: () => document.createElement("pre"),
-  sync: (node, root) => mirrorAttribute(root, "id", node.attrs.id),
-};
-
 /**
  * Class the source pre separately: terminal playback contains other pre nodes
  * and shared selectors must not hide/style those instead.

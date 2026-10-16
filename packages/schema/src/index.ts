@@ -51,6 +51,7 @@ export {
   getBlocksWithInline,
   insertBlock,
   normalizeLegacyTables,
+  removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
   setBlockLanguage,
   setBlockLevel,

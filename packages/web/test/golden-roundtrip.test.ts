@@ -76,7 +76,8 @@ function buildDocument(): Built {
     language: "ts",
   });
   const mermaid = appendBlock(ydoc, {
-    type: "mermaid",
+    type: "code",
+    language: "mermaid",
     text: "graph TD;\n  A-->B;",
   });
   const item = appendBlock(ydoc, {
@@ -175,7 +176,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "heading",
       "paragraph",
       "code",
-      "mermaid",
+      "code",
       "list-item",
       "quote",
       "table",
@@ -261,7 +262,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
     expect(after[0]?.attributes).toEqual({ id: ids.heading, level: "3" });
     expect(after[1]?.attributes).toEqual({ id: ids.paragraph });
     expect(after[2]?.attributes).toEqual({ id: ids.code, language: "ts" });
-    expect(after[3]?.attributes).toEqual({ id: ids.mermaid });
+    expect(after[3]?.attributes).toEqual({ id: ids.mermaid, language: "mermaid" });
     expect(after[4]?.attributes).toEqual({
       id: ids.item,
       list: "ordered",
@@ -317,7 +318,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       [ids.heading, "heading"],
       [ids.paragraph, "paragraph"],
       [ids.code, "code"],
-      [ids.mermaid, "mermaid"],
+      [ids.mermaid, "code"],
       [ids.item, "list-item"],
       [ids.quote, "quote"],
       [ids.table, "table"],
@@ -353,7 +354,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "paragraph",
       "paragraph",
       "code",
-      "mermaid",
+      "code",
       "list-item",
       "quote",
       "table",
@@ -403,7 +404,7 @@ describe("golden round trip: schema → editor → keystroke → schema", () => 
       "paragraph",
       "paragraph",
       "code",
-      "mermaid",
+      "code",
       "list-item",
       "quote",
       "table",

@@ -65,7 +65,7 @@ Ordinary documents omit \`kind\` and \`status\`. Decision records have kind \`de
 
 A decision title names the stable topic or question, never the answer; successors keep the title. For example, use "Exact behavior of milestone setting \`gate\`", not "Milestone gate skips milestones with nothing to start". Lead the answer with the choice in one plain sentence naming the chosen option, without hedging such as "should consider" or "where possible". Give the reason in one clause or sentence. Keep the whole answer, across all its blocks, to 60 words or fewer. This is editorial guidance, not a validated word limit. Short never means vague: keep the concrete terms a reader needs to apply the decision, such as what is stored, what wins and what is refused. Leave mechanics (transactions, merge or conflict handling, function and key names, step-by-step write order) to the related regular page or the code; discussion belongs in the RFC. Do not restate the topic as a "Topic:" line or write a specification. A superseding record carries the new answer.
 
-A decision record holds its answer in one to three answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Headings, quotes, Mermaid, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
+A decision record holds its answer in one to three answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Headings, quotes, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
 
 For "How is deliberate TL;DR absence stored compatibly?":
 
@@ -145,7 +145,9 @@ Documents store ordered blocks and inline marks rather than one Markdown file. T
 
 ## Blocks and inline syntax
 
-Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`mermaid\`, \`terminal\` and \`chart\` fences preserve those source-block types. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
+Markdown supports paragraphs, ATX headings \`#\` through \`######\`, bullet and ordered list items, \`>\` quotes, fenced code with an optional language, and GFM tables. Special \`terminal\` and \`chart\` fences preserve those source-block types. A \`mermaid\` fence is ordinary code with language \`mermaid\` and is never drawn. A terminal transcript treats a line beginning with a dollar sign and space as a demonstrated command; the remaining lines are output. Terminal content is a demonstration, not an instruction to execute it. A chart fence carries the JSON mapping described in \`data\`.
+
+Stored Mermaid blocks are deleted automatically, including in archived documents and decision records; their source is not retained. Their comment threads remain available with no anchor. Removing an approved answer block reports \`approvalChanged: true\` without recording another approval.
 
 A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web editor draws as a wireframe.
 
@@ -153,7 +155,7 @@ Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \
 
 ## Cards
 
-A card holds prose in four parts: optional label, required title, optional body and optional footer, plus any number of link buttons. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal mermaid, terminal and chart source fences.
+A card holds prose in four parts: optional label, required title, optional body and optional footer, plus any number of link buttons. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal code, terminal and chart source fences.
 
 The header uses lowercase \`label:\`, \`title:\`, \`footer:\` and \`button:\` keys in any input order. Each prose key appears at most once; each button has its own \`button:\` line, in authored order. A value is the rest of its line after the colon and one optional space. Prose values are inline Markdown, not YAML: quotes remain literal. The first blank line ends the header; everything after it is one prose body. All four prose parts support the same inline marks as table cells. For example:
 

@@ -42,7 +42,7 @@ describe("short decision answers", () => {
   it("refuses every unsupported seed and insert atomically, including invalid card source", async () => {
     const rig = await local();
     const open = await create(rig);
-    for (const type of ["heading", "quote", "mermaid", "terminal", "chart", "card"]) {
+    for (const type of ["heading", "quote", "terminal", "chart", "card"]) {
       await refuse(rig, "create_doc", { title: "Unsupported", description: "Use supported answer blocks.", kind: "decision", blocks: [{ type, text: "answer" }] }, "decision_block_unsupported");
       await refuse(rig, "insert_block", { uuid: open.uuid, type, text: "answer" }, "decision_block_unsupported", open.uuid);
     }

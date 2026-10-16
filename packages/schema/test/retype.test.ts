@@ -106,7 +106,7 @@ describe("setBlockType", () => {
     const code = appendBlock(doc, { type: "code", text: "x", language: "ts" });
     setBlockType(doc, code, "code");
     expect(getBlock(doc, code)?.language).toBe("ts");
-    setBlockType(doc, code, "mermaid");
+    setBlockType(doc, code, "terminal");
     expect(getBlock(doc, code)?.language).toBeUndefined();
     setBlockType(doc, code, "code");
     expect(getBlock(doc, code)?.language).toBe("");
@@ -133,7 +133,6 @@ describe("setBlockType", () => {
       "paragraph",
       "heading",
       "code",
-      "mermaid",
       "list-item",
       "quote",
       "terminal",
