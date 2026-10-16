@@ -1,4 +1,4 @@
-import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
+import { expectOfflineHubText, proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /** An open page survives local serving restarts and credential changes. */
 
 import { expect, test } from "@playwright/test";
@@ -7,8 +7,6 @@ import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helper
 import { placeCaret } from "./harness.js";
 
 const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
-
-type OfflineTextHistory = { readings: (string | null)[]; stop: () => void };
 
 async function documentText(page: Page): Promise<string | null> {
   return editor(page).evaluate((element) => {
@@ -36,7 +34,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   // A shared-secret connection has no GitHub account to claim, even though
   // the hub accepts edits from this running local service.
   await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
-  await createDoc(page, docTitle("local-credentials"), { pin: true });
+  const uuid = await createDoc(page, docTitle("local-credentials"), { pin: true });
   await placeCaret(page);
   await page.keyboard.type("before restart");
   const observer = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
@@ -49,80 +47,65 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect(shared).toHaveText("synced with hub");
   const authenticatedGeometry = await statusGeometry(page);
 
-  await observer.evaluate(() => {
-    const read = (): string | null => {
-      const prose = document.querySelector(".ub-editor .ProseMirror");
-      if (prose === null) return null;
-      const copy = prose.cloneNode(true) as HTMLElement;
-      for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) cursor.remove();
-      return copy.textContent;
-    };
-    const readings = [read()];
-    const mutations = new MutationObserver(() => { readings.push(read()); });
-    mutations.observe(document.body, { childList: true, characterData: true, subtree: true });
-    (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory = {
-      readings,
-      stop: () => { readings.push(read()); mutations.disconnect(); },
-    };
-  });
-  await harness().restartOpen({ authenticated: false });
-  await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(shared).toHaveText("not shared with hub");
-  await expect(reason).toBeVisible();
-  await expect(reason).toHaveAttribute("data-type", "warning");
-  await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
-  await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
-  expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
-  for (const width of [810]) {
-    await page.setViewportSize({ width, height: 844 });
-    await expect(reason).toBeInViewport({ ratio: 1 });
-    const trigger = page.locator(".ub-sync-toggle");
-    await expect(trigger).toBeInViewport({ ratio: 1 });
-    await trigger.click();
-    await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
-      .toHaveText("this machine has no credentials for its hub");
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
-  }
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-  await placeCaret(page);
-  await page.keyboard.type("; saved locally");
-  await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(reason).toBeVisible();
-  await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
-  const localGeometry = await statusGeometry(page);
+  const room = `${harness().workspaceUuid}/${uuid}`;
+  const history = harness().observeHubText(room);
+  try {
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).toHaveText("saved here");
+    await expect(shared).toHaveText("not shared with hub");
+    await expect(reason).toBeVisible();
+    await expect(reason).toHaveAttribute("data-type", "warning");
+    await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
+    await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
+    expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
+    for (const width of [810]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(reason).toBeInViewport({ ratio: 1 });
+      const trigger = page.locator(".ub-sync-toggle");
+      await expect(trigger).toBeInViewport({ ratio: 1 });
+      await trigger.click();
+      await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
+        .toHaveText("this machine has no credentials for its hub");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await placeCaret(page);
+    await page.keyboard.type("; saved locally");
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).toHaveText("saved here");
+    await expect(reason).toBeVisible();
+    await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
+    const localGeometry = await statusGeometry(page);
 
-  // This page retains its original imported browser key on another local-only
-  // boot, as well as across both authentication transitions below.
-  await harness().restartOpen({ authenticated: false });
-  await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(shared).toHaveText("not shared with hub");
-  await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
-  expect(await statusGeometry(page)).toEqual(localGeometry);
+    // This page retains its original imported browser key on another local-only
+    // boot, as well as across both authentication transitions below.
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).toHaveText("saved here");
+    await expect(shared).toHaveText("not shared with hub");
+    await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
+    expect(await statusGeometry(page)).toEqual(localGeometry);
 
-  await observer.evaluate(() => { (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory.stop(); });
-  await harness().restartOpen({ authenticated: true });
-  await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
-  await proveDocumentPageArrival(page, observer, { path: "upstream" });
-  // The same observer has now received a later write through the acting relay.
-  const offlineReadings = await observer.evaluate(() => (window as unknown as { offlineTextHistory: OfflineTextHistory }).offlineTextHistory.readings);
-  expect(offlineReadings.every(text => text === "before restart")).toBe(true);
-  await expect(shared).toHaveText("synced with hub");
-  await expect(reason).toBeHidden();
-  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
-  expect(await statusGeometry(page)).toEqual(localGeometry);
+    await harness().restartOpen({ authenticated: true });
+    await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
+    await proveDocumentPageArrival(page, observer, { path: "upstream" });
+    expectOfflineHubText(history, "before restart");
+    await expect(shared).toHaveText("synced with hub");
+    await expect(reason).toBeHidden();
+    await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
+    expect(await statusGeometry(page)).toEqual(localGeometry);
 
-  await harness().restartOpen({ authenticated: false });
-  await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(shared).toHaveText("not shared with hub");
-  await expect(reason).toBeVisible();
-  expect(await statusGeometry(page)).toEqual(localGeometry);
-  expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).toHaveText("saved here");
+    await expect(shared).toHaveText("not shared with hub");
+    await expect(reason).toBeVisible();
+    expect(await statusGeometry(page)).toEqual(localGeometry);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+  } finally { history.stop(); }
 });
 
 test("local-only status answers leave the readings and prose in place", async ({ browser }) => {

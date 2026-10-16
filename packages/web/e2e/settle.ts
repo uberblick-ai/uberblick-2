@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import type { McpSession } from "./mcp-agent.js";
+import type { HubTextHistory } from "./harness.js";
 import { dataRevision } from "../src/editor/render-state.js";
 import type { RenderData } from "../src/editor/render-state.js";
 import type { JSONValue } from "@uberblick/schema";
@@ -62,6 +63,14 @@ export async function expectUpstreamHub(assertion: () => void | Promise<void>): 
   await test.step("converges at the upstream hub storage reader", async () => {
     await expect(assertion).toPass({ timeout: 20_000 });
   });
+}
+
+/** Check admission history only after a later write has traversed the same hub document. */
+export function expectOfflineHubText(history: HubTextHistory, expected: string): void {
+  const offline = history.readings.filter(reading => !reading.authenticated);
+  expect(offline.length, "the hub history must cover a local-only interval").toBeGreaterThan(0);
+  expect(offline.map(reading => reading.text), "local-only edits reached the upstream hub")
+    .toEqual(offline.map(() => expected));
 }
 
 /** Compute a complete expected data revision through bounded public MCP pages. */
