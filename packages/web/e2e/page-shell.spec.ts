@@ -70,7 +70,7 @@ test.describe("one page shell", () => {
   test.beforeAll(async ({ browser }) => {
     const page = await openApp(browser, "/", {
       contextOptions: { viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false },
-      readySelector: ".ub-list-head",
+      readySelector: ".ub-document-sidebar",
     });
     documentUuid = await createDoc(page, "The shared page frame");
     await page.locator(".ub-editor .ProseMirror").click();
