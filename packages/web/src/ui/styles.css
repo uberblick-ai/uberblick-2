@@ -1663,11 +1663,6 @@ h6.ub-heading {
   line-height: inherit;
 }
 
-.ub-decision-record-meta {
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
-}
-
 .ub-decisions-block {
   container-type: inline-size;
   font-family: var(--font-sans);
@@ -1937,61 +1932,263 @@ h6.ub-heading {
 }
 
 .ub-decision-history {
+  container: decision-history / inline-size;
   margin-block-start: 2rem;
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
 .ub-decision-history h2 {
-  font-size: var(--type-h2-size);
-  line-height: var(--type-h2-leading);
-  font-weight: 600;
+  margin-block: 0 0.75rem;
+  color: var(--muted-foreground);
+  font: 500 var(--type-caption-size)/var(--type-caption-leading) var(--font-sans);
+  letter-spacing: 0.1em;
 }
 
 .ub-decision-timeline {
   list-style: none;
-  padding-inline-start: 1rem;
-  border-inline-start: 1px solid var(--border);
+  margin: 0;
+  padding: 0;
 }
 
 .ub-decision-timeline > li {
+  --rail-top: calc(0.5rem + 15px);
+  --rail-left: calc(7.625rem + 1px);
+  position: relative;
+  display: grid;
+  grid-template-columns: 6rem 1rem minmax(0, 1fr) auto;
+  column-gap: 0.625rem;
+  row-gap: 0.25rem;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 0.5rem 0.75rem;
-  margin-block: 0.75rem;
+  padding: 0.5rem;
+}
+
+.ub-decision-timeline > li::before,
+.ub-decision-timeline > li::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: var(--rail-left);
+  inline-size: 1px;
+  background: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.ub-decision-timeline > li::before {
+  inset-block: -1px calc(100% - var(--rail-top));
+}
+
+.ub-decision-timeline > li::after {
+  inset-block: var(--rail-top) -1px;
+}
+
+.ub-decision-timeline > li[data-rail-green="true"]::before,
+.ub-decision-timeline > li[data-rail-green="true"]:not([data-in-force="true"])::after {
+  background: var(--status-success);
+}
+
+.ub-decision-timeline > li:first-child::before,
+.ub-decision-timeline > li:last-child::after {
+  display: none;
 }
 
 .ub-decision-timeline > li[data-selected="true"] {
-  border-color: var(--foreground);
+  border-color: var(--border);
   background: var(--card-accent);
 }
 
 .ub-decision-record {
-  display: block;
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  align-content: start;
+  row-gap: 0.25rem;
   color: inherit;
   text-decoration: none;
+  min-inline-size: 0;
   min-height: 2.75rem;
 }
 
+/* Stretch the native record link while keeping its sibling RFC link independent. */
+.ub-decision-record::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.ub-decision-record-date {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  z-index: 1;
+  text-align: end;
+  color: var(--muted-foreground);
+  font: 400 var(--type-small-size)/var(--type-small-leading) var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ub-decision-rail-dot {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 50%;
+  background: var(--background);
+}
+
+.ub-decision-timeline > li[data-state="not-yet-decided"] .ub-decision-rail-dot,
+.ub-decision-timeline > li[data-state="open-proposal"] .ub-decision-rail-dot {
+  border-style: dashed;
+}
+
+.ub-decision-timeline > li[data-state="rejected"] .ub-decision-rail-dot {
+  border-color: var(--destructive);
+}
+
+.ub-decision-timeline > li:is([data-state="superseded"], [data-state="withdrawn"]) .ub-decision-rail-dot {
+  inline-size: 0.375rem;
+  block-size: 0.375rem;
+  background: var(--muted-foreground);
+}
+
+.ub-decision-timeline > li[data-state="conflict"] .ub-decision-rail-dot {
+  border-color: var(--destructive);
+  background: var(--destructive);
+  border-radius: 2px;
+}
+
+.ub-decision-timeline > li[data-in-force="true"] .ub-decision-rail-dot {
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  border-color: var(--status-success);
+  background: var(--status-success);
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 3px var(--status-success);
+}
+
+.ub-decision-record-line {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  block-size: 30px;
+  white-space: nowrap;
+}
+
 .ub-decision-record-state {
-  font-weight: 600;
+  min-inline-size: 0;
+  flex: 0 1 auto;
+}
+
+.ub-decision-state-label,
+.ub-decision-event,
+.ub-decision-linked,
+.ub-decision-preview,
+.ub-decision-rfc-title {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ub-decision-event {
+  flex: 1;
 }
 
 .ub-decision-selection,
 .ub-decision-linked {
-  margin-inline-start: 0.75rem;
+  color: var(--muted-foreground);
   font-size: var(--type-small-size);
   line-height: var(--type-small-leading);
 }
 
-.ub-decision-preview {
-  display: block;
-  margin-block: 0.35rem;
+.ub-decision-selection {
+  flex: none;
+  margin-inline-start: auto;
 }
 
-.ub-decision-record-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+.ub-decision-preview {
+  display: block;
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.ub-decision-timeline > li:is([data-state="rejected"], [data-state="withdrawn"], [data-state="superseded"]) .ub-decision-preview {
   color: var(--muted-foreground);
+}
+
+.ub-decision-record-comments {
+  grid-column: 4;
+  grid-row: 1;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.ub-decision-record-rfc {
+  grid-column: 3;
+  min-inline-size: 0;
+  display: flex;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  color: var(--muted-foreground);
+}
+
+.ub-decision-record-rfc .ub-doclink {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+  color: inherit;
+}
+
+.ub-decision-record-rfc .ub-doclink[data-doc-link-state="archived"]::after {
+  content: none;
+}
+
+.ub-decision-archived {
+  flex: none;
+  margin-inline-start: 0.375rem;
+  padding-inline: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+
+@container decision-history (max-width: 34rem) {
+  .ub-decision-timeline > li {
+    --rail-left: calc(1rem + 1px);
+    --rail-top: calc(0.5rem + var(--type-small-leading) + 0.25rem + 15px);
+    grid-template-columns: 1rem minmax(0, 1fr) auto;
+  }
+  .ub-decision-record-date {
+    grid-column: 2;
+    min-block-size: var(--type-small-leading);
+    text-align: start;
+  }
+  .ub-decision-rail-dot { grid-column: 1; grid-row: 2; }
+  .ub-decision-record-line { grid-column: 2; grid-row: 2; }
+  .ub-decision-record-comments { grid-column: 3; grid-row: 2; }
+  .ub-decision-preview { grid-column: 2; grid-row: 3; }
+  .ub-decision-record-rfc { grid-column: 2; }
+}
+
+@media (any-pointer: coarse) {
+  .ub-decision-record-rfc .ub-doclink {
+    min-block-size: 44px;
+    align-content: center;
+  }
 }
 
 /* Banner emphasis comes from its ground and edge. Foreground prose keeps
