@@ -100,12 +100,14 @@ export {
 } from "./card.js";
 export type { CardButton, CardButtonStyle, CardButtonColor, CardInline, CardPart, CardText } from "./card.js";
 export {
+  FIGMA_DEFAULT_HEIGHT, FIGMA_MAX_HEIGHT, FIGMA_MIN_HEIGHT,
   buildFigmaElement, editFigma, figmaCaptionElement, figmaCaptionTexts, figmaFields,
-  figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaInput, writeFigmaInline, writeFigmaText,
+  figmaInline, figmaText, figmaTextParts, isSupportedFigma, parseFigmaHeight, parseFigmaInput,
+  seedNewFigmaCaptions, writeFigmaInline, writeFigmaText,
 } from "./figma.js";
 export type { FigmaInline, FigmaText } from "./figma.js";
-export { FIGMA_PROVIDER, normalizeFigmaLink } from "./providers/figma.js";
-export type { FigmaFields } from "./providers/figma.js";
+export { FIGMA_PROVIDER, figmaEmbedAddress, normalizeFigmaLink } from "./providers/figma.js";
+export type { FigmaAppearance, FigmaFields } from "./providers/figma.js";
 
 export { exportMarkdown, importMarkdown, parseInline } from "./markdown.js";
 export type {

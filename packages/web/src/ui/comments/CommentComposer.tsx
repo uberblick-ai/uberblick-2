@@ -20,7 +20,7 @@ import type { Editor } from "@tiptap/core";
 import type { Transaction } from "@tiptap/pm/state";
 import { endUndoCapture } from "../../editor/block-menu.js";
 import { cellTextTargetOf, commentTargetOf } from "../../editor/selection.js";
-import type { CardTextTarget, CellTextTarget, CommentTarget } from "../../editor/selection.js";
+import type { CardTextTarget, CellTextTarget, CommentTarget, FigmaTextTarget } from "../../editor/selection.js";
 import { CommentForm } from "./CommentForm.js";
 import { blockRefLabel } from "./threads.js";
 import { Button } from "../shadcn/button.js";
@@ -37,17 +37,17 @@ interface MarkReading {
 }
 
 interface Draft {
-  target: CommentTarget | CellTextTarget | CardTextTarget;
+  target: CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget;
   marks: Record<FlagMark, MarkReading> & { link: MarkReading };
 }
 
 /** The range a target names, as a value two reads can be compared by. */
-function rangeOf(target: CommentTarget | CellTextTarget | CardTextTarget): string {
+function rangeOf(target: CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget): string {
   return `${target.blockId}:${"cellPos" in target ? target.cellPos : "part" in target ? target.part : "prose"}:${target.start}:${target.end}`;
 }
 
 /** Read the editor's stored range even while a link or comment field has focus. */
-function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | CardTextTarget | null): Range | null {
+function selectionRange(editor: Editor, target: CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget | null): Range | null {
   const { from, to } = target === null ? editor.state.selection : {
     from: target.contentStart + target.start, to: target.contentStart + target.end,
   };
@@ -107,7 +107,7 @@ function boundedWrite(editor: Editor, write: () => void): void {
   endUndoCapture(editor.state);
 }
 
-function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | null {
+function formattingTarget(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget | null {
   const cell = cellTextTargetOf(editor);
   if (cell !== null) return cell;
   const target = commentTargetOf(editor, ydoc);

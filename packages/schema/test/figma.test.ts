@@ -1,12 +1,12 @@
 import * as Y from "yjs";
 import { describe, expect, it } from "vitest";
 import {
-  FigmaAnnotationError, FigmaConversionError, InlineLinkRangeError, InvalidFigmaError,
+  FIGMA_PROVIDER, FigmaAnnotationError, FigmaConversionError, InlineLinkRangeError, InvalidFigmaError,
   OldTextMismatchError, StaleBlockError, addComment, appendBlock, createAnnotation,
-  deleteAnnotation, editBlock, figmaCaptionElement, figmaCaptionTexts, figmaInline,
+  deleteAnnotation, editBlock, figmaCaptionElement, figmaCaptionTexts, figmaEmbedAddress, figmaInline,
   findBlockElement, getBlock, getBlocks, getBlocksWithInline, getBlockText,
   initDoc, insertBlock, isSupportedFigma, listAnnotationRanges, normalizeFigmaLink,
-  parseFigmaInput, resolveAnnotationRange, setAnnotationResolved, setBlockType,
+  parseFigmaHeight, parseFigmaInput, resolveAnnotationRange, seedNewFigmaCaptions, setAnnotationResolved, setBlockType,
   setInlineLink, writeFigmaText,
 } from "../src/index.js";
 import { replicaPair, syncDocs } from "./helpers.js";
@@ -70,6 +70,31 @@ describe("Figma provider link identity", () => {
   });
 });
 
+describe("Figma viewer provider contract", () => {
+  it("builds a frame address from only the kept identity and reader appearance", () => {
+    expect(FIGMA_PROVIDER.embedAddress(`${URL}&starting-point-node-id=12%3A401&version-id=987&theme=wrong&embed-host=https://private.test&document=secret&t=tracking#private`, "dark"))
+      .toBe("https://embed.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345&starting-point-node-id=12%3A401&version-id=987&embed-host=uberblick&footer=false&theme=dark&page-selector=false");
+  });
+
+  it.each(["design/key", "file/key", "proto/key?node-id=12-345", "board/key", "slides/key", "community/file/123"])("keeps the accepted path and shows page selection for %s", (path) => {
+    const address = new globalThis.URL(figmaEmbedAddress(`https://figma.com/${path}`, "light"));
+    expect(address.origin).toBe("https://embed.figma.com");
+    expect(`${address.pathname}${address.searchParams.has("node-id") ? `?node-id=${address.searchParams.get("node-id")}` : ""}`).toBe(`/${path}`);
+    expect(address.searchParams.get("theme")).toBe("light");
+    expect(address.searchParams.has("page-selector")).toBe(false);
+  });
+
+  it("refuses an unsupported viewer destination and fixes the security attributes", () => {
+    expect(() => figmaEmbedAddress("https://example.test/design/key", "light")).toThrow(InvalidFigmaError);
+    expect(FIGMA_PROVIDER.frameAttributes).toEqual({
+      sandbox: "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-storage-access-by-user-activation",
+      allow: "fullscreen; clipboard-write",
+      referrerpolicy: "no-referrer",
+      allowfullscreen: "",
+    });
+  });
+});
+
 describe("Figma block contract", () => {
   it("stores only kept identity, literal title, explicit height and a marked caption", () => {
     const title = `**Literal** [target](${TARGET})`;
@@ -120,6 +145,65 @@ describe("Figma block contract", () => {
   it("accepts only the specified inclusive whole-pixel height range", () => {
     expect(parseFigmaInput(`url: ${URL}\nheight:240`).height).toBe(240);
     expect(parseFigmaInput(`url: ${URL}\nheight:960`).height).toBe(960);
+  });
+
+  it("shares the same height refusal between structured text and the web field", () => {
+    expect(parseFigmaHeight("480")).toBe(480);
+    for (const height of ["", "239", "961", "-480", "480.0", "5e2", "NaN"]) {
+      expect(() => parseFigmaHeight(height)).toThrow("Height must be a whole number of pixels from 240 to 960");
+      expect(() => parseFigmaInput(`url: ${URL}\nheight: ${height}`)).toThrow("Height must be a whole number of pixels from 240 to 960");
+    }
+  });
+
+  it("seeds a web-created empty caption in its creating transaction for concurrent first edits", () => {
+    const doc = new Y.Doc();
+    doc.on("beforeObserverCalls", seedNewFigmaCaptions);
+    doc.transact(() => {
+      const figma = new Y.XmlElement("figma");
+      figma.setAttribute("id", "web-created");
+      figma.setAttribute("url", URL);
+      const caption = new Y.XmlElement("figmaCaption");
+      caption.insert(0, [new Y.XmlElement("paragraph")]);
+      figma.insert(0, [caption]);
+      doc.getXmlFragment("blocks").insert(0, [figma]);
+    });
+    const copy = new Y.Doc();
+    copy.on("beforeObserverCalls", seedNewFigmaCaptions);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc));
+    const first = doc.getXmlFragment("blocks").get(0) as Y.XmlElement;
+    const second = copy.getXmlFragment("blocks").get(0) as Y.XmlElement;
+    expect(figmaCaptionTexts(first)).toHaveLength(1);
+    expect(figmaCaptionTexts(second)).toHaveLength(1);
+    figmaCaptionTexts(first)[0]!.insert(0, "First ");
+    figmaCaptionTexts(second)[0]!.insert(0, "Second ");
+    syncDocs(doc, copy);
+    expect(figmaCaptionTexts(first)).toHaveLength(1);
+    expect(figmaCaptionTexts(second)[0]!.toString()).toBe(figmaCaptionTexts(first)[0]!.toString());
+    expect(figmaCaptionTexts(first)[0]!.toString()).toContain("First ");
+    expect(figmaCaptionTexts(first)[0]!.toString()).toContain("Second ");
+    doc.destroy();
+    copy.destroy();
+  });
+
+  it("does not repair captions created remotely or emptied after creation", () => {
+    const source = new Y.Doc();
+    const figma = new Y.XmlElement("figma");
+    const caption = new Y.XmlElement("figmaCaption");
+    const paragraph = new Y.XmlElement("paragraph");
+    caption.insert(0, [paragraph]);
+    figma.insert(0, [caption]);
+    source.getXmlFragment("blocks").insert(0, [figma]);
+    const copy = new Y.Doc();
+    copy.on("beforeObserverCalls", seedNewFigmaCaptions);
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(source));
+    const remote = copy.getXmlFragment("blocks").get(0) as Y.XmlElement;
+    expect(figmaCaptionTexts(remote)).toEqual([]);
+    paragraph.insert(0, [new Y.XmlText()]);
+    source.on("beforeObserverCalls", seedNewFigmaCaptions);
+    source.transact(() => paragraph.delete(0, 1));
+    expect(figmaCaptionTexts(figma)).toEqual([]);
+    source.destroy();
+    copy.destroy();
   });
 
   it("refuses conversions, block annotations and link ranges without writes", () => {

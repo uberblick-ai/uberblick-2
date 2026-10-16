@@ -102,6 +102,15 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: {},
   },
   {
+    id: "figma",
+    label: "Figma",
+    group: "Embeds",
+    trigger: null,
+    keywords: ["design", "prototype", "board", "slides", "embed"],
+    type: "figma",
+    attrs: {},
+  },
+  {
     id: "list-bullet",
     label: "Bullet list",
     group: "Lists",
@@ -338,6 +347,7 @@ export function convertBlockAtTrigger(
   trigger: SlashTrigger,
   entry: BlockMenuEntry,
 ): boolean {
+  if (entry.type === "figma") return false;
   const live = slashTriggerAt(editor);
   if (live === null) return false;
   if (live.blockId !== trigger.blockId || live.query !== trigger.query) return false;
@@ -381,6 +391,7 @@ export function insertBlockBelow(
   blockId: string,
   entry: BlockMenuEntry,
 ): boolean {
+  if (entry.type === "figma") return false;
   const { state } = editor;
   const found = findBlockById(state.doc, blockId);
   if (found === null) return false;

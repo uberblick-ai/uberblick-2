@@ -10,7 +10,7 @@
  */
 
 import * as Y from "yjs";
-import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
+import { BLOCK_TYPES, CARD_PARTS, cardPartTexts, figmaCaptionTexts, getBlocksFragment, tableCellTexts, tableRows } from "@uberblick/schema";
 import type { BlockType, CardPart } from "@uberblick/schema";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
@@ -41,14 +41,22 @@ export interface CardTextTarget extends Omit<CellTextTarget, "kind" | "cellPos" 
   blockType: "card";
 }
 
-function cardCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | null {
+/** Character offsets are scoped to the Figma block's caption paragraph. */
+export interface FigmaTextTarget extends Omit<CardTextTarget, "kind" | "part" | "blockType"> {
+  kind: "figma";
+  part: "caption";
+  blockType: "figma";
+}
+
+function partCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | FigmaTextTarget | null {
   const { selection, doc } = editor.state;
   if (!(selection instanceof TextSelection) || selection.empty) return null;
   const { $from } = selection;
-  if ($from.depth !== 3 || $from.node(1).type.name !== "card") return null;
-  const card = $from.node(1);
-  const part = CARD_PARTS[$from.index(1)];
-  if (part === undefined || typeof card.attrs.id !== "string" || card.attrs.id === "") return null;
+  if ($from.depth !== 3) return null;
+  const block = $from.node(1);
+  if (block.type.name !== "card" && block.type.name !== "figma") return null;
+  const part = block.type.name === "figma" ? "caption" : CARD_PARTS[$from.index(1)];
+  if (part === undefined || typeof block.attrs.id !== "string" || block.attrs.id === "") return null;
   const contentStart = $from.start(3);
   const contentEnd = contentStart + $from.parent.content.size;
   const to = Math.min(selection.to, contentEnd);
@@ -56,8 +64,9 @@ function cardCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | null
   let length = 0;
   let matched = false;
   for (const child of getBlocksFragment(ydoc).toArray()) {
-    if (!(child instanceof Y.XmlElement) || child.getAttribute("id") !== card.attrs.id) continue;
-    for (const text of cardPartTexts(child, part)) {
+    if (!(child instanceof Y.XmlElement) || child.getAttribute("id") !== block.attrs.id) continue;
+    const texts = part === "caption" ? figmaCaptionTexts(child) : cardPartTexts(child, part);
+    for (const text of texts) {
       for (const op of text.toDelta() as Array<{ insert?: unknown }>) {
         if (typeof op.insert !== "string") return null;
         length += op.insert.length;
@@ -67,11 +76,14 @@ function cardCommentTargetOf(editor: Editor, ydoc: Y.Doc): CardTextTarget | null
     break;
   }
   if (!matched || length !== $from.parent.content.size) return null;
-  return {
-    kind: "card", part, blockId: card.attrs.id, start: selection.from - contentStart,
+  const target = {
+    blockId: block.attrs.id, start: selection.from - contentStart,
     end: to - contentStart, text: doc.textBetween(selection.from, to), contentStart,
-    blockType: "card", blockIndex: $from.index(0), clamped: selection.to > contentEnd,
+    blockIndex: $from.index(0), clamped: selection.to > contentEnd,
   };
+  return part === "caption"
+    ? { ...target, kind: "figma", part, blockType: "figma" }
+    : { ...target, kind: "card", part, blockType: "card" };
 }
 
 function cellDepth($pos: ResolvedPos): number | null {
@@ -237,7 +249,7 @@ function anchorTextLength(ydoc: Y.Doc, blockId: string): number | null {
  * Reject empty/node selections, unnamed blocks and PM/Y text mismatches.
  * Run cheap PM checks first; collapsed typing must not walk the Yjs fragment.
  */
-export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | null {
+export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | CellTextTarget | CardTextTarget | FigmaTextTarget | null {
   const { selection, doc } = editor.state;
   if (selection.empty) return null;
 
@@ -250,7 +262,7 @@ export function commentTargetOf(editor: Editor, ydoc: Y.Doc): CommentTarget | Ce
 
   const type = block.type.name;
   if (type === "table") return cellCommentTargetOf(editor, ydoc);
-  if (type === "card") return cardCommentTargetOf(editor, ydoc);
+  if (type === "card" || type === "figma") return partCommentTargetOf(editor, ydoc);
   if (!(BLOCK_TYPES as readonly string[]).includes(type)) return null;
   const blockId = block.attrs.id;
   if (typeof blockId !== "string" || blockId === "") return null;
