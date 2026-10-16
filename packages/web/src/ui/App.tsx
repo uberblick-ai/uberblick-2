@@ -739,8 +739,8 @@ export function App(): ReactElement {
       action: {
         label: "Undo",
         onClick: () => {
-          if (!closed && !decisionTopicArchived(held.connection.ydoc, uuid)) return;
-          if (closed || !held.connection.status.writable) {
+          if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+          if (!held.connection.status.writable) {
             notifyTransient({
               key,
               message: `“${title}” is still archived. Open its link and choose Restore when the connection is ready.`,

@@ -333,6 +333,9 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(nextDirectory, OTHER)?.deleted).toBeUndefined();
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
+    notice.onClose?.();
+    act(() => notice.action?.onClick({} as MouseEvent<HTMLButtonElement>));
+    expect(notifyTransient).toHaveBeenCalledTimes(1);
   });
 
   it("refuses Undo without writing when its directory loses write readiness", async () => {
