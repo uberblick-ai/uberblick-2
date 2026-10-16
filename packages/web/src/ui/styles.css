@@ -138,6 +138,7 @@
   --pane-trailing-space: 1rem;
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
+  --page-title-gap: 0.5rem;
 
   /* Product type tokens stay outside Tailwind's theme namespaces. */
   --type-caption-size: 12px;
@@ -609,20 +610,23 @@ body {
   overflow-y: auto;
 }
 
-/* Cap the left-anchored document pane at its inset, reading measure and
-   rail gap, so wider windows add space after the rail. It may still shrink. */
-.ub-document-pane {
+/* Main pages share the document's inset and reading measure. Surplus width
+   stays after the column and, on documents, after the rail. */
+.ub-page-pane {
   flex: 0 1 calc(
     var(--pane-document-inset) + var(--measure) + var(--document-rail-gap)
   );
   padding-inline: var(--pane-document-inset) var(--document-rail-gap);
-  transition:
-    padding-inline-start 180ms ease,
-    flex-basis 180ms ease;
+  transition: padding-inline-start 180ms ease;
 }
 
-/* Cap the column at the reading measure. Document columns keep a fixed
-   inset; other panes center theirs. Left padding reserves `--block-gutter`. */
+/* Documents also move their rail with the changing inset. Other pages need
+   no width animation, including when loading fonts changes the ch measure. */
+.ub-document-pane {
+  transition-property: padding-inline-start, flex-basis;
+}
+
+/* Left padding reserves the document block gutter on every main page. */
 .ub-column {
   width: 100%;
   max-width: var(--measure);
@@ -630,7 +634,7 @@ body {
   padding-left: var(--block-gutter);
 }
 
-.ub-document-pane > .ub-column {
+.ub-page-pane > .ub-column {
   margin-inline: 0;
 }
 
@@ -715,11 +719,28 @@ h1.ub-heading {
 }
 
 .ub-title {
+  flex: none;
+  min-width: 0;
+  margin: 0 0 var(--page-title-gap);
   font-weight: 500;
   border-bottom: 1px solid transparent;
   padding: 0.2rem 0;
   color: inherit;
   font-family: var(--font-display);
+}
+
+.ub-page-header {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ub-page-subtitle {
+  min-height: var(--type-small-leading);
+  margin: 0;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  color: var(--muted-foreground);
 }
 
 .ub-title:focus {
@@ -2374,7 +2395,7 @@ h6.ub-heading {
 
 /* Reduced motion removes decoration while preserving every state change. */
 @media (prefers-reduced-motion: reduce) {
-  .ub-document-pane,
+  .ub-page-pane,
   .ub-group-caret,
   .ub-group-body,
   .ub-copy {
@@ -2408,12 +2429,6 @@ h6.ub-heading {
   .ub-docs {
     --docs-pin: 2.75rem;
   }
-}
-
-.ub-docs-heading {
-  font-size: var(--type-h2-size);
-  line-height: var(--type-h2-leading);
-  margin: 0;
 }
 
 .ub-docs-mode-fieldset {

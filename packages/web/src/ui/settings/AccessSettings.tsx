@@ -181,10 +181,12 @@ export function AccessSettings({ workspace, serving, subject }: {
       : "Device revoked. Documents already downloaded stay where they are.");
   };
 
-  return <section className="ub-pane" data-settings-page aria-labelledby="ub-settings-title">
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-      <h1 id="ub-settings-title" className="mt-0 mb-0 ub-type-h2 font-medium">Access</h1>
-      <p className="m-0 ub-type-small">Access is read from the hub on each visit and after each change. Changes require a reachable hub.</p>
+  return <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
+    <div className="ub-column gap-4">
+      <div className="ub-page-header">
+        <h1 id="ub-settings-title" className="ub-title">Access</h1>
+        <p className="m-0 ub-type-small">Access is read from the hub on each visit and after each change. Changes require a reachable hub.</p>
+      </div>
       {!available ? <div className={CARD}><p className="m-0 ub-type-ui" role="status">{serving?.rebound
         ? "This project's workspace binding changed. Restart ub open to manage access."
         : "Manage access from this workspace's locally served page. Run ub open in its project."}</p></div> : <>

@@ -165,10 +165,12 @@ export function HubSettings({ page, administration }: {
   };
   const ready = admin && list?.status === "ok";
 
-  return <section className="ub-pane ub-document-pane" data-settings-page aria-labelledby="ub-settings-title">
-    <div className="ub-column flex flex-col gap-4">
-      <h1 id="ub-settings-title" className="mt-0 mb-0 ub-type-title font-(family-name:--font-display) font-medium tracking-[-0.021em]">{page === "hub-admins" ? "Admins" : "Workspaces"}</h1>
-      <p className="m-0 ub-type-small">{page === "hub-admins" ? `Hub admins of ${host(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}</p>
+  return <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
+    <div className="ub-column gap-4">
+      <div className="ub-page-header">
+        <h1 id="ub-settings-title" className="ub-title">{page === "hub-admins" ? "Admins" : "Workspaces"}</h1>
+        <p className="m-0 ub-type-small">{page === "hub-admins" ? `Hub admins of ${host(authority?.hub ?? null)}.` : "Workspaces this hub serves. Suspending one stops its sync for everyone; its documents and members stay."}</p>
+      </div>
       {authority === null ? <p className="m-0 ub-type-ui" role="status">Reading hub access…</p> :
         !admin ? <p className="m-0 ub-type-ui" role="alert">{failure(authority.status)}</p> :
         list === null ? <p className="m-0 ub-type-ui" role="status">Reading from the hub…</p> :

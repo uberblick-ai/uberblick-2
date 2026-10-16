@@ -146,7 +146,7 @@ it("keeps the rebound notice visible across routes without replacing the page", 
   const notice = reboundNotice(container);
   expect(notice?.getAttribute("role")).toBe("status");
   expect(notice?.textContent).toContain(`workspace ${WORKSPACE}`);
-  expect(within(container).getByRole("heading", { name: "Documents" }).textContent).toBe("Documents");
+  expect(within(container).getByRole("heading", { name: "All documents" }).textContent).toBe("All documents");
 
   await act(async () => {
     window.history.pushState(null, "", `/${WORKSPACE}/not-a-document`);
