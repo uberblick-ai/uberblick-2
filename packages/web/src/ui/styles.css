@@ -785,12 +785,11 @@ h1.ub-heading {
   color: var(--muted-foreground);
 }
 
-/* Brand strokes and brand text use their separate accent and ink tokens. */
 .ub-badge {
-  border: 1px solid var(--brand);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.05rem 0.5rem;
-  color: var(--brand-ink);
+  color: var(--muted-foreground);
 }
 
 .ub-lifecycle-badge {
@@ -1278,7 +1277,7 @@ h6.ub-heading {
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
 }
-.ub-data-link { color: var(--brand-ink); text-decoration: underline; }
+.ub-data-link { color: var(--foreground); text-decoration: underline; }
 
 .tableWrapper {
   max-width: 100%;
@@ -1569,7 +1568,7 @@ h6.ub-heading {
 
 .ub-link,
 .ub-doclink {
-  color: var(--brand-ink);
+  color: var(--foreground);
   text-underline-offset: 0.15em;
 }
 

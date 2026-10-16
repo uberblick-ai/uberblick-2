@@ -513,7 +513,6 @@ function DocumentActions({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   disabled={onTogglePin === null}
-                  className={pinned ? "ub-action-pinned text-(--brand-ink)!" : ""}
                   onSelect={() => onTogglePin?.()}
                 >
                   {onTogglePin === null
@@ -550,8 +549,6 @@ function DocumentActions({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   aria-disabled={onArchive === null}
-                  variant="destructive"
-                  className="ub-action-danger text-[light-dark(oklch(0.51_0.20_27.325),var(--destructive))]!"
                   onSelect={(event) => {
                     if (onArchive === null) {
                       event.preventDefault();
