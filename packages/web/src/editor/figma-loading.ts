@@ -1,6 +1,7 @@
 interface Viewer {
   near: boolean;
   live: boolean;
+  ready: () => boolean;
   pinned: () => boolean;
   load: () => void;
   unload: () => void;
@@ -18,7 +19,9 @@ class ViewerBudget {
     }
     let count = [...this.viewers].filter((viewer) => viewer.live).length;
     if (!navigator.onLine) return;
-    for (const viewer of this.viewers) {
+    // Start every nearby lookup even when all live-viewer slots are occupied.
+    const ready = [...this.viewers].filter((viewer) => !viewer.live && viewer.near && viewer.ready());
+    for (const viewer of ready) {
       if (count === 3) break;
       if (!viewer.live && viewer.near) {
         viewer.live = true;
@@ -30,14 +33,14 @@ class ViewerBudget {
 }
 const budgets = new WeakMap<Document, ViewerBudget>();
 
-export function observeFigma({ dom, scroller, load, unload, pinned }: {
-  dom: HTMLElement; scroller: Element | null; load: () => void; unload: () => void; pinned: () => boolean;
+export function observeFigma({ dom, scroller, load, unload, pinned, ready }: {
+  dom: HTMLElement; scroller: Element | null; load: () => void; unload: () => void; pinned: () => boolean; ready: () => boolean;
 }): { refresh: () => void; reset: () => void; destroy: () => void } {
   const owner = dom.ownerDocument;
   let budget = budgets.get(owner);
   if (budget === undefined) { budget = new ViewerBudget(); budgets.set(owner, budget); }
   const currentBudget = budget;
-  const viewer: Viewer = { near: false, live: false, pinned, load, unload };
+  const viewer: Viewer = { near: false, live: false, pinned, load, unload, ready };
   currentBudget.viewers.add(viewer);
   const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
     // The fullscreen top layer is outside the document scroller. Keep the last

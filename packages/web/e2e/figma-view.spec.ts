@@ -13,6 +13,7 @@ import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { setNativeSelection } from "./native-selection.js";
+import { mockFigmaLookup } from "./figma-fixtures.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -59,9 +60,10 @@ async function open(browser: Browser, uuid: string, navigations: string[], optio
     contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1366, height: 1000 }, hasTouch: false, isMobile: false }),
       ...(options.fullscreen ? { isMobile: false } : {}), colorScheme: options.appearance ?? "light" },
     beforeNavigate: async (page) => {
+      await mockFigmaLookup(page);
       await page.route("https://embed.figma.com/**", async (route) => {
         navigations.push(route.request().url());
-        expect(route.request().headers().referer).toBeUndefined();
+        expect((await route.request().allHeaders()).referer).toBeUndefined();
         await route.fulfill({ contentType: "text/html", body: STUB });
       });
       if (options.offline) await page.addInitScript(() => {
@@ -319,7 +321,7 @@ test("offline placeholders and print output keep the title, caption and link wit
   const visits: string[] = [];
   const page = await open(browser, created.uuid, visits, { offline: true });
   const frame = page.locator(".ub-figma");
-  await expect(frame.locator(".ub-figma-placeholder")).toHaveText("The Figma preview needs a connection.");
+  await expect(frame.locator(".ub-figma-placeholder > span")).toHaveText("The Figma preview needs a connection.");
   await expect(frame.locator(".ub-block-label")).toContainText("Payment, mobile");
   await expect(frame.locator(".ub-figma-caption")).toHaveText(CAPTION);
   await expect(frame.locator("iframe")).toHaveCount(0);

@@ -1088,7 +1088,8 @@ h6.ub-heading {
 }
 .ub-block-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ub-block-actions { display: flex; flex: none; gap: 0.3rem; }
-.ub-block-actions > button {
+.ub-block-actions > button,
+.ub-figma-placeholder > button {
   pointer-events: auto;
   position: static;
   min-width: 1.5rem;
@@ -1103,15 +1104,18 @@ h6.ub-heading {
   text-align: center;
   cursor: pointer;
 }
-.ub-block-actions > button:focus-visible { color: var(--foreground); }
+.ub-block-actions > button:focus-visible,
+.ub-figma-placeholder > button:focus-visible { color: var(--foreground); }
 @media (hover: hover) {
-  .ub-block-actions > button:hover { color: var(--foreground); }
+  .ub-block-actions > button:hover,
+  .ub-figma-placeholder > button:hover { color: var(--foreground); }
 }
 .ub-code-language-trigger { pointer-events: auto; }
 
 .ub-figma-viewer { position: relative; width: 100%; min-height: 240px; height: var(--figma-height, 480px); }
 .ub-figma-viewer > iframe { display: block; width: 100%; height: 100%; border: 0; }
-.ub-figma-placeholder { display: grid; place-content: center; height: 100%; color: var(--muted-foreground); font-family: var(--font-sans); }
+.ub-figma-placeholder { display: grid; place-content: center; gap: 0.5rem; height: 100%; padding: 1rem; color: var(--muted-foreground); font-family: var(--font-sans); }
+.ub-figma-placeholder > button { justify-self: start; }
 .ub-figma-shield { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: transparent; color: var(--foreground); font: inherit; cursor: pointer; }
 .ub-figma-shield > span { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--background); color: var(--foreground); font: var(--type-caption-size)/var(--type-caption-leading) var(--font-sans); white-space: nowrap; }
 .ub-figma[data-figma-active="true"] { box-shadow: 0 0 0 2px var(--ring); }
@@ -1122,7 +1126,7 @@ h6.ub-heading {
 .ub-figma-fields [role="alert"] { color: var(--destructive); }
 .ub-figma-resize { display: block; width: 100%; height: 12px; margin-top: 0.3rem; padding: 0; border: 0; background: transparent; color: transparent; cursor: ns-resize; touch-action: none; }
 .ub-figma-resize::after { content: ""; display: block; width: 3rem; height: 3px; margin: auto; border-radius: 2px; background: var(--muted-foreground); }
-@media (any-pointer: coarse) { .ub-figma-resize { height: 24px; } .ub-figma .ub-block-actions > :is(button, a) { min-height: 44px; } }
+@media (any-pointer: coarse) { .ub-figma-resize { height: 24px; } .ub-figma .ub-block-actions > :is(button, a), .ub-figma-placeholder > button { min-height: 44px; } }
 .ub-figma-print { display: none; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ub-figma:fullscreen { display: flex; flex-direction: column; width: 100%; height: 100%; margin: 0; background: var(--background); }
 .ub-figma:fullscreen .ub-figma-viewer { flex: 1; min-height: 0; height: auto; }

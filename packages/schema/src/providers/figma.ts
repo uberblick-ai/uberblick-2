@@ -17,6 +17,7 @@ export const FIGMA_PROVIDER = {
   parameters: ["node-id", "starting-point-node-id", "version-id"],
   normalizeLink: normalizeFigmaLink,
   embedAddress: figmaEmbedAddress,
+  lookupAddress: figmaLookupAddress,
   frameAttributes: {
     sandbox: "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-storage-access-by-user-activation",
     allow: "fullscreen; clipboard-write",
@@ -27,6 +28,15 @@ export const FIGMA_PROVIDER = {
 
 const HOST_MESSAGE = "figma blocks take figma.com links only; use a plain link for other sites";
 const PATH_MESSAGE = "Figma links must use /design/, /file/, /proto/, /board/, /slides/ or /community/file/, followed by a file key and optional file name";
+
+/** Community links are not supported by Figma's oEmbed endpoint. */
+function figmaLookupAddress(storedLink: string): string | null {
+  const { url, figma } = normalizeFigmaLink(storedLink);
+  if (figma.kind === "community file") return null;
+  const address = new URL("https://www.figma.com/api/oembed");
+  address.searchParams.set("url", url);
+  return address.href;
+}
 
 /** Use only the stored view identity; reader and document addresses are never inputs. */
 export function figmaEmbedAddress(storedLink: string, appearance: FigmaAppearance): string {

@@ -8,6 +8,7 @@ import { SETTINGS_KEY } from "../src/settings.js";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import { waitForDocumentDraw } from "./settle.js";
+import { mockFigmaLookup } from "./figma-fixtures.js";
 
 const { harness, openApp, trackContext } = setupHarness();
 let agent: McpAgent | null = null;
@@ -95,6 +96,7 @@ test("workspace, supported renderers and the every-type document emit no report-
   });
   const page = await openApp(browser, "/", { beforeNavigate: async (target) => {
     await watchViolations(target);
+    await mockFigmaLookup(target);
     await target.route("https://embed.figma.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" }));
   } });
   await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
