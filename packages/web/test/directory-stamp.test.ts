@@ -26,12 +26,14 @@ import {
   appendBlock,
   addComment,
   createAnnotation,
+  deleteDirectoryEntry,
   documentDirectoryFields,
   editBlock,
   getDirectoryEntry,
   getDirectoryMap,
   getMetaMap,
   initDoc,
+  isDirectoryEntryDeleted,
   resolveAnnotationRange,
   setAnnotationResolved,
   setDescription,
@@ -131,6 +133,28 @@ afterEach(() => {
 });
 
 describe("directory stamps from the web", () => {
+  it.each([false, true])("never repairs a permanently deleted document, including decisions: %s", (decision) => {
+    const document = new Y.Doc();
+    const directory = new Y.Doc();
+    initDoc(document, { uuid: UUID, title: "Private" });
+    if (decision) setKind(document, "decision");
+    deleteDirectoryEntry(directory, UUID);
+    const before = Y.encodeStateAsUpdate(directory);
+    const stop = watchDocumentStub(document, directory);
+    try {
+      setTitle(document, "Late rename");
+      setTags(document, ["late"]);
+      appendBlock(document, { type: "paragraph", text: "Late edit" });
+      expect(isDirectoryEntryDeleted(directory, UUID)).toBe(true);
+      expect(getDirectoryMap(directory).has(UUID)).toBe(false);
+      expect(Y.encodeStateAsUpdate(directory)).toEqual(before);
+    } finally {
+      stop();
+      document.destroy();
+      directory.destroy();
+    }
+  });
+
   it("repairs decision relationships, summary and discussion counts from the document", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: UUID, title: "Lease duration" });

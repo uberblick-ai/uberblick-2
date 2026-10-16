@@ -1236,12 +1236,21 @@ export async function openCommand(
         }
         return collectServingSyncStatus(replicas.read(workspaceId), [...observedServedRooms].filter(room => parseRoom(room).workspaceId === workspaceId));
       };
-      const engineForRoom = (room: string): UberblickMcpEngine => replicas.read(parseRoom(room).workspaceId);
+      const engineForRoom = (room: string): UberblickMcpEngine => {
+        const { workspaceId, uuid } = parseRoom(room);
+        const engine = replicas.read(workspaceId);
+        engine.replicas.assertNotDeleted(uuid);
+        return engine;
+      };
       localServer = await createLocalBrowserServer({
         port: options.port,
         workspaces: new Map([...workspaces].map(([id, entry]) => [id, entry.browserKey])),
         expectedOrigin: servedUrl.origin,
-        prepareRoom: async room => { await replicas.prepare(parseRoom(room).workspaceId); },
+        prepareRoom: async room => {
+          await replicas.prepare(parseRoom(room).workspaceId);
+          engineForRoom(room);
+        },
+        assertRoomAvailable: room => { engineForRoom(room); },
         readRoom: (room, afterSeq) => {
           (collectingServedRooms ?? observedServedRooms).add(room);
           return engineForRoom(room).store.readSince(room, afterSeq);

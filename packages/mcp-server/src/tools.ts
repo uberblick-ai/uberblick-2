@@ -3,7 +3,7 @@
  * failure serialization. Use schema helpers for document reads and writes so
  * content stays within the web editor's supported palette.
  * Prose writes target one block and data writes validated collections; there
- * is no whole-document write, Markdown import or hard-delete tool.
+ * is no whole-document write or Markdown import. Permanent deletion requires archive first.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -29,6 +29,7 @@ import { registerDeleteBlock } from "./registrations/delete-block.js";
 import { registerSetMetadata } from "./registrations/set-metadata.js";
 import { registerSetStatus } from "./registrations/set-status.js";
 import { registerArchiveDoc } from "./registrations/archive-doc.js";
+import { registerDeleteDoc } from "./registrations/delete-doc.js";
 import { registerRestoreDoc } from "./registrations/restore-doc.js";
 import { registerAnnotate } from "./registrations/annotate.js";
 import { registerLinkRange } from "./registrations/link-range.js";
@@ -61,6 +62,7 @@ export function registerTools(
   registerSetMetadata(registrar, context);
   registerSetStatus(registrar, context);
   registerArchiveDoc(registrar, context);
+  registerDeleteDoc(registrar, context);
   registerRestoreDoc(registrar, context);
   registerAnnotate(registrar, context);
   registerLinkRange(registrar, context);

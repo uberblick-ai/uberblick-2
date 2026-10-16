@@ -129,6 +129,11 @@ export const toolHelpEntries: Record<string, ToolHelpEntry> = {
     example: { uuid },
     related: documentContracts,
   },
+  delete_doc: {
+    details: toolHelpDetails.delete_doc,
+    example: { uuid },
+    related: documentContracts,
+  },
   annotate: {
     details: toolHelpDetails.annotate,
     example: {

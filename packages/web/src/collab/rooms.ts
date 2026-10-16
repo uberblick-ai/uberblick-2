@@ -12,8 +12,17 @@ import {
   WebSocketStatus,
 } from "@hocuspocus/provider";
 import * as Y from "yjs";
-import { parseRoom } from "@uberblick/schema";
 import {
+  deleteDirectoryEntry,
+  directoryRoom,
+  enforceDeletedDirectoryEntries,
+  isDirectoryEntryDeleted,
+  listDeletedDirectoryUuids,
+  parseRoom,
+  roomForDoc,
+} from "@uberblick/schema";
+import {
+  isDocDeletedReason,
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
   wrapToken,
@@ -77,6 +86,9 @@ let protocolMismatch: { hub: number; client: number } | null = null;
 
 /** Rooms the store refused remain closed until this page is reloaded. */
 const storeRefusedRooms = new Set<string>();
+
+/** Deletion is permanent even if the directory has not reached this page yet. */
+const deletedRooms = new Set<string>();
 
 let lastForcedDrop = 0;
 /** Retain the last drop's window; use the band's maximum before any drop. */
@@ -275,6 +287,8 @@ export interface RoomStatus {
   writable: boolean;
   /** The local store refused this room; terminal until a page reload. */
   storeRefused: boolean;
+  /** Terminal document deletion, distinct from authentication and storage failures. */
+  deleted?: boolean;
   /** Unacked messages, not edits; batches merge and reconnect resets to one handshake. */
   unsyncedChanges: number;
   /** Terminal page-wide client/hub versions; new rooms inherit refusal without dialing. */
@@ -305,9 +319,34 @@ interface Entry {
   stopPresence: (withdraw: boolean) => void;
   presenceRefs: number;
   refs: number;
+  haltDeleted: () => void;
 }
 
 const entries = new Map<string, Entry>();
+
+function rememberDeletedRoom(room: string): void {
+  deletedRooms.add(room);
+  entries.get(room)?.haltDeleted();
+  const parsed = parseRoom(room);
+  const directory = entries.get(directoryRoom(parsed.workspaceId));
+  if (directory !== undefined && !isDirectoryEntryDeleted(directory.connection.ydoc, parsed.uuid)) {
+    deleteDirectoryEntry(directory.connection.ydoc, parsed.uuid);
+  }
+}
+
+function watchDirectoryDeletion(ydoc: Y.Doc, workspaceId: string): void {
+  const reconcileDeleted = (): void => {
+    enforceDeletedDirectoryEntries(ydoc);
+    for (const uuid of listDeletedDirectoryUuids(ydoc)) {
+      rememberDeletedRoom(roomForDoc(workspaceId, uuid));
+    }
+  };
+  ydoc.on("update", reconcileDeleted);
+  for (const deletedRoom of deletedRooms) {
+    const deletedId = parseRoom(deletedRoom);
+    if (deletedId.workspaceId === workspaceId) deleteDirectoryEntry(ydoc, deletedId.uuid);
+  }
+}
 
 function openRoom(room: string, identity: AwarenessUser): Entry {
   const ydoc = new Y.Doc();
@@ -324,8 +363,12 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // sockets it owns. destroy() detaches without destroying the shared socket.
   // Keep terminally refused rooms detached; they still expose their status.
   const storeRefused = storeRefusedRooms.has(room);
+  const parsed = parseRoom(room);
+  const directory = entries.get(directoryRoom(parsed.workspaceId));
+  const deleted = deletedRooms.has(room) ||
+    (directory !== undefined && isDirectoryEntryDeleted(directory.connection.ydoc, parsed.uuid));
   const tokenMissing = missingWorkspaceKeys.has(parseRoom(room).workspaceId);
-  if (protocolMismatch === null && !storeRefused) {
+  if (protocolMismatch === null && !storeRefused && !deleted) {
     provider.attach();
   }
 
@@ -342,6 +385,7 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   };
   let stopPreference = (): void => {};
   const startPresence = (): void => {
+    if (status.deleted) return;
     publishedColor = "";
     publishedName = "";
     publishUser();
@@ -368,13 +412,15 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     connected:
       protocolMismatch === null &&
       !storeRefused &&
+      !deleted &&
       socket.status === WebSocketStatus.Connected,
-    synced: protocolMismatch === null && !storeRefused && provider.isSynced,
+    synced: protocolMismatch === null && !storeRefused && !deleted && provider.isSynced,
     hasReceivedServerState: provider.isSynced,
     hasAnswered:
-      provider.isSynced || protocolMismatch !== null || storeRefused || tokenMissing,
+      provider.isSynced || protocolMismatch !== null || storeRefused || deleted || tokenMissing,
     writable: false,
     storeRefused,
+    deleted,
     unsyncedChanges: provider.unsyncedChanges,
     // New rooms inherit the page's terminal refusal.
     protocolMismatch,
@@ -386,6 +432,19 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   const emit = (): void => {
     for (const listener of listeners) listener({ ...status });
   };
+  const haltDeleted = (): void => {
+    if (status.deleted) return;
+    status.deleted = true;
+    status.authFailed = false;
+    status.hasAnswered = true;
+    status.connected = false;
+    status.synced = false;
+    status.writable = false;
+    status.unsyncedChanges = 0;
+    stopPresence(false);
+    provider.detach();
+    emit();
+  };
 
   // Read current socket/provider state: synced emits only true, so mirroring
   // events would retain a stale true after disconnect.
@@ -395,19 +454,26 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     status.connected =
       !halted &&
       !status.storeRefused &&
+      !status.deleted &&
       socket.status === WebSocketStatus.Connected;
-    status.synced = !halted && !status.storeRefused && provider.isSynced;
+    status.synced = !halted && !status.storeRefused && !status.deleted && provider.isSynced;
     status.writable =
       status.connected &&
       provider.isAuthenticated &&
       !status.storeRefused &&
+      !status.deleted &&
       !status.tokenMissing;
-    status.unsyncedChanges = provider.unsyncedChanges;
+    status.unsyncedChanges = status.deleted ? 0 : provider.unsyncedChanges;
     emit();
   };
   // Match protocol refusal strictly and never render hub text. Other refusals
   // remain room-local while the shared socket retries.
   provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
+    if (status.deleted) return;
+    if (isDocDeletedReason(reason)) {
+      rememberDeletedRoom(room);
+      return;
+    }
     const hub = readProtocolMismatch(reason);
     if (hub !== null) {
       haltForProtocolMismatch(hub);
@@ -436,6 +502,11 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     // echo (navigation/remount) and must not churn the shared socket.
     const reason = event?.event?.reason;
     if (reason === "provider_initiated") return;
+    if (reason !== undefined && isDocDeletedReason(reason)) {
+      rememberDeletedRoom(room);
+      return;
+    }
+    if (status.deleted) return;
     status.hasAnswered = true;
     if (reason === STORE_REFUSED_REASON) {
       storeRefusedRooms.add(room);
@@ -471,7 +542,11 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     },
   };
 
-  return { connection, listeners, startPresence, stopPresence, presenceRefs: 0, refs: 0 };
+  if (parsed.isDirectory) {
+    watchDirectoryDeletion(ydoc, parsed.workspaceId);
+  }
+
+  return { connection, listeners, startPresence, stopPresence, haltDeleted, presenceRefs: 0, refs: 0 };
 }
 
 /**

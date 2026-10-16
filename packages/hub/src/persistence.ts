@@ -15,6 +15,15 @@ import type {
   onStoreDocumentPayload,
 } from "@hocuspocus/server";
 import * as Y from "yjs";
+import {
+  deleteDirectoryEntry,
+  enforceDeletedDirectoryEntries,
+  isDirectoryEntryDeleted,
+  listDeletedDirectoryUuids,
+  parseRoom,
+  roomForDoc,
+} from "@uberblick/schema";
+import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 
 /**
  * Retain the exact extension schema and unique index; SQLite does not enforce
@@ -42,6 +51,17 @@ const UPSERT_DOCUMENT = `
  */
 const BUSY_TIMEOUT_MS = 5_000;
 
+/** afterTransaction runs before GC; persist no deleted directory metadata. */
+function directoryState(document: Y.Doc): Uint8Array {
+  const compacted = new Y.Doc();
+  try {
+    Y.applyUpdate(compacted, Y.encodeStateAsUpdate(document));
+    return Y.encodeStateAsUpdate(compacted);
+  } finally {
+    compacted.destroy();
+  }
+}
+
 /** Anonymous SQLite databases need no directory and do not survive close. */
 export function isEphemeralDatabase(databasePath: string): boolean {
   return databasePath === ":memory:" || databasePath === "";
@@ -57,6 +77,11 @@ export class HubDatabase implements Extension {
   private readonly onStoreFailed: (error: unknown) => void;
 
   private db: DatabaseSync | undefined;
+
+  private readonly deletedRooms = new Set<string>();
+  private readonly pendingDeletedRooms = new Set<string>();
+  private readonly reconcilingDirectories = new WeakSet<Y.Doc>();
+  private deletionHandler: (rooms: readonly string[]) => void = () => {};
 
   private statements:
     | { select: StatementSync; upsert: StatementSync }
@@ -101,6 +126,34 @@ export class HubDatabase implements Extension {
       throw error;
     }
     this.db = db;
+    try {
+      // Positive marks must fence admission even when nobody opens the directory.
+      for (const row of db.prepare('SELECT name, data FROM documents WHERE name GLOB ?').all("*/_directory")) {
+        if (typeof row.name !== "string" || !(row.data instanceof Uint8Array)) continue;
+        const directory = new Y.Doc();
+        try {
+          Y.applyUpdate(directory, row.data);
+          this.reconcileDirectory(row.name, directory);
+        } finally {
+          directory.destroy();
+        }
+      }
+    } catch (error) {
+      this.close();
+      throw error;
+    }
+  }
+
+  onDeleteRooms(handler: (rooms: readonly string[]) => void): void {
+    this.deletionHandler = handler;
+  }
+
+  isDeletedRoom(room: string): boolean {
+    return this.deletedRooms.has(room);
+  }
+
+  requireRoom(room: string): void {
+    if (this.isDeletedRoom(room)) throw { reason: DOC_DELETED_REASON };
   }
 
   /** Hub-internal only: sharing this handle avoids competing connections to the same file. */
@@ -115,10 +168,25 @@ export class HubDatabase implements Extension {
     document,
     documentName,
   }: onLoadDocumentPayload): Promise<void> {
+    this.requireRoom(documentName);
     const row = this.prepared().select.get({ name: documentName });
     const data = row?.data;
     if (data instanceof Uint8Array) {
       Y.applyUpdate(document, data);
+    }
+    if (parseRoom(documentName).isDirectory) {
+      this.reconcileDirectory(documentName, document);
+      // This runs synchronously, before an update can be acknowledged. A
+      // debounced directory store could otherwise lose its deletion evidence.
+      document.on("afterTransaction", (transaction: Y.Transaction) => {
+        if (transaction.changed.size === 0) return;
+        try {
+          this.reconcileDirectory(documentName, document);
+        } catch (error) {
+          this.onStoreFailed(error);
+          throw error;
+        }
+      });
     }
   }
 
@@ -127,6 +195,9 @@ export class HubDatabase implements Extension {
     documentName,
   }: onStoreDocumentPayload): Promise<void> {
     try {
+      // Queued stores retain their old document object after the room is closed.
+      if (this.isDeletedRoom(documentName)) return;
+      if (parseRoom(documentName).isDirectory) this.reconcileDirectory(documentName, document);
       this.prepared().upsert.run({
         name: documentName,
         data: Y.encodeStateAsUpdate(document),
@@ -146,6 +217,50 @@ export class HubDatabase implements Extension {
     }
     this.db = undefined;
     this.statements = undefined;
+    this.deletedRooms.clear();
+    this.pendingDeletedRooms.clear();
+  }
+
+  private reconcileDirectory(room: string, directory: Y.Doc): void {
+    if (this.reconcilingDirectories.has(directory)) return;
+    this.reconcilingDirectories.add(directory);
+    try {
+      const { workspaceId, isDirectory } = parseRoom(room);
+      if (!isDirectory) return;
+      // Never forget a mark because a later writer changed the directory.
+      for (const deletedRoom of this.deletedRooms) {
+        const parsed = parseRoom(deletedRoom);
+        if (parsed.workspaceId === workspaceId && !isDirectoryEntryDeleted(directory, parsed.uuid)) {
+          deleteDirectoryEntry(directory, parsed.uuid);
+        }
+      }
+      const deleted = listDeletedDirectoryUuids(directory).map(uuid => roomForDoc(workspaceId, uuid));
+      if (deleted.length === 0) return;
+      enforceDeletedDirectoryEntries(directory);
+      const newlyDeleted = deleted.filter(name => !this.deletedRooms.has(name));
+      // Retain the fence even if storage fails; the sticky failure forbids a
+      // durability claim, and active clients still cannot republish the room.
+      for (const name of deleted) this.deletedRooms.add(name);
+      for (const name of newlyDeleted) this.pendingDeletedRooms.add(name);
+      this.deletionHandler(newlyDeleted);
+      // Ordinary directory writes use the debounced store. A failed mark must
+      // still retry synchronously even though its room is already fenced.
+      if (!deleted.some(name => this.pendingDeletedRooms.has(name))) return;
+      const database = this.connection;
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        this.prepared().upsert.run({ name: room, data: directoryState(directory) });
+        const remove = database.prepare('DELETE FROM documents WHERE name = ?');
+        for (const name of deleted) remove.run(name);
+        database.exec("COMMIT");
+        for (const name of deleted) this.pendingDeletedRooms.delete(name);
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    } finally {
+      this.reconcilingDirectories.delete(directory);
+    }
   }
 
   private prepared(): { select: StatementSync; upsert: StatementSync } {

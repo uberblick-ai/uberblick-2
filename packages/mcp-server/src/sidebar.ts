@@ -5,6 +5,7 @@
 import {
   decisionTopicArchived,
   getDirectoryEntry,
+  isDirectoryEntryDeleted,
   moveDoc,
   pinDoc,
   readSidebar,
@@ -120,7 +121,7 @@ export function sidebarPayload(
     groups: readSidebar(sidebar.doc).map((group) => ({
       id: group.id,
       name: group.name,
-      docs: group.docs.map(resolve),
+      docs: group.docs.filter(uuid => !isDirectoryEntryDeleted(directory, uuid)).map(resolve),
     })),
   };
 }

@@ -13,6 +13,7 @@ import {
 } from "@uberblick/schema/token";
 import {
   AUTH_REJECTED,
+  isDocDeletedReason,
   protocolSkew,
   readProtocolMismatch,
   SYNC_PROTOCOL_VERSION,
@@ -225,6 +226,8 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 }
 
 export interface HubSyncOptions {
+  /** Positive room deletion evidence is scoped to that room, not authentication. */
+  onDocDeleted?: (room: string) => void;
   /**
    * Override the admission bound for small stress fixtures. Must be a positive
    * integer: zero would leave every room queued forever on a working socket.
@@ -254,6 +257,10 @@ export class HubSync {
   private readonly socket: HocuspocusProviderWebsocket | null = null;
 
   private readonly providers = new Map<string, AdmittedHocuspocusProvider>();
+
+  private readonly deletedRooms = new Set<string>();
+
+  private readonly onDocDeleted: ((room: string) => void) | undefined;
 
   private socketStatus: "connecting" | "connected" | "disconnected" =
     "connecting";
@@ -371,6 +378,7 @@ export class HubSync {
     onConnected: () => void,
     options: HubSyncOptions = {},
   ) {
+    this.onDocDeleted = options.onDocDeleted;
     if (!isLoopbackEndpoint(config.hubUrl)) {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
@@ -478,6 +486,7 @@ export class HubSync {
    * duplicate continuation already holds this room's slot.
    */
   private admission(room: string): Promise<number | null> {
+    if (this.deletedRooms.has(room)) return Promise.resolve(null);
     if (this.stopped) {
       // Terminal callers must resolve rather than queue for a nonexistent connection.
       return Promise.resolve(this.socketGeneration);
@@ -719,7 +728,7 @@ export class HubSync {
    * Disabled and terminal clients attach nothing.
    */
   attach({ room, doc, awareness }: AttachOptions): void {
-    if (this.socket === null || this.stopped || this.providers.has(room)) {
+    if (this.socket === null || this.stopped || this.providers.has(room) || this.deletedRooms.has(room)) {
       return;
     }
 
@@ -736,7 +745,7 @@ export class HubSync {
             return "";
           }
           const generation = await this.admission(room);
-          if (this.stopped || generation === null) {
+          if (this.stopped || generation === null || this.deletedRooms.has(room)) {
             // Empty means send nothing: no terminal or duplicate call may requeue.
             return "";
           }
@@ -763,7 +772,7 @@ export class HubSync {
             this.roomAnswered(room);
             return "";
           }
-          if (token === null || this.stopped) {
+          if (token === null || this.stopped || this.deletedRooms.has(room)) {
             this.roomAnswered(room);
             return "";
           }
@@ -799,6 +808,11 @@ export class HubSync {
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         provider.blockUntilToken();
+        if (isDocDeletedReason(reason)) {
+          this.detach(room);
+          this.onDocDeleted?.(room);
+          return;
+        }
         // Strict parsing yields only a validated different version, never wire
         // text. Other reasons, including our own version, remain token refusals.
         const hubProtocol = readProtocolMismatch(reason);
@@ -838,10 +852,16 @@ export class HubSync {
         // connection, retaining auth-failed until authentication actually succeeds.
         this.hubDisownedRoom();
       },
-      onClose: () => {
+      onClose: ({ event }) => {
         provider.blockUntilToken();
+        if (isDocDeletedReason(event.reason) && !this.deletedRooms.has(room)) {
+          this.detach(room);
+          this.onDocDeleted?.(room);
+          return;
+        }
         // A closed room releases its slot even without an auth answer.
         this.roomAnswered(room);
+        if (this.deletedRooms.has(room)) return;
         // Rebuild only for a room close; hubDisownedRoom ignores socket loss.
         this.hubDisownedRoom();
       },
@@ -853,6 +873,24 @@ export class HubSync {
     provider.attach();
     this.providers.set(room, provider);
     this.stateChanged();
+  }
+
+  /** Permanently retire one room without disturbing its shared connection. */
+  detach(room: string): void {
+    if (this.deletedRooms.has(room) && !this.providers.has(room) && !this.waiting.has(room) && !this.attaching.has(room)) return;
+    this.deletedRooms.add(room);
+    const ticket = this.waiting.get(room);
+    this.waiting.delete(room);
+    ticket?.admit(null);
+    const provider = this.providers.get(room);
+    this.providers.delete(room);
+    this.syncedRooms.delete(room);
+    this.offeredLogins.delete(room);
+    if (provider !== undefined) {
+      provider.blockUntilToken();
+      provider.destroy();
+    }
+    this.roomAnswered(room);
   }
 
   /**

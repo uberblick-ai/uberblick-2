@@ -3,6 +3,7 @@ import { archiveDocOperation } from "./tools/archive-doc.js";
 import { backlinksOperation } from "./tools/backlinks.js";
 import { createDocOperation } from "./tools/create-doc.js";
 import { deleteBlockOperation } from "./tools/delete-block.js";
+import { deleteDocOperation } from "./tools/delete-doc.js";
 import { editBlockOperation } from "./tools/edit-block.js";
 import { exportMarkdownOperation } from "./tools/export-markdown.js";
 import { findDecisionsOperation } from "./tools/find-decisions.js";
@@ -29,6 +30,7 @@ export const operations = {
   backlinks: backlinksOperation,
   create_doc: createDocOperation,
   delete_block: deleteBlockOperation,
+  delete_doc: deleteDocOperation,
   edit_block: editBlockOperation,
   export_markdown: exportMarkdownOperation,
   find_decisions: findDecisionsOperation,

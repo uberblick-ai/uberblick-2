@@ -6,6 +6,8 @@ import {
   SIDEBAR_SUFFIX,
   directoryRoom,
   directoryStubDiffers,
+  deleteDirectoryEntry,
+  enforceDeletedDirectoryEntries,
   documentDirectoryFields,
   decisionTopicArchived,
   findBlockElement,
@@ -15,6 +17,8 @@ import {
   getDirectoryMap,
   getMeta,
   isProseBlockType,
+  isDirectoryEntryDeleted,
+  listDeletedDirectoryUuids,
   listDirectory,
   normalizeLegacyTables,
   repairDuplicateBlocks,
@@ -31,6 +35,7 @@ import {
   CARD_PARTS,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
+import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import type { Block, CardPart, DocMeta, InlineRun } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { githubReference } from "./github-reference.js";
@@ -80,6 +85,14 @@ export class PersistenceError extends Error {
     );
     this.name = "PersistenceError";
     this.room = room;
+  }
+}
+
+export class DocDeletedError extends Error {
+  readonly reason = DOC_DELETED_REASON;
+  constructor(readonly uuid: string) {
+    super(`Document ${uuid} was permanently deleted.`);
+    this.name = "DocDeletedError";
   }
 }
 
@@ -205,7 +218,13 @@ export class Replicas {
     this.sync = new HubSync(config, () => {
       // A reconnect can reveal unseen documents; settle before serving again.
       this.settleNeeded = true;
-    });
+    }, { onDocDeleted: (room) => {
+      const prefix = `${config.workspaceId}/`;
+      if (!room.startsWith(prefix)) return;
+      const uuid = room.slice(prefix.length);
+      deleteDirectoryEntry(this.directory().doc, uuid);
+      this.purgeDeletedDocs();
+    } });
 
     // Discovery reads this synced directory, not this process's creations.
     // Attach from boot so stub repair and the first tool's hydration can use it.
@@ -335,7 +354,16 @@ export class Replicas {
 
   /** The replica for one document, hydrated from the log and attached to the hub. */
   replica(uuid: string): Replica {
+    this.assertNotDeleted(uuid);
     return this.ensureRoom(roomForDoc(this.config.workspaceId, uuid), uuid);
+  }
+
+  isDeleted(uuid: string): boolean {
+    return isDirectoryEntryDeleted(this.directory().doc, uuid);
+  }
+
+  assertNotDeleted(uuid: string): void {
+    if (this.isDeleted(uuid)) throw new DocDeletedError(uuid);
   }
 
   /** Whether a replica for this document is already attached. */
@@ -403,6 +431,10 @@ export class Replicas {
       if (origin === LOG_ORIGIN) {
         return;
       }
+      if (!replica.isDirectory && !replica.isSidebar && !replica.isSettings && this.isDeleted(id)) {
+        this.purgeDeletedDocs();
+        return;
+      }
       const kind: UpdateOrigin = this.sync.isRemoteOrigin(origin)
         ? "remote"
         : "local";
@@ -447,7 +479,7 @@ export class Replicas {
       replica.doc.destroy();
       throw error;
     }
-    this.sync.attach({ room, doc, awareness });
+    if (this.replicas.has(room)) this.sync.attach({ room, doc, awareness });
     return replica;
   }
 
@@ -461,6 +493,7 @@ export class Replicas {
     if (id === "" || id.includes("/")) {
       return;
     }
+    if (isDirectoryEntryDeleted(this.directory().doc, id)) return;
     this.ensureRoom(room, id);
   }
 
@@ -520,6 +553,7 @@ export class Replicas {
 
   private pollAll(): void {
     for (const replica of [...this.replicas.values()]) {
+      if (!this.replicas.has(replica.room)) continue;
       this.poll(replica);
     }
   }
@@ -532,6 +566,7 @@ export class Replicas {
    */
   private afterChange(replica: Replica, authored: boolean): void {
     if (replica.isDirectory) {
+      this.purgeDeletedDocs();
       this.reconcileDirectory();
       return;
     }
@@ -564,6 +599,10 @@ export class Replicas {
       return;
     }
     if (replica.isSidebar) {
+      return;
+    }
+    if (this.isDeleted(replica.id)) {
+      this.purgeDeletedDocs();
       return;
     }
     this.repairDuplicates(replica);
@@ -761,6 +800,7 @@ export class Replicas {
    */
   private repairStub(meta: DocMeta, authored: boolean): void {
     const directory = this.directory();
+    if (isDirectoryEntryDeleted(directory.doc, meta.uuid)) return;
     const stub = getDirectoryEntry(directory.doc, meta.uuid);
     if (meta.kind !== "decision" && stub?.deleted === true) {
       return;
@@ -948,12 +988,47 @@ export class Replicas {
 
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
   private refreshReplicas(): void {
+    this.poll(this.directory());
+    this.purgeDeletedDocs();
     this.pollAll();
     this.adoptKnownDocs();
     // Retry even without another directory update; each call drains at most
     // one previously refused entry, so untouched documents still recover.
     if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
       this.reconcileDirectory();
+    }
+  }
+
+  /** Run only after directory evidence is logged; stale peers may add rows again. */
+  private purgeDeletedDocs(): void {
+    if (this.persistenceFailure !== null) return;
+    const directory = this.directory();
+    enforceDeletedDirectoryEntries(directory.doc);
+    this.assertHealthy();
+    for (const uuid of listDeletedDirectoryUuids(directory.doc)) {
+      const room = roomForDoc(this.config.workspaceId, uuid);
+      this.sync.detach(room);
+      const replica = this.replicas.get(room);
+      if (replica !== undefined) {
+        this.replicas.delete(room);
+        for (const timers of [this.cursorTimers, this.presenceTimers]) {
+          const timer = timers.get(room);
+          if (timer !== undefined) clearTimeout(timer);
+          timers.delete(room);
+        }
+        replica.awareness.destroy();
+        replica.doc.destroy();
+      }
+      this.staleStubs.delete(uuid);
+      this.pacedStubs.delete(uuid);
+      try {
+        this.store.purgeDoc(room, uuid);
+      } catch (error) {
+        this.persistenceFailure ??= { room, error };
+        this.sync.quarantine();
+        log.error("failed to remove a permanently deleted document", { room, error: String(error) });
+        return;
+      }
     }
   }
 

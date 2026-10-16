@@ -1,4 +1,4 @@
-import { resolveDecisionTopics, resolveTagAssignments } from "@uberblick/schema";
+import { isDirectoryEntryDeleted, resolveDecisionTopics, resolveTagAssignments } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "../inputs.js";
 import { resolveTagFilter } from "../tag-catalog.js";
@@ -27,7 +27,8 @@ export const searchOperation = operation("search", inputSchema, (context, { quer
   const tagIds = tag === undefined ? undefined : [...new Set(
     (Array.isArray(tag) ? tag : [tag]).map((value) => resolveTagFilter(replicas, value)),
   )];
-  const hits = replicas.store.search(query, limit ?? 20, tagIds, kind);
+  const hits = replicas.store.search(query, limit ?? 20, tagIds, kind)
+    .filter(hit => !isDirectoryEntryDeleted(replicas.directory().doc, hit.uuid));
   const states = new Map<string, RecordState>();
   if (hits.some((hit) => hit.kind === "decision")) {
     for (const topic of resolveDecisionTopics(replicas.directory().doc)) {

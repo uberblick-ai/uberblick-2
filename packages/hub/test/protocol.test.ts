@@ -117,6 +117,32 @@ async function maximalToken(): Promise<string> {
 }
 
 describe("the version exchange", () => {
+  it("refuses a protocol-3 offline document writer before syncing or acknowledging it", async () => {
+    const room = testRoom();
+    const oldDoc = new Y.Doc();
+    oldDoc.getText("body").insert(0, "offline content from a client without deletion support");
+    const old = createClient({ port: hub.port, room, token: await token(), doc: oldDoc,
+      protocolVersion: 3, reconnectDelayMs: 60_000 });
+    clients.push(old);
+    try {
+      expect(SYNC_PROTOCOL_VERSION).toBe(4);
+      await expect(old.denied).resolves.toBe("protocol-mismatch:4");
+      await expect(old.synced).rejects.toThrow("protocol-mismatch:4");
+      expect(old.provider.isAuthenticated).toBe(false);
+      expect(old.provider.synced).toBe(false);
+      expect(old.provider.hasUnsyncedChanges).toBe(true);
+      expect(hub.hocuspocus.documents.has(room)).toBe(false);
+      const current = createClient({ port: hub.port, room, token: await token() });
+      clients.push(current);
+      await current.synced;
+      expect(current.text.toString()).toBe("");
+    } finally {
+      old.destroy();
+      clients.splice(clients.indexOf(old), 1);
+      oldDoc.destroy();
+    }
+  });
+
   it("refuses the shipped protocol-2 table writer before sync or acknowledgement", async () => {
     const room = testRoom();
     const current = createClient({ port: hub.port, room, token: await token() });

@@ -59,6 +59,7 @@ export const DOCUMENT_MUTATING_TOOLS: ReadonlySet<string> = new Set([
   "set_metadata",
   "set_status",
   "archive_doc",
+  "delete_doc",
   "restore_doc",
   "annotate",
   "link_range",
@@ -129,6 +130,7 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolHints>> = {
   set_status: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
   archive_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  delete_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   // Clears the tombstone and overwrites stub metadata; repeating leaves the same state.
   restore_doc: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   // Replaces, upserts and deletes data; an identical repeat reports changed: false.
@@ -298,8 +300,19 @@ const RECOVERIES: Record<string, Recovery> = {
   doc_archived: {
     recoveryClass: "manual",
     guidance:
-      "Archived documents are read-only. Call restore_doc for this uuid — the only mutation an archived document " +
-      "accepts — and then make this call again.",
+      "Archived documents are read-only. Call restore_doc for this uuid before editing, or delete_doc to permanently delete an archived regular document.",
+  },
+  doc_deleted: {
+    recoveryClass: "manual",
+    guidance: "This UUID was permanently deleted and cannot be restored or reused. Choose another document from list_docs or search. Nothing was written.",
+  },
+  doc_not_archived: {
+    recoveryClass: "manual",
+    guidance: "Call archive_doc for this UUID before deliberately calling delete_doc. Nothing was written.",
+  },
+  decision_delete_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Decision records and topics cannot be permanently deleted through this tool yet. Keep the topic archived. Nothing was written.",
   },
   group_not_found: {
     recoveryClass: "reread",

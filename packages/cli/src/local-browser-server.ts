@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { WebSocketLike } from "@hocuspocus/server";
-import { Server } from "@hocuspocus/server";
+import { OutgoingMessage, Server } from "@hocuspocus/server";
 import { parseRoom } from "@uberblick/schema";
 import {
   messageYjsSyncStep1,
@@ -22,7 +22,7 @@ import {
   PEER_ADDRESS_HEADER,
   type HubContext,
 } from "@uberblick/hub";
-import { SYNC_PROTOCOL_VERSION, isProtocolVersion } from "@uberblick/schema/protocol";
+import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, isDocDeletedReason, isProtocolVersion } from "@uberblick/schema/protocol";
 
 export const STORE_BUSY_REASON = "uberblick:store-busy";
 export const STORE_REFUSED_REASON = "uberblick:store-refused";
@@ -122,6 +122,8 @@ export interface LocalBrowserServerConfig {
   log?: HubLogger;
   /** Prepare an authenticated room's replica before reading its store. */
   prepareRoom?(room: string): Promise<void>;
+  /** Refuse deleted rooms before a loaded room can answer another handshake. */
+  assertRoomAvailable?(room: string): void;
   /** The caller owns the store; load rooms from its update log. */
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
   /** Commit browser bytes before Hocuspocus applies or acknowledges them. */
@@ -168,6 +170,12 @@ function refused(reason: string, cause: unknown): Error {
     reason,
     cause,
   });
+}
+
+function refusalReason(error: unknown): string {
+  const reason = (error as { reason?: unknown } | null)?.reason;
+  if (typeof reason === "string" && isDocDeletedReason(reason)) return DOC_DELETED_REASON;
+  return isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
 }
 
 function sockets(server: Server<HubContext>): Set<WebSocketLike> {
@@ -253,7 +261,7 @@ export async function createLocalBrowserServer(
         // replica for each authenticated connection as well as its first one.
         await config.prepareRoom?.(payload.documentName);
       } catch (error) {
-        const reason = isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
+        const reason = refusalReason(error);
         log({
           event: "ub-open.store.refused",
           room: payload.documentName,
@@ -281,7 +289,7 @@ export async function createLocalBrowserServer(
           bridgeAwareness(document.awareness, config.awarenessForRoom(documentName)),
         );
       } catch (error) {
-        const reason = isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
+        const reason = refusalReason(error);
         log({
           event: "ub-open.store.refused",
           room: documentName,
@@ -302,6 +310,12 @@ export async function createLocalBrowserServer(
     },
 
     async beforeSync({ connection, documentName, type, payload }) {
+      try {
+        // Check even read-only handshakes before any stale room state is served.
+        config.assertRoomAvailable?.(documentName);
+      } catch (error) {
+        throw refused(refusalReason(error), error);
+      }
       if (type === messageYjsSyncStep1 || connection.readOnly) return;
       if (type !== messageYjsSyncStep2 && type !== messageYjsUpdate) return;
 
@@ -326,7 +340,7 @@ export async function createLocalBrowserServer(
         // replay but is never an excuse to re-encode the client's update.
         config.appendUpdate(documentName, payload);
       } catch (error) {
-        const reason = isBusy(error) ? STORE_BUSY_REASON : STORE_REFUSED_REASON;
+        const reason = refusalReason(error);
         log({
           event: "ub-open.store.refused",
           room: documentName,
@@ -372,7 +386,7 @@ export async function createLocalBrowserServer(
         log({
           event: "ub-open.store.refused",
           room,
-          cause: busy ? STORE_BUSY_REASON : STORE_REFUSED_REASON,
+          cause: refusalReason(error),
           error: String(error),
         });
         if (!busy) {
@@ -380,7 +394,10 @@ export async function createLocalBrowserServer(
           // Close document connections, rather than their shared websocket.
           appliedThrough.delete(document);
           for (const connection of document.getConnections()) {
-            connection.close({ code: REFUSAL_CODE, reason: STORE_REFUSED_REASON });
+            if (refusalReason(error) === DOC_DELETED_REASON) {
+              connection.send(new OutgoingMessage(connection.messageAddress).writePermissionDenied(DOC_DELETED_REASON).toUint8Array());
+            }
+            connection.close({ code: REFUSAL_CODE, reason: refusalReason(error) });
           }
         }
       }

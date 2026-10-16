@@ -13,7 +13,7 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
       "kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the " +
       "record in force, else pending, else first, plus pending/conflicting records. Predicates may match " +
       "different live records; resolution uses the whole graph. include_superseded applies predicates per " +
-      "record. include_deleted admits archived topics but is not a predicate. Filters combine; unknown tags " +
+      "record. include_deleted admits archived entries, never permanently deleted UUIDs, and is not a predicate. Filters combine; unknown tags " +
       "refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, " +
       "including inForce, pending and conflicts, caches its document's openThreadCount: threads whose " +
       "resolved is not true, including deleted anchors; absent means unknown. A matching topic's " +

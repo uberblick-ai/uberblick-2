@@ -33,6 +33,7 @@ import * as Y from "yjs";
 import {
   appendBlock,
   createGroup,
+  deleteDirectoryEntry,
   directoryRoom,
   getDirectoryMap,
   getDirectoryEntry,
@@ -248,6 +249,24 @@ function action(label: string): HTMLElement | undefined {
 }
 
 describe("an archived document is readable, says so, and offers one way back", () => {
+  it("stops rendering an open document when permanent deletion arrives", async () => {
+    const directory = room(directoryRoom(WORKSPACE)).ydoc;
+    const document = room(roomForDoc(WORKSPACE, UUID)).ydoc;
+    initDoc(document, { uuid: UUID, title: "Retired draft" });
+    appendBlock(document, { type: "paragraph", text: "Private retired text" });
+    upsertDirectoryEntry(directory, { uuid: UUID, title: "Retired draft" });
+    tombstoneDirectoryEntry(directory, UUID);
+    const peer = peerDirectory(directory);
+    const host = await openApp(`/${WORKSPACE}/${UUID}`);
+    expect(prose(host)).not.toBeNull();
+    act(() => deleteDirectoryEntry(peer, UUID));
+    expect(prose(host)).toBeNull();
+    expect(restoreButton(host)).toBeNull();
+    expect(host.textContent).not.toContain("Private retired text");
+    expect(getDirectoryMap(directory).has(UUID)).toBe(false);
+    peer.destroy();
+  });
+
   it("archives and restores a whole decision topic from a successor, with first-record authority", async () => {
     const directory = room(directoryRoom(WORKSPACE)).ydoc;
     const sidebar = room(sidebarRoom(WORKSPACE)).ydoc;

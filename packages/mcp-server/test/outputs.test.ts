@@ -121,6 +121,8 @@ describe("successful MCP output contracts", () => {
     await success("unpin_doc", { uuid });
     await success("archive_doc", { uuid });
     await success("restore_doc", { uuid });
+    await success("archive_doc", { uuid });
+    await success("delete_doc", { uuid });
     await success("sync_status");
     await success("get_help");
     await success("get_help", { topic: "get_doc" });

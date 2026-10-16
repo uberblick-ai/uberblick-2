@@ -22,6 +22,7 @@ import {
   getDirectoryEntry,
   getMeta,
   initDoc,
+  isDirectoryEntryDeleted,
   readSidebar,
   relatedDecisionTopics,
   restoreDirectoryEntry,
@@ -250,7 +251,9 @@ export function RoutePane({
 }): ReactElement {
   // Hooks precede early returns. The answer flag distinguishes a joining
   // empty room from an empty server answer.
-  const { hasAnswered } = useRoomStatus(connection);
+  const { hasAnswered, deleted } = useRoomStatus(connection);
+
+  if (deleted) return <PaneNotice documentLayout>{null}</PaneNotice>;
 
   if (route.kind === "no-workspace") {
     // Keep the frame silent until configuration answers.
@@ -566,10 +569,13 @@ export function App(): ReactElement {
     : route.kind === "doc"
       ? topics.find((candidate) => candidate.records.some((record) => record.uuid === route.uuid)) ?? null
       : null;
-  const selected = directory === null ? null : topic === null ? (route.kind === "decision" ? null : routedSelection)
+  const candidateSelection = directory === null ? null : topic === null ? (route.kind === "decision" ? null : routedSelection)
     : route.kind === "decision"
       ? topic.records.find((record) => record.uuid === route.record)?.uuid ?? null
       : decisionCurrentRecord(topic)?.uuid ?? null;
+  const selected = directory !== null && candidateSelection !== null &&
+    isDirectoryEntryDeleted(directory.ydoc, candidateSelection)
+    ? null : candidateSelection;
   const doc = useRoom(
     roomReady && workspace !== null && selected !== null
       ? roomForDoc(workspace.uuid, selected)

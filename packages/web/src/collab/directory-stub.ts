@@ -15,6 +15,7 @@ import {
   directoryStubDiffers,
   getDirectoryEntry,
   getMeta,
+  isDirectoryEntryDeleted,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 
@@ -32,6 +33,7 @@ export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
 function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): void {
   const meta = getMeta(docDoc);
   if (meta.uuid === "") return;
+  if (isDirectoryEntryDeleted(dirDoc, meta.uuid)) return;
   const stub = getDirectoryEntry(dirDoc, meta.uuid);
   if (stub?.deleted === true && meta.kind !== "decision") return;
 

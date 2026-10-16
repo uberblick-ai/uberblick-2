@@ -895,6 +895,33 @@ export class MirrorStore {
     this.unindexTx(uuid);
   }
 
+  /** Only positive directory deletion evidence authorizes removing authoritative rows. */
+  purgeDoc(room: string, uuid: string): void {
+    const tables = [
+      ["updates", "room", room], ["snapshots", "room", room],
+      ["pending_rooms", "room", room], ["doc_index", "uuid", uuid],
+      ["doc_index_seq", "uuid", uuid], ["doc_tags", "uuid", uuid],
+      ["doc_links", "source", uuid], ["decision_github_refs", "source", uuid],
+    ] as const;
+    // FTS writers also commit doc_index; probing its unindexed UUID would scan
+    // the entire search corpus on every refresh after a permanent deletion.
+    // Absent copies need no write lock, including repeated checks for older peers.
+    if (!tables.some(([table, key, value]) => this.db.prepare(
+      `SELECT 1 FROM ${table} WHERE ${key} = ? LIMIT 1`,
+    ).get(value) !== undefined)) return;
+    transactional(this.db, () => {
+      this.statements.dropFts.run(uuid);
+      this.statements.dropTags.run(uuid);
+      this.statements.dropLinks.run(uuid);
+      this.statements.dropGithubRefs.run(uuid);
+      this.statements.dropDoc.run(uuid);
+      this.statements.dropIndexSeq.run(uuid);
+      this.db.prepare("DELETE FROM updates WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
+    })();
+  }
+
   /** All index rows are disposable caches; rebuild from log-hydrated replicas. */
   clearDerived(): void {
     transactional(this.db, () => {
