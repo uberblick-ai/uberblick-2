@@ -5,6 +5,7 @@ import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { installPageTimers, withPageTimers } from "./page-timers.js";
 import { alphaOf, contrast, oklab } from "../test/colour.js";
 
 const { harness, openApp } = setupHarness();
@@ -234,7 +235,10 @@ for (const touch of [false, true]) {
       const uuid = await fixture(session, "One block frame");
       const before = await session.call<Document>("get_doc", { uuid });
       const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
-        beforeNavigate: observeCanvas,
+        beforeNavigate: async (page) => {
+          await installPageTimers(page);
+          await observeCanvas(page);
+        },
         contextOptions: { ...(touch ? devices["iPad Pro 11"] : { hasTouch: false, isMobile: false }),
           viewport: { width: touch ? 600 : 1366, height: 1100 }, colorScheme: appearance, reducedMotion: "reduce" },
       });
@@ -293,7 +297,9 @@ for (const touch of [false, true]) {
       await expectCaption(page.locator(".ub-terminal"), "Terminal", touch);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await expect(page.locator(".ub-terminal-frame")).toHaveText(TERMINAL);
-      await expect(page.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(0);
+      await withPageTimers(page, async () => {
+        await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+      });
       await capture(page, info, `block-frames-${touch ? "ipad-narrow" : "desktop"}-${appearance}`);
       expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
       const codeFrame = page.locator(".ub-code:not(.ub-wireframe)");

@@ -127,6 +127,35 @@ test("one polite region precedes publication and outside-React calls preserve fo
   await expect(reactPublisher).toBeFocused();
 });
 
+test("transients expire after six seconds with native browser timers", async ({ browser }) => {
+  const page = await openFixture(browser);
+  await page.mouse.move(0, 0);
+  // Observe inside the browser so a slow runner cannot miss an early expiry.
+  const lifetime = await page.evaluate(() => new Promise<number>((resolveLifetime, reject) => {
+    const region = document.querySelector("[aria-live=polite]");
+    if (region === null) throw new Error("missing live region");
+    let addedAt: number | null = null;
+    const observer = new MutationObserver(() => {
+      const toast = region.querySelector("[data-sonner-toast]");
+      if (toast === null) return;
+      addedAt ??= performance.now();
+      if (toast.getAttribute("data-removed") !== "true") return;
+      observer.disconnect();
+      clearTimeout(deadline);
+      resolveLifetime(performance.now() - addedAt);
+    });
+    const deadline = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("transient did not expire within ten seconds"));
+    }, 10_000);
+    observer.observe(region, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-removed"] });
+    (window as unknown as { notificationFixture: Fixture }).notificationFixture.transient({ severity: "success", message: "Native lifetime" });
+  }));
+  expect(lifetime).toBeGreaterThanOrEqual(5900);
+  expect(lifetime).toBeLessThan(10_000);
+  await expect(notice(page, "Native lifetime")).toHaveCount(0);
+});
+
 test("transients expire after six seconds and keyed repeats are new additions with a fresh timer", async ({ browser }) => {
   const page = await openFixture(browser, { clock: true });
   await publish(page, "transient", { key: "copy", severity: "success", message: "Copied" });
