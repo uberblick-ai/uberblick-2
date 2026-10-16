@@ -153,9 +153,9 @@ describe("the built web bundle", () => {
     });
   });
 
-  it("emits the provider-derived report-only policy the web image imports", () => {
+  it("emits the provider-derived enforcing policy the web image imports", () => {
     expect(readFileSync(join(outDir, "uberblick-csp.caddy"), "utf8")).toBe(
-      `header Content-Security-Policy-Report-Only ${JSON.stringify(WEB_CONTENT_SECURITY_POLICY)}\n`,
+      `header Content-Security-Policy ${JSON.stringify(WEB_CONTENT_SECURITY_POLICY)}\n`,
     );
   });
 

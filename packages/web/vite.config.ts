@@ -52,7 +52,7 @@ function buildStampPlugin(contentSecurityPolicy: string): Plugin {
       this.emitFile({
         type: "asset",
         fileName: "uberblick-csp.caddy",
-        source: `header Content-Security-Policy-Report-Only ${JSON.stringify(contentSecurityPolicy)}\n`,
+        source: `header Content-Security-Policy ${JSON.stringify(contentSecurityPolicy)}\n`,
       });
     },
   };
@@ -66,11 +66,13 @@ export default defineConfig(async (): Promise<UserConfig> => {
   const { module: dev } = runtimeConfigOnly ? { module: null } :
     await runnerImport<typeof import("./dev-config-document.js")>(fileURLToPath(new URL("./dev-config-document.ts", import.meta.url)));
   const config = dev?.resolveDevProjectConfig();
+  const hubTarget = config === undefined ? undefined : new URL(config.hubUrl);
   for (const warning of config?.warnings ?? []) console.error(warning);
   return {
     // Omit Tailwind preflight to preserve editor and unmigrated control defaults.
     // Editor content remains plain CSS; see src/ui/tailwind.css.
-    plugins: [tailwindcss(), react(), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), wireframeRendererUrlPlugin()],
+    // The entry imports React's module preamble; its inline HTML preamble is blocked by script-src.
+    plugins: [tailwindcss(), react().map((plugin) => ({ ...plugin, transformIndexHtml: undefined })), ...(dev === null ? [] : [dev.devConfigDocumentPlugin()]), buildStampPlugin(webPolicy.WEB_CONTENT_SECURITY_POLICY), wireframeRendererUrlPlugin()],
     define: {
       __RUNTIME_CONFIG_ONLY__: JSON.stringify(runtimeConfigOnly),
       __HUB_URL__: JSON.stringify(config?.hubUrl ?? ""),
@@ -80,7 +82,11 @@ export default defineConfig(async (): Promise<UserConfig> => {
     server: {
       port: 5173,
       headers: {
-        "Content-Security-Policy-Report-Only": webPolicy.WEB_CONTENT_SECURITY_POLICY,
+        "Content-Security-Policy": webPolicy.WEB_CONTENT_SECURITY_POLICY,
+      },
+      // Keep browser sync on the page's origin; CLI/MCP still dial the bound hub directly.
+      proxy: hubTarget === undefined ? {} : {
+        "/ws": { target: hubTarget.origin, ws: true, rewrite: () => hubTarget.pathname },
       },
     },
   };

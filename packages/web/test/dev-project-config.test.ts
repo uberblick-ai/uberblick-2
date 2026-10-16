@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,13 +101,55 @@ describe("checkout web project configuration", () => {
     expect(url).toBeDefined();
     const response = await fetch(new URL("uberblick-config.json", url));
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ hubUrl: "ws://localhost:1234", workspaces: [OVERRIDE], hubAuthToken: SECRET });
+    expect(await response.json()).toEqual({ hubUrl: new URL("/ws", url).href.replace(/^http/, "ws"), workspaces: [OVERRIDE], hubAuthToken: SECRET });
     for (const path of ["/", `/${OVERRIDE}/document-deep-link`]) {
       const page = await fetch(new URL(path, url));
       expect(page.status).toBe(200);
       expect(page.headers.get("content-type")).toContain("text/html");
-      expect(page.headers.get("content-security-policy-report-only")).toBe(WEB_CONTENT_SECURITY_POLICY);
-      expect(page.headers.has("content-security-policy")).toBe(false);
+      expect(page.headers.get("content-security-policy")).toBe(WEB_CONTENT_SECURITY_POLICY);
+      expect(page.headers.has("content-security-policy-report-only")).toBe(false);
+      const html = await page.text();
+      // Every executable script must have a same-origin source, including Fast Refresh.
+      expect(html.match(/<script\b(?![^>]*\bsrc=)[^>]*>/g)).toBeNull();
+    }
+  }, 30_000);
+
+  it("proxies browser WebSocket upgrades to the bound path without changing Host, Origin or an upstream refusal", async () => {
+    const { env } = fixture();
+    const upgrades: Array<{ path: string | undefined; host: string | undefined; origin: string | undefined }> = [];
+    const upstream = createHttpServer();
+    upstream.on("upgrade", (incoming, socket) => {
+      upgrades.push({ path: incoming.url, host: incoming.headers.host, origin: incoming.headers.origin });
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = upstream.address();
+      if (address === null || typeof address === "string") throw new Error("upstream has no TCP address");
+      Object.assign(process.env, env, { UB_WORKSPACE_ID: OVERRIDE, UB_HUB_URL: `ws://127.0.0.1:${address.port}/bound/socket` });
+      server = await createServer({ configFile: join(webRoot, "vite.config.ts"), root: webRoot,
+        logLevel: "error", server: { host: "127.0.0.1", port: 0 } });
+      await server.listen();
+      const url = server.resolvedUrls?.local[0];
+      if (url === undefined) throw new Error("Vite has no local address");
+      const origin = new URL(url).origin;
+      const status = await new Promise<number | undefined>((resolve, reject) => {
+        const upgrade = request(new URL("/ws", url), { headers: {
+          Origin: origin, Connection: "Upgrade", Upgrade: "websocket",
+          "Sec-WebSocket-Version": "13", "Sec-WebSocket-Key": "c3ludGhldGljLXByb29mIQ==",
+        } });
+        upgrade.setTimeout(5000, () => upgrade.destroy(new Error("proxy handshake timed out")));
+        upgrade.once("error", reject);
+        upgrade.once("response", (response) => {
+          response.resume();
+          response.once("end", () => resolve(response.statusCode));
+        });
+        upgrade.end();
+      });
+      expect(status).toBe(403);
+      expect(upgrades).toEqual([{ path: "/bound/socket", host: new URL(url).host, origin }]);
+    } finally {
+      await new Promise<void>((resolve, reject) => upstream.close((error) => error ? reject(error) : resolve()));
     }
   }, 30_000);
 });

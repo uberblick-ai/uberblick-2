@@ -412,7 +412,7 @@ describe("ub open", () => {
     expect((await app.interrupt()).status).toBe(0);
   });
 
-  it.each(["project", "environment"])("serves one report-only policy on HTML for a %s binding", async source => {
+  it.each(["project", "environment"])("serves one enforcing policy on HTML for a %s binding", async source => {
     const box = source === "project"
       ? sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null }, credentials: { signingSecret: SECRET } })
       : unboundSandbox({ credentials: { signingSecret: SECRET } });
@@ -431,8 +431,8 @@ describe("ub open", () => {
           const page = await fetch(`${app.url}${path}`, { method });
           expect(page.status).toBe(200);
           expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
-          expect(page.headers.get("content-security-policy-report-only")).toBe(WEB_CONTENT_SECURITY_POLICY);
-          expect(page.headers.get("content-security-policy")).toBeNull();
+          expect(page.headers.get("content-security-policy")).toBe(WEB_CONTENT_SECURITY_POLICY);
+          expect(page.headers.get("content-security-policy-report-only")).toBeNull();
           if (method === "GET") expect(await page.text()).toContain("<title>uberblick</title>");
           else expect(await page.text()).toBe("");
         }

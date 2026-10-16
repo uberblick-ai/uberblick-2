@@ -5,11 +5,12 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page, Response as BrowserResponse } from "@playwright/test";
 import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { createTeamHub } from "@uberblick/hub/team";
 import type { TeamHub } from "@uberblick/hub/team";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
 
@@ -39,7 +40,9 @@ test.beforeAll(async () => {
   }
   hub = await createHub({ port: 0, authSecret: SECRET, databasePath: ":memory:", log: silentLogger });
   serving = await preview({ configFile: false, root: webRoot, logLevel: "error",
-    build: { outDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true } });
+    build: { outDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true,
+      headers: { "Content-Security-Policy": WEB_CONTENT_SECURITY_POLICY },
+      proxy: { "/ws": { target: `ws://127.0.0.1:${hub.port}`, ws: true } } } });
   const address = serving.httpServer.address();
   if (address === null || typeof address === "string") throw new Error("release preview has no TCP address");
   appUrl = `http://127.0.0.1:${address.port}`;
@@ -96,10 +99,11 @@ function previewTls(): { key: Buffer; cert: Buffer } {
   return { key: readFileSync(keyPath), cert: readFileSync(certPath) };
 }
 
-async function browserPreview(running: TeamHub, secure = false): Promise<{ serving: PreviewServer; appUrl: string }> {
+async function browserPreview(running: TeamHub, secure = false, enforcePolicy = true): Promise<{ serving: PreviewServer; appUrl: string }> {
   const serving = await preview({ configFile: false, root: webRoot, logLevel: "error",
     build: { outDir: releaseOutDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true,
       ...(secure ? { https: previewTls() } : {}),
+      ...(enforcePolicy ? { headers: { "Content-Security-Policy": WEB_CONTENT_SECURITY_POLICY } } : {}),
       // Preserve the page's Host and Origin, including its port, through the
       // same-origin /auth route used by the released hub's reverse proxy.
       proxy: { "/auth/": { target: `http://127.0.0.1:${running.port}`, changeOrigin: false } } } });
@@ -111,7 +115,7 @@ async function browserPreview(running: TeamHub, secure = false): Promise<{ servi
   return { serving, appUrl: `${secure ? "https" : "http"}://localhost:${address.port}` };
 }
 
-async function browserHub(secure = false): Promise<{
+async function browserHub(secure = false, enforcePolicy = true): Promise<{
   hub: TeamHub; github: BrowserGithub; appUrl: string; stop(): Promise<void>;
 }> {
   const github = new BrowserGithub();
@@ -119,7 +123,7 @@ async function browserHub(secure = false): Promise<{
     github: { clientId: "Iv1.0123456789abcdef", fetch: github.fetch, now: () => github.now } },
   { initializeDefaultWorkspace: true, deviceCredentials: true });
   try {
-    const served = await browserPreview(running, secure);
+    const served = await browserPreview(running, secure, enforcePolicy);
     return { hub: running, github, appUrl: served.appUrl, async stop() {
       try { await served.serving.close(); } finally { await running.stop(); }
     } };
@@ -150,6 +154,33 @@ async function sessionStatus(page: Page, token: string): Promise<number> {
   })).status, token);
 }
 
+async function watchViolations(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const violations: { directive: string; blocked: string; disposition: string }[] = [];
+    (window as unknown as { cspViolations: typeof violations }).cspViolations = violations;
+    document.addEventListener("securitypolicyviolation", (event) => violations.push({
+      directive: event.effectiveDirective, blocked: event.blockedURI, disposition: event.disposition,
+    }));
+  });
+}
+
+async function expectNoViolations(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)));
+  }));
+  expect(await page.evaluate(() => (window as unknown as { cspViolations: unknown[] }).cspViolations)).toEqual([]);
+}
+
+async function expectPolicy(response: BrowserResponse | null): Promise<void> {
+  if (response === null) throw new Error("release HTML navigation returned no response");
+  const headers = await response.headersArray();
+  expect(headers.filter(({ name }) => name.toLowerCase() === "content-security-policy")
+    .map(({ value }) => value)).toEqual([WEB_CONTENT_SECURITY_POLICY]);
+  expect(headers.some(({ name }) => name.toLowerCase() === "content-security-policy-report-only")).toBe(false);
+}
+
+test.beforeEach(async ({ context }) => { await watchViolations(context); });
+
 test.afterAll(async () => {
   try {
     await serving?.close();
@@ -162,10 +193,11 @@ test.afterAll(async () => {
 
 test("a release bundle makes no implicit connection and uses a valid served endpoint", async ({ browser }) => {
   if (hub === undefined) throw new Error("release test hub did not start");
-  const endpoint = `ws://127.0.0.1:${hub.port}`;
+  const endpoint = `${appUrl.replace("http:", "ws:")}/ws`;
   for (const kind of ["missing", "empty", "invalid", "valid"] as const) {
     const context = await browser.newContext();
     try {
+      await watchViolations(context);
       await context.route("**/uberblick-config.json", async (route) => {
         await route.fulfill({ status: kind === "missing" ? 404 : 200,
           contentType: "application/json", body: JSON.stringify({
@@ -181,7 +213,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
         if (message.text().startsWith("uberblick web: hub ")) resolved = true;
       });
       // The address names a workspace even when no config document arrives.
-      await page.goto(`${appUrl}/${WORKSPACE}`);
+      await expectPolicy(await page.goto(`${appUrl}/${WORKSPACE}`));
       await expect.poll(() => resolved).toBe(true);
       if (kind === "valid") {
         await expect.poll(() => sockets.length).toBeGreaterThan(0);
@@ -191,6 +223,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
         await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
         expect(sockets, kind).toEqual([]);
       }
+      await expectNoViolations(page);
     } finally {
       await context.close();
     }
@@ -199,7 +232,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
 
 
 for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
-  test(`a released page for ${endpoint} guides every route without credentials or documents`, async ({ context, page }, testInfo) => {
+  test(`@webkit a released page for ${endpoint} guides every route without credentials or documents`, async ({ context, page }, testInfo) => {
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         hubUrl: endpoint, workspaces: [WORKSPACE],
@@ -220,7 +253,7 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
     const sockets: string[] = [];
     page.on("websocket", (socket) => sockets.push(socket.url()));
     for (const path of ["/", `/${WORKSPACE}`, `/${WORKSPACE}/00000000-0000-4000-8000-000000000002`]) {
-      await page.goto(`${appUrl}${path}`);
+      await expectPolicy(await page.goto(`${appUrl}${path}`));
       await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
       const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
@@ -239,6 +272,7 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
       await expect(page.getByRole("button", { name: "+ New page" })).toHaveCount(0);
       await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
       expect(sockets).toEqual([]);
+      await expectNoViolations(page);
     }
     expect(claimRequests).toHaveLength(3);
     expect(claimRequests.every(({ url, headers }) => url === `${appUrl}/auth/claim-state` &&
@@ -258,7 +292,7 @@ test("ub open's local page ignores remote claim state and keeps its editor", asy
   });
   await context.route("**/uberblick-config.json", async (route) => {
     await route.fulfill({ json: {
-      hubUrl: `ws://127.0.0.1:${hub?.port}`, workspaces: [WORKSPACE], hubAuthToken: SECRET,
+      hubUrl: `${appUrl.replace("http:", "ws:")}/ws`, workspaces: [WORKSPACE], hubAuthToken: SECRET,
       remoteHubUrl: "wss://remote.example/ws", rebound: false,
     } });
   });
@@ -266,6 +300,7 @@ test("ub open's local page ignores remote claim state and keeps its editor", asy
   await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Hub setup guide" })).toHaveCount(0);
   expect(claimReads).toBe(0);
+  await expectNoViolations(page);
 });
 
 test("@webkit browser sign-in claims a released localhost hub and survives reload without opening documents", async ({ context, page }) => {
@@ -281,7 +316,7 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
     });
     const sockets: string[] = [];
     page.on("websocket", (socket) => sockets.push(socket.url()));
-    await page.goto(running.appUrl);
+    await expectPolicy(await page.goto(running.appUrl));
     await expect(page.getByRole("heading", { name: "This hub is unclaimed", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Hub setup guide" }))
@@ -303,9 +338,11 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
     expect(running.hub.credentials?.listDevices(principal.id)).toEqual([]);
     expect(running.hub.hubAdmins?.listAdmins(principal.id)[0]?.lastSignedInAt).toBeNull();
 
-    await page.reload();
+    await expectNoViolations(page);
+    await expectPolicy(await page.reload());
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
-    await page.goto(`${running.appUrl}/${result.claimedWorkspaceId}/00000000-0000-4000-8000-000000000002`);
+    await expectNoViolations(page);
+    await expectPolicy(await page.goto(`${running.appUrl}/${result.claimedWorkspaceId}/00000000-0000-4000-8000-000000000002`));
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "+ New page" })).toHaveCount(0);
     await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
@@ -315,6 +352,7 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
     const authRequests = await Promise.all(authHeaders);
     expect(authRequests.length).toBeGreaterThan(0);
     expect(authRequests.every((headers) => headers.cookie === undefined && headers.authorization === undefined)).toBe(true);
+    await expectNoViolations(page);
   } finally { await running.stop(); }
 });
 
@@ -322,25 +360,30 @@ test("@webkit a released HTTPS page signs in through its own origin and keeps th
   const running = await browserHub(true);
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   try {
+    await watchViolations(context);
     await context.route("**/uberblick-config.json", (route) => route.fulfill({ json: {
       hubUrl: "wss://different-hub.example/ws", workspaces: [WORKSPACE],
     } }));
     const page = await context.newPage();
-    await page.goto(running.appUrl);
+    await expectPolicy(await page.goto(running.appUrl));
     const result = await completeBrowserSignIn(page, running.github);
     expect(await sessionStatus(page, result.session.token)).toBe(200);
-    await page.reload();
+    await expectNoViolations(page);
+    await expectPolicy(await page.reload());
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
     expect(await sessionStatus(page, result.session.token)).toBe(401);
+    await expectNoViolations(page);
   } finally {
     try { await context.close(); } finally { await running.stop(); }
   }
 });
 
 test("another localhost port cannot start or end hub sign-in or reuse the hub session", async ({ context, page }) => {
-  const running = await browserHub();
+  // These pages deliberately omit CSP so the browser reaches the hub's
+  // independent Origin and embedded-session defenses rather than CSP stopping it.
+  const running = await browserHub(false, false);
   let otherServing: PreviewServer | undefined;
   try {
     await context.route("**/uberblick-config.json", (route) => route.fulfill({ json: {
@@ -348,7 +391,7 @@ test("another localhost port cannot start or end hub sign-in or reuse the hub se
     } }));
     await page.goto(running.appUrl);
     const signedIn = await completeBrowserSignIn(page, running.github);
-    const other = await browserPreview(running.hub);
+    const other = await browserPreview(running.hub, false, false);
     otherServing = other.serving;
     const attacker = await context.newPage();
     await attacker.goto(other.appUrl);
