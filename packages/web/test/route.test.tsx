@@ -812,7 +812,7 @@ describe("the copy control hands back the document's canonical link", () => {
       workspace,
       uuid: UUID,
     });
-    expect(said).toBe("URL copied to clipboard");
+    expect(said).toBe("Link copied");
     expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: said, severity: "success" });
   });
 
@@ -869,7 +869,7 @@ describe("the copy control hands back the document's canonical link", () => {
     const { said } = await clickCopy();
 
     expect(copied).toEqual([`${window.location.origin}/${WS}/${UUID}`]);
-    expect(said).toBe("URL copied to clipboard");
+    expect(said).toBe("Link copied");
   });
 
   it("says so when the copy fails, rather than looking like it worked", async () => {
@@ -879,8 +879,8 @@ describe("the copy control hands back the document's canonical link", () => {
     });
     (document as unknown as { execCommand: unknown }).execCommand = (): boolean => false;
 
-    expect((await clickCopy()).said).toBe("Copy failed");
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Copy failed", severity: "error" });
+    expect((await clickCopy()).said).toBe("Couldn't copy the link. Select it in the address bar instead.");
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Couldn't copy the link. Select it in the address bar instead.", severity: "error" });
   });
 
   it("publishes every copy again under the same key, including the waiting control", async () => {
@@ -901,7 +901,7 @@ describe("the copy control hands back the document's canonical link", () => {
     ]);
     expect(notifyTransient).toHaveBeenCalledTimes(3);
     for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
-      expect(notice).toEqual({ key: "clipboard", message: "URL copied to clipboard", severity: "success" });
+      expect(notice).toEqual({ key: "clipboard", message: "Link copied", severity: "success" });
     }
     expect(buttons[1]!.getAttribute("aria-label")).toBe(`Copy link — copies the canonical document URL for ${DECORATED}/${OTHER}`);
     expect(within(view.container).queryByRole("status")).toBeNull();

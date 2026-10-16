@@ -893,7 +893,7 @@ test("archiving hides structural controls and keyboard and right-click paths can
   await page.keyboard.insertText("Retained cell");
   await activate(page.getByRole("button", { name: "Document actions", exact: true }), info);
   await activate(page.getByRole("menuitem", { name: "Archive document", exact: true }), info);
-  await activate(page.getByRole("alertdialog").getByRole("button", { name: "Archive document", exact: true }), info);
+  await activate(page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }), info);
   await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await activate(table.locator("td").first(), info);

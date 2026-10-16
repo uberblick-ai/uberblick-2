@@ -967,7 +967,7 @@ test("document actions stay reachable, close with the route, and archive into Re
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Copy link", exact: true }).click();
-  await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
+  await expect(copyNotice(page, "Link copied")).toBeVisible();
   // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
   await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
@@ -993,15 +993,15 @@ test("document actions stay reachable, close with the route, and archive into Re
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   const confirmation = page.getByRole("alertdialog");
-  await expect(confirmation).toContainText("Archive Lifecycle notes?");
-  await expect(confirmation).toContainText("read-only");
+  await expect(confirmation).toHaveAccessibleName("Archive “Lifecycle notes”?");
+  await expect(confirmation).toContainText("It leaves the document list and search. You can restore it later.");
   await page.keyboard.press("Escape");
   await expect(confirmation).toHaveCount(0);
   await expect(trigger).toBeFocused();
 
   await trigger.click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("button", { name: "Archive document" }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore).toBeVisible();
   await expect(restore).toBeFocused();
@@ -1026,7 +1026,7 @@ test("document actions stay reachable, close with the route, and archive into Re
 });
 
 /**
- * The archive confirmation is a surface, and a destructive one, so it owes the
+ * The archive confirmation is a surface, so it owes the
  * proof a dialog owes: opaque over the page. Only a browser can settle
  * it — `light-dark()` resolves in the engine, and an undefined custom property
  * (which is what `--popover` was here) computes to `transparent` rather than
@@ -1765,7 +1765,7 @@ test("the document-actions control is a 44px target, at rest and once the pane h
 
 function copyNotice(page: Page, message: string): Locator {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
-    has: page.locator("[data-description]", { hasText: new RegExp(`^${message}$`) }),
+    has: page.getByText(message, { exact: true }),
   });
 }
 
@@ -1882,9 +1882,9 @@ for (const scheme of ["light"] as const) {
       await page.getByRole("button", { name: "Document actions" }).click();
       await expect(link).toHaveAccessibleName("Copy link");
       await activateCopy(page, link);
-      await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+      await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
       await activateCopy(page, link, true);
-      await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+      await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
 
@@ -1902,14 +1902,14 @@ for (const scheme of ["light"] as const) {
       ]) {
         await page.setViewportSize(viewport);
         await activateCopy(page, link);
-        await expectCopyNoticeLeavesHeaderUsable(page, "URL copied to clipboard");
+        await expectCopyNoticeLeavesHeaderUsable(page, "Link copied");
         await activateCopy(page, link);
         expect((await copiedTexts(page)).at(-1)).toBe(canonicalUrl);
         await activateCopy(page, codeCopy);
-        await expectCopyNoticeLeavesHeaderUsable(page, "Copied to clipboard");
+        await expectCopyNoticeLeavesHeaderUsable(page, "Source copied");
         await actions.click();
         await expect(page.getByRole("menuitem", { name: "Pin to sidebar" })).toBeVisible();
-        await expect(copyNotice(page, "Copied to clipboard")).toBeVisible();
+        await expect(copyNotice(page, "Source copied")).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(actions).toBeFocused();
       }
@@ -1929,7 +1929,7 @@ for (const scheme of ["light"] as const) {
         const copyLabel = "Copy";
         const copy = page.locator(selector).getByRole("button", { name: copyLabel, exact: true });
         await activateCopy(page, copy);
-        await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
+        await expect(copyNotice(page, "Source copied")).toHaveAttribute("data-type", "success");
         await expect(copy).toHaveText(copyLabel);
         expect((await copiedTexts(page)).at(-1)).toBe(text);
         expect(await editorSelection(page)).toEqual(selected);
@@ -1937,7 +1937,7 @@ for (const scheme of ["light"] as const) {
       }
       await activateCopy(page, codeCopy);
       await activateCopy(page, codeCopy);
-      await expect(copyNotice(page, "Copied to clipboard")).toHaveAttribute("data-type", "success");
+      await expect(copyNotice(page, "Source copied")).toHaveAttribute("data-type", "success");
       expect(await editorSelection(page)).toEqual(selected);
       // Each missing or refused modern API still succeeds through selection,
       // without moving the editor's caret or keeping a second notice.
@@ -1945,7 +1945,7 @@ for (const scheme of ["light"] as const) {
         await clipboardMode(page, mode);
         const copy = page.locator(".ub-code .ub-copy");
         await activateCopy(page, copy);
-        await expect(copyNotice(page, mode === "failed" ? "Copy failed" : "Copied to clipboard")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
+        await expect(copyNotice(page, mode === "failed" ? "Couldn't copy the source. Select the source text and copy it instead." : "Source copied")).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
         expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [sources[0][2]]);
         expect(await editorSelection(page)).toEqual(selected);
         await expect(copy).toHaveText("Copy");
@@ -1966,12 +1966,12 @@ for (const scheme of ["light"] as const) {
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     await activateCopy(waiting, waitingCopy);
-    await expect(copyNotice(waiting, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
+    await expect(copyNotice(waiting, "Link copied")).toHaveAttribute("data-type", "success");
     expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, harness().appUrl).href]);
     await expect(waiting.locator(".ub-copied")).toHaveCount(0);
     await clipboardMode(waiting, "failed");
     await activateCopy(waiting, waitingCopy, true);
-    await expect(copyNotice(waiting, "Copy failed")).toHaveAttribute("data-type", "error");
+    await expect(copyNotice(waiting, "Couldn't copy the link. Select it in the address bar instead.")).toHaveAttribute("data-type", "error");
     await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
   });
 }
@@ -2146,7 +2146,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   await page.setViewportSize({ width: 1280, height: 620 });
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("button", { name: "Archive document" }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(page.locator(".ub-tags-readonly")).toContainText(longest);
   for (const viewport of [810]) {
@@ -2391,15 +2391,30 @@ for (const scheme of ["light", "dark"] as const) {
       await page.keyboard.press("ArrowDown");
       await page.keyboard.press("Enter");
       const confirmation = page.getByRole("alertdialog");
-      await expect(confirmation).toContainText("read-only");
-      await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(confirmation).toContainText("It leaves the document list and search. You can restore it later.");
+      const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
+      const primary = confirmation.getByRole("button", { name: "Archive", exact: true });
+      await expect(cancel).toBeFocused();
+      expect(await cancel.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
+      expect(await cancel.evaluate((element) => Number.parseFloat(getComputedStyle(element).outlineWidth))).toBeGreaterThan(0);
+      const primaryFill = await paintedIn(primary, "background-color");
+      expect(oklab(primaryFill).chroma).toBeLessThan(accentChroma);
+      expect(contrast(await paintedIn(primary, "color"), primaryFill)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(primaryFill, await paintedIn(confirmation, "background-color"))).toBeGreaterThan(
+        contrast(await paintedIn(cancel, "background-color"), await paintedIn(confirmation, "background-color")),
+      );
+      await primary.focus();
+      await expect(primary).toBeFocused();
+      await expect(cancel).not.toBeFocused();
+      await expect(cancel).toHaveCSS("border-top-width", "0px");
+      await cancel.click();
       await expect(trigger).toBeFocused();
       if (touch) await trigger.tap();
       else await trigger.click();
       if (touch) await archive.tap();
       else await archive.click();
       await expect(confirmation).toBeVisible();
-      await confirmation.getByRole("button", { name: "Archive document", exact: true }).click();
+      await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
       const banner = page.locator(".ub-archived-banner");
       await expect(banner).toBeVisible();
       expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeGreaterThan(accentChroma);
@@ -2477,7 +2492,7 @@ for (const scheme of ["light"] as const) {
     const copy = waiting.getByRole("button", { name: /^Copy link/ });
     const before = await controlPaint(copy);
     await copy.tap();
-    await expect(copyNotice(waiting, "URL copied to clipboard")).toBeVisible();
+    await expect(copyNotice(waiting, "Link copied")).toBeVisible();
     await copy.evaluate((element) => (element as HTMLElement).blur());
     await expect.poll(() => controlPaint(copy)).toEqual(before);
     expect(await activeHoverRules(copy)).toEqual([]);
@@ -3047,7 +3062,7 @@ test("decision archive and restore follow the whole topic and its first record",
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     await page.getByRole("button", { name: "Document actions" }).click();
     await page.getByRole("menuitem", { name: "Archive document" }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(earlier.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect.poll(() => readSidebar(sidebar).find((entry) => entry.id === group)?.docs).toEqual([]);

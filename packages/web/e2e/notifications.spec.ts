@@ -68,10 +68,16 @@ interface Fixture {
   sticky: (notice: Notice & { key: string }) => void;
   resolve: (key: string) => void;
   appearance: (appearance: "light" | "dark") => void;
+  archive: () => void;
+  undos: number;
+  closedActions: number;
 }
 
-async function openFixture(browser: Browser, options: { width?: number; height?: number; clock?: boolean } = {}): Promise<Page> {
-  const context = await browser.newContext({ viewport: { width: options.width ?? 1280, height: options.height ?? 720 } });
+async function openFixture(browser: Browser, options: { width?: number; height?: number; clock?: boolean; touch?: boolean } = {}): Promise<Page> {
+  const context = await browser.newContext({
+    viewport: { width: options.width ?? 1280, height: options.height ?? 720 },
+    hasTouch: options.touch ?? false,
+  });
   contexts.push(context);
   const page = await context.newPage();
   if (options.clock) await page.clock.install();
@@ -95,7 +101,7 @@ async function resolveSticky(page: Page, key: string): Promise<void> {
 }
 
 function notice(page: Page, message: string): Locator {
-  return page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: message }) });
+  return page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-title]", { hasText: message }) });
 }
 
 async function startNoticeClock(page: Page): Promise<void> {
@@ -192,6 +198,75 @@ test("transients expire after six seconds and keyed repeats are new additions wi
   await expect(copied).toHaveAttribute("data-removed", "false");
   await page.clock.runFor(600);
   await expect(copied).toHaveCount(0);
+});
+
+test("errors stay until dismissed and a successful keyed retry gets the transient lifetime", async ({ browser }) => {
+  const page = await openFixture(browser, { clock: true });
+  const message = "Couldn't copy the link. Select it in the address bar instead.";
+  await publish(page, "transient", { key: "copy-link", severity: "error", message });
+  await startNoticeClock(page);
+  await page.clock.runFor(60_000);
+  await expect(notice(page, message)).toHaveAttribute("data-removed", "false");
+  await expect(notice(page, message).locator("[data-description]")).toHaveCount(0);
+  await publish(page, "transient", { key: "copy-link", severity: "success", message: "Link copied" });
+  // Let Sonner's two dismissal frames commit before advancing its exit timer.
+  await page.clock.runFor(100);
+  await expect(notice(page, message)).toHaveAttribute("data-removed", "true");
+  await page.clock.runFor(300);
+  await expect(notice(page, message)).toHaveCount(0);
+  await expect(notice(page, "Link copied")).toHaveAttribute("data-removed", "false");
+  await page.clock.runFor(6100);
+  await expect(notice(page, "Link copied")).toHaveCount(0);
+  await publish(page, "transient", { severity: "error", message });
+  await startNoticeClock(page);
+  await notice(page, message).getByRole("button", { name: "Dismiss notification" }).click();
+  await page.clock.runFor(400);
+  await expect(notice(page, message)).toHaveCount(0);
+});
+
+test("native Undo works with pointer, keyboard and iPad touch in both appearances @webkit-touch", async ({ browser, browserName }) => {
+  for (const appearance of ["light", "dark"] as const) {
+    for (const input of ["pointer", "keyboard", "touch"] as const) {
+      const page = await openFixture(browser, input === "touch" ? { width: 810, height: 1080, touch: true } : {});
+      await page.evaluate((appearance) => {
+        const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
+        fixture.appearance(appearance);
+        fixture.archive();
+      }, appearance);
+      const archived = notice(page, "Archived “Example document”.");
+      const undo = archived.getByRole("button", { name: "Undo", exact: true });
+      await expect(undo).toBeVisible();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
+      await expect(archived.locator("[data-description]")).toHaveCount(0);
+      if (input === "touch") {
+        await expect(archived).toHaveCSS("opacity", "1");
+        const readings = await renderedText(page, "[aria-live=polite]");
+        for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+        const axe = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
+        assertNoViolations(axe.violations);
+        await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notification-undo-${appearance}-${browserName}.png`) });
+      }
+      if (input === "touch") {
+        const target = await undo.boundingBox();
+        expect(target?.width).toBeGreaterThanOrEqual(44);
+        expect(target?.height).toBeGreaterThanOrEqual(44);
+        await undo.tap();
+      } else if (input === "keyboard") {
+        const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+        await page.keyboard.press("Shift+F8");
+        await page.keyboard.press(nextControl);
+        await page.keyboard.press(nextControl);
+        await page.keyboard.press(nextControl);
+        await expect(undo).toBeFocused();
+        await page.keyboard.press("Enter");
+      } else await undo.click();
+      await expect(archived).toHaveCount(0);
+      expect(await page.evaluate(() => {
+        const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
+        return { undos: fixture.undos, closes: fixture.closedActions };
+      })).toEqual({ undos: 1, closes: 1 });
+    }
+  }
 });
 
 for (const pause of ["hover", "keyboard", "hidden"] as const) {
@@ -293,7 +368,8 @@ test("notices are accessible in both appearances and stay above chrome", async (
     for (const severity of ["success", "info", "warning", "error"] as const) {
       const condition = notice(page, `${severity} condition`);
       await expect(condition).toHaveAttribute("data-type", severity);
-      await expect(condition).toContainText(severity === "info" ? "Information" : severity.charAt(0).toUpperCase() + severity.slice(1));
+      await expect(condition.locator("[data-title]")).toHaveText(`${severity} condition`);
+      await expect(condition.locator("[data-description]")).toHaveCount(0);
       const readings = await condition.evaluate((element) => {
         const bounds = element.getBoundingClientRect();
         const chrome = document.querySelector<HTMLElement>("[data-fixture-chrome]");
@@ -317,7 +393,7 @@ test("notices are accessible in both appearances and stay above chrome", async (
       expect(readings.icon).toBeDefined();
       shapes.add(readings.icon ?? "");
     }
-    expect(shapes.size, "each severity has a distinct icon as well as a text label").toBe(4);
+    expect(shapes.size, "each severity has a distinct icon without relying on colour").toBe(4);
     const readings = await renderedText(page, "[aria-live=polite]");
     expect(readings.length).toBeGreaterThanOrEqual(4);
     for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);

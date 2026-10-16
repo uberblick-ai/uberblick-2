@@ -10,13 +10,13 @@ const { harness, openApp } = setupHarness();
 
 function successNotice(page: Page, message: string) {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
-    has: page.locator("[data-description]", { hasText: message }),
+    has: page.locator("[data-title]", { hasText: message }),
   });
 }
 
 async function expectSuccess(page: Page, message: string): Promise<void> {
   await expect(successNotice(page, message)).toHaveAttribute("data-type", "success");
-  await expect(successNotice(page, message).locator("[data-description]")).toHaveText(message);
+  await expect(successNotice(page, message).locator("[data-title]")).toHaveText(message);
   await expect(page.locator("[data-settings-page]").getByText(message, { exact: true })).toHaveCount(0);
   await expect.poll(() => successNotice(page, message).evaluate((element) => {
     const box = element.getBoundingClientRect();
