@@ -124,15 +124,6 @@ function ArchivedBanner({
   );
 }
 
-function SparklesIcon(): ReactElement {
-  return (
-    <svg className="ub-tldr-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 2.5c.45 3.35 2.15 5.05 5.5 5.5-3.35.45-5.05 2.15-5.5 5.5C11.55 10.15 9.85 8.45 6.5 8 9.85 7.55 11.55 5.85 12 2.5Z" />
-      <path d="M18.25 13.5c.25 1.85 1.4 3 3.25 3.25-1.85.25-3 1.4-3.25 3.25-.25-1.85-1.4-3-3.25-3.25 1.85-.25 3-1.4 3.25-3.25ZM5 13c.2 1.35 1 2.15 2.35 2.35C6 15.55 5.2 16.35 5 17.7c-.2-1.35-1-2.15-2.35-2.35C4 15.15 4.8 14.35 5 13Z" />
-    </svg>
-  );
-}
-
 /** The person-facing summary and its one in-place write surface. */
 function TldrCallout({
   connection,
@@ -188,15 +179,7 @@ function TldrCallout({
 
   return (
     <section className="ub-tldr" aria-labelledby="ub-tldr-title">
-      <div className="ub-tldr-header">
-        <span className="ub-tldr-mark">
-          <SparklesIcon />
-        </span>
-        <div className="ub-tldr-heading">
-          <span className="ub-tldr-label">Quick summary</span>
-          <h2 id="ub-tldr-title">TL;DR</h2>
-        </div>
-      </div>
+      <h2 id="ub-tldr-title">TL;DR</h2>
       <div className="ub-tldr-body">
         {editing && !decision ? (
           <form

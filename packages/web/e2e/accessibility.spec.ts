@@ -37,6 +37,13 @@ for (const colorScheme of ["light", "dark"] as const) {
     try {
       await createDoc(page, "Picker destination");
       await createDoc(page, `Accessibility ${colorScheme}`);
+      await page.getByRole("button", { name: "Document actions" }).click();
+      await page.getByRole("menuitem", { name: "Add TL;DR" }).click();
+      await page.getByRole("textbox", {
+        name: "Write one or two plain-English sentences that help a reader understand this document.",
+      }).fill("A summary on an index card.");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toBeVisible();
       const documentUrl = page.url();
       await placeCaret(page);
       // Keep the first paragraph empty for the real slash/@ typing triggers.
