@@ -415,7 +415,7 @@ export function ThreadsPane({
       {highlights}
       <aside
         id="ub-rail"
-        className="ub-rail flex w-[var(--outline-width)] flex-none flex-col gap-5 overflow-y-auto border-l border-border p-3 ub-type-ui me-[var(--pane-trailing-space)]"
+        className="ub-rail flex min-h-0 w-full flex-1 flex-col gap-5 overflow-y-auto p-3 ub-type-ui"
       >
         {content}
       </aside>

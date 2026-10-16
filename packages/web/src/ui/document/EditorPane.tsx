@@ -946,16 +946,18 @@ export function EditorPane({
             setTldrEditorRoom(null);
           }}
         />
-        {header ?? <DocumentTitle
-          value={meta?.title ?? ""}
-          readOnly={contentReadOnly || !writable}
-          // Guard the live write too: a document may become a decision before
-          // this readOnly render updates.
-          onChange={(value) => {
-            if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
-            setTitle(connection.ydoc, value);
-          }}
-        />}
+        <div data-outline-title="">
+          {header ?? <DocumentTitle
+            value={meta?.title ?? ""}
+            readOnly={contentReadOnly || !writable}
+            // Guard the live write too: a document may become a decision before
+            // this readOnly render updates.
+            onChange={(value) => {
+              if (contentReadOnly || isDecision(connection) || !connection.status.writable) return;
+              setTitle(connection.ydoc, value);
+            }}
+          />}
+        </div>
         {/* The editor draws only for a document that is here: `RoutePane` sends
             everything else to the waiting screen. */}
         <StatusLine

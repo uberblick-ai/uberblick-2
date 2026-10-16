@@ -45,8 +45,9 @@ export function observeOutline(
 }
 
 /** Scroll a block into view by its id. A no-op when the block is not rendered. */
-export function scrollBlockIntoView(blockId: string): void {
-  document
-    .getElementById(blockId)
-    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+export function scrollBlockIntoView(blockId: string, inset = 16): void {
+  const block = document.getElementById(blockId);
+  const pane = block?.closest<HTMLElement>(".ub-document-pane");
+  if (block === null || block === undefined || pane === null || pane === undefined) return;
+  pane.scrollTo({ top: pane.scrollTop + block.getBoundingClientRect().top - pane.getBoundingClientRect().top - inset, behavior: "instant" });
 }

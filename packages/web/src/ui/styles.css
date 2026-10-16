@@ -567,6 +567,17 @@ body {
   transition-property: padding-inline-start, flex-basis;
 }
 
+@media (width < 80rem) {
+  .ub-document-rail .ub-outline {
+    width: calc(var(--outline-pane-width) - 3rem - 0.75rem);
+    pointer-events: auto;
+  }
+
+  .ub-document-rail[data-has-threads="true"] .ub-outline {
+    width: calc(var(--outline-pane-width) - 3rem - 7rem);
+  }
+}
+
 /* Left padding reserves the document block gutter on every main page. */
 .ub-column {
   width: 100%;

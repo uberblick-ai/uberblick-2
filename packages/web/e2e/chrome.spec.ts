@@ -2739,26 +2739,27 @@ for (const scheme of ["light"] as const) {
           }
         }
       };
-      const contents = page.getByRole("button", { name: "Contents 2" });
+      const contents = page.getByRole("button", { name: /^On this page/ });
       await contents.click();
       await expect(page.locator(".ub-outline-panel")).toBeVisible();
       await check(".ub-outline-panel");
-      const row = page.locator(".ub-outline-panel [role=menuitem]").first();
+      const row = page.locator(".ub-outline-panel button").first();
       await row.hover();
       expect(separation(await paintedIn(row, "background-color"), ground)).toBeGreaterThanOrEqual(step);
-      const [rowBox, listBox] = await Promise.all([row.boundingBox(), page.locator(".ub-outline-panel ul").boundingBox()]);
-      expect(rowBox?.width).toBeCloseTo(listBox?.width ?? 0, 1);
+      const rowBox = await row.boundingBox();
+      const available = await page.locator(".ub-outline-panel ul").evaluate((list) => {
+        const style = getComputedStyle(list);
+        return list.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+      });
+      expect(rowBox?.width).toBeCloseTo(available, 1);
       await check(".ub-outline-panel");
       await page.keyboard.press("Escape");
       await page.mouse.move(1399, 999);
       await contents.focus();
       await page.keyboard.press("Enter");
-      await page.keyboard.press("ArrowDown");
-      const keyboardRow = page.locator(".ub-outline-panel [role=menuitem]").nth(1);
-      await expect.poll(async () => {
-        const fill = await paintedIn(keyboardRow, "background-color");
-        return alphaOf(fill) === 0 ? 0 : separation(fill, ground);
-      }).toBeGreaterThanOrEqual(step);
+      const keyboardRow = page.locator(".ub-outline-panel button").nth(1);
+      await keyboardRow.focus();
+      await expect(keyboardRow).toBeFocused();
       await check(".ub-outline-panel");
       await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Document actions" }).click();
@@ -2797,7 +2798,7 @@ for (const scheme of ["light"] as const) {
       const readings: Awaited<ReturnType<typeof renderedText>> = [];
       const collect = async (root = "body") => readings.push(...await renderedText(page, root, { mutedOnly: true }));
       await collect();
-      await page.getByRole("button", { name: "Contents 2" }).click();
+      await page.getByRole("button", { name: /^On this page/ }).click();
       await collect();
       await page.keyboard.press("Escape");
       await page.locator(".ub-sync-toggle").click();

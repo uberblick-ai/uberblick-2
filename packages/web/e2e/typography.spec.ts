@@ -174,13 +174,13 @@ test.describe("document and workspace typography", () => {
         await page.screenshot({ path: documentImage });
         await info.attach(`document-${viewport.width}`, { path: documentImage, contentType: "image/png" });
 
-        const contents = page.getByRole("button", { name: /^Contents \d+$/ });
+        const contents = page.getByRole("button", { name: /^On this page/ });
         if (touch) await contents.tap();
         else { await contents.focus(); await page.keyboard.press("Enter"); }
-        await expect(page.getByRole("menu", { name: /^Contents \d+$/ })).toBeVisible();
+        await expect(page.getByRole("navigation", { name: "On this page" })).toBeVisible();
         await expectScale(page, `contents ${viewport.width}px`);
         await page.keyboard.press("Escape");
-        await expect(page.getByRole("menu", { name: /^Contents \d+$/ })).toHaveCount(0);
+        await expect(page.getByRole("navigation", { name: "On this page" })).toHaveCount(0);
         if (viewport.width < 1280) await activateControl(page.locator(".ub-threads-toggle"));
         await expect(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." })).toBeVisible();
         await expectStep(page.locator(".ub-thread-text").filter({ hasText: "A UI-sized conversation." }), 14, 20);

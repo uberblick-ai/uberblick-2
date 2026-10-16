@@ -1,10 +1,9 @@
 /**
- * The floating document outline in a real browser.
+ * The document's collapsible navigation in a real browser.
  *
  * Its derived H1/H2 data stays in the unit suite. This file owns the behavior
- * only a layout and input model can prove: stable geometry, activation-only
- * opening, keyboard operation, touch toggling, long-list containment, and the
- * smooth scroll call into the rendered block.
+ * only a layout and input model can prove: column placement, scroll tracking,
+ * hover focus preservation, keyboard operation, touch toggling and containment.
  */
 
 import { chromium, expect, test } from "@playwright/test";
@@ -45,8 +44,6 @@ async function selectParagraph(paragraph: ReturnType<Page["locator"]>): Promise<
 
 /** Reach a control through the browser's real sequential focus order. */
 async function tabTo(page: Page, target: ReturnType<Page["locator"]>): Promise<void> {
-  // Drain the prior menu's deferred close cleanup before starting new input.
-  await page.clock.runFor(1);
   for (let attempts = 0; attempts < 30; attempts += 1) {
     await page.keyboard.press("Tab");
     if (await target.evaluate((node) => node === document.activeElement)) return;
@@ -58,54 +55,66 @@ async function tabTo(page: Page, target: ReturnType<Page["locator"]>): Promise<v
 async function typeLongOutline(page: Page): Promise<string[]> {
   const shown = ["Overview", "Install"];
   await typeHeading(page, 1, "Overview");
+  await page.keyboard.insertText("A section has enough text to read while scrolling. ".repeat(12));
+  await page.keyboard.press("Enter");
   await typeHeading(page, 2, "Install");
+  await page.keyboard.insertText("Installation has enough text to read while scrolling. ".repeat(12));
+  await page.keyboard.press("Enter");
   for (let number = 3; number <= 12; number += 1) {
-    const text = `Section ${number}`;
+    const text = number === 12
+      ? "Section 12 with a long heading that describes the final section in enough detail to exceed the available column width"
+      : `Section ${number}`;
     shown.push(text);
     await typeHeading(page, 2, text);
+    if (number < 12) {
+      await page.keyboard.insertText("This section continues with more document text. ".repeat(12));
+      await page.keyboard.press("Enter");
+    }
   }
   return shown;
 }
 
-test("pointer and keyboard share one contained, stable outline", async ({ page }) => {
-  await page.clock.install();
-  await page.setViewportSize({ width: 1400, height: 360 });
+test("a threadless page has a full-column row that follows document scrolling", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
+  await page.setViewportSize({ width: 1400, height: 600 });
   await openDocument(page);
-
+  await expect(page.locator(".ub-outline-trigger")).toHaveCount(0);
+  await expect(page.locator(".ub-document-rail")).toHaveCount(0);
   const expected = await typeLongOutline(page);
-  const trigger = page.getByRole("button", { name: `Contents ${expected.length}` });
+  const trigger = page.getByRole("button", { name: /^On this page/ });
+  const panel = page.getByRole("navigation", { name: "On this page" });
+  const rail = page.locator(".ub-document-rail");
   await expect(trigger).toBeVisible();
-
+  await expect(page.locator(".ub-thread")).toHaveCount(0);
+  await expect(rail).toBeVisible();
   const pane = page.locator(".ub-document-pane");
-  await pane.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  const firstHeading = page.locator(".ub-editor h1", { hasText: "Overview" });
-  const top = (await trigger.boundingBox())?.y;
-  const headingTop = (await firstHeading.boundingBox())?.y;
-  expect(top).toBeDefined();
-  expect(headingTop).toBeDefined();
-  await pane.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
+  await pane.evaluate((element) => { element.scrollTop = 0; });
+  await expect(trigger).toHaveText("On this page");
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await page.locator(".ub-title").boundingBox())?.y ?? 0, 0);
+  const [triggerBox, railBox, railWidth] = await Promise.all([trigger.boundingBox(), rail.boundingBox(), rail.evaluate((element) => element.clientWidth)]);
+  expect(triggerBox?.width).toBeCloseTo(railWidth, 0);
+  await page.locator(".ub-editor h1").evaluate((heading) => heading.scrollIntoView({ behavior: "instant", block: "start" }));
+  await expect(trigger).toContainText("Overview");
+  await page.locator(".ub-editor h2", { hasText: "Install" }).evaluate((heading) => heading.scrollIntoView({ behavior: "instant", block: "start" }));
+  await expect(trigger).toContainText("Install");
+  await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
   await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect
-    .poll(async () => (await firstHeading.boundingBox())?.y ?? 0)
-    .toBeLessThan(headingTop ?? 0);
-  await expect
-    .poll(async () => (await trigger.boundingBox())?.y)
-    .toBeCloseTo(top ?? 0, 1);
-
-  // Contents stays closed on hover and opens when the control is activated.
-  const panel = page.getByRole("menu", { name: `Contents ${expected.length}` });
-  await trigger.hover();
-  await page.clock.runFor(180);
-  await expect(panel).toBeHidden();
-  await trigger.click();
+  await expect(trigger).toBeInViewport({ ratio: 1 });
+  await expect(trigger).toContainText(expected.at(-1) ?? "");
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await pane.boundingBox())?.y ?? 0, 0);
+  // A short final section cannot reach the scroll container's top.
+  const finalHeading = page.locator(".ub-editor h2", { hasText: expected.at(-1) ?? "" });
+  expect((await finalHeading.boundingBox())?.y).toBeGreaterThan((await pane.boundingBox())?.y ?? 0);
+  await pane.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await page.locator(".ub-title").boundingBox())?.y ?? 0, 0);
+  const titleBefore = await page.locator(".ub-title").boundingBox();
+  await trigger.focus();
+  await trigger.press("Enter");
   await expect(panel).toBeVisible();
-  const rows = panel.getByRole("menuitem");
-  await expect(panel.getByRole("list")).toHaveCount(0);
-
+  expect(await panel.evaluate((node) => getComputedStyle(node).animationName)).toBe("none");
+  const rows = panel.getByRole("button");
+  await expect(rows).toHaveText(expected);
+  expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
   const [panelBox, listMetrics] = await Promise.all([
     panel.boundingBox(),
     panel.locator("ul").evaluate((list) => ({
@@ -114,8 +123,14 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
     })),
   ]);
   expect(panelBox).not.toBeNull();
-  expect((panelBox?.y ?? 0) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(360);
+  expect(panelBox?.height).toBeLessThanOrEqual(600 * 0.6 + 1);
+  expect(panelBox?.x).toBeGreaterThanOrEqual(railBox?.x ?? 0);
+  expect((panelBox?.x ?? 0) + (panelBox?.width ?? 0)).toBeLessThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0) + 1);
   expect(listMetrics.scrollHeight).toBeGreaterThan(listMetrics.clientHeight);
+
+  await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(async () => (await panel.boundingBox())?.y)
+    .toBeCloseTo(((await trigger.boundingBox())?.y ?? 0) + ((await trigger.boundingBox())?.height ?? 0), 0);
 
   const first = rows.first();
   const second = rows.nth(1);
@@ -124,60 +139,162 @@ test("pointer and keyboard share one contained, stable outline", async ({ page }
   ).toBeGreaterThan(
     await first.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingLeft)),
   );
-  const rowGround = await first.evaluate(
-    (node) => getComputedStyle(node).backgroundColor,
-  );
-  await first.hover();
-  expect(await first.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe(
-    rowGround,
-  );
-  await first.click();
+  await rows.last().click();
   await expect(panel).toBeHidden();
-
-  // A real Tab reaches the trigger without opening the menu. Enter opens it,
-  // and Uberblick's Tab override closes at the trigger so the browser owns
-  // subsequent page traversal in the shipped, threadless DOM.
-  await tabTo(page, trigger);
-  await expect(panel).toBeHidden();
-  await page.keyboard.press("Enter");
-  await expect(panel).toBeVisible();
-  await page.keyboard.press("Tab");
   await expect(trigger).toBeFocused();
-  await expect(panel).toBeHidden();
-
-  const target = page.locator(".ub-editor h2", { hasText: "Install" });
-  const targetId = await target.getAttribute("id");
-  expect(targetId).not.toBeNull();
-  await page.evaluate(() => {
-    const original = Element.prototype.scrollIntoView;
-    (window as unknown as { outlineScroll?: unknown[] }).outlineScroll = [];
-    Element.prototype.scrollIntoView = function scrollIntoView(options) {
-      (window as unknown as { outlineScroll: unknown[] }).outlineScroll.push({
-        id: this.id,
-        options,
-      });
-      original.call(this, options);
-    };
+  await expect(trigger).toContainText(expected.at(-1) ?? "");
+  expect(await trigger.locator("span").nth(1).evaluate((section) => ({
+    truncated: section.scrollWidth > section.clientWidth,
+    overflow: getComputedStyle(section).textOverflow,
+  }))).toEqual({ truncated: true, overflow: "ellipsis" });
+  await trigger.press("Enter");
+  const current = panel.locator('[aria-current="location"]');
+  await expect(current).toHaveText(expected.at(-1) ?? "");
+  const colours = await current.evaluate((entry) => {
+    const style = getComputedStyle(entry);
+    const probe = document.createElement("span");
+    probe.style.color = "var(--brand)";
+    document.body.append(probe);
+    const amber = getComputedStyle(probe).color;
+    probe.remove();
+    return { barWidth: style.borderInlineStartWidth, bar: style.borderInlineStartColor, amber, ink: style.color };
   });
-  for (const key of ["Enter", "Space"]) {
-    await tabTo(page, trigger);
-    await page.keyboard.press("Enter");
-    await second.press(key);
-    await expect(panel).toBeHidden();
-  }
-  expect(
-    await page.evaluate(
-      () => (window as unknown as { outlineScroll: unknown[] }).outlineScroll,
-    ),
-  ).toEqual(
-    ["Enter", "Space"].map(() => ({
-      id: targetId,
-      options: { behavior: "smooth", block: "start" },
-    })),
-  );
+  expect(colours.barWidth).toBe("2px");
+  expect(colours.bar).toBe(colours.amber);
+  expect(colours.ink).toBe(await page.locator(".ub-title").evaluate((title) => getComputedStyle(title).color));
+  expect(await first.evaluate((entry) => getComputedStyle(entry).color)).toBe(await trigger.locator("span").first().evaluate((caption) => getComputedStyle(caption).color));
+  await page.keyboard.press("Escape");
 });
 
-test("a non-hover pointer toggles the panel and dismisses it outside", async ({
+test("keyboard reaches every navigation entry and restores the row on dismissal", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await openDocument(page);
+  const expected = await typeLongOutline(page);
+  const trigger = page.getByRole("button", { name: /^On this page/ });
+  const panel = page.getByRole("navigation", { name: "On this page" });
+  const rows = panel.getByRole("button");
+  await page.mouse.move(0, 0);
+  await tabTo(page, trigger);
+  await expect(panel).toBeHidden();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+  for (const key of ["Enter", "Space"]) {
+    await trigger.press(key);
+    await expect(panel).toBeVisible();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(rows.first()).toBeFocused();
+    for (let index = 1; index < expected.length; index += 1) {
+      await page.keyboard.press("Tab");
+      await expect(rows.nth(index)).toBeFocused();
+    }
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await trigger.press(key);
+    await rows.nth(1).press(key);
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toContainText("Install");
+  }
+});
+
+test("comments scroll beneath the pinned row without moving it or the document", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 1400, height: 600 });
+  await openDocument(page);
+  await typeHeading(page, 1, "Commented section");
+  await page.keyboard.insertText("annotated paragraph");
+  for (let index = 0; index < 12; index += 1) {
+    await page.keyboard.press("Enter");
+    await page.keyboard.insertText("The document has its own scrolling content. ".repeat(12));
+  }
+  await page.locator(".ub-editor .ub-paragraph").first().click();
+  await selectParagraph(page.locator(".ub-editor .ub-paragraph").first());
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await page.getByPlaceholder(/Comment as/).fill("A comment line that occupies the scrolling comments column.\n".repeat(45));
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ub-thread")).toHaveCount(1);
+  await expect(editor(page)).toBeFocused();
+  const trigger = page.getByRole("button", { name: /^On this page/ });
+  const panel = page.getByRole("navigation", { name: "On this page" });
+  const pane = page.locator(".ub-document-pane");
+  const comments = page.locator("aside.ub-rail");
+  await pane.evaluate((element) => { element.scrollTop = 0; });
+  await comments.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await page.locator(".ub-title").boundingBox())?.y ?? 0, 0);
+  const cardBefore = await page.locator(".ub-thread").boundingBox();
+  const titleBefore = await page.locator(".ub-title").boundingBox();
+  await trigger.focus();
+  await trigger.press("Enter");
+  await expect(panel).toBeVisible();
+  expect(await page.locator(".ub-thread").boundingBox()).toEqual(cardBefore);
+  expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
+  await page.keyboard.press("Escape");
+  await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await pane.boundingBox())?.y ?? 0, 0);
+  const documentScroll = await pane.evaluate((element) => element.scrollTop);
+  const pinned = await trigger.boundingBox();
+  await comments.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect.poll(() => comments.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await pane.evaluate((element) => element.scrollTop)).toBe(documentScroll);
+  expect(await trigger.boundingBox()).toEqual(pinned);
+  await pane.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo((await page.locator(".ub-title").boundingBox())?.y ?? 0, 0);
+});
+
+test("hover preserves editor focus and selection, and a click makes it persistent", async ({ page }) => {
+  await page.clock.install();
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await openDocument(page);
+  await typeHeading(page, 1, "Overview");
+  await typeHeading(page, 2, "Install");
+  await page.keyboard.insertText("keep this selection");
+  await selectParagraph(page.locator(".ub-editor .ub-paragraph").last());
+  const trigger = page.getByRole("button", { name: /^On this page/ });
+  const panel = page.getByRole("navigation", { name: "On this page" });
+  await expect(editor(page)).toBeFocused();
+  await trigger.hover();
+  await expect(panel).toBeHidden();
+  await page.clock.runFor(600);
+  await expect(panel).toBeVisible();
+  await expect(editor(page)).toBeFocused();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("keep this selection");
+  await panel.hover();
+  await page.clock.runFor(600);
+  await expect(panel).toBeVisible();
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(600);
+  await expect(panel).toBeHidden();
+  await expect(editor(page)).toBeFocused();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("keep this selection");
+
+  await trigger.hover();
+  await page.clock.runFor(600);
+  await panel.getByRole("button", { name: "Install", exact: true }).click();
+  await expect(panel).toBeVisible();
+  await expect(trigger).toContainText("Install");
+  await expect(panel.locator('[aria-current="location"]')).toHaveText("Install");
+  await trigger.click();
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(600);
+  await expect(panel).toBeVisible();
+  await trigger.click();
+  await expect(panel).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.mouse.move(0, 0);
+  await trigger.hover();
+  await page.clock.runFor(600);
+  await expect(panel).toBeVisible();
+  await page.locator(".ub-title").click();
+  await expect(panel).toBeHidden();
+  await expect(page.locator(".ub-title")).toBeFocused();
+  await trigger.hover();
+  await page.clock.runFor(600);
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+});
+
+test("a non-hover pointer toggles the panel and dismisses it outside @webkit", async ({
   browser,
 }) => {
   const context = await browser.newContext({ hasTouch: true });
@@ -187,7 +304,13 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await openDocument(page);
     await typeHeading(page, 1, "Touch target");
     const trigger = page.locator(".ub-outline-trigger");
-    const panel = page.getByRole("menu", { name: "Contents 1" });
+    const panel = page.getByRole("navigation", { name: "On this page" });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+    const paneBox = await page.locator(".ub-document-pane").boundingBox();
+    expect((triggerBox?.y ?? 0) + (triggerBox?.height ?? 0)).toBeLessThanOrEqual((paneBox?.y ?? 0) + 1);
+    const openerBox = await page.getByRole("button", { name: "Show document list", exact: true }).boundingBox();
+    expect(triggerBox?.x).toBeGreaterThanOrEqual((openerBox?.x ?? 0) + (openerBox?.width ?? 0));
     await trigger.tap();
     await expect(panel).toBeVisible();
     await trigger.tap();
@@ -211,6 +334,8 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
     await page.keyboard.press("Escape");
     const threads = page.locator(".ub-threads-toggle");
     await expect(threads).toBeVisible();
+    const [rowBox, commentsBox] = await Promise.all([trigger.boundingBox(), threads.boundingBox()]);
+    expect((rowBox?.x ?? 0) + (rowBox?.width ?? 0)).toBeLessThanOrEqual(commentsBox?.x ?? 0);
     await trigger.tap();
     await expect(panel).toBeVisible();
     await threads.tap();
@@ -224,7 +349,7 @@ test("a non-hover pointer toggles the panel and dismisses it outside", async ({
       return node === document.activeElement;
     })).toBe(false);
 
-    // The drawer stays open across the breakpoint. If Contents opens while
+    // The drawer stays open across the breakpoint. If the outline opens while
     // wide, narrowing again must close its portal when CSS hides the trigger.
     await page.setViewportSize({ width: 1280, height: 540 });
     await expect(sheet).toHaveCount(0);
