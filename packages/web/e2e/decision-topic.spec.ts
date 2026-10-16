@@ -307,7 +307,6 @@ for (const { touch, appearance } of [
     await expect(reader.getByRole("region", { name: "Decisions" }).getByRole("link", { name: `Under review: ${renamed}`, exact: true })).toBeVisible();
     await reader.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href);
     await reader.getByRole("button", { name: "Decisions", exact: true }).click();
-    await reader.getByRole("searchbox", { name: "Search" }).fill(renamed);
     const row = reader.locator(".ub-docs-row").filter({ hasText: renamed });
     await expect(row).toHaveCount(1);
     await expect(row).not.toContainText("Changed after approval");
@@ -324,7 +323,6 @@ for (const { touch, appearance } of [
       await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).approvalChanged).toBe(true);
       const changedTitle = `Changed answer question ${current.uuid}`;
       await title.fill(changedTitle);
-      await reader.getByRole("searchbox", { name: "Search" }).fill(changedTitle);
       await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toContainText("Changed after approval");
       expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: changedTitle, approvalChanged: true });
     } finally { peer.close(); }
