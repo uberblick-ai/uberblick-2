@@ -16,19 +16,9 @@ import {
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "../shadcn/sidebar.js";
 import type { Workspace } from "../route.js";
 import { workspaceLabel } from "../workspace-names.js";
+import { workspaceLocationLabel } from "../workspace-location.js";
 
 const NO_NAMES: ReadonlyMap<string, string | null> = new Map();
-
-function locationLabel(address: string | null): string | null {
-  if (address === "local") return "This device";
-  if (address === null) return null;
-  try {
-    const url = new URL(address);
-    return url.protocol === "ws:" || url.protocol === "wss:" ? url.host || null : null;
-  } catch {
-    return null;
-  }
-}
 
 export function WorkspaceSwitcher({
   workspaces,
@@ -66,7 +56,7 @@ export function WorkspaceSwitcher({
     return () => onOpenChange?.(false);
   }, [active, open, onOpenChange]);
   const currentLabel = current === null ? "no workspace" : workspaceLabel(current, names, workspaces);
-  const location = current === null ? null : locationLabel(workspaceLocation);
+  const location = current === null ? null : workspaceLocationLabel(workspaceLocation);
 
   return (
     <SidebarMenu>
