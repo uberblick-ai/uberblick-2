@@ -110,7 +110,8 @@ export function DevicesSettings({ request, initial }: {
     <div className="ub-column gap-4">
       <div className="ub-page-header">
         <h1 id="ub-settings-title" className="ub-title">Devices</h1>
-        {identity?.handle !== undefined && <p className="m-0 ub-type-small">Computers signed in to {host(identity.hub)} as @{identity.handle}. Revoking one stops its sync; its downloaded documents stay.</p>}
+        <p className="m-0 min-h-(--type-small-leading) ub-type-small">{identity?.handle !== undefined
+          ? `Computers signed in to ${host(identity.hub)} as @${identity.handle}. Revoking one stops its sync; its downloaded documents stay.` : null}</p>
       </div>
       {feedback !== null && <p className="m-0 ub-type-ui" role={feedback.applied ? "status" : "alert"}>{feedback.text}</p>}
       {list === null ? <p className="m-0 ub-type-ui" role="status">Reading devices from the hub…</p> :

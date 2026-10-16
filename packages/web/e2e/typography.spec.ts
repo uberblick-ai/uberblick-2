@@ -73,7 +73,7 @@ async function expectHeading(element: Locator, size: number, leading: number, ab
 }
 
 test.describe("document and workspace typography", () => {
-  const { harness, openApp } = setupHarness();
+  const { harness, openApp } = setupHarness({ app: { upstream: true } });
   let agent: McpAgent | null = null;
   let documentUuid = "";
   let decisionUuid = "";

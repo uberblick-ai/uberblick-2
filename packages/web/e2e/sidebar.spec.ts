@@ -104,7 +104,7 @@ test("narrowing hands sidebar focus to the opener and preserves pane focus", asy
     await page.setViewportSize({ width: 1400, height: 832 });
     if (settings) {
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     }
     await page.getByRole("button", { name: settings ? "Hide sidebar" : "Hide document list", exact: true }).focus();
     await page.setViewportSize({ width: 820, height: 832 });
@@ -177,7 +177,7 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
     if (settings) {
       if (webkit && projectWidth < 1280) await openDrawer(page);
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     }
     for (const width of webkit ? [projectWidth] : [810, 1280]) {
       await test.step(`${settings ? "settings" : "documents"} at ${width}px`, async () => {

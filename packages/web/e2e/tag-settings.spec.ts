@@ -7,7 +7,7 @@ import type { Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { setupHarness } from "./app-helpers.js";
 
-const { harness, openApp } = setupHarness();
+const { harness, openApp } = setupHarness({ accessRole: "admin" });
 
 function successNotice(page: Page, message: string) {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
