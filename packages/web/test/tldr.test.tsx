@@ -293,10 +293,10 @@ describe("the document TL;DR", () => {
     act(() => openActions(host));
     expect(menuItem("Add TL;DR")).not.toBeUndefined();
     act(() => menuItem("Add TL;DR")?.click());
-    expect(within(host).getByText("Quick summary").textContent).toBe("Quick summary");
-    expect(within(host).getByRole("heading", { name: "TL;DR" }).textContent).toBe("TL;DR");
-    // Decorative, aria-hidden icon has no accessible handle.
-    expect(host.querySelector(".ub-tldr-icon")).not.toBeNull();
+    const card = within(host).getByRole("region", { name: "TL;DR" });
+    expect(within(card).getAllByRole("heading")).toHaveLength(1);
+    expect(within(card).getByRole("heading", { name: "TL;DR", level: 2 }).textContent).toBe("TL;DR");
+    expect(within(card).queryByText("Quick summary")).toBeNull();
     expect(within(host).getByText(/Write one or two plain-English sentences/).textContent).toContain(
       "plain-English sentences",
     );

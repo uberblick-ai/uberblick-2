@@ -129,6 +129,7 @@ const pairs: Pair[] = [
   // Selected list switches and the current workspace entry still use amber.
   ...["--brand-subtle", "--sidebar", "--sidebar-accent"]
     .map((ground) => text("retained functional brand ink", "--brand-ink", ground)),
+  text("TL;DR tab label ink", "--brand-ink", "--card"),
   // Global muted ink is not the sidebar's muted ink. These are its actual
   // light grounds, including code/source chrome, focused threads and stops.
   ...["--background", "--card", "--card-accent", "--muted", "--secondary", "--brand-subtle", "--status-warning-subtle", "--destructive-subtle", "--page-ground[0]", "--page-ground[1]"]
