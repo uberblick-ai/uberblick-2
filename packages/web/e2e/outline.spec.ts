@@ -275,6 +275,16 @@ test("hover preserves editor focus and selection, and a click makes it persisten
   await expect(panel).toBeVisible();
   await expect(trigger).toContainText("Install");
   await expect(panel.locator('[aria-current="location"]')).toHaveText("Install");
+  await expect(editor(page)).toBeFocused();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("keep this selection");
+  await page.mouse.move(0, 0);
+  await page.clock.runFor(600);
+  await expect(panel).toBeHidden();
+  await expect(editor(page)).toBeFocused();
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("keep this selection");
+
+  await trigger.hover();
+  await page.clock.runFor(600);
   await trigger.click();
   await page.mouse.move(0, 0);
   await page.clock.runFor(600);
@@ -294,6 +304,38 @@ test("hover preserves editor focus and selection, and a click makes it persisten
   await expect(panel).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
+});
+
+test("a hover list promoted to click mode restores focus on choice and Escape, and yields to outside clicks", async ({ page }) => {
+  await page.clock.install();
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await openDocument(page);
+  await typeHeading(page, 1, "Overview");
+  await typeHeading(page, 2, "Install");
+  const trigger = page.getByRole("button", { name: /^On this page/ });
+  const panel = page.getByRole("navigation", { name: "On this page" });
+  for (const close of ["choice", "Escape", "outside"]) {
+    await page.mouse.move(0, 0);
+    await trigger.hover();
+    await page.clock.runFor(600);
+    await expect(panel).toBeVisible();
+    await trigger.click();
+    await page.mouse.move(0, 0);
+    await page.clock.runFor(600);
+    await expect(panel).toBeVisible();
+    if (close === "outside") {
+      await page.locator(".ub-title").click();
+    } else {
+      const entry = panel.getByRole("button", { name: "Install", exact: true });
+      if (close === "choice") await entry.click();
+      else {
+        await entry.focus();
+        await page.keyboard.press("Escape");
+      }
+    }
+    await expect(panel).toBeHidden();
+    await expect(close === "outside" ? page.locator(".ub-title") : trigger).toBeFocused();
+  }
 });
 
 test("a non-hover pointer toggles the panel and dismisses it outside @webkit", async ({

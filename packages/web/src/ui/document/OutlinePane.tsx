@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent, ReactElement } from "react";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useOutline } from "../hooks.js";
-import { scrollBlockIntoView } from "./outline.js";
+import { OUTLINE_SCROLL_INSET, scrollBlockIntoView } from "./outline.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
 
 type OpenMode = "closed" | "hover" | "click";
@@ -109,7 +109,7 @@ export function OutlinePane({
       let active: string | null = null;
       for (const entry of entries) {
         const element = document.getElementById(entry.id);
-        if (element !== null && (element.getBoundingClientRect().top <= top + 16 || reachedEnd)) active = entry.id;
+        if (element !== null && (element.getBoundingClientRect().top <= top + OUTLINE_SCROLL_INSET || reachedEnd)) active = entry.id;
       }
       setCurrentId(active);
     };
@@ -175,6 +175,10 @@ export function OutlinePane({
         className="ub-outline-panel flex w-(--radix-popover-trigger-width)! max-h-[min(60dvh,var(--radix-popover-content-available-height))] flex-col overflow-hidden p-0!"
         onPointerEnter={enter}
         onPointerLeave={leave}
+        onInteractOutside={(event) => {
+          // Apply Radix's trigger exemption before it records an outside interaction.
+          if (event.target instanceof Node && trigger.current?.contains(event.target)) event.preventDefault();
+        }}
         onOpenAutoFocus={(event) => {
           if (openMode.current === "hover") event.preventDefault();
         }}
@@ -189,6 +193,9 @@ export function OutlinePane({
                 type="button"
                 aria-current={entry.id === currentId ? "location" : undefined}
                 className={`block w-full truncate border-0 border-s-2 border-solid bg-transparent px-2 py-2 text-left [font-family:inherit] ub-type-small hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring [@media(any-pointer:coarse)]:min-h-11 ${entry.id === currentId ? "border-(--brand) text-foreground" : "border-transparent text-muted-foreground"} ${entry.level === 2 ? "ps-5" : ""}`}
+                onMouseDown={(event) => {
+                  if (openMode.current === "hover") event.preventDefault();
+                }}
                 onClick={() => {
                   scrollBlockIntoView(entry.id);
                   const pane = document.querySelector<HTMLElement>(".ub-document-pane");

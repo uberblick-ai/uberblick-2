@@ -10,6 +10,9 @@ import type { HeadingLevel } from "@uberblick/schema";
 /** Deepest heading level the outline shows. Below this the outline is noise. */
 export const OUTLINE_MAX_LEVEL = 2;
 
+/** Keep scroll targets and the current-section threshold aligned. */
+export const OUTLINE_SCROLL_INSET = 16;
+
 export interface OutlineEntry {
   /** The block id — also the heading element's DOM id, which is how clicks scroll. */
   id: string;
@@ -45,9 +48,9 @@ export function observeOutline(
 }
 
 /** Scroll a block into view by its id. A no-op when the block is not rendered. */
-export function scrollBlockIntoView(blockId: string, inset = 16): void {
+export function scrollBlockIntoView(blockId: string): void {
   const block = document.getElementById(blockId);
   const pane = block?.closest<HTMLElement>(".ub-document-pane");
   if (block === null || block === undefined || pane === null || pane === undefined) return;
-  pane.scrollTo({ top: pane.scrollTop + block.getBoundingClientRect().top - pane.getBoundingClientRect().top - inset, behavior: "instant" });
+  pane.scrollTo({ top: pane.scrollTop + block.getBoundingClientRect().top - pane.getBoundingClientRect().top - OUTLINE_SCROLL_INSET, behavior: "instant" });
 }
