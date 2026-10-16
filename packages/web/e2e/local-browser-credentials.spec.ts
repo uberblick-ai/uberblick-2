@@ -52,7 +52,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   const pageInstance = await page.evaluate(() => performance.timeOrigin);
   const saved = page.locator(".ub-not-saved");
   const shared = page.locator(".ub-status-sync");
-  const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
+  const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-title]", { hasText: "this machine has no credentials for its hub" }) });
   await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
   const authenticatedGeometry = await statusGeometry(page);
 
@@ -157,7 +157,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     const pageInstance = await page.evaluate(() => performance.timeOrigin);
     const saved = page.locator(".ub-not-saved");
     const shared = page.locator(".ub-status-sync");
-    const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
+    const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-title]", { hasText: "this machine has no credentials for its hub" }) });
     await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
     await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));

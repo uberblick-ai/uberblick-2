@@ -7,10 +7,14 @@ import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
+import { notifyTransient } from "../src/notifications.js";
 
 const copy = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
   ...await original<object>(), writeToClipboard: copy,
+}));
+vi.mock("../src/notifications.js", async (original) => ({
+  ...await original<object>(), notifyTransient: vi.fn(),
 }));
 
 const ROOM = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc";
@@ -34,7 +38,7 @@ function fixture(patch: Partial<RoomStatus> = {}) {
   } };
 }
 
-beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); });
+beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(notifyTransient).mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 function settle() { act(() => void vi.advanceTimersByTime(5_000)); }
 
@@ -61,6 +65,12 @@ describe("the edited row", () => {
     expect(revision.querySelector(".ub-doc-id")?.textContent).toBe("e9faf4df");
     await act(async () => revision.click());
     expect(copy).toHaveBeenCalledWith("e9faf4df1234abcd");
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Revision copied", severity: "success" });
+    copy.mockResolvedValueOnce(false);
+    await act(async () => revision.click());
+    expect(notifyTransient).toHaveBeenLastCalledWith({
+      key: "clipboard", message: "Couldn't copy the revision. Try again in a browser with clipboard access.", severity: "error",
+    });
   });
 });
 

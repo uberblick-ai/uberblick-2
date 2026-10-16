@@ -66,7 +66,8 @@ describe("transient notifications", () => {
     expect(sonner.visible.size).toBe(1);
     expect(sonner.visible.has(first.options.id!)).toBe(false);
     expect(replacement.options.duration).toBe(6_000);
-    expect(replacement.options.description).toBe("Copied");
+    expect(replacement.title).toBe("Copied");
+    expect(replacement.options.description).toBeUndefined();
 
     // Removal of the old element must not forget the currently showing one.
     dismiss(first);
@@ -76,8 +77,51 @@ describe("transient notifications", () => {
     expect(sonner.toast.dismiss).toHaveBeenLastCalledWith(replacement.options.id);
     expect(retry.options.id).not.toBe(replacement.options.id);
     expect(retry.severity).toBe("error");
-    expect(retry.options.duration).toBe(6_000);
+    expect(retry.options.duration).toBe(Infinity);
     expect(sonner.visible.size).toBe(1);
+
+    notifications.notifyTransient({ key: "copy", message: "Copied", severity: "success" });
+    expect(sonner.toast.dismiss).toHaveBeenLastCalledWith(retry.options.id);
+    expect(lastPublication().options.duration).toBe(6_000);
+    expect(sonner.visible.size).toBe(1);
+  });
+
+  it.each([dismiss, expire])("closes retained action resources once when the toast leaves", (remove) => {
+    const onClose = vi.fn();
+    notifications.notifyTransient({ message: "Archived document", severity: "success", onClose });
+    const publication = lastPublication();
+    remove(publication);
+    remove(publication);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes replaced action resources even though programmatic Sonner dismissal has no callback", () => {
+    const onClose = vi.fn();
+    notifications.notifyTransient({ key: "archive", message: "Archived first document", severity: "success", onClose });
+    const first = lastPublication();
+    notifications.notifyTransient({ key: "archive", message: "Archived second document", severity: "success" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    dismiss(first);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])("uses native action dismissal and respects preventDefault (%s)", (keepOpen) => {
+    const onClose = vi.fn();
+    const onClick = vi.fn((event: { preventDefault: () => void }) => {
+      if (keepOpen) event.preventDefault();
+    });
+    notifications.notifyTransient({
+      key: "archive", message: "Archived document", severity: "success",
+      action: { label: "Undo", onClick }, onClose,
+    });
+    const action = lastPublication().options.action as import("sonner").Action;
+    const event = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    action.onClick(event as unknown as Parameters<typeof action.onClick>[0]);
+    expect(action.label).toBe("Undo");
+    expect(onClick).toHaveBeenCalledWith(event);
+    expect(onClose).toHaveBeenCalledTimes(keepOpen ? 0 : 1);
+    dismiss(lastPublication());
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it.each([dismiss, expire])("forgets a removed transient before its next publication", (remove) => {
@@ -119,7 +163,8 @@ describe("sticky notifications", () => {
     notifications.notifySticky({ key: "sync", message: "Retry failed", severity: "warning" });
     const updated = lastPublication();
     expect(updated.options.id).toBe(first.options.id);
-    expect(updated.options.description).toBe("Retry failed");
+    expect(updated.title).toBe("Retry failed");
+    expect(updated.options.description).toBeUndefined();
     notifications.notifySticky({ key: "sync", message: "Retry failed", severity: "error" });
     expect(lastPublication().options.id).toBe(first.options.id);
     expect(lastPublication().severity).toBe("error");

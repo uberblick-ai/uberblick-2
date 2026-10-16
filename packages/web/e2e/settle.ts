@@ -169,7 +169,7 @@ export async function proveMcpArrival(page: Page, session: McpSession, uuid: str
     if (archived) {
       await page.locator(".ub-doc-meta").getByRole("button", { name: "Document actions", exact: true }).click();
       await page.locator('[role="menu"]').getByRole("menuitem", { name: "Archive document", exact: true }).click();
-      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive document", exact: true }).click();
+      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive", exact: true }).click();
       await waitForAcknowledged(page, { path: options.path });
     }
   });
@@ -192,7 +192,7 @@ export async function proveBrowserArrival(page: Page, options: {
     if (archived) {
       await page.locator(".ub-doc-meta").getByRole("button", { name: "Document actions", exact: true }).click();
       await page.locator('[role="menu"]').getByRole("menuitem", { name: "Archive document", exact: true }).click();
-      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive document", exact: true }).click();
+      await page.locator('[role="alertdialog"]').getByRole("button", { name: "Archive", exact: true }).click();
       await waitForAcknowledged(page, { path: options.path });
     }
   });

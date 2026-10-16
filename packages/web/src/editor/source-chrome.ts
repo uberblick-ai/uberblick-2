@@ -78,7 +78,7 @@ export function copyButton(source: () => string): {
     void writeToClipboard(source()).then((copied) => {
       notifyTransient({
         key: "clipboard",
-        message: copied ? "Copied to clipboard" : "Copy failed",
+        message: copied ? "Source copied" : "Couldn't copy the source. Select the source text and copy it instead.",
         severity: copied ? "success" : "error",
       });
     });

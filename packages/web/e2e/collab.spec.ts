@@ -472,7 +472,7 @@ test("the open document's last-updated reading follows its stub through status a
   await page.getByRole("menuitem", { name: "Archive document" }).click();
   await page
     .getByRole("alertdialog")
-    .getByRole("button", { name: "Archive document" })
+    .getByRole("button", { name: "Archive", exact: true })
     .click();
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore).toBeVisible();

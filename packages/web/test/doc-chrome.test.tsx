@@ -169,6 +169,17 @@ describe("the document identity line keeps its local controls", () => {
     expect(writeToClipboard).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["Copy link", "Couldn't copy the link. Select it in the address bar instead."],
+    ["Copy document id", "Couldn't copy the document id. Try again in a browser with clipboard access."],
+  ])("gives a next step when %s fails", async (name, message) => {
+    vi.mocked(writeToClipboard).mockResolvedValueOnce(false);
+    const { host } = mount(fixture());
+    openActions(host);
+    await selectCopy(name);
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message, severity: "error" });
+  });
+
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
     const decision = fixture();
     setKind(decision.ydoc, "decision");
@@ -233,10 +244,10 @@ describe("the document identity line keeps its local controls", () => {
     if (archived) expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Copy link", "Copy document id"]);
     await selectCopy("Copy link");
     expect(writeToClipboard).toHaveBeenLastCalledWith(`${window.location.origin}${copyPath ?? `/${WORKSPACE}/${DOC_UUID}`}`, expect.any(Promise));
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "URL copied to clipboard", severity: "success" });
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Link copied", severity: "success" });
     openActions(host);
     await selectCopy("Copy document id");
     expect(writeToClipboard).toHaveBeenLastCalledWith(DOC_UUID, expect.any(Promise));
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Document id copied to clipboard", severity: "success" });
+    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Document id copied", severity: "success" });
   });
 });

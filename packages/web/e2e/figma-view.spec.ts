@@ -266,6 +266,23 @@ test("Expand enters browser fullscreen with the same iframe and browser exit pre
   await unchanged(frame, identity, visits);
 });
 
+test("a refused fullscreen request keeps the preview and names Open in Figma as the next step", { tag: "@webkit" }, async ({ browser }) => {
+  const created = await create(writer());
+  const visits: string[] = [];
+  const page = await open(browser, created.uuid, visits, { fullscreen: true });
+  const frame = page.locator(".ub-figma");
+  const identity = await frame.locator("iframe").elementHandle();
+  await frame.evaluate((element) => {
+    element.requestFullscreen = () => Promise.reject(new Error("Fullscreen refused"));
+  });
+  await frame.getByRole("button", { name: "Expand", exact: true }).click();
+  const notice = page.locator("[data-sonner-toast]:not([data-removed=true])");
+  await expect(notice).toContainText("Couldn't open fullscreen. Use Open in Figma instead.");
+  await expect(notice).toHaveAttribute("data-type", "error");
+  await expect(frame.getByRole("link", { name: "Open in Figma", exact: true })).toBeVisible();
+  await unchanged(frame, identity, visits);
+});
+
 test("the nested document scroller loads at most three nearby viewers and releases distant ones", async ({ browser }) => {
   const created = await create(writer(), [
     ...Array.from({ length: 4 }, (_, index) => ({ type: "figma", text: source(`budget${index}`) })),

@@ -144,7 +144,7 @@ test("a human selection keeps its range through pointer, keyboard, link and comm
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await expectModalOverControl(page, coveredControl, "alert-dialog");
   await page.getByRole("alertdialog").getByRole("button", {
-    name: "Archive document",
+    name: "Archive",
   }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
   await expect(toolbar).toHaveCount(0);
