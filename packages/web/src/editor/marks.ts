@@ -31,7 +31,7 @@ import {
 
 /**
  * The marks a prose block may carry: the closed inline set plus the annotation
- * anchor, as a ProseMirror `marks` spec. Source blocks (`code`, `mermaid`) take
+ * anchor, as a ProseMirror `marks` spec. Source blocks take
  * `COMMENT_MARK` alone.
  */
 export const PROSE_MARKS: string = [...INLINE_MARKS, COMMENT_MARK].join(" ");

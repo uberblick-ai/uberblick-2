@@ -5,7 +5,6 @@ export const BLOCK_TYPES = [
   "paragraph",
   "heading",
   "code",
-  "mermaid",
   "list-item",
   "quote",
   "table",

@@ -47,7 +47,6 @@ const BLOCK_LABELS: Record<BlockType, string> = {
   paragraph: "Paragraph",
   heading: "Heading",
   code: "Code block",
-  mermaid: "Mermaid block",
   "list-item": "List item",
   quote: "Quote",
   table: "Table",

@@ -1903,13 +1903,12 @@ for (const scheme of ["light"] as const) {
       await new Promise<void>((resolve) => provider.on("synced", resolve));
       const sources = [
         [".ub-code", "code", "const answer = 42;\nanswer;"],
-        [".ub-mermaid", "mermaid", "graph TD; A-->B"],
         [".ub-terminal", "terminal", "$ ub init\nworkspace ready"],
         [".ub-chart[data-view=line]", "chart", JSON.stringify({ version: 1, type: "line", collection: "missing", x: { field: "day", type: "date" }, y: [{ field: "value" }] })],
         [".ub-chart[data-view=table]", "chart", JSON.stringify({ version: 1, type: "table", collection: "missing", columns: [{ field: "value" }] })],
       ] as const;
       for (const [, type, text] of sources) appendBlock(doc, { type, text });
-      await expect(page.locator(".ub-copy")).toHaveCount(5);
+      await expect(page.locator(".ub-copy")).toHaveCount(4);
       await clipboardMode(page, "modern");
       const link = page.getByRole("menuitem", { name: "Copy link", exact: true });
       const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, page.url()).href;
@@ -2251,7 +2250,6 @@ async function contrastDocument(
       { text: " on the page", marks: {} },
     ] });
     appendBlock(doc, { type: "code", language: "ts", text: "const answer = 42;" });
-    appendBlock(doc, { type: "mermaid", text: "graph TD; A-->B" });
     appendBlock(doc, { type: "terminal", text: "$ ub init\nworkspace ready" });
     await expect(page.locator(".ub-terminal-screen")).toBeVisible();
     if ((page.viewportSize()?.width ?? 1280) >= 1280) {
@@ -2505,7 +2503,7 @@ for (const scheme of ["light"] as const) {
       await page.locator(".ub-peer-more").tap();
       await check(page.locator(".ub-peer-overflow-row").first());
       await page.keyboard.press("Escape");
-      for (const selector of [".ub-code .ub-copy", ".ub-mermaid .ub-copy", ".ub-terminal .ub-copy", ".ub-terminal-toggle"]) {
+      for (const selector of [".ub-code .ub-copy", ".ub-terminal .ub-copy", ".ub-terminal-toggle"]) {
         await check(page.locator(selector));
       }
       if ((page.viewportSize()?.width ?? 1280) < 1280) {
@@ -2566,7 +2564,7 @@ for (const scheme of ["light"] as const) {
       await page.keyboard.press("ArrowRight");
       expect(Number(await paintedIn(second, "z-index"))).toBeGreaterThan(Math.max(...stacking));
       await second.evaluate((element) => (element as HTMLElement).blur());
-      for (const selector of [".ub-code", ".ub-mermaid", ".ub-terminal"]) {
+      for (const selector of [".ub-code", ".ub-terminal"]) {
         const block = page.locator(selector);
         const copy = block.locator(".ub-copy");
         await page.mouse.move(1399, 999);
@@ -2822,7 +2820,7 @@ for (const scheme of ["light"] as const) {
       }
       await page.keyboard.press("Escape");
       const enabled: Awaited<ReturnType<typeof renderedText>> = [];
-      for (const kind of ["code", "mermaid"]) {
+      for (const kind of ["code", "terminal"]) {
         const copy = `.ub-${kind} .ub-copy`;
         await page.mouse.move(1399, 999);
         enabled.push(...await renderedText(page, copy));
@@ -2892,8 +2890,6 @@ for (const scheme of ["light"] as const) {
 test("terminal caption controls keep AA contrast on the appearance-aware tint", async ({ browser }, testInfo) => {
   const page = await openAppearanceApp(browser, "dark");
   await contrastDocument(page, "dark", async () => {
-    // The preceding diagram changes the terminal's position when it renders.
-    await expect(page.locator(".ub-mermaid")).toHaveAttribute("data-state", "ready");
     await page.addStyleTag({ content: "* { transition: none !important; }" });
     const readings: Record<string, Awaited<ReturnType<typeof renderedText>>> = {};
     for (const scheme of ["dark", "light"] as const) {

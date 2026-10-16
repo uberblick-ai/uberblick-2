@@ -1,5 +1,5 @@
 /**
- * The code/mermaid copy button.
+ * The code block copy button.
  *
  * Two things are worth defending. First, what lands on the clipboard is the
  * block's source verbatim — every line, no fence, no trailing decoration.
@@ -27,7 +27,7 @@ const DIAGRAM = "graph TD;\n  A-->B;";
 function documentWithSourceBlocks(): Y.Doc {
   const ydoc = new Y.Doc();
   appendBlock(ydoc, { type: "code", text: SHELL, language: "sh" });
-  appendBlock(ydoc, { type: "mermaid", text: DIAGRAM });
+  appendBlock(ydoc, { type: "code", language: "mermaid", text: DIAGRAM });
   return ydoc;
 }
 

@@ -30,7 +30,6 @@
   --ink-button-fg: oklch(0.985 0 0);
   --bar-quote: oklch(0.72 0.12 10);
   --bar-code: oklch(0.6 0.03 250);
-  --bar-mermaid: oklch(0.62 0.14 300);
   --bar-terminal: oklch(0.65 0.14 150);
   --bar-chart: oklch(0.6 0.13 240);
   --bar-decision: oklch(0.55 0.03 65);
@@ -53,7 +52,7 @@
   --border: oklch(1 0 0 / 10%); --rule: oklch(1 0 0 / 12%);
   --brand: oklch(0.8 0.18 65); --brand-ink: oklch(0.8 0.18 65); --brand-subtle: oklch(0.25 0.04 65);
   --ink-button: oklch(0.922 0 0); --ink-button-fg: oklch(0.205 0 0);
-  --bar-quote: oklch(0.75 0.12 10); --bar-code: oklch(0.7 0.03 250); --bar-mermaid: oklch(0.75 0.13 300);
+  --bar-quote: oklch(0.75 0.12 10); --bar-code: oklch(0.7 0.03 250);
   --bar-terminal: oklch(0.75 0.14 150); --bar-chart: oklch(0.72 0.12 240); --bar-decision: oklch(0.7 0.03 65); --bar-embed: oklch(0.72 0.1 195); --bar-wire: oklch(0.7 0.02 260);
   color-scheme: dark; } }
 :root[data-theme="dark"] {
@@ -62,7 +61,7 @@
   --border: oklch(1 0 0 / 10%); --rule: oklch(1 0 0 / 12%);
   --brand: oklch(0.8 0.18 65); --brand-ink: oklch(0.8 0.18 65); --brand-subtle: oklch(0.25 0.04 65);
   --ink-button: oklch(0.922 0 0); --ink-button-fg: oklch(0.205 0 0);
-  --bar-quote: oklch(0.75 0.12 10); --bar-code: oklch(0.7 0.03 250); --bar-mermaid: oklch(0.75 0.13 300);
+  --bar-quote: oklch(0.75 0.12 10); --bar-code: oklch(0.7 0.03 250);
   --bar-terminal: oklch(0.75 0.14 150); --bar-chart: oklch(0.72 0.12 240); --bar-decision: oklch(0.7 0.03 65); --bar-embed: oklch(0.72 0.1 195); --bar-wire: oklch(0.7 0.02 260);
   color-scheme: dark; }
 
@@ -99,7 +98,6 @@ p code { background: var(--card); border: 1px solid var(--border); border-radius
 .block.code { --bar: var(--bar-code); }
 .block.quote { --bar: var(--bar-quote); }
 .block.chart { --bar: var(--bar-chart); }
-.block.mermaid { --bar: var(--bar-mermaid); }
 .block.decision { --bar: var(--bar-decision); }
 .block.terminal { --bar: var(--bar-terminal); background: var(--term-screen); border-color: oklch(1 0 0 / 10%); }
 .block.terminal .cap { color: var(--term-muted); border-color: oklch(1 0 0 / 10%); }

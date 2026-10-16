@@ -150,15 +150,6 @@ export const BLOCK_MENU_ENTRIES: readonly BlockMenuEntry[] = [
     attrs: {},
   },
   {
-    id: "mermaid",
-    label: "Mermaid",
-    group: "Source",
-    trigger: null,
-    keywords: ["diagram", "flowchart", "sequence"],
-    type: "mermaid",
-    attrs: {},
-  },
-  {
     // `$ ` is ordinary prose too, so it must not trigger transcript conversion.
     id: "terminal",
     label: "Terminal demo",

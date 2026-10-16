@@ -54,7 +54,6 @@ describe("the editor palette and stored block types", () => {
       "figmaCaption",
       "heading",
       "list-item",
-      "mermaid",
       "paragraph",
       "quote",
       "table",
@@ -68,7 +67,6 @@ describe("the editor palette and stored block types", () => {
       "paragraph",
       "heading",
       "code",
-      "mermaid",
       "list-item",
       "quote",
       "table",
@@ -96,6 +94,7 @@ describe("the editor palette and stored block types", () => {
       "horizontalRule",
       "hardBreak",
       "image",
+      "mermaid",
     ]) {
       expect(uberblickSchema.nodes[absent]).toBeUndefined();
     }
@@ -104,7 +103,7 @@ describe("the editor palette and stored block types", () => {
     }
   });
 
-  it("allows the comment mark inside code and mermaid blocks, and nothing else there", () => {
+  it("allows the comment mark inside source blocks, and nothing else there", () => {
     // A `marks: ""` node spec would make y-prosemirror throw while building the
     // node — and its catch block deletes the Y.XmlText from the document.
     for (const name of BLOCK_NODE_NAMES.filter((name) => name !== "table" && name !== "card" && name !== "figma")) {
@@ -121,7 +120,6 @@ describe("the editor palette and stored block types", () => {
         expect(uberblickSchema.nodes[prose]?.allowsMarkType(type), mark).toBe(true);
       }
       expect(uberblickSchema.nodes.code?.allowsMarkType(type), mark).toBe(false);
-      expect(uberblickSchema.nodes.mermaid?.allowsMarkType(type), mark).toBe(false);
     }
   });
 
@@ -371,7 +369,7 @@ describe("foreign blocks already in the document", () => {
     initDoc(clean, { uuid: "doc-2", title: "Fine" });
     appendBlock(clean, { type: "heading", text: "h", level: 2 });
     appendBlock(clean, { type: "code", text: "x", language: "ts" });
-    appendBlock(clean, { type: "mermaid", text: "graph TD;" });
+    appendBlock(clean, { type: "code", language: "mermaid", text: "graph TD;" });
     expect(findForeignBlocks(getBlocksFragment(clean))).toEqual([]);
     expect(describeForeignBlocks([])).toBe("");
   });

@@ -120,8 +120,9 @@ describe("decision records linking GitHub work", () => {
           "https://github.com/owner/repo/issues",
           "https://github.com/owner/repo",
         ].map((href) => ({ type: "paragraph", text: "", inline: [{ text: "owner/repo#64", marks: { link: href } }] })),
-        ...["code", "mermaid", "table", "terminal"].map((type, index) => ({
+        ...["code", "code", "table", "terminal"].map((type, index) => ({
           type,
+          ...(index === 1 ? { language: "mermaid" } : {}),
           text: type === "table"
             ? `| Source |\n| --- |\n| https://github.com/owner/repo/issues/${70 + index} |`
             : `https://github.com/owner/repo/issues/${70 + index}`,

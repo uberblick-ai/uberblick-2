@@ -19,6 +19,7 @@ import {
   getMetaMap,
   listDirectory,
   normalizeLegacyTables,
+  removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
   tableText,
   readSidebar,
@@ -285,6 +286,7 @@ function observeForeignBlocks(
   const fragment = getBlocksFragment(connection.ydoc);
   const read = (): void => {
     if (connection.status.writable && connection.status.synced) {
+      removeLegacyMermaidBlocks(connection.ydoc);
       repairDuplicateBlocks(connection.ydoc);
       normalizeLegacyTables(connection.ydoc);
     }

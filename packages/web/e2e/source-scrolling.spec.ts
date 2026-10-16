@@ -20,11 +20,11 @@ async function openDocument(page: Page): Promise<void> {
   await page.keyboard.insertText("Neighbor paragraph");
 }
 
-async function insertSource(page: Page, name: "Code" | "Mermaid" | "Terminal demo", text: string): Promise<void> {
+async function insertSource(page: Page, name: "Code" | "Terminal demo", text: string): Promise<void> {
   await page.locator(".ub-editor .ProseMirror > *").last().hover();
   await page.getByRole("button", { name: "Insert block below" }).click();
   await page.getByRole("option", { name, exact: true }).click();
-  const selector = name === "Code" ? ".ub-code > code" : name === "Mermaid" ? ".ub-mermaid-source" : ".ub-terminal-source";
+  const selector = name === "Code" ? ".ub-code > code" : ".ub-terminal-source";
   const source = page.locator(selector).last();
   await source.click();
   for (const [index, line] of text.split("\n").entries()) {
@@ -96,9 +96,6 @@ async function exercisePanels(page: Page, wheel: boolean): Promise<void> {
   await insertSource(page, "Code", LONG_LINE);
   const code = page.locator(".ub-code > code");
   await expectSingleLine(code);
-  await insertSource(page, "Mermaid", LONG_LINE);
-  const mermaid = page.locator(".ub-mermaid-source");
-  await expectSingleLine(mermaid);
   await insertSource(page, "Terminal demo", LONG_LINE);
   const terminal = page.locator(".ub-terminal-source");
   await expectSingleLine(terminal);
@@ -107,7 +104,7 @@ async function exercisePanels(page: Page, wheel: boolean): Promise<void> {
   const screen = page.locator(".ub-terminal-screen");
   await expectSingleLine(frame, screen);
 
-  const fonts = await Promise.all([code, mermaid, terminal, frame].map((source) =>
+  const fonts = await Promise.all([code, terminal, frame].map((source) =>
     source.evaluate((element) => ({ size: getComputedStyle(element).fontSize, family: getComputedStyle(element).fontFamily }))));
   expect(fonts.every((font) => font.size === fonts[0]?.size && font.family === fonts[0]?.family)).toBe(true);
   expect(fonts[0]?.family).toMatch(/mono/i);
@@ -154,8 +151,7 @@ async function expectSourceControl(control: Locator, source: Locator, floor: num
 
 async function expectPinned(control: Locator, scroller: Locator): Promise<void> {
   await scroller.scrollIntoViewIfNeeded();
-  // A debounced Mermaid draw can shift the page between the two reads, so the
-  // pair repeats until one layout holds; a control that scrolls never passes.
+  // Repeat until one layout holds; a control that scrolls never passes.
   await expect(async () => {
     await scroller.evaluate((element) => { element.scrollLeft = 0; });
     const before = await control.boundingBox();
@@ -171,7 +167,6 @@ async function exerciseSourceTargets(page: Page, touch: boolean): Promise<void> 
   const floor = touch ? 44 : 24;
   for (const [name, selector] of [
     ["Code", ".ub-code > code"],
-    ["Mermaid", ".ub-mermaid-source"],
     ["Terminal demo", ".ub-terminal-source"],
   ] as const) {
     await insertSource(page, name, LONG_LINE);
@@ -246,7 +241,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
   await openDocument(page);
   const sourceText = `${LONG_LINE}\nsecond line with trailing spaces    `;
   const notices = page.locator("[data-sonner-toast]:not([data-removed=true])");
-  for (const name of ["Code", "Mermaid", "Terminal demo"] as const) await insertSource(page, name, sourceText);
+  for (const name of ["Code", "Terminal demo"] as const) await insertSource(page, name, sourceText);
   for (const path of ["clipboard", "selection"] as const) {
     // Record the product's clipboard boundary; OS clipboard permissions are
     // outside this proof. The fallback must use a focused, fully selected field.
@@ -265,7 +260,7 @@ async function exerciseSourceCopy(page: Page, touch: boolean): Promise<void> {
         return true;
       };
     }, path);
-    for (const selector of [".ub-code > code", ".ub-mermaid-source", ".ub-terminal-source"]) {
+    for (const selector of [".ub-code > code", ".ub-terminal-source"]) {
       const source = page.locator(selector);
       // Clicking a drawn terminal opens its editable transcript.
       if (selector === ".ub-terminal-source" && !await source.isVisible()) await page.locator(".ub-terminal-screen").click();

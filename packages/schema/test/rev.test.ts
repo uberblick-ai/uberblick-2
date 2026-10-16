@@ -29,7 +29,7 @@ describe("blockRev", () => {
     const base = blockRev({ type: "paragraph", text: "hello" });
     expect(blockRev({ type: "paragraph", text: "hello" })).toBe(base);
     expect(blockRev({ type: "paragraph", text: "hello " })).not.toBe(base);
-    expect(blockRev({ type: "mermaid", text: "hello" })).not.toBe(base);
+    expect(blockRev({ type: "terminal", text: "hello" })).not.toBe(base);
     expect(blockRev({ type: "heading", text: "hello", level: 1 })).not.toBe(
       blockRev({ type: "heading", text: "hello", level: 2 }),
     );

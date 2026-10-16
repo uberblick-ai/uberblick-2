@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   appendBlock,
   getBlocks,
+  getBlocksFragment,
   getMeta,
   initDoc,
   listDirectory,
@@ -109,6 +110,45 @@ async function peer(port: number, room: string): Promise<PeerClient> {
 }
 
 describe("hub sync", () => {
+  it("removes older-client Mermaid writes across live sync and delayed reconnects without losing ordinary edits", async () => {
+    const running = await hub();
+    const rig = await serverOn(running.port);
+    const created = await rig.ok("create_doc", {
+      title: "Old source blocks", description: "Older replicas keep using ordinary document sync.",
+      blocks: [{ type: "paragraph", text: "Original prose." }],
+    });
+    expect(await rig.instance.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
+    const room = roomForDoc(WORKSPACE, created.uuid);
+    const older = await peer(running.port, room);
+    await older.synced;
+    await waitUntil("the older client to receive the document", () => getBlocks(older.doc).length === 1);
+    const writeMermaid = () => {
+      const element = new Y.XmlElement("mermaid");
+      element.setAttribute("id", randomUUID());
+      const text = new Y.XmlText();
+      text.insert(0, "flowchart LR; A --> B");
+      element.insert(0, [text]);
+      getBlocksFragment(older.doc).push([element]);
+    };
+    writeMermaid();
+    await waitUntil("the old client to receive the removal", () => getBlocksFragment(older.doc).length === 1);
+
+    older.provider.disconnect();
+    writeMermaid();
+    appendBlock(older.doc, { type: "paragraph", text: "Written while offline." });
+    await older.provider.connect();
+    await waitUntil("the reconnected client to receive the removal and retain its prose", () =>
+      getBlocks(older.doc).length === 2 && !getBlocksFragment(older.doc).toArray().some(element => element instanceof Y.XmlElement && element.nodeName === "mermaid"),
+    );
+    const read = await rig.ok("get_doc", { uuid: created.uuid });
+    expect(read.blocks.map((block: { text: string }) => block.text)).toEqual(["Original prose.", "Written while offline."]);
+    const fresh = await peer(running.port, room);
+    await fresh.synced;
+    await waitUntil("a fresh replica to hydrate the hub's cleaned state", () => getBlocks(fresh.doc).length === 2);
+    expect(getBlocksFragment(fresh.doc).toArray()).toHaveLength(2);
+    expect(getBlocks(fresh.doc).map(block => block.text)).toEqual(["Original prose.", "Written while offline."]);
+  });
+
   it("retries a room whose first log hydration failed", async () => {
     const running = await hub();
     const databasePath = tempDatabasePath();

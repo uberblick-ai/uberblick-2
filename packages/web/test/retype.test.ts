@@ -123,12 +123,12 @@ describe("retypeSelectedBlock", () => {
 
     // Leaving `code` drops the language attribute entirely, in the document as
     // well as in the read.
-    retypeSelectedBlock(editor, "mermaid");
-    expect(getBlocks(ydoc)[0]?.type).toBe("mermaid");
+    retypeSelectedBlock(editor, "terminal");
+    expect(getBlocks(ydoc)[0]?.type).toBe("terminal");
     expect(getBlocks(ydoc)[0]?.language).toBeUndefined();
     const element = ydoc.getXmlFragment("blocks").get(0) as Y.XmlElement;
     expect(element.getAttribute("language")).toBeUndefined();
-    expect(retypeSelectedBlock(editor, "mermaid")).toBe(false);
+    expect(retypeSelectedBlock(editor, "terminal")).toBe(false);
   });
 
   /**
@@ -142,7 +142,7 @@ describe("retypeSelectedBlock", () => {
     editor.commands.setTextSelection({ from: 1, to: 8 });
     expect(editor.commands.toggleMark("bold")).toBe(true);
 
-    for (const type of ["code", "mermaid"] as const) {
+    for (const type of ["code", "terminal", "chart"] as const) {
       expect(retypeSelectedBlock(editor, type), type).toBe(false);
     }
     expect(getBlocks(ydoc)[0]).toMatchObject({
