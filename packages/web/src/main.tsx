@@ -5,6 +5,7 @@
  * refcounted rooms tolerate it, but this entry mounts without it.
  */
 
+import "@vitejs/plugin-react/preamble";
 import { createRoot } from "react-dom/client";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";

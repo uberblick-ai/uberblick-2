@@ -210,7 +210,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     const room = roomForDoc(harness().workspaceUuid, source);
     await expect.poll(() => harness().hubText(room)).toContain(`[${secondTitle}](${second})`);
     await expect.poll(() => harness().hubText(room)).toContain(`[${firstTitle}](${first})`);
-    await author.goto(new URL(`/${ws()}/${source}`, harness().appUrl).href);
+    await author.goto(new URL(`/${ws()}/${source}`, author.url()).href);
     await expect(author.locator(".ub-table th").last().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", second);
     await expect(author.locator(".ub-table td").first().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", first);
     await waitForAcknowledged(page, { path: "relay" });

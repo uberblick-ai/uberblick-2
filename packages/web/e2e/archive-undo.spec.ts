@@ -53,7 +53,7 @@ for (const input of ["pointer", "keyboard"] as const) {
     await expect(docButton(page, title)).toHaveCount(0);
     await expect(docButton(page, other)).toBeVisible();
 
-    await page.goto(new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href);
+    await page.goto(new URL(`/${harness().workspace}/${uuid}`, page.url()).href);
     await expect(page.locator(".ub-title")).toHaveValue(title);
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toHaveCount(0);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");

@@ -746,7 +746,7 @@ function serveBundleRequest(
       // not, and a stale one points at assets that are gone.
       "cache-control": "no-cache",
       ...(contentType === MIME[".html"] ? {
-        "content-security-policy-report-only": WEB_CONTENT_SECURITY_POLICY,
+        "content-security-policy": WEB_CONTENT_SECURITY_POLICY,
       } : {}),
     };
     if (request.method === "HEAD") {

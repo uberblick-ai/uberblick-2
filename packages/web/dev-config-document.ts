@@ -15,10 +15,10 @@ export { resolveDevProjectConfig } from "./dev-project-config.js";
 const HUB_CONFIG_PATH = "/uberblick-config.json";
 
 /** Bound workspace first for `/`, then deduplicated WORKSPACES, matching build defines. */
-export function devConfigDocument(env: NodeJS.ProcessEnv, cwd = process.cwd()): string {
+export function devConfigDocument(env: NodeJS.ProcessEnv, cwd = process.cwd(), browserHubUrl?: string): string {
   const config = resolveDevProjectConfig({ env, cwd });
   return JSON.stringify({
-    hubUrl: config.hubUrl,
+    hubUrl: browserHubUrl ?? config.hubUrl,
     workspaces: config.workspaces,
     hubAuthToken: config.hubAuthToken,
   });
@@ -37,7 +37,8 @@ export function devConfigDocumentPlugin(): Plugin {
         }
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-store");
-        response.end(devConfigDocument(process.env));
+        const protocol = server.config.server.https ? "wss" : "ws";
+        response.end(devConfigDocument(process.env, undefined, `${protocol}://${request.headers.host}/ws`));
       });
     },
   };

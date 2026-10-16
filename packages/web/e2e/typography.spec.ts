@@ -121,7 +121,7 @@ test.describe("document and workspace typography", () => {
       if (native === null) throw new Error("e2e: typography proof requires a viewport");
       for (const viewport of [native, { width: 640, height: 900 }]) {
         await page.setViewportSize(viewport);
-        await page.goto(new URL(`/${harness().workspace}/${documentUuid}`, harness().appUrl).href);
+        await page.goto(new URL(`/${harness().workspace}/${documentUuid}`, page.url()).href);
         await expect(editor(page).locator("h6")).toBeVisible();
         await expectStep(page.locator(".ub-title"), 36, 42);
         await expect(page.locator(".ub-title")).toHaveCSS("font-weight", "500");
@@ -196,7 +196,7 @@ test.describe("document and workspace typography", () => {
           ["General settings", "settings", "[data-settings-page]"],
           ["Tags settings", "settings/tags", "[data-settings-page]"],
         ] as const) {
-          await page.goto(new URL(`/${harness().workspace}/${suffix}`, harness().appUrl).href);
+          await page.goto(new URL(`/${harness().workspace}/${suffix}`, page.url()).href);
           await expect(page.locator(ready ?? "body")).toBeVisible();
           if (surface === "decision") {
             const title = page.locator(".ub-title");

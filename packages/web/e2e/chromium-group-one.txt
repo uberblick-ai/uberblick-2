@@ -6,6 +6,7 @@ caret-menu.spec.ts
 chrome.spec.ts
 content-security-policy.spec.ts
 data-table.spec.ts
+dev-content-security-policy.spec.ts
 decided-editor.spec.ts
 decision-topic.spec.ts
 presence-name.spec.ts
