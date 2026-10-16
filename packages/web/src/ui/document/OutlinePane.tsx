@@ -188,7 +188,7 @@ export function OutlinePane({
               <button
                 type="button"
                 aria-current={entry.id === currentId ? "location" : undefined}
-                className={`block w-full truncate border-s-2 px-2 py-2 text-left ub-type-small hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring [@media(any-pointer:coarse)]:min-h-11 ${entry.id === currentId ? "border-(--brand) text-foreground" : "border-transparent text-muted-foreground"} ${entry.level === 2 ? "ps-5" : ""}`}
+                className={`block w-full truncate border-0 border-s-2 border-solid bg-transparent px-2 py-2 text-left [font-family:inherit] ub-type-small hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring [@media(any-pointer:coarse)]:min-h-11 ${entry.id === currentId ? "border-(--brand) text-foreground" : "border-transparent text-muted-foreground"} ${entry.level === 2 ? "ps-5" : ""}`}
                 onClick={() => {
                   scrollBlockIntoView(entry.id);
                   const pane = document.querySelector<HTMLElement>(".ub-document-pane");
