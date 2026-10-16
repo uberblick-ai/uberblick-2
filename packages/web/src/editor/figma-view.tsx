@@ -106,7 +106,7 @@ class FigmaView implements NodeView {
       void this.dom.requestFullscreen().catch(() => {
         this.fullscreen = false;
         this.visibility.refresh();
-        notifyTransient({ key: "figma-fullscreen", message: "Fullscreen is unavailable", severity: "error" });
+        notifyTransient({ key: "figma-fullscreen", message: "Couldn't open fullscreen. Use Open in Figma instead.", severity: "error" });
       });
     });
     document.addEventListener("pointerdown", this.outside, true);

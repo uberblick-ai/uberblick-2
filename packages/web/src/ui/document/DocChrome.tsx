@@ -290,11 +290,11 @@ function copyAddress(room: string, segment: string, copyPath?: string): string {
   return copyPath?.replace(/^\//, "") ?? `${segment}/${parseRoom(room).uuid}`;
 }
 
-async function copyText(text: string, message: string, fallbackReady?: Promise<void>): Promise<void> {
+async function copyText(text: string, message: string, failure: string, fallbackReady?: Promise<void>): Promise<void> {
   const ok = await writeToClipboard(text, fallbackReady);
   notifyTransient({
     key: "clipboard",
-    message: ok ? message : "Copy failed",
+    message: ok ? message : failure,
     severity: ok ? "success" : "error",
   });
 }
@@ -319,7 +319,7 @@ export function CopyLink({
         className="ub-copy-link inline-flex min-h-11 min-w-[max(2.75rem,6em)] cursor-pointer items-center justify-center border-0 bg-transparent px-[0.15rem] py-0 [font:inherit] text-(--muted-foreground) hover:text-(--foreground) hover:underline focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
         aria-label={`Copy link — copies the canonical document URL for ${address}`}
         title={`Copy link — copies the canonical document URL for ${address}`}
-        onClick={() => void copyText(shareUrl(address, window.location.origin), "URL copied to clipboard")}
+        onClick={() => void copyText(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
       >
         Copy link
       </button>
@@ -450,9 +450,9 @@ function DocumentActions({
   const openingTldrEditor = useRef(false);
   const pendingCopy = useRef<(() => void) | null>(null);
 
-  const copyFromMenu = (text: string, message: string): void => {
+  const copyFromMenu = (text: string, message: string, failure: string): void => {
     const closed = new Promise<void>((resolve) => { pendingCopy.current = resolve; });
-    void copyText(text, message, closed);
+    void copyText(text, message, failure, closed);
   };
 
   useEffect(
@@ -499,12 +499,12 @@ function DocumentActions({
             }}
           >
             <DropdownMenuItem
-              onSelect={() => copyFromMenu(shareUrl(address, window.location.origin), "URL copied to clipboard")}
+              onSelect={() => copyFromMenu(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
             >
               Copy link
             </DropdownMenuItem>
             <DropdownMenuItem
-              onSelect={() => copyFromMenu(uuid, "Document id copied to clipboard")}
+              onSelect={() => copyFromMenu(uuid, "Document id copied", "Couldn't copy the document id. Try again in a browser with clipboard access.")}
             >
               Copy document id
             </DropdownMenuItem>
@@ -572,16 +572,15 @@ function DocumentActions({
             }
           }}
         >
-          <AlertDialogTitle>Archive {title}?</AlertDialogTitle>
+          <AlertDialogTitle>Archive “{title}”?</AlertDialogTitle>
           <AlertDialogDescription>
             {onArchive === null
               ? `${ARCHIVE_UNAVAILABLE}. Nothing has been archived.`
-              : "Its content is preserved, but the document becomes read-only and leaves normal listings until you Restore it."}
+              : "It leaves the document list and search. You can restore it later."}
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
               disabled={onArchive === null}
               onClick={(event) => {
                 // Lost readiness refuses Archive in place; keep the reason
@@ -594,7 +593,7 @@ function DocumentActions({
                 onArchive();
               }}
             >
-              Archive document
+              Archive
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -423,7 +423,7 @@ describe("read-only decision records", () => {
     act(() => openActions(host));
     act(() => menuItem("Archive document")?.click());
     const dialog = document.querySelector<HTMLElement>('[role="alertdialog"]')!;
-    act(() => button(dialog, "Archive document").click());
+    act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);
     expect(item.querySelector(".ub-thread-actions")).toBeNull();
     const editor = binding.mock.results[0]?.value.editor;

@@ -11,6 +11,15 @@ const fixture = {
   sticky: notifySticky,
   resolve: resolveSticky,
   appearance: (appearance: "light" | "dark") => setSetting("appearance", appearance),
+  undos: 0,
+  closedActions: 0,
+  archive: (): void => notifyTransient({
+    key: "archive",
+    severity: "success",
+    message: "Archived “Example document”.",
+    action: { label: "Undo", onClick: () => { fixture.undos += 1; } },
+    onClose: () => { fixture.closedActions += 1; },
+  }),
 };
 
 // Calls through this object execute outside a component and React context,

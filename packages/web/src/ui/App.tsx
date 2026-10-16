@@ -20,6 +20,7 @@ import {
   decisionTopicArchived,
   directoryRoom,
   getDirectoryEntry,
+  getMeta,
   initDoc,
   readSidebar,
   relatedDecisionTopics,
@@ -43,6 +44,7 @@ import {
 } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
+import { notifyTransient } from "../notifications.js";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
@@ -599,6 +601,10 @@ export function App(): ReactElement {
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
+  const archiveUndoReleases = useRef(new Set<() => void>());
+  useEffect(() => () => {
+    for (const release of archiveUndoReleases.current) release();
+  }, []);
   // Read the selected stub directly while its directory observer catches up.
   const selectedDirectoryEntry =
     directory === null || selected === null
@@ -712,7 +718,42 @@ export function App(): ReactElement {
     if (entry === null || decisionTopicArchived(directory.ydoc, selected)) return;
     restoreFocusRoom.current = doc.room;
     archiveDocument(directory.ydoc, sidebar.ydoc, selected);
-  }, [directory, doc, sidebar, selected]);
+    const uuid = selected;
+    const title = getMeta(doc.ydoc).title || "Untitled";
+    const key = `archive:${directory.room}:${uuid}`;
+    // Keep the original directory alive while Undo is offered, including
+    // navigation to a document in another workspace.
+    const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
+    let closed = false;
+    const close = (): void => {
+      closed = true;
+      held.release();
+      archiveUndoReleases.current.delete(close);
+    };
+    archiveUndoReleases.current.add(close);
+    notifyTransient({
+      key,
+      message: `Archived “${title}”.`,
+      severity: "success",
+      onClose: close,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+          if (!held.connection.status.writable) {
+            notifyTransient({
+              key,
+              message: `“${title}” is still archived. Open its link and choose Restore when the connection is ready.`,
+              severity: "error",
+            });
+            return;
+          }
+          restoreFocusRoom.current = null;
+          restoreDirectoryEntry(held.connection.ydoc, uuid);
+        },
+      },
+    });
+  }, [directory, doc, sidebar, selected, defaultIdentity]);
 
   /**
    * Canonicalize the default route, trailing slash and document UUID case

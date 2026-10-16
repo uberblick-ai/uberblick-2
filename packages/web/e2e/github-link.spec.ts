@@ -96,7 +96,7 @@ async function selectLinkText(link: Locator, from: number, to: number): Promise<
 async function archiveDoc(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
-  await page.getByRole("alertdialog").getByRole("button", { name: "Archive document" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Archive", exact: true }).click();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
 }
 
