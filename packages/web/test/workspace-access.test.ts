@@ -35,6 +35,24 @@ describe("the browser's hub management answers", () => {
       .request({ operation: "own-hub-role" })).resolves.toEqual({ status: "ok", role: "admin", hub: null });
   });
 
+  it("projects only the login handle and public device fields", async () => {
+    const device = { deviceId: "device", deviceName: "Laptop", signedInAt: 1_790_000_000_000, current: true };
+    await expect(reply({ status: "ok", hub: "https://bound.example", handle: "this-person",
+      identity: { private: true }, credential: "private", devices: [{ ...device, key: "private" }] })
+      .request({ operation: "list-devices" })).resolves.toEqual({ status: "ok", hub: "https://bound.example",
+        handle: "this-person", devices: [device] });
+    await expect(reply({ status: "sign-in-required", handle: "stale-person", devices: [device] })
+      .request({ operation: "list-devices" })).resolves.toEqual({ status: "sign-in-required", hub: null });
+    await expect(reply({ status: "ok", role: "member", handle: "private-for-this-operation" })
+      .request({ operation: "own-role", workspaceId: WORKSPACE.workspaceId }))
+      .resolves.toEqual({ status: "ok", role: "member", hub: null });
+  });
+
+  it.each([undefined, "", "a".repeat(40), "bad/handle", "-person", 12])("refuses a device list with an invalid login handle %j", async (handle) => {
+    await expect(reply({ status: "ok", handle, devices: [] }).request({ operation: "list-devices" }))
+      .rejects.toThrow("Invalid access answer");
+  });
+
   it.each([{ ...ADMIN, workspaces: -1 }, { ...ADMIN, lastSignedInAt: "never" },
     { ...ADMIN, current: undefined }, { ...ADMIN, principalId: undefined }])("refuses malformed administrator state %j", async (admin) => {
     await expect(reply({ status: "ok", admins: [admin], nextCursor: null }).request({ operation: "list-hub-admins" })).rejects.toThrow("Invalid access answer");

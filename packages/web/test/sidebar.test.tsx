@@ -39,6 +39,7 @@ import {
 } from "@uberblick/schema";
 import type { SidebarGroup } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
+import type { AccessAction } from "../src/shell/workspace-access.js";
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
 const ONE = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
@@ -90,6 +91,7 @@ function room(name: string): RoomConnection {
 
 vi.mock("../src/collab/rooms.js", () => ({
   acquireRoom: (name: string) => ({ connection: room(name), release: () => {} }),
+  mintHubAuthMessage: async () => "local-browser-bearer",
 }));
 
 const { App } = await import("../src/ui/App.js");
@@ -155,6 +157,29 @@ async function mount(node: ReactNode): Promise<HTMLElement> {
 async function openApp(path: string): Promise<HTMLElement> {
   window.history.replaceState(null, "", path);
   return await mount(<App />);
+}
+
+function settingsHub(ownRole: () => Promise<Record<string, unknown>>, hubAdmin = false) {
+  const calls: AccessAction[] = [];
+  vi.mocked(fetch).mockImplementation(async (input, init) => {
+    if (input === "/api/access") {
+      const action = JSON.parse(init?.body as string) as AccessAction;
+      calls.push(action);
+      const body = action.operation === "own-role" ? await ownRole()
+        : action.operation === "own-hub-role" ? hubAdmin ? { status: "ok", role: "admin" } : { status: "forbidden" }
+        : action.operation === "list-devices" ? { status: "ok", handle: "hub-person", devices: [] }
+        : action.operation === "list-members" ? { status: "ok", members: [] }
+        : { status: "forbidden" };
+      return Response.json({ ...body, hub: "https://hub.example.test" });
+    }
+    if (input === "/api/account") return Response.json({ state: "unavailable" });
+    if (input === "/uberblick-config.json") return Response.json({
+      hubUrl: "ws://127.0.0.1:4321", workspaces: [WORKSPACE],
+      servedWorkspaces: { [WORKSPACE]: { remoteHubUrl: "wss://hub.example.test/ws" } },
+    });
+    return new Response("", { status: 404 });
+  });
+  return calls;
 }
 
 /** Three documents in the directory, so the sidebar has titles to show. */
@@ -704,6 +729,48 @@ describe("the sidebar is the _sidebar document", () => {
 });
 
 describe("workspace settings is a route-driven sidebar mode", () => {
+  it.each(["general", "tags", "members"] as const)("keeps a pasted %s address while admin authority is pending", async (page) => {
+    let confirm: (() => void) | undefined;
+    const role = new Promise<void>((resolve) => { confirm = resolve; });
+    settingsHub(async () => { await role; return { status: "ok", role: "admin" }; });
+    const address = `/${WORKSPACE}/settings${page === "general" ? "" : `/${page}`}`;
+    const host = await openApp(address);
+    expect(window.location.pathname).toBe(address);
+    expect(within(host).queryByRole("region", { name: "Workspace" })).toBeNull();
+    expect(within(host).queryByRole("textbox")).toBeNull();
+    await act(async () => confirm?.());
+    await waitFor(() => expect(within(host).getByRole("heading", { level: 1 }).textContent)
+      .toBe(page === "general" ? "General" : page === "tags" ? "Tags" : "Members"));
+    expect(window.location.pathname).toBe(address);
+    expect(within(host).getByRole("region", { name: "Workspace" })).toBeTruthy();
+  });
+
+  it.each(["", "/tags", "/members"])("sends a member's direct Workspace address %s to Preferences", async (suffix) => {
+    const calls = settingsHub(async () => ({ status: "ok", role: "member" }));
+    const host = await openApp(`/${WORKSPACE}/settings${suffix}`);
+    await waitFor(() => expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/preferences`));
+    expect(within(host).getByRole("heading", { level: 1, name: "Preferences" })).toBeTruthy();
+    expect(within(host).queryByRole("region", { name: "Workspace" })).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Workspace name" })).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Main repository" })).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Create a tag" })).toBeNull();
+    expect(calls.some((action) => action.operation === "list-members")).toBe(false);
+  });
+
+  it("shows independently authorized groups in order, with distinct icons and no settings footer entry", async () => {
+    settingsHub(async () => ({ status: "ok", role: "admin" }), true);
+    const host = await openApp(`/${WORKSPACE}/settings`);
+    const settings = within(host).getByRole("navigation", { name: "Settings" });
+    const groups = within(settings).getAllByRole("region");
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual(["Workspace", "User", "Hub"]);
+    const entries = groups.flatMap((group) => within(group).getAllByRole("button"));
+    expect(entries.map((entry) => entry.textContent)).toEqual(["General", "Tags", "Members", "Preferences", "Devices", "Admins", "Workspaces"]);
+    const icons = entries.map((entry) => entry.querySelector("svg")?.innerHTML);
+    expect(icons.every((icon) => icon !== undefined)).toBe(true);
+    expect(new Set(icons).size).toBe(7);
+    expect(within(host).queryByRole("button", { name: "Settings" })).toBeNull();
+  });
+
   function pane(host: HTMLElement, label: string): HTMLElement {
     return within(host).getByLabelText(label);
   }
@@ -735,8 +802,8 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
     const host = await openApp(`/${WORKSPACE}`);
     const documents = pane(host, "Documents");
-    const settings = pane(host, "Workspace settings");
-    const settingsEntry = within(host).getByRole<HTMLButtonElement>("button", { name: "Workspace settings" });
+    const settings = pane(host, "Settings");
+    const settingsEntry = within(host).getByRole<HTMLButtonElement>("button", { name: "Settings" });
 
     expectLive(documents);
     expectDead(settings);
@@ -759,11 +826,11 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
     expect(within(host).getByLabelText(/; preferences$/)).toBe(accountControl);
     expect(document.activeElement).toBe(
-      within(settings).getByRole("button", { name: "Back to Unnamed workspace" }),
+      within(settings).getByRole("button", { name: "Unnamed workspace" }),
     );
-    expect(settings.textContent).toContain("Back to Unnamed workspace");
-    expect(within(settings).getByText("Workspace settings").textContent).toBe(
-      "Workspace settings",
+    expect(settings.textContent).toContain("Unnamed workspace");
+    expect(within(settings).getByText("Workspace").textContent).toBe(
+      "Workspace",
     );
     expect(within(settings).getByRole("button", { name: /./, current: "page" }).textContent).toContain(
       "General",
@@ -782,11 +849,11 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
     expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
 
-    act(() => within(settings).getByRole("button", { name: "Back to Unnamed workspace" }).click());
+    act(() => within(settings).getByRole("button", { name: "Unnamed workspace" }).click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}`);
     expectDead(settings);
     expectLive(documents);
-    expect(document.activeElement).toBe(settingsEntry);
+    expect(document.activeElement).toBe(within(host).getByRole("button", { name: "Settings" }));
   });
 
   it("opens a pasted settings address directly", async () => {
@@ -805,14 +872,14 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     const host = await openApp(`/${WORKSPACE}/settings/tags`);
     expect(within(host).getByRole("heading", { name: "Tags" }).textContent).toBe("Tags");
     expect(
-      within(pane(host, "Workspace settings")).getByRole("button", { name: /./, current: "page" }).textContent,
+      within(pane(host, "Settings")).getByRole("button", { name: /./, current: "page" }).textContent,
     ).toContain("Tags");
     expect(rooms.has(settingsRoom(WORKSPACE))).toBe(true);
   });
 
   it("offers no settings destination when the address names no workspace", async () => {
     const host = await openApp("/not-a-workspace");
-    expect(within(host).queryByRole("button", { name: "Workspace settings" })).toBeNull();
+    expect(within(host).queryByRole("button", { name: "Settings" })).toBeNull();
   });
 });
 
@@ -859,10 +926,10 @@ describe("the sidebar's fixed navigation", () => {
     ]);
     // The footer is an unnamed layout wrapper. Its structural marker sets the
     // original absence scope; the named control and non-null check prove it exists.
-    const footer = within(host).getByRole("button", { name: "Workspace settings" }).closest('[data-slot="sidebar-footer"]') as HTMLElement;
+    const footer = within(host).getByRole("button", { name: "Settings" }).closest('[data-slot="sidebar-footer"]') as HTMLElement;
     expect(footer).not.toBeNull();
     expect(within(footer).queryByRole("button", { name: "All documents" })).toBeNull();
-    expect(within(footer).getByRole("button", { name: "Workspace settings" })).not.toBeNull();
+    expect(within(footer).getByRole("button", { name: "Settings" })).not.toBeNull();
     expect(within(footer).getByLabelText(/; preferences$/)).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
@@ -926,7 +993,7 @@ describe("the sidebar's directory status", () => {
     expect(row?.title).not.toContain("sync when the hub is back");
     expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
     expect(row?.parentElement?.getAttribute("data-slot")).toBe("sidebar-footer");
-    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
+    expect(row?.nextElementSibling?.textContent).toBe("Settings");
   });
 
   it.each([
@@ -946,7 +1013,7 @@ describe("the sidebar's directory status", () => {
     expect(row?.textContent).toBe("Offline");
     expect(row?.title).toBe("Changes are saved on this device and sync when the hub is back.");
     expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
-    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
+    expect(row?.nextElementSibling?.textContent).toBe("Settings");
   });
 
   it("does not turn the no-workspace fallback into an offline workspace", async () => {

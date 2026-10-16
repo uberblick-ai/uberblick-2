@@ -103,7 +103,7 @@ test("narrowing hands sidebar focus to the opener and preserves pane focus", asy
   for (const settings of [false, true]) {
     await page.setViewportSize({ width: 1400, height: 832 });
     if (settings) {
-      await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
     await page.getByRole("button", { name: settings ? "Hide sidebar" : "Hide document list", exact: true }).focus();
@@ -176,7 +176,7 @@ test("narrow and docked layouts keep the drawer and pane controls inside the vie
     if (!webkit) await page.setViewportSize({ width: 1280, height: 832 });
     if (settings) {
       if (webkit && projectWidth < 1280) await openDrawer(page);
-      await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     }
     for (const width of webkit ? [projectWidth] : [810, 1280]) {
@@ -364,11 +364,11 @@ test("collapse isolates contents and portals immediately, and rapid reversal kee
   await expect(sidebar).toBeVisible();
   await expectPaneAtSidebarEdge(page);
   await page.getByTestId("account-menu").click();
-  await expect(page.locator(".ub-user-panel")).toBeVisible();
+  await expect(page.getByRole("menu")).toBeVisible();
   await sidebar.locator(".ub-sidebar-hide").evaluate((button: HTMLButtonElement) => {
     button.click();
   });
-  await expect(page.locator(".ub-user-panel")).toHaveCount(0);
+  await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(restore).toBeFocused();
 });
 
@@ -417,7 +417,7 @@ test("the drawer's menus, group editing and pointer, keyboard and touch sorting 
   await page.keyboard.press("Escape");
   await expect(drawer).toBeVisible();
   await page.getByTestId("account-menu").click();
-  await expect(page.locator(".ub-user-panel")).toBeVisible();
+  await expect(page.getByRole("menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(drawer).toBeVisible();
 

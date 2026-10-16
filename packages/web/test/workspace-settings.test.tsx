@@ -19,7 +19,7 @@ import type { HubEndpoint } from "../src/config.js";
 import { notifyTransient } from "../src/notifications.js";
 import { WorkspaceSettings } from "../src/ui/settings/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
-import type { AccessAction, AccessAnswer, AccessDevice, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
+import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
 
 vi.mock("../src/collab/rooms.js", async (original) => ({
   ...await original<typeof import("../src/collab/rooms.js")>(),
@@ -108,6 +108,7 @@ async function mount(
 ): Promise<HTMLElement> {
   mounted = await renderSettled(
     <WorkspaceSettings
+      admin={true}
       workspace={WORKSPACE}
       endpoint={endpoint}
       connection={connection}
@@ -121,6 +122,7 @@ async function mount(
 async function mountTags(connection: RoomConnection | null): Promise<HTMLElement> {
   mounted = await renderSettled(
     <WorkspaceSettings
+      admin={true}
       page="tags"
       workspace={WORKSPACE}
       endpoint={ENDPOINT}
@@ -131,6 +133,23 @@ async function mountTags(connection: RoomConnection | null): Promise<HTMLElement
   );
   return mounted.container;
 }
+
+it.each(["general", "tags", "members"] as const)("offers no %s controls or writes before workspace admin authority is confirmed", async (page) => {
+  const directory = statusRoom(SYNCED);
+  const catalog = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const before = Y.encodeStateAsUpdate(catalog.connection.ydoc);
+  const fetchImpl = vi.fn();
+  vi.stubGlobal("fetch", fetchImpl);
+  mounted = await renderSettled(<WorkspaceSettings admin={false} page={page} workspace={WORKSPACE}
+    endpoint={ENDPOINT} connection={directory.connection} catalogConnection={catalog.connection} agentSessions={2}
+    serving={{ workspace: WORKSPACE.uuid, remoteHubUrl: "wss://hub.example.test/ws", rebound: false }} />);
+  const pageControls = within(mounted.container);
+  expect(pageControls.queryAllByRole("textbox")).toEqual([]);
+  expect(pageControls.queryAllByRole("button")).toEqual([]);
+  expect(pageControls.queryAllByRole("table")).toEqual([]);
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(Y.encodeStateAsUpdate(catalog.connection.ydoc)).toEqual(before);
+});
 
 /** Change a controlled input through the native setter, like a keystroke. */
 function typeInto(input: HTMLInputElement, value: string): void {
@@ -224,6 +243,7 @@ it("counts only the routed directory after server state, across disconnects", as
   await act(async () => {
     mounted?.rerender(
       <WorkspaceSettings
+      admin={true}
         workspace={WORKSPACE}
         endpoint={ENDPOINT}
         connection={foreign.connection}
@@ -645,14 +665,9 @@ const ADMIN: AccessMember = { principalId: "admin-principal", githubAccountId: "
 const SECOND_ADMIN: AccessMember = { principalId: "second-principal", githubAccountId: "1002", githubUsername: "second-admin", role: "admin" };
 const NEW_MEMBER: AccessMember = { principalId: "new-principal", githubAccountId: "9001", githubUsername: "current-agent-login", role: "member" };
 
-function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?: string; devices?: AccessDevice[] } = {}) {
+function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?: string } = {}) {
   let role: AccessRole = options.role ?? "admin";
   let members = [{ ...ADMIN }, { ...SECOND_ADMIN }];
-  let devices = options.devices ?? [
-    { deviceId: "current-device", signedInAt: Date.UTC(2026, 9, 5, 10), current: true },
-    { deviceId: "other-own-device", signedInAt: Date.UTC(2026, 9, 4, 12), current: false },
-  ];
-  let signedIn = true;
   let ownRoleStatus = options.ownRoleStatus;
   let override: ((action: AccessAction) => AccessAnswer | Response | null) | null = null;
   const calls: { action: AccessAction; init: RequestInit }[] = [];
@@ -665,7 +680,6 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
     if (overridden instanceof Response) return overridden;
     if (overridden !== undefined && overridden !== null) body = overridden;
     else if (options.status !== undefined) body = { status: options.status, hub: options.status === "local-only" ? null : ACCESS_HUB };
-    else if (!signedIn) body = { status: "sign-in-required", hub: ACCESS_HUB };
     else switch (action.operation) {
       case "own-hub-role":
       case "list-hub-admins":
@@ -674,7 +688,7 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
       case "restore-workspace":
       case "remove-hub-admin": body = { status: "forbidden", hub: ACCESS_HUB }; break;
       case "own-role": body = { status: ownRoleStatus ?? "ok", hub: ACCESS_HUB, ...(ownRoleStatus === undefined ? { role } : {}) }; break;
-      case "list-devices": body = { status: "ok", hub: ACCESS_HUB, devices: [...devices] }; break;
+      case "list-devices": throw new Error("Members must not read devices");
       case "list-members": body = { status: "ok", hub: ACCESS_HUB, members: members.map((item) => ({ ...item })) }; break;
       case "resolve-account": body = { status: "ok", hub: ACCESS_HUB, githubAccountId: NEW_MEMBER.githubAccountId, githubUsername: NEW_MEMBER.githubUsername }; break;
       case "grant-member": {
@@ -695,20 +709,17 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
         members = members.filter((item) => item.principalId !== action.principalId);
         if (action.principalId === ADMIN.principalId) ownRoleStatus = "forbidden";
         body = { status: "ok", hub: ACCESS_HUB }; break;
-      case "revoke-device":
-        devices = devices.filter((device) => device.deviceId !== action.deviceId);
-        if (action.deviceId === "current-device") signedIn = false;
-        body = { status: "ok", hub: ACCESS_HUB }; break;
+      case "revoke-device": throw new Error("Members must not revoke devices");
     }
     return new Response(JSON.stringify(body), { status: body.status === "closure-failed" ? 500 : 200, headers: { "Content-Type": "application/json" } });
   });
   vi.stubGlobal("fetch", fetchImpl);
   return { calls, setOverride: (next: typeof override) => { override = next; },
-    add: (member: AccessMember) => { members.push(member); }, revokeCurrent: () => { signedIn = false; } };
+    add: (member: AccessMember) => { members.push(member); } };
 }
 
 async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid): Promise<HTMLElement> {
-  mounted = await renderSettled(<WorkspaceSettings page="access" workspace={WORKSPACE}
+  mounted = await renderSettled(<WorkspaceSettings admin={true} page="members" workspace={WORKSPACE}
     serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", rebound: false } : null}
     subject="browser-person" endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />);
   return mounted.container;
@@ -792,89 +803,6 @@ it.each(["@octocat", "https://github.com/octocat", "octo cat"])(
   },
 );
 
-it("offers members only their role and own devices with sign-in times and this-computer marker", async () => {
-  const hub = accessHub({ role: "member" }); const host = await mountAccess();
-  expect(host.textContent).toContain("Your role: member.");
-  expect(within(host).queryByLabelText("Members")).toBeNull();
-  expect(within(host).queryByLabelText("GitHub account")).toBeNull();
-  expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
-  const table = within(host).getByRole("table", { name: "Your devices" });
-  expect(within(table).getAllByRole("row", { hidden: true }).slice(1)).toHaveLength(2);
-  expect(table?.textContent).toContain("This computer");
-  expect(within(table).getAllByRole("time", { hidden: true })[0]?.getAttribute("datetime")).toBe("2026-10-05T10:00:00.000Z");
-  expect(table?.textContent).not.toContain("another-person");
-});
-
-it("shows duplicate hostnames and UUID fallback while revoking each row by UUID", async () => {
-  const hub = accessHub({ role: "member", devices: [
-    { deviceId: "current-device", deviceName: "shared-host", signedInAt: Date.UTC(2026, 9, 5, 10), current: true },
-    { deviceId: "other-own-device", deviceName: "shared-host", signedInAt: Date.UTC(2026, 9, 4, 12), current: false },
-    { deviceId: "legacy-device", signedInAt: Date.UTC(2026, 9, 3, 12), current: false },
-  ] });
-  const host = await mountAccess();
-  const table = within(host).getByRole("table", { name: "Your devices" });
-  expect(within(table).getAllByText("shared-host", { exact: true })).toHaveLength(2);
-  expect(table.textContent).toContain("legacy-device");
-  expect(table.textContent).not.toContain("current-device");
-  expect(table.textContent).not.toContain("other-own-device");
-  const current = accessButton(host, "Revoke device current-device");
-  const other = accessButton(host, "Revoke device other-own-device");
-  expect(current.textContent).toBe("Revoke device");
-  expect(other.textContent).toBe("Revoke device");
-  expect(within(current.closest("tr") as HTMLElement).getByText("This computer")).toBeTruthy();
-  expect(within(other.closest("tr") as HTMLElement).queryByText("This computer")).toBeNull();
-  expect(within(other.closest("tr") as HTMLElement).getByRole("time", { hidden: true }).getAttribute("datetime"))
-    .toBe("2026-10-04T12:00:00.000Z");
-  await clickAccess(host, "Revoke device other-own-device");
-  await clickAccess(screen.getByRole("alertdialog", { name: "Revoke device?" }), "Revoke device");
-  expect(hub.calls.find(({ action }) => action.operation === "revoke-device")?.action)
-    .toEqual({ operation: "revoke-device", deviceId: "other-own-device" });
-  expect(within(table).getAllByText("shared-host", { exact: true })).toHaveLength(1);
-  expect(accessButton(host, "Revoke device current-device")).toBeTruthy();
-  expect(accessButton(host, "Revoke device legacy-device")).toBeTruthy();
-});
-
-it.each(["h".repeat(253), "\u{1f4bb}".repeat(253), "<script>plain host</script>"])(
-  "renders an acceptable hostname as plain device text", async (deviceName) => {
-    accessHub({ role: "member", devices: [{ deviceId: "current-device", deviceName, signedInAt: 1, current: true }] });
-    const host = await mountAccess();
-    const table = within(host).getByRole("table", { name: "Your devices" });
-    expect(within(table).getByRole("rowheader").textContent).toBe(`${deviceName}This computer`);
-    expect(table.querySelector("script")).toBeNull();
-  },
-);
-
-it.each([null, 12, "", "h".repeat(254), "host\nname", "host\n", "host\tname", "host\u202ename", "host\u2028name", "host\u2029name", "host\ud800name"])(
-  "falls back to UUID without refusing a device with an unacceptable hostname", async (deviceName) => {
-    const hub = accessHub({ role: "member" });
-    hub.setOverride((action) => action.operation === "list-devices" ? new Response(JSON.stringify({
-      status: "ok", hub: ACCESS_HUB, devices: [{ deviceId: "current-device", deviceName, signedInAt: 1, current: true,
-        key: "must-not-be-shown", token: "must-not-be-shown" }],
-    }), { status: 200 }) : null);
-    const host = await mountAccess();
-    const table = within(host).getByRole("table", { name: "Your devices" });
-    expect(within(table).getByRole("rowheader").textContent).toBe("current-deviceThis computer");
-    expect(accessButton(host, "Revoke device current-device").textContent).toBe("Revoke device");
-    expect(table.textContent).not.toContain("must-not-be-shown");
-    expect(within(host).queryByRole("alert")).toBeNull();
-  },
-);
-
-it("keeps account-scoped own-device revocation available after a forbidden role read", async () => {
-  const hub = accessHub({ ownRoleStatus: "forbidden" }); const host = await mountAccess();
-  expect(host.textContent).toContain("The hub refused access");
-  expect(accessButton(host, "Revoke device other-own-device").disabled).toBe(false);
-  await clickAccess(host, "Revoke device other-own-device");
-  expect(hub.calls.some(({ action }) => action.operation === "revoke-device")).toBe(false);
-  const dialog = screen.getByRole("alertdialog", { name: "Revoke device?" });
-  expect(dialog?.textContent).toContain("This one device of yours loses access to this hub");
-  expect(dialog?.textContent).toContain("Documents already downloaded stay where they are");
-  expect(dialog?.textContent).not.toContain("every device");
-  await clickAccess(dialog, "Revoke device");
-  expect(hub.calls.find(({ action }) => action.operation === "revoke-device")?.action).toEqual({ operation: "revoke-device", deviceId: "other-own-device" });
-  expect(within(host).getByRole("table", { name: "Your devices" }).textContent).not.toContain("other-own-device");
-});
-
 it("shows a hub role-change refusal and keeps the hub's unchanged role", async () => {
   const hub = accessHub(); const host = await mountAccess();
   hub.setOverride((action) => action.operation === "change-role" ? { status: "last-admin", hub: ACCESS_HUB } : null);
@@ -897,25 +825,8 @@ it("confirms member removal on every device, then preserves acknowledged self-re
   await clickAccess(dialog, "Remove member");
   expect(host.textContent).toContain("signed-in-admin removed from this workspace.");
   expect(host.textContent).toContain("The hub refused access");
-  expect(within(host).queryByLabelText("Members")).toBeNull();
-  expect(accessButton(host, "Revoke device current-device").disabled).toBe(false);
-});
-
-it("acknowledges applied closure failure for this-computer revocation despite sign-in-required follow-up reads", async () => {
-  const hub = accessHub(); const host = await mountAccess();
-  hub.setOverride((action) => {
-    if (action.operation !== "revoke-device") return null;
-    hub.revokeCurrent(); return { status: "closure-failed", applied: true, hub: ACCESS_HUB };
-  });
-  await clickAccess(host, "Revoke device current-device");
-  const dialog = screen.getByRole("alertdialog", { name: "Revoke this computer?" });
-  expect(dialog?.textContent).toContain("sync with the hub stops until ub auth login https://hub.example.test is run again");
-  await clickAccess(dialog, "Revoke device");
-  expect(host.textContent).toContain("This computer was revoked.");
-  expect(host.textContent).toContain("The change was applied");
-  expect(host.textContent).toContain("Sign-in is required");
-  expect(within(host).getAllByRole("status", { hidden: true }).some((item) => item.textContent?.includes("This computer was revoked"))).toBe(true);
-  expect(within(host).queryByLabelText("Your devices")).toBeNull();
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(hub.calls.some(({ action }) => action.operation === "list-devices")).toBe(false);
 });
 
 it.each([
@@ -948,5 +859,5 @@ it("accepts the served workspace's decorated segment and makes new live reads on
   expect(priorSignals.every((signal) => signal?.aborted)).toBe(true);
   await mountAccess(true, null, WORKSPACE.segment);
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
-  expect(hub.calls.filter(({ action }) => action.operation === "list-devices")).toHaveLength(2);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-devices")).toHaveLength(0);
 });

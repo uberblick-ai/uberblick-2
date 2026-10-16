@@ -72,9 +72,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("workspace switcher");
       await page.keyboard.press("Escape");
       await page.getByTestId("account-menu").click();
-      await expect(page.locator("[data-slot=popover-content]")).toBeVisible();
+      await expect(page.getByRole("menu")).toBeVisible();
       await scan("user menu");
-      await page.keyboard.press("Escape");
+      await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+      await scan("Preferences");
+      await page.goBack();
       await page.getByRole("button", { name: "+ New group", exact: true }).click();
       const groupName = page.getByRole("textbox", { name: "Group name" });
       await groupName.fill("Scan group");

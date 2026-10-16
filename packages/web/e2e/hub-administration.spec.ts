@@ -113,7 +113,7 @@ test.describe("a hub administrator with no workspace membership", () => {
     await expect(page.getByText(/hub refused access/i)).toBeVisible();
     await expect(table).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Hub", exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.getByRole("button", { name: "Preferences", exact: true }).click();
     await expect(page.getByRole("button", { name: "Admins", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Workspaces", exact: true })).toHaveCount(0);
   });
@@ -122,7 +122,7 @@ test.describe("a hub administrator with no workspace membership", () => {
 test.describe("a workspace administrator with no hub role", () => {
   const { harness, openApp } = setupHarness({ accessRole: "admin" });
   test("workspace administration never shows hub administration", async ({ browser }) => {
-    const page = await openApp(browser, `/${harness().workspace}/settings/access`);
+    const page = await openApp(browser, `/${harness().workspace}/settings/members`);
     await expect(page.getByRole("table", { name: "Members", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Admins", exact: true })).toHaveCount(0);
     await page.goto(new URL(`/${harness().workspace}/settings/hub-workspaces`, harness().appUrl).href);

@@ -250,7 +250,7 @@ test.describe("authenticated Settings typography", () => {
     test(`one scale on access and hub Settings in ${colorScheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
       test.setTimeout(120_000);
       const touch = info.project.use.hasTouch === true;
-      const page = await openApp(browser, `/${harness().workspace}/settings/access`, {
+      const page = await openApp(browser, `/${harness().workspace}/settings/members`, {
         contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 800 } }), colorScheme, reducedMotion: "reduce" },
         readySelector: "[data-settings-page]",
       });
@@ -258,7 +258,7 @@ test.describe("authenticated Settings typography", () => {
       if (native === null) throw new Error("e2e: typography proof requires a viewport");
       for (const viewport of [native, { width: 640, height: 900 }]) {
         await page.setViewportSize(viewport);
-        for (const [suffix, table] of [["access", "Your devices"], ["hub-admins", "Hub admins"], ["hub-workspaces", "Hub workspaces"]] as const) {
+        for (const [suffix, table] of [["members", "Members"], ["devices", "Devices"], ["hub-admins", "Hub admins"], ["hub-workspaces", "Hub workspaces"]] as const) {
           await page.goto(new URL(`/${harness().workspace}/settings/${suffix}`, harness().appUrl).href);
           await expect(page.getByRole("table", { name: table, exact: true })).toBeVisible();
           for (const heading of await page.locator("[data-settings-page] h2").all()) {

@@ -134,106 +134,110 @@ for (const settings of [
     const label = cursor.locator("div");
     const peer = page.locator(".ub-peers > .ub-peer-control[data-peer-id]");
     const avatar = peer.locator(".ub-avatar");
+    const facts = await page.context().newPage();
+    try {
+      await facts.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
+      await expect(facts.getByRole("heading", { level: 1, name: "General", exact: true })).toBeVisible();
+      await page.bringToFront();
 
-    // A usable session title wins; otherwise the client's own name is retained.
-    for (const session of [
-      { title: "Uberblick Coordinator Agent", name: "Uberblick Coordinator Agent" },
-      { title: "   ", name: "Codex" },
-    ]) {
-      await writeAndLeave(
-        { name: "Codex", title: session.title },
-        uuid,
-        `watch this — written by ${session.name}, who has already gone`,
-      );
-      await expect(peer).toHaveCount(1);
-      await expect(peer).toHaveAccessibleName(new RegExp(`^${session.name} · agent.* · left$`));
-      // y-prosemirror batches awareness decorations through a zero-delay
-      // timer. Drain that ordinary editor work without unfreezing the grace.
-      await page.clock.runFor(1);
-      await expect(label).toHaveText(session.name);
-      await expect(label).toBeVisible();
-      await expect(peer).not.toHaveAccessibleName(/active|editing/);
-      await expect(avatar).toBeVisible();
+      // A usable session title wins; otherwise the client's own name is retained.
+      for (const session of [
+        { title: "Uberblick Coordinator Agent", name: "Uberblick Coordinator Agent" },
+        { title: "   ", name: "Codex" },
+      ]) {
+        await writeAndLeave(
+          { name: "Codex", title: session.title },
+          uuid,
+          `watch this — written by ${session.name}, who has already gone`,
+        );
+        await expect(peer).toHaveCount(1);
+        await expect(peer).toHaveAccessibleName(new RegExp(`^${session.name} · agent.* · left$`));
+        // y-prosemirror batches awareness decorations through a zero-delay
+        // timer. Drain that ordinary editor work without unfreezing the grace.
+        await page.clock.runFor(1);
+        await expect(label).toHaveText(session.name);
+        await expect(label).toBeVisible();
+        await expect(peer).not.toHaveAccessibleName(/active|editing/);
+        await expect(avatar).toBeVisible();
 
-      // The caret label keeps its original session colour.
-      const [caretColor, labelColor] = await Promise.all([
-        cursor.evaluate((element) => getComputedStyle(element).borderLeftColor),
-        label.evaluate((element) => getComputedStyle(element).backgroundColor),
-      ]);
-      expect(labelColor).toBe(caretColor);
+        // The caret label keeps its original session colour.
+        const [caretColor, labelColor] = await Promise.all([
+          cursor.evaluate((element) => getComputedStyle(element).borderLeftColor),
+          label.evaluate((element) => getComputedStyle(element).backgroundColor),
+        ]);
+        expect(labelColor).toBe(caretColor);
 
-      // A departure is visibly different without hover, including on a tablet.
-      // The full-strength initial retains the rendered text contrast floor.
-      await page.mouse.move(0, 0);
-      const paint = await avatar.evaluate((circle) => {
-        const style = getComputedStyle(circle);
-        let opacity = 1;
-        for (let node: Element | null = circle; node !== null; node = node.parentElement) {
-          opacity *= Number(getComputedStyle(node).opacity);
+        // A departure is visibly different without hover, including on a tablet.
+        // The full-strength initial retains the rendered text contrast floor.
+        await page.mouse.move(0, 0);
+        const paint = await avatar.evaluate((circle) => {
+          const style = getComputedStyle(circle);
+          let opacity = 1;
+          for (let node: Element | null = circle; node !== null; node = node.parentElement) {
+            opacity *= Number(getComputedStyle(node).opacity);
+          }
+          const button = circle.closest("button");
+          if (button === null) throw new Error("e2e: an avatar has no labelled control");
+          return {
+            borderStyle: style.borderLeftStyle,
+            ink: style.color,
+            ground: getComputedStyle(button).backgroundColor,
+            opacity,
+          };
+        });
+        expect(paint.borderStyle).toBe("dashed");
+        expect(paint.opacity).toBe(1);
+        expect(contrast(paint.ink, paint.ground)).toBeGreaterThanOrEqual(4.5);
+
+        // Presentation retains the departure; connection facts read real awareness.
+        await expect(facts.locator("[data-settings-facts] > div", { hasText: "MCP connections" })).toContainText("0");
+        await openSidebar();
+        if (settings.touch) {
+          await activate(page.getByRole("button", { name: "Close document list", exact: true }));
         }
-        const button = circle.closest("button");
-        if (button === null) throw new Error("e2e: an avatar has no labelled control");
-        return {
-          borderStyle: style.borderLeftStyle,
-          ink: style.color,
-          ground: getComputedStyle(button).backgroundColor,
-          opacity,
-        };
-      });
-      expect(paint.borderStyle).toBe("dashed");
-      expect(paint.opacity).toBe(1);
-      expect(contrast(paint.ink, paint.ground)).toBeGreaterThanOrEqual(4.5);
+        await activate(page.locator(".ub-sync-toggle"));
+        const presence = page.getByRole("dialog", { name: "Sync and presence" });
+        await expect(presence).toContainText("Nobody else is in this room.");
+        await expect(presence.getByText(session.name, { exact: true })).toHaveCount(0);
+        await activate(page.locator(".ub-sync-toggle"));
+        await expect(label).toBeVisible();
+        await expect(avatar).toBeVisible();
 
-      // Presentation retains the departure; connection facts read real awareness.
-      await openSidebar();
-      await activate(page.getByTestId("account-menu"));
-      await expect(page.locator(".ub-panel-fact", { hasText: "MCP connections" })).toContainText("0");
-      await page.keyboard.press("Escape");
-      if (settings.touch) {
-        await activate(page.getByRole("button", { name: "Close document list", exact: true }));
+        // Run every intermediate callback, including provider heartbeats: a
+        // reconnect cannot stand in for the presentation expiring on its own.
+        await page.clock.runFor(READABLE_MS - 1);
+        await expect(label).toHaveText(session.name);
+        await expect(label).toBeVisible();
+        await expect(avatar).toBeVisible();
+        await page.clock.runFor(AGENT_CURSOR_GRACE_MS - READABLE_MS - 1);
+        await expect(label).toBeVisible();
+        await expect(avatar).toBeVisible();
+        // Expiry queues the same decoration refresh: cross the deadline and
+        // drain its next event-loop turn as well.
+        await page.clock.runFor(2);
+        await expect(cursor).toHaveCount(0);
+        await expect(peer).toHaveCount(0);
+        expect(socketCloses).toBe(0);
       }
-      await activate(page.locator(".ub-sync-toggle"));
-      const presence = page.getByRole("dialog", { name: "Sync and presence" });
-      await expect(presence).toContainText("Nobody else is in this room.");
-      await expect(presence.getByText(session.name, { exact: true })).toHaveCount(0);
-      await activate(page.locator(".ub-sync-toggle"));
-      await expect(label).toBeVisible();
-      await expect(avatar).toBeVisible();
 
-      // Run every intermediate callback, including provider heartbeats: a
-      // reconnect cannot stand in for the presentation expiring on its own.
-      await page.clock.runFor(READABLE_MS - 1);
-      await expect(label).toHaveText(session.name);
-      await expect(label).toBeVisible();
-      await expect(avatar).toBeVisible();
-      await page.clock.runFor(AGENT_CURSOR_GRACE_MS - READABLE_MS - 1);
-      await expect(label).toBeVisible();
-      await expect(avatar).toBeVisible();
-      // Expiry queues the same decoration refresh: cross the deadline and
-      // drain its next event-loop turn as well.
-      await page.clock.runFor(2);
-      await expect(cursor).toHaveCount(0);
-      await expect(peer).toHaveCount(0);
-      expect(socketCloses).toBe(0);
-    }
-
-    if (!settings.touch) {
-      await writeAndLeave({ name: "Codex" }, uuid, "a retained departure that must not survive navigation");
-      await expect(peer).toHaveAccessibleName(/^Codex · agent.* · left$/);
-      await page.clock.runFor(1);
-      await expect(label).toHaveText("Codex");
-      await expect(avatar).toBeVisible();
-      // Navigate inside the mounted app; reopening before expiry must not
-      // resurrect a departure from the room's earlier visit.
-      await page.getByRole("button", { name: "All documents", exact: true }).click();
-      await expect(page.locator(".ub-docs")).toBeVisible();
-      await expect(cursor).toHaveCount(0);
-      await expect(peer).toHaveCount(0);
-      await openDoc(page, title);
-      await expect(cursor).toHaveCount(0);
-      await expect(peer).toHaveCount(0);
-      expect(socketCloses).toBe(0);
-    }
+      if (!settings.touch) {
+        await writeAndLeave({ name: "Codex" }, uuid, "a retained departure that must not survive navigation");
+        await expect(peer).toHaveAccessibleName(/^Codex · agent.* · left$/);
+        await page.clock.runFor(1);
+        await expect(label).toHaveText("Codex");
+        await expect(avatar).toBeVisible();
+        // Navigate inside the mounted app; reopening before expiry must not
+        // resurrect a departure from the room's earlier visit.
+        await page.getByRole("button", { name: "All documents", exact: true }).click();
+        await expect(page.locator(".ub-docs")).toBeVisible();
+        await expect(cursor).toHaveCount(0);
+        await expect(peer).toHaveCount(0);
+        await openDoc(page, title);
+        await expect(cursor).toHaveCount(0);
+        await expect(peer).toHaveCount(0);
+        expect(socketCloses).toBe(0);
+      }
+    } finally { await facts.close(); }
   });
 
   test(`reconnected agent sessions keep one title avatar and their latest departed caret — ${settings.name}`, async ({ browser }) => {

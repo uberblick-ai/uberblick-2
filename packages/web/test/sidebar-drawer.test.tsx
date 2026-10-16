@@ -231,7 +231,7 @@ it("keeps the drawer unsaved and closed on load and narrowing with desktop colla
 
 const destinations = [
   { choice: "another document", name: "Editing", path: `/${WORKSPACE}/${TWO}` },
-  { choice: "Workspace settings", name: "Workspace settings", path: `/${WORKSPACE}/settings` },
+  { choice: "Settings", name: "Settings", path: `/${WORKSPACE}/settings` },
   { choice: "another workspace", menu: `Unnamed workspace · ${OTHER_WORKSPACE.slice(0, 8)}`, path: `/${OTHER_WORKSPACE}` },
 ];
 
@@ -242,7 +242,7 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
     // A label query also finds the retired navigation whose role/name is
     // suppressed by aria-hidden; this asserts mounted boundary state.
     const documentsPane = within(drawer() as HTMLElement).getByLabelText("Documents");
-    const settingsPane = within(drawer() as HTMLElement).getByLabelText("Workspace settings");
+    const settingsPane = within(drawer() as HTMLElement).getByLabelText("Settings");
     for (const [pane, retired] of [[documentsPane, settings], [settingsPane, !settings]] as const) {
       expect(pane).not.toBeNull();
       expect(pane?.hasAttribute("inert")).toBe(retired);
@@ -252,10 +252,10 @@ it("retires each outgoing drawer pane from interaction and assistive navigation"
 
   await openDrawer();
   expectMode(false);
-  await click(sidebarButton("Workspace settings"));
+  await click(sidebarButton("Settings"));
   await openDrawer(true);
   expectMode(true);
-  await click(sidebarButton("Back to Unnamed workspace"));
+  await click(sidebarButton("Unnamed workspace"));
   await openDrawer();
   expectMode(false);
 });

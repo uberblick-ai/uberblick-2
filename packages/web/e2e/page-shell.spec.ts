@@ -103,7 +103,9 @@ test.describe("one page shell", () => {
           ["all", "All documents", ".ub-docs-table"],
           ["settings", "General", "#ub-workspace-name"],
           ["settings/tags", "Tags", "#ub-new-tag"],
-          ["settings/access", "Access", 'table[aria-label="Your devices"]'],
+          ["settings/members", "Members", 'table[aria-label="Members"]'],
+          ["settings/preferences", "Preferences", '.ub-appearance'],
+          ["settings/devices", "Devices", 'table[aria-label="Devices"]'],
           ["settings/hub-admins", "Admins", 'table[aria-label="Hub admins"]'],
           ["settings/hub-workspaces", "Workspaces", 'table[aria-label="Hub workspaces"]'],
         ] as const) {
@@ -143,21 +145,22 @@ test.describe("one page shell", () => {
     const contextOptions = { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 900 } }), reducedMotion: "reduce" as const };
     const referencePage = await openApp(browser, `/${harness().workspace}/${documentUuid}`, { contextOptions, readySelector: ".ub-editor .ProseMirror" });
     const reference = await expectShell(referencePage);
-    for (const [suffix, loading] of [["access", "Reading access from the hub…"], ["hub-admins", "Reading from the hub…"], ["hub-workspaces", "Reading from the hub…"]] as const) {
+    for (const [suffix, loading] of [["devices", "Reading devices from the hub…"], ["hub-admins", "Reading from the hub…"], ["hub-workspaces", "Reading from the hub…"]] as const) {
       const pending: Route[] = [];
       const page = await openApp(browser, `/${harness().workspace}/settings/${suffix}`, {
         contextOptions,
         beforeNavigate: async (target) => {
           await target.route("**/api/access", (route) => {
             const action = route.request().postDataJSON() as { operation: string };
-            if (action.operation === "own-hub-role") return route.continue();
+            if (action.operation === "own-hub-role" || action.operation === "own-role" ||
+              (suffix !== "devices" && action.operation === "list-devices")) return route.continue();
             pending.push(route);
           });
         },
       });
       await expect(page.getByText(loading, { exact: true })).toBeVisible();
       await expectShell(page, reference);
-      await expect.poll(() => pending.length).toBe(suffix === "access" ? 2 : 1);
+      await expect.poll(() => pending.length).toBe(1);
       for (const route of pending) await route.fulfill({ json: { status: "hub-down", hub: null } });
       await expect(page.getByRole("alert").filter({ hasText: "The hub cannot be reached." })).toBeVisible();
       await expectShell(page, reference);

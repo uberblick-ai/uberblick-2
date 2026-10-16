@@ -1,4 +1,3 @@
-import { expectOpenPages, provePageArrival } from "./settle.js";
 /** The footer identifies the login of this running local service, separately from presence. */
 import { devices, expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -17,8 +16,7 @@ async function showSidebar(page: Page, settings = false): Promise<void> {
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`the standard account footer keeps inert account settings and usable preferences — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
-    test.skip(info.project.name === "webkit-ipad", "The paired explicit iPad context owns touch coverage.");
+  test(`the account footer opens personal settings by pointer and keyboard — ${scheme}`, async ({ browser }) => {
     const page = await openApp(browser, "/", {
       contextOptions: { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 832 }, colorScheme: scheme, reducedMotion: "reduce" },
       readySelector: ".ub-document-sidebar",
@@ -26,102 +24,95 @@ for (const scheme of ["light", "dark"] as const) {
     for (const width of [1280, 810]) {
       await page.setViewportSize({ width, height: 832 });
       for (const mode of ["documents", "settings"] as const) {
-        const settings = mode === "settings";
-        await showSidebar(page, settings);
-        if (settings) {
-          await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+        await page.goto(harness().appUrl);
+        await showSidebar(page);
+        if (mode === "settings") {
+          await page.getByRole("button", { name: "Settings", exact: true }).click();
+          await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
           await showSidebar(page, true);
         }
         await expect(page.locator(".ub-list")).toHaveAttribute("data-mode", mode);
-        await expect(account(page)).toHaveCount(1);
-        await expect(account(page)).toContainText(`@${handle}`);
         const footer = page.locator('[data-slot="sidebar-footer"]');
-        await expect(footer).toHaveCount(1);
-        await expect(footer.locator('[data-slot="sidebar-menu"] > [data-slot="sidebar-menu-item"] [data-sidebar="menu-button"]'))
-          .toHaveCount(1);
-        const settingsEntry = footer.getByRole("button", { name: "Workspace settings", exact: true });
-        await expect(settingsEntry).toBeInViewport({ ratio: 1 });
+        await expect(account(page)).toContainText(`@${handle}`);
         await expect(account(page)).toBeInViewport({ ratio: 1 });
-        const placeholder = footer.getByText("Account settings", { exact: true });
-        expect(await placeholder.evaluate((element) => ({
-          interactive: element.closest('button, a, [role="button"], [role="link"]') !== null,
-          explicitTabIndex: element.hasAttribute("tabindex"),
-          tabIndex: (element as HTMLElement).tabIndex,
-        }))).toEqual({ interactive: false, explicitTabIndex: false, tabIndex: -1 });
-        const url = page.url();
-        const pages = page.context().pages().length;
-        await placeholder.click();
-        expect(page.url()).toBe(url);
-        await provePageArrival(page, { path: "browser context" });
-        await expectOpenPages(page.context(), pages);
-        await expect(page.locator(".ub-user-panel")).toHaveCount(0);
-
-        // A real pointer opens the existing controls, then native keyboard
-        // activation opens them again and restores focus to the same identity.
+        await expect(footer.getByRole("button", { name: "Settings", exact: true })).toHaveCount(mode === "settings" ? 0 : 1);
+        await expect(footer.getByText("Account settings", { exact: true })).toHaveCount(0);
         await account(page).click();
-        const panel = page.locator(".ub-user-panel");
-        await expect(panel.getByRole("group", { name: "Presence colour" })).toBeVisible();
-        await expect(panel.getByRole("group", { name: "Appearance" })).toBeVisible();
-        await expect(panel.getByText("MCP connections", { exact: true })).toBeVisible();
-        const name = panel.getByRole("textbox", { name: "Presence name", exact: true });
-        await expect(name).toHaveValue(/\S/);
-        await expect(account(page)).not.toContainText(await name.inputValue());
+        const menu = page.getByRole("menu");
+        await expect(menu.getByRole("menuitem")).toHaveText(["Preferences", "Devices"]);
         await page.keyboard.press("Escape");
         await expect(account(page)).toBeFocused();
         await page.keyboard.press("Enter");
-        await expect(panel).toBeVisible();
-        // The name uses the native form's Enter submission and remains
-        // separate from the verified account in both sidebar modes.
+        await menu.getByRole("menuitem", { name: "Preferences", exact: true }).press("Enter");
+        const preferences = page.locator("[data-settings-page]");
+        await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+        await expect(preferences).toContainText("Saved in this browser only.");
+        await expect(preferences.getByText("MCP connections", { exact: true })).toHaveCount(0);
+        const name = preferences.getByRole("textbox", { name: "Presence name", exact: true });
         await name.fill(`Presence ${scheme} ${width} ${mode}`);
         await name.press("Enter");
-        await page.keyboard.press("Escape");
-        await expect(account(page)).toBeFocused();
-        await page.keyboard.press("Enter");
-        await expect(name).toHaveValue(`Presence ${scheme} ${width} ${mode}`);
-        await expect(account(page)).toContainText(`@${handle}`);
-        const swatch = panel.getByRole("group", { name: "Presence colour" }).getByRole("button").first();
+        await expect(preferences).toContainText(`How others see you while you edit: Presence ${scheme} ${width} ${mode}`);
+        const swatch = preferences.getByRole("group", { name: "Presence colour" }).getByRole("button").first();
         await swatch.focus();
         await page.keyboard.press("Space");
         await expect(swatch).toHaveAttribute("aria-pressed", "true");
-        const appearance = panel.getByRole("group", { name: "Appearance" }).getByRole("button", {
+        const appearance = preferences.getByRole("group", { name: "Appearance" }).getByRole("button", {
           name: scheme === "light" ? "Light" : "Dark", exact: true,
         });
         await appearance.focus();
         await page.keyboard.press("Enter");
         await expect(appearance).toHaveAttribute("aria-pressed", "true");
-        await page.keyboard.press("Escape");
-        await expect(account(page)).toBeFocused();
-        if (settings) {
-          await page.getByRole("button", { name: /^Back to / }).click();
-          await showSidebar(page);
-        }
+        await showSidebar(page, true);
+        await expect(account(page)).toContainText(`@${handle}`);
+        await account(page).press("Enter");
+        await page.getByRole("menuitem", { name: "Devices", exact: true }).press("Enter");
+        await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+        await expect(page.getByRole("table", { name: "Devices", exact: true })).toBeVisible();
       }
     }
   });
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`the presence name form saves through iPad touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }) => {
+  test(`the presence name form saves through wide and narrow iPad touch — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }) => {
     const page = await openApp(browser, "/", {
       contextOptions: { ...devices["iPad Pro 11"], colorScheme: scheme, reducedMotion: "reduce" },
       readySelector: ".ub-body",
     });
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    await page.getByRole("button", { name: "Show document list", exact: true }).tap();
-    await account(page).tap();
-    const name = page.getByRole("textbox", { name: "Presence name", exact: true });
-    const save = page.getByRole("button", { name: "Save name", exact: true });
-    await expect(name).toBeInViewport({ ratio: 1 });
-    await expect(save).toBeInViewport({ ratio: 1 });
-    await name.tap();
-    await expect(name).toBeFocused();
-    await name.fill(`iPad ${scheme}`);
-    await save.tap();
-    await account(page).tap();
-    await expect(name).toHaveCount(0);
-    await account(page).tap();
-    await expect(name).toHaveValue(`iPad ${scheme}`);
-    await expect(account(page)).toContainText(`@${handle}`);
+    for (const width of [834, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(harness().appUrl);
+      await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+      await account(page).tap();
+      const menuitem = page.getByRole("menuitem", { name: "Preferences", exact: true });
+      expect((await menuitem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await menuitem.tap();
+      const name = page.getByRole("textbox", { name: "Presence name", exact: true });
+      const save = page.getByRole("button", { name: "Save name", exact: true });
+      await expect(name).toBeInViewport({ ratio: 1 });
+      await expect(save).toBeInViewport({ ratio: 1 });
+      expect((await name.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect((await save.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await name.tap();
+      await name.fill(`iPad ${scheme} ${width}`);
+      await save.tap();
+      await page.reload();
+      await expect(name).toHaveValue(`iPad ${scheme} ${width}`);
+      await showSidebar(page, true);
+      await expect(account(page)).toContainText(`@${handle}`);
+      await account(page).tap();
+      const devices = page.getByRole("menuitem", { name: "Devices", exact: true });
+      expect((await devices.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await devices.tap();
+      await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
+      const revoke = page.getByRole("table", { name: "Devices", exact: true }).getByRole("button").first();
+      expect((await revoke.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await revoke.tap();
+      await expect(page.getByRole("alertdialog")).toBeVisible();
+      await page.getByRole("alertdialog").getByRole("button", { name: "Cancel", exact: true }).tap();
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    }
   });
 }
 
@@ -138,9 +129,9 @@ test("a page outside ub open has no account reading or generated account name", 
   });
   await expect(account(page)).toContainText("Account unavailable");
   await account(page).click();
+  await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
   const presence = await page.getByRole("textbox", { name: "Presence name", exact: true }).inputValue();
   await expect(account(page)).not.toContainText(presence);
-  await page.keyboard.press("Escape");
   expect(accountRequests).toBe(0);
 });
 
