@@ -307,9 +307,9 @@ test("decision title renames sync without approving answer changes", async ({ br
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(editor(page)).toHaveText(answerText(current));
 
-  await reader.goto(new URL(`/${harness().workspace}/${owner.uuid}`, harness().appUrl).href);
+  await reader.goto(new URL(`/${harness().workspace}/${owner.uuid}`, reader.url()).href);
   await expect(reader.getByRole("region", { name: "Decisions" }).getByRole("link", { name: `Under review: ${renamed}`, exact: true })).toBeVisible();
-  await reader.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href);
+  await reader.goto(new URL(`/${harness().workspace}/all`, reader.url()).href);
   await reader.getByRole("button", { name: "Decisions", exact: true }).click();
   const row = reader.locator(".ub-docs-row").filter({ hasText: renamed });
   await expect(row).toHaveCount(1);
@@ -761,7 +761,7 @@ for (const { touch, appearance } of [
     await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
-    await page.goto(new URL(firstPath, harness().appUrl).href);
+    await page.goto(new URL(firstPath, page.url()).href);
     await selected(page, first.uuid, answerText(first));
     await proveMcpArrival(page, writer, first.uuid, { path: "upstream" });
     await expectMcp(async () => {
@@ -788,7 +788,7 @@ test("undecided proposals, agent stances and conflicting answers show selected-r
   await expect(editor(page)).toHaveText(answerText(rfc));
 
   const stance = await create(writer, "An initial stance", "Initial agent answer.", { kind: "decision", status: "decided" });
-  await page.goto(new URL(`/${harness().workspace}/${stance.uuid}`, harness().appUrl).href);
+  await page.goto(new URL(`/${harness().workspace}/${stance.uuid}`, page.url()).href);
   await selected(page, stance.uuid, answerText(stance));
   await selectedRfc(page, null);
   await answerHeader(page, "Agent stance", "agent-stance");

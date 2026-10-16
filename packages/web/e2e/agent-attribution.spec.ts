@@ -136,7 +136,7 @@ for (const settings of [
     const avatar = peer.locator(".ub-avatar");
     const facts = await page.context().newPage();
     try {
-      await facts.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
+      await facts.goto(new URL(`/${harness().workspace}/settings`, page.url()).href);
       await expect(facts.getByRole("heading", { level: 1, name: "General", exact: true })).toBeVisible();
       await facts.getByRole("button", { name: "Connection details", exact: true }).click();
       await page.bringToFront();

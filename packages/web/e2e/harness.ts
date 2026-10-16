@@ -1,5 +1,5 @@
 /**
- * The e2e bootstrap: one real hub and the bundle served by one real `ub open`.
+ * The e2e bootstrap: one real hub, the built bundle and one real `ub open`.
  *
  * Nothing here is a test double. The proof points these tests exist for —
  * convergence between two live clients, rendered remote cursors, and reloads
@@ -18,6 +18,8 @@
  *   `/uberblick-config.json`. The harness writes the project binding and private
  *   credential store, and removes inherited configuration pins before spawning
  *   it, so no developer machine state can steer the run.
+ *   Direct-upstream proofs use the same bundle behind a same-origin socket
+ *   proxy, so they bypass the local replica under the shared enforced policy.
  *
  * The upstream hub is startable and stoppable on its own: the local-first
  * proof point needs it gone while `ub open` and the browser stay up, then back
@@ -40,6 +42,9 @@ import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
 import { getBlocks } from "@uberblick/schema";
+import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
+import { preview } from "vite";
+import type { PreviewServer } from "vite";
 import { buildAppBundle, sharedAppBundle } from "./bundle.js";
 import { activateControl } from "./input-helpers.js";
 
@@ -176,11 +181,11 @@ export interface Harness {
   removeCurrentHubAdmin(): void;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
+  /** Same-origin bundle and socket proxy that bypasses the serving replica. */
+  upstreamAppUrl(): Promise<string>;
   /**
-   * This run's hub, as a client dials it. `ub open`'s own document already
-   * names it; a test that fulfils that request with a document of its own has
-   * to name it there too, because that document supplies the endpoint and the
-   * signing secret as well as the workspaces.
+   * The upstream address for Node and MCP clients. Browser fixtures reach this
+   * hub through their same-origin socket route under the shared web policy.
    */
   readonly hubUrl: string;
   /**
@@ -222,7 +227,7 @@ export interface Harness {
 /** Open the served bundle against the harness's upstream hub. */
 export async function openUpstreamApp(
   browser: Browser,
-  running: Pick<Harness, "appUrl" | "hubUrl" | "workspace" | "authSecret">,
+  running: Pick<Harness, "upstreamAppUrl" | "workspace" | "authSecret">,
   path = "/",
   options: {
     contextOptions?: BrowserContextOptions;
@@ -231,6 +236,7 @@ export async function openUpstreamApp(
     readySelector?: string | null;
   } = {},
 ): Promise<{ context: BrowserContext; page: Page }> {
+  const appUrl = await running.upstreamAppUrl();
   const context = await browser.newContext(options.contextOptions);
   try {
     await context.route("**/uberblick-config.json", async (route) => {
@@ -238,7 +244,7 @@ export async function openUpstreamApp(
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          hubUrl: running.hubUrl,
+          hubUrl: `${appUrl.replace("http:", "ws:")}ws`,
           workspaces: options.workspaces ?? [running.workspace],
           hubAuthToken: running.authSecret,
         }),
@@ -246,7 +252,7 @@ export async function openUpstreamApp(
     });
     const page = await context.newPage();
     await options.beforeNavigate?.(page);
-    await page.goto(new URL(path, running.appUrl).href);
+    await page.goto(new URL(path, appUrl).href);
     const readySelector = options.readySelector === undefined ? ".ub-document-sidebar" : options.readySelector;
     if (readySelector !== null) await expect(page.locator(readySelector)).toBeVisible();
     return { context, page };
@@ -421,6 +427,7 @@ export async function startHarness(options: {
   let open: ChildProcessWithoutNullStreams | null = null;
   let secondOpen: ChildProcessWithoutNullStreams | null = null;
   let secondProject: string | null = null;
+  let upstreamPreview: Promise<PreviewServer> | undefined;
 
   // One failure boundary for the whole bootstrap, the temp directory included:
   // a harness that did not finish starting must leave nothing behind — no
@@ -548,6 +555,16 @@ export async function startHarness(options: {
     return {
       ...(access === undefined ? {} : { access }),
       appUrl,
+      async upstreamAppUrl() {
+        upstreamPreview ??= preview({ configFile: false, root: packageRoot, logLevel: "error",
+          build: { outDir: bundleDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true,
+            headers: { "Content-Security-Policy": WEB_CONTENT_SECURITY_POLICY },
+            proxy: { "/ws": { target: hubUrl, ws: true } } } });
+        const serving = await upstreamPreview;
+        const address = serving.httpServer.address();
+        if (address === null || typeof address === "string") throw new Error("e2e: upstream preview has no TCP address");
+        return `http://127.0.0.1:${address.port}/`;
+      },
       hubUrl,
       authSecret: SECRET,
       workspace,
@@ -620,6 +637,7 @@ export async function startHarness(options: {
           const secondChild = secondOpen;
           secondOpen = null;
           if (secondChild !== null) await stopChild(secondChild).catch(() => {});
+          if (upstreamPreview !== undefined) await upstreamPreview.then((server) => server.close()).catch(() => {});
           await stopHub().catch(() => {});
           await secondHub?.stop().catch(() => {});
           secondHub = null;
@@ -631,6 +649,7 @@ export async function startHarness(options: {
   } catch (error) {
     if (open !== null) await stopChild(open).catch(() => {});
     if (secondOpen !== null) await stopChild(secondOpen).catch(() => {});
+    if (upstreamPreview !== undefined) await upstreamPreview.then((server) => server.close()).catch(() => {});
     await hub?.stop().catch(() => {});
     await secondHub?.stop().catch(() => {});
     rmSync(runDir, { recursive: true, force: true });
