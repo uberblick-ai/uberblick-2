@@ -91,6 +91,7 @@ describe("set_metadata", () => {
       { required: ["tags"] },
       { required: ["links"] },
       { required: ["discussion"] },
+      { required: ["code_check"] },
     ]);
     const before = state(rig, source.uuid);
     const empty = await rig.call("set_metadata", { uuid: source.uuid });

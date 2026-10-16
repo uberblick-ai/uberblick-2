@@ -63,6 +63,7 @@ describe("document round-trip", () => {
       tags: ["schema"],
       description: null,
       tldr: null,
+      code_check: [],
       links: [],
     });
     expect([...doc.share.keys()].sort()).toEqual([
@@ -84,6 +85,7 @@ describe("document round-trip", () => {
       tags: ["keystone", "schema"],
       description: null,
       tldr: null,
+      code_check: [],
       links: [target],
     });
   });

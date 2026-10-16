@@ -5,6 +5,7 @@
  */
 
 import type * as Y from "yjs";
+import { normalizeCodeCheck, readCodeCheck } from "./code-check.js";
 import {
   InvalidDocumentLifecycleError,
   InvalidSupersedesReferenceError,
@@ -16,6 +17,8 @@ import {
   readDocumentLifecycle,
 } from "./types.js";
 import type {
+  CodeCheck,
+  CodeCheckInput,
   DocMeta,
   DocumentKind,
   DocumentStatus,
@@ -30,6 +33,8 @@ export const ANNOTATIONS_KEY = "annotations";
  * same-key set/delete conflict follows Yjs's set-wins semantics.
  */
 const TAG_ASSIGNED_PREFIX = "tag-assigned:";
+/** Repository keys merge independently even when two replicas first write a check. */
+const CODE_CHECK_PREFIX = "code-check:";
 
 export function getMetaMap(ydoc: Y.Doc): Y.Map<unknown> {
   return ydoc.getMap<unknown>(META_KEY);
@@ -160,6 +165,29 @@ function storedTags(meta: Y.Map<unknown>): string[] {
   return tags.sort();
 }
 
+function storedCodeChecks(meta: Y.Map<unknown>): CodeCheck[] {
+  const checks: CodeCheck[] = [];
+  for (const [key, value] of meta.entries()) {
+    if (!key.startsWith(CODE_CHECK_PREFIX)) continue;
+    const check = readCodeCheck(value);
+    if (check !== null && key === `${CODE_CHECK_PREFIX}${check.repository}`) checks.push(check);
+  }
+  return checks.sort((a, b) => a.repository < b.repository ? -1 : a.repository > b.repository ? 1 : 0);
+}
+
+/** A check changes only its repository's metadata and never a content root. */
+export function setCodeCheck(ydoc: Y.Doc, input: CodeCheckInput): void {
+  const check = normalizeCodeCheck(input);
+  if (check === null) throw new Error("Invalid code check");
+  if (getMeta(ydoc).kind === "decision") throw new Error("Decision records do not carry code checks");
+  ydoc.transact(() => {
+    getMetaMap(ydoc).set(`${CODE_CHECK_PREFIX}${check.repository}`, {
+      ...check,
+      checked_at: new Date().toISOString(),
+    });
+  });
+}
+
 /**
  * Make the assignment equal to `tags`, writing only the tags whose presence
  * changed. An unchanged tag must not compete with another replica's toggle.
@@ -215,6 +243,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     description:
       typeof description === "string" && description !== "" ? description : null,
     tldr,
+    ...(!decision ? { code_check: storedCodeChecks(meta) } : {}),
     // Summary text wins over a separately merged mark, including older writers.
     ...(!decision && tldr === null && meta.get("tldrOptOut") === true ? { tldrOptOut: true as const } : {}),
     ...lifecycle,

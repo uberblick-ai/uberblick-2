@@ -10,6 +10,7 @@ export {
   getMeta,
   getMetaMap,
   initDoc,
+  setCodeCheck,
   setDescription,
   setDiscussion,
   setTldr,
@@ -21,6 +22,7 @@ export {
   setTitle,
 } from "./doc.js";
 export type { InitDocOptions } from "./doc.js";
+export { CODE_CHECK_RESULTS, normalizeCodeCheck } from "./code-check.js";
 export {
   DATA_KEY, DATA_LIMITS, applyDocData, prepareDocData, getDocDataEntries, hasDocData, readDocData, summarizeDocData,
 } from "./data.js";
@@ -273,6 +275,8 @@ export type {
   BlockInput,
   BlockType,
   CommentMark,
+  CodeCheck,
+  CodeCheckInput,
   DecisionReference,
   DecisionTopicResolution,
   DirectoryEntry,

@@ -81,6 +81,11 @@ export const toolHelpDetails = {
     "compatible `status`; ordinary documents omit both. When structured data exists, `data` lists collection " +
     "names and record counts and names `get_data` for deliberate reads. It contains no schemas or record " +
     "values; documents without data omit it.\n\n" +
+    "Regular documents return `code_check`: the latest comparison per repository, or [] when never checked. " +
+    "Each entry has repository (owner/name), commit, checked_at (writer's UTC recording time) and result: " +
+    "matches means agreement, ahead means intentionally undelivered behavior, drift means unintended " +
+    "disagreement. Decision records omit code_check. Content edits and other metadata writes leave these " +
+    "entries unchanged; they never appear in blocks or Markdown export.\n\n" +
     "Regular-page `decisions` resolve live topics without opening decision rooms: related topics first, " +
     "then other topics found in backlinks, marked `relation: \"related\"` or `relation: \"linked\"`. Any " +
     "record can establish either relation, including superseded, rejected or withdrawn history. Each group " +
@@ -157,6 +162,13 @@ export const toolHelpDetails = {
     "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
     "neither exists, and absent when unknown. Decisions have no TL;DR and their directory entries omit tldr. Page get_doc reads mark related and linked topics separately; " +
     "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
+    "Regular entries cache `code_check` without opening document rooms: [] means never checked, while " +
+    "absence means not cached yet. Decision entries omit it. Each entry records repository, commit, " +
+    "writer-stamped UTC checked_at and result: matches (agreement), ahead (intentionally undelivered " +
+    "behavior) or drift (unintended disagreement). Content edits leave the checks unchanged. A local " +
+    "set_metadata code_check write appears in the next listing. As with openThreadCount, hydration and " +
+    "peer updates repair this cache; an older whole-stub writer can drop it until a current replica " +
+    "recomputes it after a document change or restart.\n\n" +
     "Every entry, regular or decision, including `inForce`, `pending` and `conflicts`, carries " +
     "`openThreadCount` when known: the count of that document's threads whose `resolved` is not `true`, " +
     "including threads whose anchored text was deleted (`range: null`). Resolved threads do not count; " +
@@ -175,7 +187,7 @@ export const toolHelpDetails = {
     "live documents gain a known count on hydration or replay without a thread change. Whole-entry stub " +
     "writes use Yjs ordering: during version skew an older writer can drop the field, making it unknown " +
     "and excluding it from the filter until a current replica sees another document change or replays it " +
-    "on restart. Archived regular stubs are not repaired; restore supplies the current count.\n\n" +
+    "on restart. Archived regular stubs are not repaired; restore supplies the current count and code checks.\n\n" +
     "`description` is the document's own one-or-two-sentence description, cached in the stub so this listing " +
     "answers with it without opening a single room — read it before deciding what to get_doc. It is null for " +
     "a document nobody has described yet; documents created in the web UI start that way, and set_metadata " +
@@ -188,7 +200,7 @@ export const toolHelpDetails = {
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +
     "stamp exceeds it. It is also deliberately coarse — at most one re-stamp every few minutes of its own " +
-    "edits, immediately on a metadata or cached thread-count change. Both come from the clock of whichever replica wrote them, " +
+    "edits, immediately on a metadata, cached thread-count or code-check change. Both come from the clock of whichever replica wrote them, " +
     "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
@@ -371,11 +383,23 @@ export const toolHelpDetails = {
     "read their document's collection and contain no record values; use update_data to write records. Invalid mappings stay " +
     "editable source and show a problem message. Every block has one text an agent can edit.",
   set_metadata:
-    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links` and decision `discussion` " +
+    "Update one or more of `title`, `description`, `tldr`, `tags`, curated `links`, `code_check` and decision `discussion` " +
     "together. At least one " +
     "must be named, and undeclared fields are refused. Each field keeps its own type and limit; a field " +
     "refusal writes none of the named fields and adds `field` to its existing error. Document-level " +
     "refusals keep their usual shape.\n\n" +
+    "On a regular document, `code_check: {repository, commit, result}` records the latest comparison " +
+    "with code for one repository. Repository is owner/name, case-insensitive; commit is a full 40- or " +
+    "64-character hexadecimal Git commit hash, normalized to lowercase. Results are matches (the page agrees " +
+    "with that commit), ahead (intended behavior not yet " +
+    "delivered there) and drift (unintended disagreement). Only that repository's entry is replaced; " +
+    "other repositories remain and concurrent writes for different repositories survive synchronization. " +
+    "The writing replica sets checked_at to the current UTC time; callers do not supply it. Invalid " +
+    "repository, commit or result values and any decision-record code_check write refuse with " +
+    "`field: \"code_check\"`, preserving every field in the call. Entries live only in metadata: " +
+    "content edits and other metadata writes leave them unchanged, and Markdown export omits them. " +
+    "get_doc returns the entries, or []; list_docs caches them on regular entries, with absence meaning " +
+    "not cached yet. No removal or check history is provided.\n\n" +
     "A title is replaced wholesale without changing the document UUID, so links, backlinks and annotations " +
     "survive a rename. Title and description are trimmed and cannot be empty or cleared; replace a " +
     "description you dislike with a better one. The directory caches both and follows in the same call, " +
@@ -416,7 +440,7 @@ export const toolHelpDetails = {
     "but accepts title, description, tags and links. Title-only renames preserve answer approval, including " +
     "an existing changed-after-approval warning. An archived document refuses every metadata field. A success " +
     "returns uuid and the descriptive metadata fields, including unchanged values and " +
-    "discussion for decision records, plus shared write durability and " +
+    "code_check for regular documents or discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",
   archive_doc:
     "Hide a document: tombstones its directory stub, so it leaves list_docs and the search index. This is not " +

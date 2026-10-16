@@ -88,6 +88,7 @@ describe("the update log", () => {
           createdAt: expect.any(Number),
           updatedAt: expect.any(Number),
           openThreadCount: 0,
+          code_check: [],
         },
       ]);
 

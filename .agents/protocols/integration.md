@@ -160,7 +160,14 @@ MCP, checked against the merged code. A block that describes intended behavior
 the merged code does not deliver yet stays as it is, tracked by an issue under
 [AGENTS.md's Edit corpus rules](../../AGENTS.md#read-for-the-action); when you cannot tell
 whether a block is intent or a wrong claim, leave it and ask the maintainers on
-the PR. If MCP fails, open an issue titled `Corpus update outstanding for #<PR>`
+the PR. Once the update is applied, use `set_metadata` to record a `code_check`
+on each regular page it changed, against repository `uberblick-ai/uberblick-2`
+at the merge commit. Compare the page with that merged code and set `result`
+to `matches` when they agree, `ahead` when the page intentionally describes
+behavior not delivered there, or `drift` for an unintended disagreement. The
+writing replica supplies `checked_at`; keep the comparison's coverage and any
+unresolved gap in the PR evidence rather than implying an exhaustive check.
+If MCP fails, open an issue titled `Corpus update outstanding for #<PR>`
 that quotes the concrete failure and the update still to apply, link it on the
 PR, and still finish `merged`. A fresh integrator does not own
 or restart another session's development processes.

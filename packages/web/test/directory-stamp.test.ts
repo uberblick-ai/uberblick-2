@@ -87,6 +87,7 @@ function open(title: string, options: { stub?: string } = {}): Rig {
     uuid: UUID,
     title: options.stub ?? title,
     openThreadCount: 0,
+    code_check: [],
     createdAt: T0,
     updatedAt: T0,
   });
@@ -444,6 +445,7 @@ describe("directory stamps from the web", () => {
       title: "Publish after sync",
       tags: [],
       openThreadCount: 0,
+      code_check: [],
       createdAt: T0,
     });
     stop();
@@ -499,6 +501,7 @@ describe("directory stamps from the web", () => {
       uuid: UUID,
       title: "Arrived",
       openThreadCount: 0,
+      code_check: [],
       createdAt: T0,
       updatedAt: T0,
     });
@@ -740,7 +743,7 @@ describe("directory stamps from the web", () => {
     const stop = watchDocumentStub(doc, directory);
     expect(getDirectoryEntry(peer, UUID)).toEqual({
       uuid: UUID, title: "Legacy page", tags: [], updatedAt: T0,
-      openThreadCount: 0, createdAt: T0,
+      openThreadCount: 0, code_check: [], createdAt: T0,
     });
     setTitle(doc, "Edited legacy page");
     expect(getDirectoryEntry(peer, UUID)?.title).toBe("Edited legacy page");

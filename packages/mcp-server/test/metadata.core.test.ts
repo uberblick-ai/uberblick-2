@@ -1,8 +1,8 @@
 /** Combined metadata writes retain the field rules and refuse before mutation. */
 import { randomUUID } from "node:crypto";
 
-import { EXAMPLE_TAGS, getDirectoryEntry, getMetaMap, setLinks, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { EXAMPLE_TAGS, getDirectoryEntry, getDirectoryMap, getMetaMap, setLinks, setTldrOptOut, upsertDirectoryEntry } from "@uberblick/schema";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
@@ -11,6 +11,8 @@ const rigs: Rig[] = [];
 const DESCRIPTION = "Metadata contract fixture.";
 const AUTH = { ...EXAMPLE_TAGS[0], state: "active" };
 const MCP = { ...EXAMPLE_TAGS[2], state: "active" };
+const COMMIT = "33086e02eb66f2e32dcce67a21c6c8ece9cf9ae4";
+const CHECK = { repository: "uberblick-ai/uberblick-2", commit: COMMIT, result: "matches" } as const;
 
 async function localRig(): Promise<Rig> {
   const rig = await startServer(testConfig());
@@ -37,6 +39,7 @@ function metadata(read: any) {
     tags: read.tags,
     links: read.links,
     ...(read.discussion === undefined ? {} : { discussion: read.discussion }),
+    ...(read.code_check === undefined ? {} : { code_check: read.code_check }),
   };
 }
 
@@ -77,6 +80,145 @@ afterEach(async () => {
 afterAll(removeTempDirs);
 
 describe("set_metadata", () => {
+  it("records UTC checks, replaces case-insensitive repository entries and preserves other checks and content", async () => {
+    const rig = await localRig();
+    const source = await document(rig);
+    expect(await rig.ok("get_doc", { uuid: source.uuid })).toHaveProperty("code_check", []);
+    const beforeExport = await rig.ok("export_markdown", { uuid: source.uuid });
+    const before = Date.now();
+    const first = await rig.ok("set_metadata", {
+      uuid: source.uuid,
+      code_check: { ...CHECK, repository: "Uberblick-AI/Uberblick-2", commit: COMMIT.toUpperCase() },
+    });
+    expect(first.code_check).toEqual([{ ...CHECK, checked_at: expect.any(String) }]);
+    const firstTime = first.code_check[0].checked_at;
+    expect(new Date(firstTime).toISOString()).toBe(firstTime);
+    expect(Date.parse(firstTime)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(firstTime)).toBeLessThanOrEqual(Date.now());
+
+    const second = await rig.ok("set_metadata", {
+      uuid: source.uuid,
+      code_check: { ...CHECK, repository: "uberblick-ai/ub-agents", result: "ahead" },
+    });
+    const other = second.code_check.find((entry: any) => entry.repository === "uberblick-ai/ub-agents");
+    const replaced = await rig.ok("set_metadata", {
+      uuid: source.uuid,
+      code_check: { ...CHECK, repository: "UBERBLICK-AI/UBERBLICK-2", commit: "a".repeat(64), result: "drift" },
+    });
+    expect(replaced.code_check).toEqual([
+      other,
+      { ...CHECK, commit: "a".repeat(64), result: "drift", checked_at: expect.any(String) },
+    ]);
+    const read = await rig.ok("get_doc", { uuid: source.uuid });
+    expect(read.code_check).toEqual(replaced.code_check);
+    expect(read.blocks).toEqual(source.blocks);
+    expect(await rig.ok("export_markdown", { uuid: source.uuid })).toEqual(beforeExport);
+    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+      .toEqual(replaced.code_check);
+    expect((await rig.ok("search", { query: "aardvark" })).hits[0]).not.toHaveProperty("code_check");
+  });
+
+  it("leaves checks unchanged through metadata and block edits and out of Markdown and block content", async () => {
+    const rig = await localRig();
+    const source = await document(rig);
+    const written = await rig.ok("set_metadata", { uuid: source.uuid, code_check: CHECK });
+    await rig.ok("set_metadata", {
+      uuid: source.uuid, title: "Renamed page", description: "Changed descriptive fields.",
+      tldr: "A summary.", tags: [MCP.id], links: [],
+    });
+    const original = source.blocks[0];
+    await rig.ok("edit_block", {
+      uuid: source.uuid, block_id: original.id, old_text: original.text,
+      new_text: "Changed content", rev: original.rev,
+    });
+    const inserted = await rig.ok("insert_block", { uuid: source.uuid, type: "paragraph", text: "Temporary block" });
+    await rig.ok("delete_block", { uuid: source.uuid, block_id: inserted.block.id });
+    const read = await rig.ok("get_doc", { uuid: source.uuid });
+    expect(read.code_check).toEqual(written.code_check);
+    expect(read.blocks).toEqual([expect.objectContaining({ text: "Changed content" })]);
+    expect(JSON.stringify(read.blocks)).not.toContain("code_check");
+    const exported = await rig.ok("export_markdown", { uuid: source.uuid });
+    expect(exported.markdown).not.toContain("code_check");
+    expect(exported.markdown).not.toContain(COMMIT);
+    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+      .toEqual(written.code_check);
+  });
+
+  it("lists cached checks and unknown caches without opening document rooms, and repairs a dropped cache on a write", async () => {
+    const rig = await localRig();
+    const source = await document(rig);
+    const uuid = randomUUID();
+    const cached = { ...CHECK, checked_at: "2026-10-16T12:00:00.000Z" };
+    const unknown = randomUUID();
+    const directory = rig.instance.replicas.directory().doc;
+    upsertDirectoryEntry(directory, { uuid, title: "Cached elsewhere", code_check: [cached] });
+    upsertDirectoryEntry(directory, { uuid: unknown, title: "Not cached yet" });
+    await rig.instance.replicas.settle();
+    const opening = vi.spyOn(rig.instance.replicas, "replica");
+    const listing = await rig.ok("list_docs");
+    expect(listing.docs.find((entry: any) => entry.uuid === uuid)).toHaveProperty("code_check", [cached]);
+    expect(listing.docs.find((entry: any) => entry.uuid === unknown)).not.toHaveProperty("code_check");
+    expect(listing.docs.find((entry: any) => entry.uuid === source.uuid)).toHaveProperty("code_check", []);
+    expect(opening).not.toHaveBeenCalled();
+    opening.mockRestore();
+    expect(rig.instance.replicas.hydrated(uuid)).toBe(false);
+    expect(rig.instance.replicas.hydrated(unknown)).toBe(false);
+
+    const written = await rig.ok("set_metadata", { uuid: source.uuid, code_check: CHECK });
+    await rig.instance.replicas.settle();
+    const map = getDirectoryMap(directory);
+    const { code_check: _cache, ...oldClient } = map.get(source.uuid) as Record<string, unknown>;
+    map.set(source.uuid, oldClient);
+    expect(getDirectoryEntry(directory, source.uuid)).not.toHaveProperty("code_check");
+    await rig.ok("set_metadata", { uuid: source.uuid, description: "An authored change repairs the cache." });
+    expect((await rig.ok("list_docs")).docs.find((entry: any) => entry.uuid === source.uuid)?.code_check)
+      .toEqual(written.code_check);
+  });
+
+  it("names malformed checks and decision writes without changing any field, room or index", async () => {
+    const rig = await localRig();
+    const source = await document(rig);
+    for (const code_check of [
+      null, [], "matches", {},
+      { ...CHECK, repository: "https://github.com/uberblick-ai/uberblick-2" },
+      { ...CHECK, repository: "owner/repo/extra" },
+      { ...CHECK, repository: 17 },
+      { ...CHECK, commit: "33086e0" },
+      { ...CHECK, commit: "z".repeat(40) },
+      { ...CHECK, commit: 17 },
+      { ...CHECK, result: "aligned" },
+      { ...CHECK, result: null },
+      { ...CHECK, checked_at: "2026-10-16T12:00:00.000Z" },
+    ]) {
+      const refused = await refuseUnchanged(rig, {
+        uuid: source.uuid, title: "Must not change", tags: [MCP.id], code_check,
+      }, "invalid_code_check", source.uuid);
+      expect(refused).toMatchObject({ field: "code_check", recoveryClass: "manual" });
+    }
+    for (const status of ["open", "decided", "rejected", "withdrawn"]) {
+      const decision = await document(rig, { kind: "decision", status: status === "decided" ? "decided" : "open" });
+      if (status === "rejected") {
+        await rig.ok("set_status", {
+          uuid: decision.uuid, status,
+          reason: "Another proposal was chosen.",
+          answer: { who: "A maintainer", when: "2026-10-16T12:00:00Z", where: "A discussion." },
+        });
+      } else if (status === "withdrawn") await rig.ok("set_status", { uuid: decision.uuid, status });
+      const refused = await refuseUnchanged(rig, {
+        uuid: decision.uuid, title: "Must not change", tags: [MCP.id], code_check: CHECK,
+      }, "decision_code_check_unsupported", decision.uuid);
+      expect(refused).toMatchObject({ field: "code_check", kind: "decision", status });
+      expect(await rig.ok("get_doc", { uuid: decision.uuid })).not.toHaveProperty("code_check");
+    }
+    const decisions = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs;
+    for (const entry of decisions) expect(entry).not.toHaveProperty("code_check");
+    const refused = await refuseUnchanged(rig, {
+      uuid: source.uuid, code_check: CHECK, tags: ["missing-metadata-tag"],
+    }, "invalid_tag_assignment", source.uuid);
+    expect(refused.field).toBe("tags");
+    expect(await rig.ok("get_doc", { uuid: source.uuid })).toHaveProperty("code_check", []);
+  });
+
   it("refuses a deliberate TL;DR replacement before changing any metadata, room or index", async () => {
     const rig = await localRig();
     const target = await document(rig, { title: "Curated target" });
@@ -343,6 +485,7 @@ describe("set_metadata", () => {
       { tags: [] },
       { links: [] },
       { discussion: null },
+      { code_check: CHECK },
       { title: "Archived title", description: "Archived description.", tldr: null, tags: [], links: [] },
     ]) {
       const refused = await refuseUnchanged(rig, { uuid: archived.uuid, ...args }, "doc_archived", archived.uuid);

@@ -189,6 +189,8 @@ const EXPECTED: Record<
   },
   decision_answer_empty: { recoveryClass: "manual", detail: ["kind", "status"] },
   decision_tldr_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
+  invalid_code_check: { recoveryClass: "manual", detail: ["uuid", "field"] },
+  decision_code_check_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status", "field"] },
   tldr_opted_out: { recoveryClass: "manual", detail: ["uuid", "field"] },
   decision_data_unsupported: { recoveryClass: "manual", detail: ["uuid", "kind", "status"] },
   decision_block_unsupported: { recoveryClass: "manual", detail: ["kind", "status"] },
@@ -446,6 +448,11 @@ describe("the failure contract", () => {
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
     record((await rig.call("set_metadata", { uuid: firstDecision.uuid, tldr: null })).payload);
     record((await rig.call("set_metadata", { uuid: regular.uuid, discussion: null })).payload);
+    record((await rig.call("set_metadata", { uuid: regular.uuid, code_check: {} })).payload);
+    record((await rig.call("set_metadata", {
+      uuid: firstDecision.uuid,
+      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches" },
+    })).payload);
     record((await rig.call("create_doc", {
       title: "Wrong discussion kind",
       description: "Discussion belongs on a regular document.",
