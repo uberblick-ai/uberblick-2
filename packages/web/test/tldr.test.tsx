@@ -142,21 +142,34 @@ function press(field: HTMLTextAreaElement | null, key: string, init: KeyboardEve
 }
 
 describe("the document TL;DR", () => {
-  it.each(["open", "decided", "rejected", "withdrawn"] as const)("keeps a legacy %s decision summary readable without offering add or edit", async (status) => {
+  it.each(["open", "decided", "rejected", "withdrawn"] as const)("hides a legacy %s decision summary and offers no TL;DR actions", async (status) => {
     const ydoc = documentWith("The legacy summary.");
     setKind(ydoc, "decision");
     setStatus(ydoc, status);
     const { host } = await mountPane(ydoc);
-    expect(within(host).getByText("The legacy summary.").textContent).toBe("The legacy summary.");
+    expect(within(host).queryByText("The legacy summary.")).toBeNull();
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    expect(ydoc.getMap("meta").get("tldr")).toBe("The legacy summary.");
     expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
     act(() => openActions(host));
     expect(menuItem("Edit TL;DR")).toBeUndefined();
     expect(menuItem("Add TL;DR")).toBeUndefined();
     expect(menuItem("Remove TL;DR")).toBeUndefined();
-    act(() => setTldr(ydoc, null));
+    act(() => ydoc.getMap("meta").set("tldr", "An older client's changed summary."));
     expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    expect(within(host).queryByText("An older client's changed summary.")).toBeNull();
     expect(menuItem("Add TL;DR")).toBeUndefined();
     expect(menuItem("Remove TL;DR")).toBeUndefined();
+  });
+
+  it("hides a stored decision summary when archived", async () => {
+    const ydoc = documentWith("The archived legacy summary.");
+    setKind(ydoc, "decision");
+    setStatus(ydoc, "decided");
+    const { host } = await mountPane(ydoc, true);
+    expect(within(host).queryByRole("region", { name: "TL;DR" })).toBeNull();
+    expect(within(host).queryByText("The archived legacy summary.")).toBeNull();
+    expect(ydoc.getMap("meta").get("tldr")).toBe("The archived legacy summary.");
   });
 
   it.each([null, "The first summary."])("removes %s in one write and opts back in before a cancelled Add", async (summary) => {
@@ -265,10 +278,11 @@ describe("the document TL;DR", () => {
       form.requestSubmit();
       expect(updates).toHaveBeenCalledTimes(updatesAfterAdoption);
     });
-    expect(getMeta(ydoc).tldr).toBe("The legacy summary.");
+    expect(getMeta(ydoc).tldr).toBeNull();
+    expect(ydoc.getMap("meta").get("tldr")).toBe("The legacy summary.");
     expect(field(host)).toBeNull();
     expect(within(host).queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
-    expect(within(host).getByText("The legacy summary.").textContent).toBe("The legacy summary.");
+    expect(within(host).queryByText("The legacy summary.")).toBeNull();
   });
 
   it("adds, validates, edits and clears through the shared schema boundary", async () => {

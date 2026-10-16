@@ -338,7 +338,6 @@ export interface DirectoryEntry {
   supersedes?: string;
   /** Explicit discussion; absence means an older client has not cached it. */
   discussion?: string | null;
-  tldr?: string;
   /** Derived answer text; absence means an older client has not cached it. */
   answerPreview?: string | null;
   agentStance?: boolean;

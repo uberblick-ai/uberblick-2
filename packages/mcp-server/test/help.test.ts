@@ -231,6 +231,21 @@ it("routes decision answer guidance to lifecycle while keeping page context and 
   expect(lifecycle).toContain("missing preview is unknown");
 });
 
+it("describes decision reads and writes without a legacy TL;DR exception", async () => {
+  const rig = await local();
+  for (const topic of ["workspaces", "lifecycle", "create_doc", "get_doc", "list_docs", "set_metadata", "update_data"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    expect(text, topic).toContain("no TL;DR");
+    expect(text, topic).not.toMatch(/legacy TL;DR|legacy decision summaries remain readable/);
+  }
+  for (const topic of ["get_doc", "set_metadata"]) {
+    expect((await rig.ok("get_help", { topic })).text, topic).toContain("tldr: null");
+  }
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  expect(lifecycle).toContain("first answer paragraph or list");
+  expect(lifecycle).toContain("stored values are ignored without changing them");
+});
+
 it("explains deliberate TL;DR removal and explicit opt-in in help and field contracts", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();

@@ -154,7 +154,7 @@ describe("directory stamps from the web", () => {
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, {
       uuid: UUID, title: "Stale", kind: "decision", topic: predecessor,
-      commentCount: 90, agentStance: false, tldr: "stale",
+      commentCount: 90, agentStance: false, answerPreview: "stale legacy summary",
       createdAt: T0, updatedAt: T0,
     });
     tombstoneDirectoryEntry(directory, UUID);
@@ -163,10 +163,12 @@ describe("directory stamps from the web", () => {
     try {
       expect(getDirectoryEntry(peer, UUID)).toMatchObject({
         title: "Lease duration", governs, topic: predecessor, supersedes: predecessor,
-        tldr: "Renew a short lease.", agentStance: true, decidedBy: "Reviewer",
+        answerPreview: "lease duration", agentStance: true, decidedBy: "Reviewer",
         decidedAt: "2031-01-01T00:00:00.000Z", commentCount: 2, openThreadCount: 2,
         deleted: true,
       });
+      expect(getDirectoryEntry(peer, UUID)).not.toHaveProperty("tldr");
+      expect(getMetaMap(doc).get("tldr")).toBe("Renew a short lease.");
       addComment(doc, thread.id, "Reviewer", "A reply");
       addComment(doc, second.id, "Author", "Another reply");
       expect(getDirectoryEntry(peer, UUID)?.commentCount).toBe(4);
@@ -181,7 +183,7 @@ describe("directory stamps from the web", () => {
       expect(repaired?.agentStance).toBeUndefined();
       expect(repaired?.decidedBy).toBeUndefined();
       expect(repaired?.decidedAt).toBeUndefined();
-      expect(repaired?.tldr).toBeUndefined();
+      expect(repaired).not.toHaveProperty("tldr");
       expect(repaired?.deleted).toBe(true);
     } finally {
       stop();

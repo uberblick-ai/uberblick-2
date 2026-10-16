@@ -50,10 +50,8 @@ export function decisionDocAnswerFailure(doc: Y.Doc): DecisionAnswerFailure | nu
   });
 }
 
-/** A legacy TL;DR keeps its exact approved text; answer prose drops all marks. */
+/** The first answer prose supplies the preview without its inline marks. */
 export function decisionAnswerPreview(doc: Y.Doc): string | null {
-  const tldr = getMeta(doc).tldr;
-  if (tldr != null) return tldr;
   const blocks = getBlocks(doc);
   const index = blocks.findIndex((block) => block.type === "paragraph" || block.type === "list-item");
   const first = blocks[index];

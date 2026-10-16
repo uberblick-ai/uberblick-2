@@ -175,7 +175,7 @@ describe("decision metadata and caches", () => {
     setAnnotationResolved(doc, resolved.id, true);
     deleteBlock(doc, block);
     const fields = decisionDirectoryFields(doc);
-    expect(fields).toEqual({ governs: PAGE, topic: A, supersedes: A, discussion: null, tldr: "Use durable rooms.", answerPreview: "Use durable rooms.", agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", approvalChanged: false, commentCount: 3 });
+    expect(fields).toEqual({ governs: PAGE, topic: A, supersedes: A, discussion: null, answerPreview: null, agentStance: false, decidedBy: "a-person", decidedAt: "2026-10-03T12:00:00Z", approvalChanged: false, commentCount: 3 });
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, { ...getMeta(doc), description: getMeta(doc).description ?? "", ...fields });
     expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), fields)).toBe(false);
@@ -204,16 +204,27 @@ describe("decision metadata and caches", () => {
     expect(directoryStubDiffers(getDirectoryEntry(directory, B), getMeta(doc), decisionDirectoryFields(doc))).toBe(false);
   });
 
-  it("converges a foreign whitespace TL;DR instead of repeatedly repairing it", () => {
+  it.each(["Legacy answer", "   "])("ignores a stored legacy TL;DR %j and repairs its preview without changing the record", (tldr) => {
     const doc = record();
-    getMetaMap(doc).set("tldr", "   ");
+    getMetaMap(doc).set("tldr", tldr);
+    appendBlock(doc, { type: "paragraph", text: "Current answer" });
+    const before = Y.encodeStateAsUpdate(doc);
     const directory = new Y.Doc();
+    getDirectoryMap(directory).set(A, { title: "A choice", tags: [], kind: "decision", status: "decided", topic: A, tldr, answerPreview: tldr });
+    expect(getDirectoryEntry(directory, A)).not.toHaveProperty("tldr");
+    expect(listDirectory(directory)[0]).not.toHaveProperty("tldr");
+    expect(directoryStubDiffers(getDirectoryEntry(directory, A), getMeta(doc), decisionDirectoryFields(doc))).toBe(true);
     upsertDirectoryEntry(directory, { ...getMeta(doc), description: "", ...decisionDirectoryFields(doc) });
-    expect(getDirectoryEntry(directory, A)?.tldr).toBe("   ");
+    expect(getDirectoryEntry(directory, A)).toMatchObject({ answerPreview: "Current answer" });
+    expect(getDirectoryEntry(directory, A)).not.toHaveProperty("tldr");
     expect(directoryStubDiffers(getDirectoryEntry(directory, A), getMeta(doc), decisionDirectoryFields(doc))).toBe(false);
+    expect(getMetaMap(doc).get("tldr")).toBe(tldr);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    doc.destroy();
+    directory.destroy();
   });
 
-  it("caches plain answer previews from the first prose block and keeps legacy TL;DR exact", () => {
+  it("caches plain answer previews from the first prose block and ignores legacy TL;DR", () => {
     const doc = record();
     appendBlock(doc, { type: "code", text: "ignored source" });
     appendBlock(doc, {
@@ -225,8 +236,7 @@ describe("decision metadata and caches", () => {
     appendBlock(doc, { type: "paragraph", text: "Ignored later answer" });
     expect(decisionDirectoryFields(doc).answerPreview).toBe("Use this answer.");
     setTldr(doc, "  Legacy\nanswer ");
-    expect(decisionDirectoryFields(doc).answerPreview).toBe("  Legacy\nanswer ");
-    setTldr(doc, null);
+    expect(decisionDirectoryFields(doc).answerPreview).toBe("Use this answer.");
     const list = record(B, A);
     appendBlock(list, { type: "list-item", text: "First choice", list: "ordered" });
     appendBlock(list, { type: "list-item", inline: [{ text: "Second choice", marks: { italic: true } }], indent: 2 });
@@ -240,6 +250,7 @@ describe("decision metadata and caches", () => {
     expect(decisionDirectoryFields(doc).answerPreview).toBeNull();
     appendBlock(doc, { type: "code", text: "Only source" });
     appendBlock(doc, { type: "table", text: "| Value |\n| --- |\n| Only table |" });
+    setTldr(doc, "A legacy summary is no answer prose.");
     expect(decisionDirectoryFields(doc).answerPreview).toBeNull();
     const short = record(B, A);
     const id = appendBlock(short, { type: "paragraph", text: " \n\t " });
@@ -252,7 +263,7 @@ describe("decision metadata and caches", () => {
     expect(decisionDirectoryFields(long).answerPreview).toBe(`${"😀".repeat(299)}…`);
   });
 
-  it("treats missing preview caches as unknown and repairs old-client rewrites without changing the TL;DR cache", () => {
+  it("treats missing preview caches as unknown and repairs old-client rewrites", () => {
     const doc = record();
     const block = appendBlock(doc, { type: "paragraph", text: "Current answer" });
     const directory = new Y.Doc();
@@ -323,7 +334,7 @@ describe("decision metadata and caches", () => {
 
   it("keeps decision-only cache fields out of regular and stored requirement stubs", () => {
     const directory = new Y.Doc();
-    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: PAGE, discussion: E, tldr: "No", answerPreview: "No", agentStance: true, approvalChanged: true, commentCount: 10 });
+    upsertDirectoryEntry(directory, { uuid: A, title: "Ordinary", topic: A, governs: PAGE, discussion: E, answerPreview: "No", agentStance: true, approvalChanged: true, commentCount: 10 });
     getDirectoryMap(directory).set(B, { title: "Stored proposal", tags: [], kind: "requirement", status: "planned", topic: A, discussion: null, answerPreview: null, commentCount: 10 });
     expect(getDirectoryEntry(directory, A)).toEqual({ uuid: A, title: "Ordinary", tags: [] });
     expect(getDirectoryEntry(directory, B)).toEqual({ uuid: B, title: "Stored proposal", tags: [] });

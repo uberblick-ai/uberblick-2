@@ -195,9 +195,9 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
   const title = meta.get("title");
   const description = meta.get("description");
   const storedTldr = meta.get("tldr");
-  const tldr = typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   const lifecycle = readDocumentLifecycle(meta.get("kind"), meta.get("status"));
   const decision = lifecycle.kind === "decision";
+  const tldr = !decision && typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   const supersedes = decision ? readSupersedes(meta, uuid) : undefined;
   const governs = decision ? canonicalDocumentUuid(meta.get("governs")) : null;
   const discussion = decision ? canonicalDocumentUuid(meta.get("discussion")) : null;

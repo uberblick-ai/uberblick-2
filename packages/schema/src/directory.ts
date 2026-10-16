@@ -40,7 +40,6 @@ interface StoredEntry {
   topic?: string;
   supersedes?: string;
   discussion?: string | null;
-  tldr?: string;
   answerPreview?: string | null;
   agentStance?: boolean;
   decidedBy?: string;
@@ -82,7 +81,6 @@ export function directoryStubDiffers(
       stub.topic !== meta.topic ||
       stub.supersedes !== meta.supersedes ||
       stub.discussion !== (meta.discussion ?? null) ||
-      (stub.tldr ?? null) !== (meta.tldr ?? null) ||
       stub.agentStance !== meta.agentStance ||
       stub.decidedBy !== meta.decidedBy ||
       stub.decidedAt !== meta.decidedAt ||
@@ -174,7 +172,7 @@ function withResolvedUpdatedAt(
 }
 
 const DECISION_CACHE_KEYS = [
-  "governs", "topic", "supersedes", "tldr", "agentStance", "decidedBy",
+  "governs", "topic", "supersedes", "agentStance", "decidedBy",
   "decidedAt", "approvalChanged", "commentCount", "answerPreview", "discussion",
 ] as const;
 
@@ -187,7 +185,6 @@ function readDecisionFields(value: Record<string, unknown>): Partial<StoredEntry
   }
   const discussion = canonicalDocumentUuid(value.discussion);
   if (value.discussion === null || discussion !== null) fields.discussion = discussion;
-  if (typeof value.tldr === "string" && value.tldr !== "") fields.tldr = value.tldr;
   if (value.answerPreview === null || typeof value.answerPreview === "string") fields.answerPreview = value.answerPreview;
   for (const key of ["decidedBy", "decidedAt"] as const) {
     const text = value[key];
@@ -281,7 +278,6 @@ export interface DirectoryUpsert {
   topic?: string | null;
   supersedes?: string | null;
   discussion?: string | null;
-  tldr?: string | null;
   answerPreview?: string | null;
   agentStance?: boolean | null;
   decidedBy?: string | null;
@@ -291,7 +287,7 @@ export interface DirectoryUpsert {
 }
 
 export type DecisionDirectoryFields = Pick<DirectoryUpsert,
-  "governs" | "topic" | "supersedes" | "tldr" | "agentStance" |
+  "governs" | "topic" | "supersedes" | "agentStance" |
   "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
 
 export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number };
@@ -313,7 +309,6 @@ export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
     topic: meta.topic ?? meta.uuid,
     supersedes: meta.supersedes ?? null,
     discussion: meta.discussion ?? null,
-    tldr: meta.tldr ?? null,
     answerPreview: decisionAnswerPreview(doc),
     agentStance: meta.agentStance ?? null,
     decidedBy: meta.decidedBy ?? null,

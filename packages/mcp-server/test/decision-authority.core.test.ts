@@ -1,7 +1,7 @@
 /** Recorded answers, immutable decided content and directory-backed approval state. */
 import * as Y from "yjs";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { MAX_TLDR_LENGTH, decisionApprovalFingerprint, editBlock, getBlocks, getDirectoryEntry, getMetaMap, setTldr, setTitle } from "@uberblick/schema";
+import { MAX_TLDR_LENGTH, decisionApprovalFingerprint, editBlock, getBlocks, getDirectoryEntry, getDirectoryMap, getMetaMap, setTldr, setTitle } from "@uberblick/schema";
 import { removeTempDirs, startServer, testConfig } from "./core-helpers.js";
 import type { Rig } from "./core-helpers.js";
 
@@ -157,6 +157,7 @@ describe("decision authority through MCP", () => {
     const mutations: [string, Record<string, unknown>][] = [
       ["set_metadata", { title: "Reworded topic" }],
       ["set_metadata", { tldr: "Changed decision line." }],
+      ["set_metadata", { tldr: null }],
       ["edit_block", { block_id: block.id, old_text: block.text, new_text: "Changed text.", rev: block.rev }],
       ["insert_block", { type: "paragraph", text: "Additional reasoning." }],
       ["delete_block", { block_id: block.id }],
@@ -165,9 +166,9 @@ describe("decision authority through MCP", () => {
     for (const [name, args] of mutations) {
       const refused = await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
       expect(refused).toMatchObject({
-        message: "A decided record's title, answer blocks, legacy TL;DR and structured data are read-only; create a superseding record.",
+        message: "A decided record's title, answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.",
         recoveryClass: "manual",
-        recovery: "A decided record's title, answer blocks, legacy TL;DR, structured data and discussion reference are read-only. Create an open superseding record " +
+        recovery: "A decided record's title, answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
           "for any content change, then record a person's answer to decide it. Comments stay open.",
       });
     }
@@ -177,26 +178,53 @@ describe("decision authority through MCP", () => {
     await rig.ok("set_metadata", { uuid: record.uuid, tags: ["mcp"] });
     await rig.ok("set_metadata", { uuid: record.uuid, links: [target.uuid] });
     const read = await rig.ok("get_doc", { uuid: record.uuid });
-    expect(read).toMatchObject({ title: "Persistence", tldr: "Use the update log.", approvalChanged: false, description: "Updated discovery copy." });
+    expect(read).toMatchObject({ title: "Persistence", tldr: null, approvalChanged: false, description: "Updated discovery copy." });
     expect(read.blocks[0].text).toBe(block.text);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });
 
-  it("keeps legacy TL;DR readable but refuses new decision TL;DR before creation", async () => {
+  it("hides stored legacy TL;DR without rewriting it and refuses new decision TL;DR before creation", async () => {
     const rig = await localRig();
-    const first = await legacyDecision(rig, { status: "decided", tldr: "  Use the update log.  " });
+    const page = await rig.ok("create_doc", { title: "Owning page", description: "The page this decision governs." });
+    const first = await legacyDecision(rig, { status: "decided", answer, related: page.uuid, tldr: "  Use the update log.  " });
     const next = await legacyDecision(rig, { status: "decided", supersedes: first.uuid, answer, tldr: "Use a database-backed update log." });
     for (const [record, tldr] of [[first, "  Use the update log.  "], [next, "Use a database-backed update log."]] as const) {
-      expect((await rig.ok("get_doc", { uuid: record.uuid })).tldr).toBe(tldr);
-      expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)?.tldr).toBe(tldr);
-      expect((await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.find((row: any) => row.uuid === record.uuid)?.tldr).toBe(tldr);
+      const doc = rig.instance.replicas.replica(record.uuid).doc;
+      const before = Y.encodeStateAsUpdate(doc);
+      const fingerprint = getMetaMap(doc).get("approvalFingerprint");
+      for (let read = 0; read < 2; read++) {
+        const result = await rig.ok("get_doc", { uuid: record.uuid });
+        expect(result).toMatchObject({ tldr: null, approvalChanged: false });
+        for (const entry of [...result.predecessors, ...result.successors, result.resolution.inForce]) {
+          if (entry === null) continue;
+          expect(entry).not.toHaveProperty("tldr");
+          expect(entry.answerPreview).toBe(body[0]!.text);
+        }
+      }
+      expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+      expect(getMetaMap(doc).get("tldr")).toBe(tldr);
+      expect(getMetaMap(doc).get("approvalFingerprint")).toBe(fingerprint);
+      expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+      expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).not.toHaveProperty("tldr");
+      const row = (await rig.ok("list_docs", { kind: "decision", include_superseded: true })).docs.find((row: any) => row.uuid === record.uuid);
+      expect(row).not.toHaveProperty("tldr");
+      expect(row.answerPreview).toBe(body[0]!.text);
+      expect(await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." })).toMatchObject({ tldr: null });
+      expect(getMetaMap(doc).get("tldr")).toBe(tldr);
       expect(record).not.toHaveProperty("tldrHint");
+    }
+    const topics = (await rig.ok("list_docs", { kind: "decision" })).docs;
+    const pageTopics = (await rig.ok("get_doc", { uuid: page.uuid })).decisions;
+    for (const topic of [...topics, ...pageTopics]) {
+      expect(topic).not.toHaveProperty("tldr");
+      expect(topic.inForce).not.toHaveProperty("tldr");
+      expect(topic.answerPreview).toBe(body[0]!.text);
     }
     expect(getMetaMap(rig.instance.replicas.replica(next.uuid).doc).get("approvalFingerprint")).toEqual(expect.any(String));
     expect((await rig.ok("get_doc", { uuid: (await decision(rig)).uuid })).tldr).toBeNull();
     expect((await rig.ok("get_doc", { uuid: (await decision(rig, { tldr: null })).uuid })).tldr).toBeNull();
     const exact = await legacyDecision(rig, { tldr: "x".repeat(MAX_TLDR_LENGTH) });
-    expect((await rig.ok("get_doc", { uuid: exact.uuid })).tldr).toHaveLength(MAX_TLDR_LENGTH);
+    expect((await rig.ok("get_doc", { uuid: exact.uuid })).tldr).toBeNull();
     for (const status of ["open", "decided"]) {
       await refuse(rig, "create_doc", { title: "New TL;DR", description: "Answer blocks hold the answer.", kind: "decision", status, tldr: "Use the log.", blocks: body }, "decision_tldr_unsupported");
     }
@@ -250,17 +278,24 @@ describe("decision authority through MCP", () => {
     const right = await decision(author, { supersedes: first.uuid, status: "decided", answer });
     setTldr(author.instance.replicas.replica(right.uuid).doc, "Merged after approval.");
     await author.ok("get_doc", { uuid: right.uuid });
+    for (const record of [stance, pending, first, left, right]) {
+      const directory = author.instance.replicas.directory().doc;
+      getDirectoryMap(directory).set(record.uuid, { ...getDirectoryEntry(directory, record.uuid), tldr: "A stale legacy summary." });
+    }
     const reader = await localRig();
     Y.applyUpdate(reader.instance.replicas.directory().doc, Y.encodeStateAsUpdate(author.instance.replicas.directory().doc));
     const rows = (await reader.ok("list_docs", { kind: "decision" })).docs;
     const stanceRow = rows.find((row: any) => row.topic === stance.uuid);
     expect(stanceRow).toMatchObject({ agentStance: true, inForce: { uuid: stance.uuid, agentStance: true }, pending: [{ uuid: pending.uuid }] });
+    for (const entry of [stanceRow, stanceRow.inForce, ...stanceRow.pending]) expect(entry).not.toHaveProperty("tldr");
     const conflictRow = rows.find((row: any) => row.topic === first.uuid);
     expect(conflictRow.inForce).toBeNull();
     expect(conflictRow.conflicts).toHaveLength(2);
     for (const conflict of conflictRow.conflicts) {
       expect(conflict).toMatchObject({ decidedBy: answer.who, decidedAt: answer.when });
       expect(conflict.agentStance).not.toBe(true);
+      expect(conflict).not.toHaveProperty("tldr");
+      expect(conflict.answerPreview).toBe(body[0]!.text);
     }
     expect(conflictRow.conflicts.find((row: any) => row.uuid === right.uuid)?.approvalChanged).toBe(true);
     const history = (await reader.ok("list_docs", { kind: "decision", include_superseded: true })).docs;

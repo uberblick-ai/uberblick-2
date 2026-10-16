@@ -185,8 +185,11 @@ describe("document round-trip", () => {
     expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
 
     setKind(doc, "decision");
-    expect(getMeta(doc).tldr).toBe("An older client's summary.");
+    const adopted = Y.encodeStateAsUpdate(doc);
+    expect(getMeta(doc).tldr).toBeNull();
     expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
+    expect(getMetaMap(doc).get("tldr")).toBe("An older client's summary.");
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(adopted);
     getMetaMap(doc).set("tldr", null);
     expect(getMeta(doc)).not.toHaveProperty("tldrOptOut");
     doc.destroy();
@@ -282,7 +285,7 @@ describe("document round-trip", () => {
           title: "Block model, revised",
           tags: ["keystone", "schema"],
           description: "Rewritten discovery copy.",
-          tldr: "A quick summary for a person.",
+          tldr: null,
           kind: "decision",
           status: "open",
           topic: UUID,
@@ -290,6 +293,7 @@ describe("document round-trip", () => {
           links: [target],
         });
         expect(getMetaMap(replica).get("changelogSuggestion")).toBe(legacy);
+        expect(getMetaMap(replica).get("tldr")).toBe("A quick summary for a person.");
         replica.destroy();
       }
     },
