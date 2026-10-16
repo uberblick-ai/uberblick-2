@@ -105,7 +105,7 @@ test.describe("a current workspace and hub admin", () => {
         });
       },
     });
-    await expect(page.getByRole("textbox", { name: "Workspace name", exact: true })).toBeEnabled();
+    await expect(page.getByRole("textbox", { name: "Name", exact: true })).toBeEnabled();
     await expect(page.getByRole("textbox", { name: "Main repository", exact: true })).toBeEnabled();
     role = "member";
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();

@@ -752,7 +752,7 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     await waitFor(() => expect(window.location.pathname).toBe(`/${WORKSPACE}/settings/preferences`));
     expect(within(host).getByRole("heading", { level: 1, name: "Preferences" })).toBeTruthy();
     expect(within(host).queryByRole("region", { name: "Workspace" })).toBeNull();
-    expect(within(host).queryByRole("textbox", { name: "Workspace name" })).toBeNull();
+    expect(within(host).queryByRole("textbox", { name: "Name" })).toBeNull();
     expect(within(host).queryByRole("textbox", { name: "Main repository" })).toBeNull();
     expect(within(host).queryByRole("textbox", { name: "Create a tag" })).toBeNull();
     expect(calls.some((action) => action.operation === "list-members")).toBe(false);

@@ -1659,10 +1659,15 @@ for (const scheme of ["light", "dark"] as const) {
 
     await page.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Connection details", exact: true }).click();
     for (const fact of await page.locator("[data-settings-facts] > div").all()) {
       const label = await fact.locator("dt").innerText();
-      await (["Workspace UUID", "Address segment", "Hub"].includes(label) ? mono : ui)(fact.locator("dd"));
-      if (["Documents", "MCP connections"].includes(label)) {
+      const value = fact.locator("dd");
+      if (label === "Workspace ID") {
+        await mono(value.locator("span > span"));
+        await ui(value.getByRole("button", { name: "Copy workspace ID" }));
+      } else await (label === "Address segment" ? mono : ui)(value);
+      if (["Documents", "Tags", "Last edited", "MCP connections"].includes(label)) {
         await expect(fact.locator("dd")).toHaveCSS("font-variant-numeric", "tabular-nums");
       }
     }

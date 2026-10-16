@@ -187,15 +187,15 @@ export function useDirectory(
 ): DirectoryEntry[] {
   const observe = useCallback((current: RoomConnection, emit: (value: DirectoryEntry[]) => void) => {
     const { ydoc } = current;
-    const map = getDirectoryMap(ydoc);
     const read = (): void => emit(listDirectory(ydoc, { includeDeleted }).map(
       (entry) => entry.kind === "decision"
         ? { ...entry, deleted: decisionTopicArchived(ydoc, entry.uuid) }
         : entry,
     ));
     read();
-    map.observe(read);
-    return () => map.unobserve(read);
+    // Resolved edit stamps can change independently of the cached stubs.
+    ydoc.on("update", read);
+    return () => ydoc.off("update", read);
   }, [includeDeleted]);
   return useConnectionReading(connection, EMPTY_ARRAY, observe)[0];
 }

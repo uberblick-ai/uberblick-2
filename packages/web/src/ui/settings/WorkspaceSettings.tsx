@@ -7,7 +7,6 @@ import {
   directoryRoom,
   isTagCatalogSeeded,
   isTagName,
-  listDirectory,
   listTagCatalog,
   restoreTagCatalogEntry,
   retireTagCatalogEntry,
@@ -20,14 +19,18 @@ import type { TagCatalogEntry } from "@uberblick/schema";
 import { endpointSourceLabel } from "../../config.js";
 import type { HubEndpoint, LocalServing } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
+import { writeToClipboard } from "../../editor/source-chrome.js";
 import { notifyTransient } from "../../notifications.js";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
-import { useRoomStatus } from "../hooks.js";
+import { useDirectory, useRoomStatus } from "../hooks.js";
 import type { SettingsPage, Workspace } from "../route.js";
 import { Button } from "../shadcn/button.js";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../shadcn/collapsible.js";
 import { Input } from "../shadcn/input.js";
 import { statusReading } from "../status/status-reading.js";
 import { useTagCatalog } from "../tags.js";
+import { formatTimestamp, useTimestampClock } from "../timestamps.js";
+import { workspaceLocationLabel } from "../workspace-location.js";
 import { useWorkspaceName } from "../workspace-names.js";
 import { useWorkspaceMainRepository } from "./workspace-main-repository.js";
 import { AccessSettings } from "./AccessSettings.js";
@@ -42,9 +45,9 @@ function Fact({ label, children, mono = false, tabular = false }: {
   tabular?: boolean;
 }): ReactElement {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-(--border) py-3 first:pt-0 last:border-b-0 last:pb-0">
       <dt className="ub-type-ui">{label}</dt>
-      <dd className={`m-0 max-w-[70%] ub-type-ui text-right wrap-anywhere${mono ? " font-(family-name:--font-mono)" : ""}${tabular ? " tabular-nums" : ""}`}>
+      <dd className={`m-0 min-w-0 max-w-full ub-type-ui text-right wrap-anywhere${mono ? " font-(family-name:--font-mono)" : ""}${tabular ? " tabular-nums" : ""}`}>
         {children}
       </dd>
     </div>
@@ -58,25 +61,46 @@ function Fact({ label, children, mono = false, tabular = false }: {
  */
 function GeneralSettings({
   workspace,
+  workspaceLocation,
   endpoint,
   connection,
   catalogConnection,
   agentSessions,
 }: {
   workspace: Workspace;
+  workspaceLocation: string | null;
   endpoint: HubEndpoint | null;
   connection: RoomConnection | null;
   catalogConnection: RoomConnection | null;
   agentSessions: number;
 }): ReactElement {
   const status = useRoomStatus(connection);
+  const catalogStatus = useRoomStatus(catalogConnection);
+  const entries = useDirectory(connection, true);
+  const catalog = useTagCatalog(catalogConnection);
+  const now = useTimestampClock();
   const state = useCalmSyncState(rawSyncState(status));
   const reading = statusReading(status, state);
   const directoryReceived =
     connection !== null &&
     connection.room === directoryRoom(workspace.uuid) &&
     status.hasReceivedServerState;
-  const documents = directoryReceived ? listDirectory(connection.ydoc).length : null;
+  const documents = entries.filter((entry) => !entry.kind && !entry.deleted).length;
+  const archived = entries.filter((entry) => !entry.kind && entry.deleted).length;
+  const tagsReceived = catalogConnection?.room === settingsRoom(workspace.uuid) && catalogStatus.hasReceivedServerState;
+  const tags = tagsReceived ? catalog?.entries.filter((entry) => entry.state === "active").length : null;
+  const latest = entries.reduce<number | null>((stamp, entry) =>
+    entry.deleted || entry.updatedAt === undefined ? stamp : Math.max(stamp ?? entry.updatedAt, entry.updatedAt), null);
+  const edited = directoryReceived && latest !== null ? formatTimestamp(latest, now, true) : null;
+
+  const copyId = async (): Promise<void> => {
+    const copied = await writeToClipboard(workspace.uuid);
+    notifyTransient({
+      key: "copy-workspace-id",
+      message: copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
+      severity: copied ? "success" : "error",
+    });
+  };
 
   return (
     <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
@@ -86,26 +110,53 @@ function GeneralSettings({
         </h1>
         <WorkspaceNameForm key={workspace.uuid} workspace={workspace} connection={catalogConnection} />
         <MainRepositoryForm key={`repository-${workspace.uuid}`} workspace={workspace} connection={catalogConnection} />
-        <div className="rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+        <section className="mt-8" aria-labelledby="ub-workspace-location-title">
+          <h2 id="ub-workspace-location-title" className="mt-0 mb-4 ub-type-h2 font-semibold">Where it lives</h2>
           <dl className="m-0 grid" data-settings-facts>
-            <Fact label="Workspace UUID" mono>{workspace.uuid}</Fact>
-            <Fact label="Address segment" mono>{workspace.segment}</Fact>
-            <Fact label="Documents" tabular>{documents ?? UNKNOWN}</Fact>
-            <Fact label="Hub" mono>{endpoint?.url ?? UNKNOWN}</Fact>
-            <Fact label="Source">
-              {endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
+            <Fact label="Hub">{workspaceLocationLabel(workspaceLocation) ?? UNKNOWN}</Fact>
+            <Fact label="Workspace ID">
+              <span className="inline-flex max-w-full flex-wrap items-baseline justify-end gap-2">
+                <span className="min-w-0 wrap-anywhere font-(family-name:--font-mono)">{workspace.uuid}</span>
+                <Button type="button" variant="outline" size="sm" aria-label="Copy workspace ID" onClick={() => void copyId()}>Copy</Button>
+              </span>
             </Fact>
-            <Fact label="Connection">
-              <span>{reading.word}</span>
-              {reading.detail !== null && (
-                <span className="mt-1 block font-(family-name:--font-sans)">
-                  {" "}{reading.detail}
-                </span>
-              )}
-            </Fact>
-            <Fact label="MCP connections" tabular>{agentSessions}</Fact>
           </dl>
-        </div>
+        </section>
+        <section className="mt-8" aria-labelledby="ub-workspace-about-title">
+          <h2 id="ub-workspace-about-title" className="mt-0 mb-4 ub-type-h2 font-semibold">About this workspace</h2>
+          <dl className="m-0 grid" data-settings-facts>
+            <Fact label="Documents" tabular>{directoryReceived ? `${documents}${archived > 0 ? ` (${archived} archived)` : ""}` : UNKNOWN}</Fact>
+            <Fact label="Tags" tabular>{tags ?? UNKNOWN}</Fact>
+            <Fact label="Last edited" tabular>
+              {edited === null ? UNKNOWN : <time dateTime={edited.dateTime} title={edited.title}>{edited.label}</time>}
+            </Fact>
+          </dl>
+        </section>
+        <Collapsible key={`connection-${workspace.uuid}`} className="mt-8">
+          <h2 className="mt-0 mb-4 ub-type-h2 font-semibold">
+            <CollapsibleTrigger className="group flex max-w-full items-center gap-2 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit cursor-pointer [@media(any-pointer:coarse)]:min-h-11">
+              Connection details
+              <svg className="size-4 shrink-0 group-data-[state=open]:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+            </CollapsibleTrigger>
+          </h2>
+          <CollapsibleContent>
+            <dl className="m-0 grid" data-settings-facts>
+              <Fact label="Address segment" mono>{workspace.segment}</Fact>
+              <Fact label="Source">
+                {endpoint === null ? UNKNOWN : endpointSourceLabel(endpoint.source)}
+              </Fact>
+              <Fact label="Connection">
+                <span>{reading.word}</span>
+                {reading.detail !== null && (
+                  <span className="mt-1 block">
+                    {" "}{reading.detail}
+                  </span>
+                )}
+              </Fact>
+              <Fact label="MCP connections" tabular>{directoryReceived ? agentSessions : UNKNOWN}</Fact>
+            </dl>
+          </CollapsibleContent>
+        </Collapsible>
       </div>
     </section>
   );
@@ -156,13 +207,13 @@ function WorkspaceNameForm({
   };
 
   return (
-    <div className="mb-4 flex flex-col gap-3 rounded-(--radius) border border-(--border) bg-card p-4 text-card-foreground">
+    <div className="mb-4 flex flex-col gap-3">
       <form className="flex flex-col gap-2" onSubmit={save}>
-        <label htmlFor="ub-workspace-name" className="ub-type-ui font-medium">Workspace name</label>
+        <label htmlFor="ub-workspace-name" className="ub-type-ui font-medium">Name</label>
         <div className="flex gap-2">
           <Input
             id="ub-workspace-name"
-            className="flex-1"
+            className="min-w-0 flex-1"
             value={draft}
             placeholder="Unnamed workspace"
             disabled={!writable}
@@ -176,7 +227,7 @@ function WorkspaceNameForm({
           <Button type="submit" disabled={!writable}>Save</Button>
         </div>
         <p id="ub-workspace-name-help" className="m-0 ub-type-small">
-          Use 1–64 characters, with no control or format characters. Spaces at the ends are removed.
+          Shown in the sidebar header and the workspace menu.
         </p>
       </form>
       {!writable && <p className="m-0 ub-type-ui" role="status">
@@ -471,6 +522,7 @@ export function WorkspaceSettings({
   admin,
   page = "general",
   workspace,
+  workspaceLocation = null,
   endpoint,
   connection,
   catalogConnection = null,
@@ -481,6 +533,7 @@ export function WorkspaceSettings({
   admin: boolean;
   page?: SettingsPage;
   workspace: Workspace;
+  workspaceLocation?: string | null;
   endpoint: HubEndpoint | null;
   connection: RoomConnection | null;
   catalogConnection?: RoomConnection | null;
@@ -498,6 +551,7 @@ export function WorkspaceSettings({
   ) : (
     <GeneralSettings
       workspace={workspace}
+      workspaceLocation={workspaceLocation}
       endpoint={endpoint}
       connection={connection}
       catalogConnection={catalogConnection}

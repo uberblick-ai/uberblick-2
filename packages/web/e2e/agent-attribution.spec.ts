@@ -138,6 +138,7 @@ for (const settings of [
     try {
       await facts.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
       await expect(facts.getByRole("heading", { level: 1, name: "General", exact: true })).toBeVisible();
+      await facts.getByRole("button", { name: "Connection details", exact: true }).click();
       await page.bringToFront();
 
       // A usable session title wins; otherwise the client's own name is retained.

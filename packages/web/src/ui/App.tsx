@@ -1089,6 +1089,7 @@ export function App(): ReactElement {
             key={route.workspace.uuid}
             page={route.page}
             workspace={route.workspace}
+            workspaceLocation={workspaceLocation}
             serving={serving}
             subject={identity.name}
             endpoint={endpoint}

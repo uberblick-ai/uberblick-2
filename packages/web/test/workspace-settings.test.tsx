@@ -5,18 +5,22 @@ import * as Y from "yjs";
 import {
   EXAMPLE_TAGS,
   createTagCatalogEntry,
+  listDirectory,
   listTagCatalog,
   getWorkspaceName,
   getWorkspaceMainRepository,
   setWorkspaceMainRepository,
   setWorkspaceName,
   retireTagCatalogEntry,
+  restoreDirectoryEntry,
   settingsRoom,
+  tombstoneDirectoryEntry,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
 import { notifyTransient } from "../src/notifications.js";
+import { writeToClipboard } from "../src/editor/source-chrome.js";
 import { WorkspaceSettings } from "../src/ui/settings/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
 import type { AccessAction, AccessAnswer, AccessMember, AccessRole } from "../src/shell/workspace-access.js";
@@ -26,6 +30,10 @@ vi.mock("../src/collab/rooms.js", async (original) => ({
   mintHubAuthMessage: vi.fn(async () => `local-browser-bearer-${crypto.randomUUID()}`),
 }));
 vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
+vi.mock("../src/editor/source-chrome.js", async (original) => ({
+  ...await original<typeof import("../src/editor/source-chrome.js")>(),
+  writeToClipboard: vi.fn().mockResolvedValue(true),
+}));
 
 const WORKSPACE: Workspace = {
   uuid: "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4",
@@ -99,12 +107,14 @@ afterEach(() => {
   mounted = null;
   vi.unstubAllGlobals();
   vi.mocked(notifyTransient).mockClear();
+  vi.mocked(writeToClipboard).mockReset().mockResolvedValue(true);
 });
 
 async function mount(
   connection: RoomConnection | null,
   endpoint: HubEndpoint | null = ENDPOINT,
   catalogConnection: RoomConnection | null = null,
+  workspaceLocation: string | null = ENDPOINT.url,
 ): Promise<HTMLElement> {
   mounted = await renderSettled(
     <WorkspaceSettings
@@ -113,6 +123,7 @@ async function mount(
       endpoint={endpoint}
       connection={connection}
       catalogConnection={catalogConnection}
+      workspaceLocation={workspaceLocation}
       agentSessions={2}
     />,
   );
@@ -172,12 +183,17 @@ function peerOf(local: Y.Doc): Y.Doc {
 
 function facts(host: HTMLElement): Map<string, string> {
   return new Map(
-    within(host).getAllByRole("term", { hidden: true }).map((term) => [
-      term.textContent ?? "",
+    within(host).getAllByRole("term", { hidden: true }).map((term) => {
       // A definition-list row has no role; its term identifies the paired fact.
-      within(term.parentElement as HTMLElement).getByRole("definition", { hidden: true }).textContent ?? "",
-    ]),
+      const value = within(term.parentElement as HTMLElement).getByRole("definition", { hidden: true }).cloneNode(true) as HTMLElement;
+      for (const button of value.querySelectorAll("button")) button.remove();
+      return [term.textContent ?? "", value.textContent?.trim() ?? ""] as const;
+    }),
   );
+}
+
+function openConnectionDetails(host: HTMLElement): void {
+  act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Connection details" }).click());
 }
 
 /** Good news uses the same 300ms calm cadence as the status line. */
@@ -192,23 +208,34 @@ it("renders only live client-held facts and preserves each unknown rule", async 
   seedDocuments(room.connection, 3);
   const host = await mount(room.connection);
   await settleSynced();
+  expect(within(host).getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
+    "Where it lives", "About this workspace", "Connection details",
+  ]);
+  expect(within(host).getByRole("button", { name: "Connection details" }).getAttribute("aria-expanded")).toBe("false");
+  expect(within(host).queryByRole("term", { name: "Address segment" })).toBeNull();
+  openConnectionDetails(host);
   const shown = facts(host);
 
-  expect(shown.get("Workspace UUID")).toBe(WORKSPACE.uuid);
+  expect(shown.get("Workspace ID")).toBe(WORKSPACE.uuid);
   expect(shown.get("Address segment")).toBe(WORKSPACE.segment);
   expect(shown.get("Documents")).toBe("3");
-  expect(shown.get("Hub")).toBe(ENDPOINT.url);
+  expect(shown.get("Hub")).toBe("hub.example.test");
   expect(shown.get("Source")).toBe("served /uberblick-config.json");
   expect(shown.get("Connection")).toBe("synced");
   expect(shown.get("MCP connections")).toBe("2");
 
   mounted?.unmount();
   mounted = null;
-  const unknown = facts(await mount(null, null));
+  const unknownHost = await mount(null, null, null, null);
+  openConnectionDetails(unknownHost);
+  const unknown = facts(unknownHost);
   expect(unknown.get("Hub")).toBe("—");
   expect(unknown.get("Source")).toBe("—");
   expect(unknown.get("Connection")).toBe("offline");
   expect(unknown.get("Documents")).toBe("—");
+  expect(unknown.get("Tags")).toBe("—");
+  expect(unknown.get("Last edited")).toBe("—");
+  expect(unknown.get("MCP connections")).toBe("—");
 });
 
 it("counts only the routed directory after server state, across disconnects", async () => {
@@ -223,6 +250,7 @@ it("counts only the routed directory after server state, across disconnects", as
   seedDocuments(unread.connection, 2);
   const host = await mount(unread.connection);
   expect(facts(host).get("Documents")).toBe("—");
+  expect(facts(host).get("Last edited")).toBe("—");
 
   unread.update({
     connected: true,
@@ -243,7 +271,7 @@ it("counts only the routed directory after server state, across disconnects", as
   await act(async () => {
     mounted?.rerender(
       <WorkspaceSettings
-      admin={true}
+        admin={true}
         workspace={WORKSPACE}
         endpoint={ENDPOINT}
         connection={foreign.connection}
@@ -252,6 +280,148 @@ it("counts only the routed directory after server state, across disconnects", as
     );
   });
   expect(facts(host).get("Documents")).toBe("—");
+  expect(facts(host).get("Last edited")).toBe("—");
+});
+
+it.each([
+  ["wss://upstream.example.test/ws", "upstream.example.test"],
+  ["local", "This device"],
+])("uses the shell location %s rather than the local serving endpoint", async (location, label) => {
+  const endpoint: HubEndpoint = { url: "ws://127.0.0.1:43123", source: "document" };
+  const host = await mount(null, endpoint, null, location);
+  expect(facts(host).get("Hub")).toBe(label);
+  openConnectionDetails(host);
+  expect(host.textContent).not.toContain(endpoint.url);
+  expect(host.textContent).not.toContain("wss://");
+});
+
+it.each([true, false])("copies the bare workspace ID and reports clipboard success=%s", async (copied) => {
+  vi.mocked(writeToClipboard).mockResolvedValueOnce(copied);
+  const host = await mount(null);
+  const copy = within(host).getByRole<HTMLButtonElement>("button", { name: "Copy workspace ID" });
+  await act(async () => copy.click());
+  expect(writeToClipboard).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(writeToClipboard).mock.calls[0]?.[0]).toBe(WORKSPACE.uuid);
+  expect(notifyTransient).toHaveBeenLastCalledWith(expect.objectContaining({
+    message: copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
+    severity: copied ? "success" : "error",
+  }));
+});
+
+it("counts regular documents and active tags live, and takes the newest stamp from live document and decision entries", async () => {
+  const directory = statusRoom(SYNCED);
+  const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const regular = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
+  const archived = "1f77c0d9-6b42-4a18-9e35-2c8d0f6a1b73";
+  const created = "7c2e5a11-3f80-4d66-b1a9-8e4d2c6f0a55";
+  const decision = "5104a4b1-7249-48d6-8050-146ca373f56e";
+  const archivedTopic = "6670f9ee-a571-4b6c-83f7-40c05be3ae76";
+  const archivedSuccessor = "2a7b16f2-d7f8-46dd-84c2-4a1f63c09053";
+  const now = Date.now();
+  const decisionStamp = now - 3_600_000;
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid: regular, title: "Regular", updatedAt: now - 7_200_000 });
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid: archived, title: "Archived regular", updatedAt: now - 60_000 });
+  tombstoneDirectoryEntry(directory.connection.ydoc, archived);
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid: decision, title: "Live decision", kind: "decision", updatedAt: decisionStamp });
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid: archivedTopic, title: "Archived decision", kind: "decision", updatedAt: now - 30_000 });
+  tombstoneDirectoryEntry(directory.connection.ydoc, archivedTopic);
+  // A successor received after its topic's archive still belongs to that archive.
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid: archivedSuccessor, title: "Archived successor", kind: "decision", topic: archivedTopic, updatedAt: now - 10_000 });
+  const tag = createTagCatalogEntry(settings.connection.ydoc, "product");
+  const retired = createTagCatalogEntry(settings.connection.ydoc, "auth");
+  retireTagCatalogEntry(settings.connection.ydoc, retired.id);
+  const host = await mount(directory.connection, ENDPOINT, settings.connection);
+  expect(facts(host).get("Documents")).toBe("1 (1 archived)");
+  expect(facts(host).get("Tags")).toBe("1");
+  const stamp = within(host).getByRole("time");
+  expect(stamp.getAttribute("dateTime")).toBe(new Date(decisionStamp).toISOString());
+
+  act(() => upsertDirectoryEntry(directory.connection.ydoc, { uuid: created, title: "Created", updatedAt: now }));
+  expect(facts(host).get("Documents")).toBe("2 (1 archived)");
+  expect(stamp.getAttribute("dateTime")).toBe(new Date(now).toISOString());
+  act(() => tombstoneDirectoryEntry(directory.connection.ydoc, regular));
+  expect(facts(host).get("Documents")).toBe("1 (2 archived)");
+  act(() => restoreDirectoryEntry(directory.connection.ydoc, regular));
+  expect(facts(host).get("Documents")).toBe("2 (1 archived)");
+  act(() => upsertDirectoryEntry(directory.connection.ydoc, { uuid: decision, title: "Edited decision", kind: "decision", updatedAt: now + 1_000 }));
+  expect(stamp.getAttribute("dateTime")).toBe(new Date(now + 1_000).toISOString());
+  act(() => createTagCatalogEntry(settings.connection.ydoc, "architecture"));
+  expect(facts(host).get("Tags")).toBe("2");
+  act(() => retireTagCatalogEntry(settings.connection.ydoc, tag.id));
+  expect(facts(host).get("Tags")).toBe("1");
+});
+
+it("waits for the routed settings room without seeding or requesting more data", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
+  createTagCatalogEntry(settings.connection.ydoc, "product");
+  const before = Y.encodeStateAsUpdate(settings.connection.ydoc);
+  const host = await mount(null, ENDPOINT, settings.connection);
+  expect(facts(host).get("Tags")).toBe("—");
+  settings.update({ hasReceivedServerState: true });
+  expect(facts(host).get("Tags")).toBe("1");
+  settings.update({ connected: false, synced: false, writable: false });
+  expect(facts(host).get("Tags")).toBe("1");
+  expect(Y.encodeStateAsUpdate(settings.connection.ydoc)).toEqual(before);
+  expect(fetch).not.toHaveBeenCalled();
+
+  const foreign = statusRoom(SYNCED, settingsRoom("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"));
+  createTagCatalogEntry(foreign.connection.ydoc, "auth");
+  await act(async () => mounted?.rerender(<WorkspaceSettings admin={true} workspace={WORKSPACE} endpoint={ENDPOINT} connection={null} catalogConnection={foreign.connection} agentSessions={2} />));
+  expect(facts(host).get("Tags")).toBe("—");
+  mounted?.unmount();
+  const empty = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const emptyBefore = Y.encodeStateAsUpdate(empty.connection.ydoc);
+  const emptyHost = await mount(null, ENDPOINT, empty.connection);
+  expect(facts(emptyHost).get("Tags")).toBe("0");
+  expect(Y.encodeStateAsUpdate(empty.connection.ydoc)).toEqual(emptyBefore);
+  expect(listTagCatalog(empty.connection.ydoc)).toEqual([]);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("updates last edited when a peer's stamp converges while its concurrent directory stub loses", async () => {
+  const directory = statusRoom(SYNCED);
+  directory.connection.ydoc.clientID = 2;
+  const uuid = "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31";
+  const now = Date.now();
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid, title: "Original", updatedAt: now - 120_000 });
+  const peer = new Y.Doc();
+  peer.clientID = 1;
+  Y.applyUpdate(peer, Y.encodeStateAsUpdate(directory.connection.ydoc));
+  upsertDirectoryEntry(directory.connection.ydoc, { uuid, title: "Local title", updatedAt: now - 60_000 });
+  upsertDirectoryEntry(peer, { uuid, title: "Peer title", updatedAt: now });
+  const host = await mount(directory.connection);
+  const stamp = within(host).getByRole("time");
+  expect(stamp.getAttribute("dateTime")).toBe(new Date(now - 60_000).toISOString());
+
+  act(() => Y.applyUpdate(directory.connection.ydoc, Y.encodeStateAsUpdate(peer)));
+  expect(listDirectory(directory.connection.ydoc)[0]?.title).toBe("Local title");
+  expect(stamp.getAttribute("dateTime")).toBe(new Date(now).toISOString());
+  peer.destroy();
+});
+
+it.each([
+  { age: 59_000, initial: "just now", later: "1 minute ago" },
+  { age: 400 * 24 * 3_600_000, initial: "1 year ago", later: "1 year ago" },
+])("keeps last edited relative and advances its clock at age $age", async ({ age, initial, later }) => {
+  vi.useFakeTimers();
+  try {
+    const now = Date.UTC(2026, 9, 16, 12);
+    vi.setSystemTime(now);
+    const directory = statusRoom(SYNCED);
+    const editedAt = now - age;
+    upsertDirectoryEntry(directory.connection.ydoc, { uuid: "b4e6f1c2-9d3a-4f57-8c21-5e0a7b9d4c31", title: "Clock", updatedAt: editedAt });
+    const host = await mount(directory.connection);
+    const stamp = within(host).getByRole("time");
+    expect(stamp.textContent).toBe(initial);
+    expect(stamp.getAttribute("dateTime")).toBe(new Date(editedAt).toISOString());
+    expect(stamp.getAttribute("title")).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(editedAt));
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(stamp.textContent).toBe(later);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("waits for server state, seeds once, and keeps a retired-only reading offline", async () => {
@@ -430,6 +600,7 @@ it("leaves focus untouched when a peer changes the catalog", async () => {
 it("takes offline and refusal readings live from the shared status derivation", async () => {
   const room = statusRoom(SYNCED);
   const host = await mount(room.connection);
+  openConnectionDetails(host);
   await settleSynced();
   expect(facts(host).get("Connection")).toBe("synced");
 
@@ -461,19 +632,24 @@ it("renames only shared workspace state and refuses invalid drafts without chang
   createTagCatalogEntry(settings.connection.ydoc, "product");
   const catalog = listTagCatalog(settings.connection.ydoc);
   const host = await mount(directory.connection, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   expect(input.value).toBe("Current name");
+  const hint = within(host).getByText("Shown in the sidebar header and the workspace menu.", { exact: true });
+  expect(input.getAttribute("aria-describedby")?.split(/\s+/)).toContain(hint.id);
+  expect(host.textContent).not.toContain("Use 1–64 characters");
 
   for (const invalid of ["   ", "x".repeat(65), "Control\u0007name", "Format\u200bname"]) {
     act(() => typeInto(input, invalid));
     expect(within(host).queryByRole("alert")).toBeNull();
     act(() => submit.click());
     expect(within(host).getByRole("alert").textContent).toContain("1–64 characters after trimming");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
   }
   expect(notifyTransient).not.toHaveBeenCalled();
   act(() => typeInto(input, "  Product Research  "));
+  expect(input.getAttribute("aria-invalid")).toBe("false");
   act(() => submit.click());
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Product Research");
   expect(input.value).toBe("Product Research");
@@ -481,7 +657,8 @@ it("renames only shared workspace state and refuses invalid drafts without chang
   expect(host.textContent).not.toContain("Saved “Product Research”.");
   expect(within(host).queryByRole("alert")).toBeNull();
   expect(listTagCatalog(settings.connection.ydoc)).toEqual(catalog);
-  expect(facts(host).get("Workspace UUID")).toBe(WORKSPACE.uuid);
+  expect(facts(host).get("Workspace ID")).toBe(WORKSPACE.uuid);
+  openConnectionDetails(host);
   expect(facts(host).get("Address segment")).toBe(WORKSPACE.segment);
   directory.connection.ydoc.destroy(); settings.connection.ydoc.destroy();
 });
@@ -557,7 +734,7 @@ it("follows shared names while pristine and preserves an edited rename draft", a
   const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(settings.connection.ydoc);
   const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   expect(input.value).toBe("");
 
@@ -585,7 +762,7 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   const settings = statusRoom({ ...SYNCED, hasReceivedServerState: false }, settingsRoom(WORKSPACE.uuid));
   setWorkspaceName(settings.connection.ydoc, "Existing name");
   const host = await mount(null, ENDPOINT, settings.connection);
-  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   // Use the input's native form relationship to force submit while disabled.
   const form = input.form as HTMLFormElement;
   const button = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
@@ -620,7 +797,7 @@ it("waits for settings state and refuses renaming when its room cannot write", a
 it.each(["input", "submit"])("preserves the focused %s when name or tag submission publishes success", async (focus) => {
   const settings = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   let host = await mount(null, ENDPOINT, settings.connection);
-  let input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Workspace name" });
+  let input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Name" });
   let submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Save" });
   act(() => {
     typeInto(input, "New name");
