@@ -414,7 +414,7 @@ function SettingsNavigation({
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
         <button
           type="button"
-          className="ub-settings-back flex min-h-8.5 pointer-coarse:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-settings-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           data-swap-focus
           onClick={onBack}
         >

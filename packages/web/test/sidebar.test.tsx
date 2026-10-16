@@ -172,6 +172,7 @@ function settingsHub(ownRole: () => Promise<Record<string, unknown>>, hubAdmin =
         : { status: "forbidden" };
       return Response.json({ ...body, hub: "https://hub.example.test" });
     }
+    if (input === "/api/device-login") return Response.json({ state: "signed-in", handle: "hub-person" });
     if (input === "/api/account") return Response.json({ state: "unavailable" });
     if (input === "/uberblick-config.json") return Response.json({
       hubUrl: "ws://127.0.0.1:4321", workspaces: [WORKSPACE],
