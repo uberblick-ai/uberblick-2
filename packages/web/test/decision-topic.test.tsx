@@ -221,7 +221,9 @@ function selection(host: HTMLElement): string | null {
 }
 
 async function choose(host: HTMLElement, uuid: string): Promise<void> {
-  await act(async () => within(item(host, uuid)).getByRole("link", { name: /Selected|proposal|answer|Superseded|Rejected|Withdrawn|In force|stance/i }).click());
+  const link = item(host, uuid).querySelector<HTMLAnchorElement>(".ub-decision-record");
+  if (link === null) throw new Error(`No record link ${uuid}`);
+  await act(async () => link.click());
 }
 
 async function back(): Promise<void> {
@@ -460,17 +462,95 @@ describe("decision topic navigation and history", () => {
     expect(selection(host)).toBe(CURRENT);
     expect(item(host, FIRST).textContent).toContain("Linked record");
     expect(item(host, FIRST).textContent).toContain("Superseded");
-    expect(item(host, FIRST).textContent).toContain("1 comment");
+    expect(within(item(host, FIRST)).getByLabelText("1 comment")).toBeDefined();
     expect(item(host, REJECTED).textContent).toContain("Rejected");
     expect(item(host, REJECTED).querySelector("time")?.dateTime).toBe("2026-10-10T12:00:00.000Z");
     expect(item(host, WITHDRAWN).textContent).toContain("Withdrawn");
-    expect(item(host, OPEN).textContent).toContain("Open proposal");
+    expect(item(host, OPEN).textContent).toContain("Under review");
     expect(item(host, OPEN).querySelector("time")?.dateTime).toBe(new Date(CREATED + 4000).toISOString());
-    expect(within(item(host, OPEN)).getByRole("link", { name: "Open RFC" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
+    expect(within(item(host, OPEN)).getByRole("link", { name: "Proposal discussion" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
     expect(host.querySelector(".ub-threads-pane")?.textContent ?? host.textContent).toContain("Current record comment");
     expect(host.textContent).not.toContain("Earlier record comment");
     expect(timeline(host).querySelectorAll("li")).toHaveLength(5);
     expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([roomForDoc(WORKSPACE, CURRENT)]);
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+  });
+
+  it("renders cached history newest first with matching answer pills and the rail through the answer in force", async () => {
+    story();
+    const host = (await open()).container;
+    const history = timeline(host);
+    expect(within(history).getByRole("heading", { name: "HISTORY" }).textContent).toBe("HISTORY");
+    expect([...history.querySelectorAll("li")].map((row) => row.getAttribute("data-record")))
+      .toEqual([OPEN, WITHDRAWN, REJECTED, CURRENT, FIRST]);
+    expect(item(host, FIRST).querySelector(".ub-decision-linked")?.textContent?.trim()).toBe("Linked record");
+    const rows = [
+      { uuid: OPEN, state: "under-review", label: "Under review", event: null, green: true },
+      { uuid: WITHDRAWN, state: "withdrawn", label: "Withdrawn", event: null, green: true },
+      { uuid: REJECTED, state: "rejected", label: "Rejected", event: "Alex rejected the proposal from 4 weeks ago", green: true },
+      { uuid: CURRENT, state: "in-force", label: "In force", event: "Ben decided", green: true },
+      { uuid: FIRST, state: "superseded", label: "Superseded", event: "Agent stance, never confirmed", green: false },
+    ];
+    for (const { uuid, state, label, event, green } of rows) {
+      const row = item(host, uuid);
+      expect(row.getAttribute("data-state")).toBe(state);
+      expect(row.getAttribute("data-in-force")).toBe(String(uuid === CURRENT));
+      expect(row.getAttribute("data-rail-green")).toBe(String(green));
+      expect(row.querySelector(".ub-decision-answer-state")?.textContent).toBe(label);
+      expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
+      await choose(host, uuid);
+      expectAnswerState(host, label);
+    }
+    expect(item(host, FIRST).querySelector(".ub-decision-selection")?.textContent?.trim()).toBe("viewing");
+    expect(history.textContent).not.toContain("Selected");
+    expect(within(item(host, CURRENT)).getByLabelText("1 comment")).toBeDefined();
+    expect(within(item(host, OPEN)).getByLabelText("0 comments")).toBeDefined();
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, EARLIER_RFC));
+  });
+
+  it.each([
+    { label: "a recorded rejection without a creation date", options: { answerer: "Ben (@bk-one)", createdAt: null }, event: "Ben (@bk-one) rejected the proposal" },
+    { label: "a rejection without a recorded person", options: {}, event: null },
+  ])("uses only cached attribution for $label", async ({ options, event }) => {
+    record(FIRST, "Rejected proposal", "rejected", "A rejected answer.", { ...options, answerDate: DATE });
+    if (options.createdAt === null) {
+      Object.defineProperty(room(directoryRoom(WORKSPACE)), "status", { value: { ...LIVE, writable: false } });
+    }
+    const host = (await open()).container;
+    const row = item(host, FIRST);
+    expect(row.querySelector(".ub-decision-event")?.textContent ?? null).toBe(event);
+    expect(row.querySelector(".ub-decision-answer-state")?.textContent).toBe("Rejected");
+    expect(row.getAttribute("data-in-force")).toBe("false");
+    expect(row.getAttribute("data-rail-green")).toBe("false");
+  });
+
+  it("leaves absent history caches empty and keeps rejected RFC links independent of record links", async () => {
+    regular(RFC, "Archived rejection discussion");
+    tombstoneDirectoryEntry(directory(), RFC);
+    record(FIRST, "Current answer", "decided", "The answer in force.", { agent: true });
+    record(REJECTED, "Rejected alternative", "rejected", "A rejected answer.", {
+      supersedes: FIRST, discussion: RFC, answerer: "  Ben (@bk-one)  ", answerDate: DATE, rejectionReason: "Only in the selected record room.", order: 1,
+    });
+    record(OPEN, "Uncached proposal", "open", "A preview that has not been cached.", { supersedes: FIRST, cache: false, order: 2 });
+    const host = (await open()).container;
+    const rejected = item(host, REJECTED);
+    const recordLink = rejected.querySelector<HTMLAnchorElement>(".ub-decision-record");
+    const rfcLink = within(rejected).getByRole("link", { name: /^Archived rejection discussion/ });
+    expect(recordLink?.getAttribute("href")).toBe(decisionRecordPath(WORKSPACE, FIRST, REJECTED));
+    expect(rfcLink.getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
+    expect(rfcLink.getAttribute("data-doc-link-state")).toBe("archived");
+    expect(rfcLink.closest(".ub-decision-record")).toBeNull();
+    expect(rejected.querySelectorAll("a a")).toHaveLength(0);
+    expect(rejected.textContent).not.toContain("Only in the selected record room.");
+    expect(rejected.querySelector(".ub-decision-event")?.textContent).toBe("  Ben (@bk-one)   rejected the proposal from 4 weeks ago");
+    expect(item(host, OPEN).querySelector(".ub-decision-preview")).toBeNull();
+    expect(item(host, OPEN).querySelector(".ub-decision-record-comments")).toBeNull();
+    expect(item(host, OPEN).querySelector(".ub-decision-record-rfc")).toBeNull();
+    expect(item(host, FIRST).querySelector(".ub-decision-event")).toBeNull();
+    expect(item(host, FIRST).getAttribute("data-in-force")).toBe("true");
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, REJECTED));
+    expect(acquired).not.toContain(roomForDoc(WORKSPACE, OPEN));
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, RFC));
   });
 
@@ -547,7 +627,7 @@ describe("decision topic navigation and history", () => {
     expect(within(host).queryByRole("link", { name: "Open proposal" })).toBeNull();
     expect(item(host, OPEN).textContent).not.toContain("Unknown preview from this room");
     expect(item(host, OPEN).querySelector(".ub-decision-preview")).toBeNull();
-    expect(within(item(host, OPEN)).queryByRole("link", { name: "Open RFC" })).toBeNull();
+    expect(item(host, OPEN).querySelector(".ub-decision-record-rfc")).toBeNull();
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, OPEN));
   });
 
@@ -557,7 +637,8 @@ describe("decision topic navigation and history", () => {
     const host = (await open()).container;
     expectAnswerState(host, "Not yet decided");
     expect(host.querySelector(".ub-decision-notice")?.textContent).not.toContain("Not yet decided");
-    expect(item(host, FIRST).querySelector(".ub-decision-record-state")?.textContent).toBe("Open proposal");
+    expect(item(host, FIRST).querySelector(".ub-decision-answer-state")?.textContent).toBe("Not yet decided");
+    expect(item(host, FIRST).getAttribute("data-rail-green")).toBe("false");
     expect(answer(host).textContent).toContain("The initial proposal.");
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Unanswered RFC");
     expect(within(host).getByRole("link", { name: "Open proposal" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
@@ -573,8 +654,8 @@ describe("decision topic navigation and history", () => {
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Under review.");
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("2 pending proposals");
     expect(within(host).queryByRole("link", { name: "Open proposal" })).toBeNull();
-    expect(within(item(host, OPEN)).getByRole("link", { name: "Open RFC" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
-    expect(within(item(host, NEXT)).queryByRole("link", { name: "Open RFC" })).toBeNull();
+    expect(within(item(host, OPEN)).getByRole("link", { name: "Proposal discussion" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
+    expect(item(host, NEXT).querySelector(".ub-decision-record-rfc")).toBeNull();
     expect(answer(host).textContent).toContain("Use the current answer.");
     await choose(host, NEXT);
     expectAnswerState(host, "Under review");
@@ -595,7 +676,7 @@ describe("decision topic navigation and history", () => {
       expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("The current answer stays in force.");
       expect(host.querySelector(".ub-decision-notice")?.textContent).not.toContain("Under review");
       expect(within(host).getByRole("link", { name: "Open proposal" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
-      expect(item(host, OPEN).querySelector(".ub-decision-record-state")?.textContent).toBe("Open proposal");
+      expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Under review");
     } else {
       expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Under review.");
     }
@@ -646,6 +727,13 @@ describe("decision topic navigation and history", () => {
     const host = (await open()).container;
     if (status === "open") expect(host.querySelector(".ub-decision-notice")).toBeNull();
     const attribution = answerHeader(host).querySelector(".ub-decision-attribution");
+    const historyTime = item(host, FIRST).querySelector("time");
+    if (dateTime === undefined) {
+      expect(historyTime).toBeNull();
+    } else {
+      expect(historyTime?.dateTime).toBe(dateTime);
+      expect(historyTime?.title).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(dateTime)));
+    }
     if (text === null) {
       expect(attribution).toBeNull();
     } else {
@@ -700,6 +788,8 @@ describe("decision topic navigation and history", () => {
     const ydoc = record(FIRST, "Initial stance", "decided", "An agent's initial answer.", { agent: true, discussion: RFC });
     const host = (await open()).container;
     expectAnswerState(host, "Agent stance");
+    expect(item(host, FIRST).querySelector(".ub-decision-answer-state")?.textContent).toBe("Agent stance");
+    expect(item(host, FIRST).querySelector(".ub-decision-event")).toBeNull();
     expect(host.querySelector(".ub-decision-rfc")?.textContent).toBe("RFC Stance discussion");
     expect(answerHeader(host).textContent?.match(/Agent stance/g)).toHaveLength(1);
     expect(answerHeader(host).querySelector(".ub-decision-attribution")?.textContent).toBe("4 weeks ago");
@@ -726,6 +816,9 @@ describe("decision topic navigation and history", () => {
     expectAnswerState(host, "Conflicting answer");
     expect(item(host, CURRENT).textContent).toContain("Conflicting answer");
     expect(item(host, NEXT).textContent).toContain("Conflicting answer");
+    expect(item(host, CURRENT).querySelector(".ub-decision-event")?.textContent).toBe("Ben decided");
+    expect(item(host, NEXT).querySelector(".ub-decision-event")?.textContent).toBe("Alex decided");
+    expect([...timeline(host).querySelectorAll("li")].every((row) => row.getAttribute("data-rail-green") === "false")).toBe(true);
     expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
     await choose(host, CURRENT);
     expect(answer(host).textContent).toContain("One conflicting answer.");
@@ -734,6 +827,8 @@ describe("decision topic navigation and history", () => {
     await act(async () => record(OPEN, "Proposal during conflict", "open", "A new proposal.", { supersedes: CURRENT, discussion: RFC, order: 3 }));
     await choose(host, OPEN);
     expectAnswerState(host, "Open proposal");
+    expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Open proposal");
+    expect(item(host, OPEN).querySelector(".ub-decision-event")).toBeNull();
     expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Nothing is in force.");
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
     expect(within(host).queryByRole("link", { name: "Go to the current answer" })).toBeNull();
@@ -797,7 +892,7 @@ describe("decision topic navigation and history", () => {
     await act(async () => tombstoneDirectoryEntry(directory(), RFC));
     expect(link()?.textContent).toBe("Current RFC title");
     expect(link()?.getAttribute("data-doc-link-state")).toBe("archived");
-    expect(within(item(host, FIRST)).getByRole("link", { name: "Open RFC" }).getAttribute("data-doc-link-state"))
+    expect(within(item(host, FIRST)).getByRole("link", { name: /^Current RFC title/ }).getAttribute("data-doc-link-state"))
       .toBe("archived");
     await act(async () => regular(RFC, "Renamed archived RFC"));
     expect(link()?.textContent).toBe("Renamed archived RFC");

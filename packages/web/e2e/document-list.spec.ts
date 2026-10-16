@@ -337,6 +337,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(currentTitle);
     await expect(editor(page)).toHaveText(currentAnswer);
     await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
+    await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-selection`)).toHaveText("viewing");
 
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
