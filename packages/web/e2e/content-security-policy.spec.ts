@@ -96,7 +96,7 @@ test("workspace, supported renderers and the every-type document emit no report-
     await watchViolations(target);
     await target.route("https://embed.figma.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" }));
   } });
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   await expectNoViolations(page);
 
   for (const uuid of [rendered.uuid, allTypes.uuid]) {
@@ -163,6 +163,6 @@ test("the classic bootstrap applies stored dark settings before the app module a
     expect(first).toEqual({ theme: appearance.theme, appMounted: false });
     expect(await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches)).toBe(false);
   } finally { releaseModule?.(); }
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   expect(await page.locator("html").getAttribute("data-theme")).toBe(appearance.theme);
 });

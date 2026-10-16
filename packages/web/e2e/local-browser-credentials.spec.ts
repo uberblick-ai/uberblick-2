@@ -6,7 +6,7 @@ import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helper
 import { placeCaret } from "./harness.js";
 import { installPageTimers, withPageTimers } from "./page-timers.js";
 
-const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head", beforeNavigate: installPageTimers } });
+const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
 
 async function documentText(page: Page): Promise<string | null> {
   return editor(page).evaluate((element) => {

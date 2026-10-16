@@ -14,8 +14,8 @@ const test = base.extend<{ peers: [Page, Page] }>({
       page.on("pageerror", (error) => errors.push(error.message));
     };
     const pages = await Promise.all([
-      openApp(browser, "/", { contextOptions: { hasTouch: true }, beforeNavigate, readySelector: ".ub-list-head" }),
-      openApp(browser, "/", { beforeNavigate, readySelector: ".ub-list-head" }),
+      openApp(browser, "/", { contextOptions: { hasTouch: true }, beforeNavigate, readySelector: ".ub-document-sidebar" }),
+      openApp(browser, "/", { beforeNavigate, readySelector: ".ub-document-sidebar" }),
     ]);
     await use(pages as [Page, Page]);
     expect(errors).toEqual([]);
@@ -29,7 +29,7 @@ const row = (page: Page, name: string): Locator => page.getByRole("button", { na
 const groups = (page: Page): Locator => page.locator(".ub-group:not([inert]) .ub-group-label");
 
 async function addGroup(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   await page.getByRole("textbox", { name: "Group name" }).fill(name);
   await page.getByRole("textbox", { name: "Group name" }).press("Enter");
   await expect(group(page, name)).toBeVisible();

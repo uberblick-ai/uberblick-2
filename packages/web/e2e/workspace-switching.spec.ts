@@ -29,7 +29,7 @@ async function switchToSecond(page: Page, keyboard = false): Promise<void> {
     await page.keyboard.press("Enter");
   } else await items.last().click();
   await expect(page).toHaveURL(new URL(`/${running.secondWorkspace}`, running.appUrl).href);
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
 }
 
 test("opening the switcher leaves the other project's replica free to serve", async ({ page }) => {
@@ -37,7 +37,7 @@ test("opening the switcher leaves the other project's replica free to serve", as
   const fresh = await startHarness({ multiWorkspace: true });
   try {
     await page.goto(fresh.appUrl);
-    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     await page.locator(".ub-workspace").click();
     const items = page.getByRole("menu").getByRole("menuitem");
     await expect(items).toHaveCount(2);
@@ -51,7 +51,7 @@ test("opening the switcher leaves the other project's replica free to serve", as
     try {
       await secondPage.goto(secondOpen.appUrl);
       await expect(secondPage).toHaveURL(new URL(`/${fresh.secondWorkspace}`, secondOpen.appUrl).href);
-      await expect(secondPage.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+      await expect(secondPage.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
       await expect(secondPage.getByTestId("account-menu")).toContainText("@second-person");
 
       const doc = await createDoc(page, docTitle("menu-leaves-startup-serving"), { pin: true });
@@ -133,7 +133,7 @@ test("a secondary replica failure is shown on its pages and clears when switchin
   });
   const page = await context.newPage();
   await page.goto(running.appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   failure = true;
   await switchToSecond(page);
   await expect(page.locator(".ub-replica-unavailable")).toContainText("serving another ub open");

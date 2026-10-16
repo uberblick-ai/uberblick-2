@@ -17,7 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -263,14 +263,14 @@ function press(element: Element | null, key: string): void {
 
 function columnOrder(host: HTMLElement): string[] {
   const controls = sidebarControls(host);
-  const head = controls.getByRole("button", { name: "+ new doc" }).parentElement;
-  const navigation = controls.getByText("Navigation").closest("section");
+  const creation = controls.getByRole("button", { name: "+ New page" }).parentElement;
+  const navigation = controls.getByRole("button", { name: "All documents" }).closest("section");
   const empty = controls.queryByText(/Nothing pinned yet/);
   const groups = sections(host);
   // These unnamed layout wrappers have no roles; compare their identities to
   // accessible descendants so a restyle cannot erase an order assertion.
-  return [...(head?.parentElement?.children ?? [])].flatMap((child) => {
-    if (child === head) return ["creation"];
+  return [...(creation?.parentElement?.children ?? [])].flatMap((child) => {
+    if (child === creation) return ["creation"];
     if (child === navigation) return ["navigation"];
     if (child === empty) return ["empty"];
     return groups.includes(child as HTMLElement) ? ["group"] : [];
@@ -279,7 +279,7 @@ function columnOrder(host: HTMLElement): string[] {
 
 /** The navigation rows, top to bottom. */
 function navRows(host: HTMLElement): HTMLButtonElement[] {
-  const navigation = sidebarControls(host).getByText("Navigation").closest("section") as HTMLElement;
+  const navigation = sidebarControls(host).getByRole("button", { name: "All documents" }).closest("section") as HTMLElement;
   // Ordering covers every mounted row, even if its name or visibility regresses.
   return within(navigation).getAllByRole<HTMLButtonElement>("button", { hidden: true });
 }
@@ -452,7 +452,7 @@ describe("the sidebar is the _sidebar document", () => {
     expect(
       // The still-open menu hides the shell; visible text identifies the
       // mounted navigation button even while its role/name is suppressed.
-      sidebarControls(host).getByText("All docs").getAttribute("aria-current"),
+      sidebarControls(host).getByText("All documents").getAttribute("aria-current"),
     ).toBeNull();
 
     // And the same control is the way back out.
@@ -470,7 +470,7 @@ describe("the sidebar is the _sidebar document", () => {
     const peer = peerOf(sidebarDoc());
     const host = await openApp(`/${WORKSPACE}`);
 
-    act(() => sidebarControls(host).getByRole("button", { name: "+ group" }).click());
+    act(() => sidebarControls(host).getByRole("button", { name: "+ New group" }).click());
     // Straight into its own name: the placeholder is not a decision.
     const field = sidebarControls(host).getByRole<HTMLInputElement>("textbox", { name: "Group name" });
     expect(field).not.toBeNull();
@@ -510,7 +510,7 @@ describe("the sidebar is the _sidebar document", () => {
 
     // Escape takes back the group the field itself made: cancelling is not a
     // decision to keep a group called "New group".
-    act(() => sidebarControls(host).getByRole("button", { name: "+ group" }).click());
+    act(() => sidebarControls(host).getByRole("button", { name: "+ New group" }).click());
     act(() => press(sidebarControls(host).getByRole("textbox", { name: "Group name" }), "Escape"));
     expect(stored(peer)).toEqual([
       ["Reading", []],
@@ -525,6 +525,7 @@ describe("the sidebar is the _sidebar document", () => {
     act(() => within(screen.getByRole("alertdialog", { name: "Delete group Reading?" })).getByRole("button", { name: "Delete group" }).click());
     expect(groupNames(host)).toEqual(["Elsewhere"]);
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
+    await waitFor(() => expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "+ New group" })));
   });
 
   it("writes nothing when group deletion is cancelled", async () => {
@@ -592,9 +593,17 @@ describe("the sidebar is the _sidebar document", () => {
     expect(dialog?.textContent).toContain("Nothing has been deleted");
     expect(stored(peer)).toEqual(before);
     expect(writes).not.toHaveBeenCalled();
-    act(() => within(dialog).getByRole("button", { name: "Cancel" }).click());
+    // Once the room publishes the loss, its delete trigger retires. Closing
+    // must reach live navigation even though the first row is unavailable.
+    act(() => {
+      for (const listener of statusListeners.get(sidebar.room) ?? []) listener(sidebar.status);
+    });
+    await act(async () => {
+      within(dialog).getByRole("button", { name: "Cancel" }).click();
+    });
     expect(screen.queryByRole("alertdialog", { name: "Delete group Reading?" })).toBeNull();
     expect(writes).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "All documents" })));
   });
 
   it("collapses a group, and remembers it", async () => {
@@ -821,14 +830,21 @@ describe("the sidebar's fixed navigation", () => {
     // Nothing pinned yet: the section is already there, above the line that
     // says so — an empty sidebar still opens with somewhere to go.
     expect(columnOrder(host)).toEqual([
-      "creation",
       "navigation",
       "empty",
+      "creation",
     ]);
     expect(navRows(host).map((row) => row.textContent)).toEqual([
-      "All docs",
-      "Dashboard Coming soon",
+      "Dashboard",
+      "All documents",
     ]);
+    const creation = sidebarControls(host).getByRole("button", { name: "+ New page" }).parentElement as HTMLElement;
+    expect(within(creation).getAllByRole("button").map((button) => button.textContent)).toEqual([
+      "+ New page",
+      "+ New group",
+    ]);
+    expect(sidebarControls(host).queryByText("Navigation")).toBeNull();
+    expect(sidebarControls(host).queryByRole("button", { name: "+ new doc" })).toBeNull();
 
     // A pin arrives and the groups appear under it; the section has not moved,
     // and the footer keeps the settings entry and account control.
@@ -837,21 +853,21 @@ describe("the sidebar's fixed navigation", () => {
       pinDoc(sidebar, createGroup(sidebar, "Reading"), ONE);
     });
     expect(columnOrder(host)).toEqual([
-      "creation",
       "navigation",
       "group",
+      "creation",
     ]);
     // The footer is an unnamed layout wrapper. Its structural marker sets the
     // original absence scope; the named control and non-null check prove it exists.
     const footer = within(host).getByRole("button", { name: "Workspace settings" }).closest('[data-slot="sidebar-footer"]') as HTMLElement;
     expect(footer).not.toBeNull();
-    expect(within(footer).queryByRole("button", { name: "All docs" })).toBeNull();
+    expect(within(footer).queryByRole("button", { name: "All documents" })).toBeNull();
     expect(within(footer).getByRole("button", { name: "Workspace settings" })).not.toBeNull();
     expect(within(footer).getByLabelText(/; preferences$/)).not.toBeNull();
 
     // Chrome, not curation: nothing in it can be dragged, and no drag of any
     // kind can land in it.
-    const nav = sidebarControls(host).getByText("Navigation").closest("section");
+    const nav = sidebarControls(host).getByRole("button", { name: "All documents" }).closest("section");
     // Native draggable attributes are the interaction contract under test.
     expect(nav?.querySelectorAll("[draggable]")).toHaveLength(0);
   });
@@ -863,25 +879,15 @@ describe("the sidebar's fixed navigation", () => {
     appendBlock(doc, { type: "paragraph", text: "how sync behaves" });
 
     const host = await openApp(`/${WORKSPACE}/${THREE}`);
-    const [, ...soon] = navRows(host);
-    expect(soon.map((row) => row.getAttribute("aria-disabled"))).toEqual([
-      "true",
-    ]);
-    expect(soon.map((row) => row.textContent)).toEqual([
-      "Dashboard Coming soon",
-    ]);
-
-    for (const row of soon) {
-      // Focusable on purpose. `disabled` would take the row out of the tab
-      // order, and a destination nobody can reach is a destination nobody is
-      // told about — `aria-disabled` announces it instead.
-      expect(row.disabled).toBe(false);
-      act(() => row.focus());
-      expect(document.activeElement).toBe(row);
-      // A button's Enter and Space are this click, so activating it either way
-      // is this call: the row has no handler, so nothing happens.
-      act(() => row.click());
-    }
+    const dashboard = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "Dashboard" });
+    expect(dashboard.getAttribute("aria-disabled")).toBe("true");
+    expect(dashboard.textContent).toBe("Dashboard");
+    expect(dashboard.title).toBe("Coming soon");
+    // Focusable on purpose: aria-disabled announces the unavailable page.
+    expect(dashboard.disabled).toBe(false);
+    act(() => dashboard.focus());
+    expect(document.activeElement).toBe(dashboard);
+    act(() => dashboard.click());
 
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${THREE}`);
     expect(within(host).getByPlaceholderText("Untitled")).toHaveProperty("value", "Sync");
@@ -889,18 +895,11 @@ describe("the sidebar's fixed navigation", () => {
 });
 
 /**
- * The directory line must show a refusal without opening a document.
- * It takes the refusal's word from the shared derivation, whose precedence
- * and wording `status-reading.test.ts` pins; what is asked here is only that
- * this line shows it, and that its own three readings are otherwise untouched —
- * uncalmed, and still saying "directory", because this line is about the
- * directory room.
+ * Only directory problems add a footer row. Refusals keep the shared
+ * precedence and their explanation, while normal connection and sync stay quiet.
  */
-describe("the sidebar's directory line reads a refusal", () => {
-  /** The line under the head, for a directory room in the given state. */
-  async function directoryLine(status: Partial<RoomStatus>): Promise<string> {
-    // A fresh mount per reading, the way the collapse test remounts: the rooms
-    // are cached, so a new status has to be in place before they are made.
+describe("the sidebar's directory status", () => {
+  async function directoryState(status: Partial<RoomStatus>, path = `/${WORKSPACE}`): Promise<HTMLElement> {
     mounted?.unmount();
     mounted = null;
     rooms.clear();
@@ -911,32 +910,64 @@ describe("the sidebar's directory line reads a refusal", () => {
       writable: false,
       ...status,
     };
-    const host = await openApp(`/${WORKSPACE}`);
-    // The status shares an unnamed creation wrapper, anchored by its button.
-    const head = sidebarControls(host).getByRole("button", { name: "new doc unavailable" }).parentElement as HTMLElement;
-    return within(head).getByText(/^(update required|no hub token|not authorized|edit refused|directory synced|syncing…|offline)$/).textContent ?? "";
+    return await openApp(path);
   }
 
-  it("names which refusal it is, rather than calling a refused page busy", async () => {
-    // Connected and synced underneath throughout, so each refusal is outranking
-    // the ordinary reading rather than standing in for a missing one.
-    const live = { connected: true, synced: true };
-    expect(
-      await directoryLine({ ...live, protocolMismatch: { hub: 2, client: 1 } }),
-    ).toBe("update required");
-    expect(await directoryLine({ ...live, tokenMissing: true })).toBe("no hub token");
-    expect(await directoryLine({ ...live, authFailed: true })).toBe("not authorized");
-    expect(await directoryLine({ ...live, storeRefused: true })).toBe(
-      "edit refused",
-    );
+  it.each([
+    [{ protocolMismatch: { hub: 2, client: 1 } }, "Update required", "this app is older than the hub"],
+    [{ tokenMissing: true }, "No hub token", "this app was served without a hub token"],
+    [{ authFailed: true }, "Not authorized", "this document is not saved"],
+    [{ storeRefused: true }, "Edit refused", "the server refused this edit"],
+  ] as const)("shows %s over the ordinary state with its own explanation", async (refusal, word, detail) => {
+    const host = await directoryState({ connected: true, synced: true, ...refusal });
+    const row = host.querySelector<HTMLElement>(".ub-directory-status");
+    expect(row?.textContent).toBe(word);
+    expect(row?.title).toContain(detail);
+    expect(row?.title).not.toContain("sync when the hub is back");
+    expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
+    expect(row?.parentElement?.getAttribute("data-slot")).toBe("sidebar-footer");
+    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
   });
 
-  it("keeps its own three readings when nothing is refused", async () => {
-    expect(await directoryLine({ connected: true, synced: true })).toBe(
-      "directory synced",
-    );
-    expect(await directoryLine({ connected: true, synced: false })).toBe("syncing…");
-    expect(await directoryLine({})).toBe("offline");
+  it.each([
+    { connected: true, synced: true },
+    { connected: true, synced: false },
+    { connected: true, synced: true, unsyncedChanges: 1 },
+    { connected: false, synced: false, hasAnswered: false },
+  ])("stays quiet during normal or initial connection: %s", async (status) => {
+    const host = await directoryState(status);
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    expect(sidebarControls(host).queryByText(/^(directory synced|syncing…|offline)$/)).toBeNull();
+  });
+
+  it("shows an answered offline directory above settings with the local sync promise", async () => {
+    const host = await directoryState({});
+    const row = host.querySelector<HTMLElement>(".ub-directory-status");
+    expect(row?.textContent).toBe("Offline");
+    expect(row?.title).toBe("Changes are saved on this device and sync when the hub is back.");
+    expect(row?.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
+    expect(row?.nextElementSibling?.textContent).toBe("Workspace settings");
+  });
+
+  it("does not turn the no-workspace fallback into an offline workspace", async () => {
+    const host = await directoryState({}, "/not-a-workspace");
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+  });
+
+  it("tracks directory reconnect and refusal immediately", async () => {
+    const host = await directoryState({ connected: true, synced: true });
+    const directory = room(directoryRoom(WORKSPACE));
+    function updateDirectory(patch: Partial<RoomStatus>): void {
+      directory.status = { ...directory.status, ...patch };
+      for (const listener of statusListeners.get(directory.room) ?? []) listener(directory.status);
+    }
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+    act(() => updateDirectory({ connected: false, synced: false, writable: false }));
+    expect(host.querySelector(".ub-directory-status")?.textContent).toBe("Offline");
+    act(() => updateDirectory({ authFailed: true }));
+    expect(host.querySelector(".ub-directory-status")?.textContent).toBe("Not authorized");
+    act(() => updateDirectory({ connected: true, authFailed: false }));
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
   });
 });
 
@@ -961,7 +992,7 @@ describe("pinning waits for the current sidebar state", () => {
     expect(writes).not.toHaveBeenCalled();
     expect(stored(sidebar.ydoc)).toEqual([]);
     // Group creation retains its admission-only gate.
-    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ group" }).disabled).toBe(false);
+    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ New group" }).disabled).toBe(false);
   });
 
   it("disables the open document's pin before sync", async () => {
@@ -1019,6 +1050,22 @@ describe("pinning waits for the current sidebar state", () => {
 });
 
 describe("unwritable workspace rooms", () => {
+  it("keeps page creation available and the footer quiet for a sidebar-only refusal", async () => {
+    seedDirectory();
+    const sidebar = room(sidebarRoom(WORKSPACE));
+    createGroup(sidebar.ydoc, "Reading");
+    sidebar.status = { ...LIVE, writable: false, storeRefused: true };
+    const host = await openApp(`/${WORKSPACE}`);
+
+    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" }).disabled).toBe(false);
+    const addGroup = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ New group" });
+    expect(addGroup.disabled).toBe(true);
+    expect(addGroup.title).toBe("Group changes unavailable while the sidebar is offline");
+    expect(sidebarControls(host).queryAllByLabelText(/^(Rename|Delete) group /)).toHaveLength(0);
+    expect(sidebarControls(host).queryByText(/Sidebar changes unavailable/)).toBeNull();
+    expect(host.querySelector(".ub-directory-status")).toBeNull();
+  });
+
   it("makes directory creation and sidebar curation unavailable", async () => {
     roomStatus = { ...LIVE, connected: false, synced: false, writable: false };
     seedDirectory();
@@ -1026,22 +1073,20 @@ describe("unwritable workspace rooms", () => {
     const host = await openApp(`/${WORKSPACE}`);
     const before = rooms.size;
 
-    const create = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "new doc unavailable" });
+    const create = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
     expect(create?.disabled).toBe(true);
     expect(create?.title).toContain("directory is read-only");
-    expect(create?.textContent).toContain("unavailable");
+    expect(create?.textContent).toBe("+ New page");
     const listPin = within(host).getAllByRole<HTMLButtonElement>("button", { name: /^Pin .+ to the sidebar unavailable while sidebar is not ready to write$/ })[0];
     expect(listPin?.disabled).toBe(true);
     expect(listPin?.getAttribute("aria-label")).toContain(
       "unavailable while sidebar is not ready to write",
     );
-    expect(sidebarControls(host).getByText(/Sidebar changes unavailable/).textContent).toContain(
-      "Sidebar changes unavailable",
-    );
+    expect(sidebarControls(host).queryByText(/Sidebar changes unavailable/)).toBeNull();
     expect(sidebarControls(host).queryAllByLabelText(/^(Rename|Delete) group /)).toHaveLength(0);
-    expect(sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ group" }).disabled).toBe(
-      true,
-    );
+    const addGroup = sidebarControls(host).getByRole<HTMLButtonElement>("button", { name: "+ New group" });
+    expect(addGroup.disabled).toBe(true);
+    expect(addGroup.title).toBe("Group changes unavailable while the sidebar is offline");
 
     act(() => create?.click());
     expect(rooms.size).toBe(before);

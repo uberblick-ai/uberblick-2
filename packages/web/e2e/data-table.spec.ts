@@ -269,7 +269,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
       contextOptions: { colorScheme: appearance, locale: "en-US", viewport: { width: 1280, height: 1000 } },
     });
     await page.context().route("https://example.invalid/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
-    await expect(page.locator(".ub-list-head")).toBeVisible();
+    await expect(page.locator(".ub-document-sidebar")).toBeVisible();
     const uuid = await createDoc(page, `Data table source ${appearance}`);
     await editor(page).locator(":scope > p").first().click();
     await page.keyboard.insertText("A source-editable table follows.");

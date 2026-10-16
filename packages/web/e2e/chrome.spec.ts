@@ -443,7 +443,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
   await expectPaneRejectsPointer(settings);
 
@@ -491,7 +491,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goBack();
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expectPaneRejectsPointer(page.locator(".ub-settings-sidebar"));
   await expectNoSidebarMotion(page);
   await page.goForward();
@@ -505,7 +505,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
  * the same column in the same two appearances.
  *
  * The sidebar's row controls share one hover rule, and two of them can be
- * unavailable: `+ new doc`, which creates into the directory room and has none
+ * unavailable: `+ New page`, which creates into the directory room and has none
  * at an address naming no workspace this client can use, and Navigation's
  * placeholder destinations, which are `aria-disabled` rather than `disabled`
  * because they stay in the tab order. Only a browser can be asked —
@@ -519,8 +519,9 @@ for (const scheme of ["light"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme, "not-a-workspace");
-    const create = page.getByRole("button", { name: "new doc unavailable" });
+    const create = page.getByRole("button", { name: "+ New page" });
     await expect(create).toBeDisabled();
+    await expect(page.locator(".ub-directory-status")).toHaveCount(0);
 
     const disabled = await paintedIn(create, "background-color");
     await create.hover();
@@ -623,7 +624,7 @@ for (const scheme of ["light"] as const) {
     };
 
     await openSidebar();
-    const create = page.getByRole("button", { name: "+ new doc", exact: true });
+    const create = page.getByRole("button", { name: "+ New page", exact: true });
     await expect(create).toBeEnabled();
     const createRest = await checkHoverAndFocus(create);
     await create.tap();
@@ -684,7 +685,7 @@ for (const scheme of ["light"] as const) {
 
     await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
     await openSidebar();
-    for (const disabled of [page.getByRole("button", { name: "new doc unavailable", exact: true }), page.locator(".ub-group-add")]) {
+    for (const disabled of [page.getByRole("button", { name: "+ New page", exact: true }), page.locator(".ub-group-add")]) {
       await expect(disabled).toBeDisabled();
       const rest = await treatment(disabled);
       await disabled.hover();
@@ -704,7 +705,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   const page = await openAppearanceApp(browser, "light");
   // A document, so there is an editor on screen to re-theme — its ink comes
   // from `--prose-text`, a token nothing else in the app reads.
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   const sidebar = await painted(page, ".ub-list", "background-color");
   const prose = await painted(page, ".ub-editor .ub-paragraph", "color");
@@ -737,7 +738,7 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Add TL;DR" }).click();
@@ -853,7 +854,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
   await expect(removed).toHaveCount(0);
   await expect(page.locator(".ub-sync-toggle")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await expect(page.locator(".ub-title")).toBeVisible();
   await expect(page.locator(".ub-doc-meta")).toBeVisible();
@@ -878,7 +879,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
 test("a multiline comment composer stays above its selected passage", async ({ browser }) => {
   const page = await openAppearanceApp(browser, "light");
   await page.setViewportSize({ width: 1400, height: 800 });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await placeCaret(page);
   for (let index = 1; index <= 10; index += 1) {
@@ -927,7 +928,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     contextOptions: { colorScheme: "light" },
     readySelector: ".ub-workspace",
   });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 810, height: 720 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
@@ -1034,7 +1035,7 @@ for (const scheme of ["light"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.getByRole("button", { name: "+ new doc" }).click();
+    await page.getByRole("button", { name: "+ New page" }).click();
     await page.locator(".ub-title").fill("Lifecycle notes");
     await page.getByRole("button", { name: "Document actions" }).click();
     await page.getByRole("menuitem", { name: "Archive document" }).click();
@@ -1072,7 +1073,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
   // The narrow drawer closes on creation, leaving the full-width document pane.
   await page.setViewportSize({ width: viewport, height: 640 });
   if (viewport < 1280) await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
   await firstBlock.click();
@@ -1475,7 +1476,7 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   // A title that reaches into all three vendored cuts proves more than a
@@ -1548,7 +1549,7 @@ for (const scheme of ["light", "dark"] as const) {
     const mono = async (locator: Locator): Promise<void> => {
       await expect(locator).toHaveCSS("font-family", monoFace);
     };
-    await ui(page.locator(".ub-list-head .ub-muted"));
+    await ui(page.getByRole("button", { name: "+ New page", exact: true }));
     await page.setViewportSize(viewport);
     await expect(page.locator(".ub-last-updated time")).toBeVisible();
     for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-rev"]) {
@@ -1652,7 +1653,7 @@ test("the document-actions control is a 44px target, at rest and once the pane h
 }) => {
   const page = await openAppearanceApp(browser, "light");
   await ensureExampleCatalog(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   // Enough prose to scroll: a clipped target cannot be exposed in a short page.
@@ -1989,7 +1990,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   const page = await openAppearanceApp(browser, "dark");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await ensureExampleCatalog(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   const documentUrl = page.url();
   const trigger = page.getByRole("button", { name: "Edit tags" });
@@ -2179,7 +2180,7 @@ async function contrastDocument(
   else if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill(`Contrast ${scheme}`);
   const uuid = new URL(page.url()).pathname.split("/")[2];
   const secret = await importRootSecret(harness().authSecret);
@@ -2332,7 +2333,7 @@ for (const scheme of ["light"] as const) {
       if ((page.viewportSize()?.width ?? 1280) < 1280) {
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       for (const selector of [".ub-docs-mode", ".ub-docs-sort"]) {
         for (const control of await page.locator(selector).all()) await check(control);
       }
@@ -2398,7 +2399,7 @@ for (const scheme of ["light"] as const) {
         await copy.hover();
         expect(await controlPaint(copy)).toEqual(revealed);
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       const selected = page.locator(".ub-docs-mode[aria-pressed=true]");
       await page.mouse.move(1399, 999);
       const selectedPaint = await controlPaint(selected);
@@ -2671,7 +2672,7 @@ for (const scheme of ["light"] as const) {
           enabled.push(...await renderedText(page, root));
         }
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       await collect();
       for (const row of await page.locator(".ub-docs-row").all()) {
         await row.hover();
@@ -2764,9 +2765,10 @@ for (const [device, width, hasTouch] of [
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
     }
     for (const destination of ["Dashboard"]) {
-      const row = page.getByRole("button", { name: new RegExp(`${destination}.*coming soon`, "i") });
+      const row = page.getByRole("button", { name: destination, exact: true });
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("aria-disabled", "true");
+      await expect(row).toHaveAttribute("title", "Coming soon");
     }
     const uuid = await createDoc(page, `Hover paths ${device}`);
     const doc = new Y.Doc();
@@ -2959,7 +2961,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   const page = await openAppearanceApp(browser, "light");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 1400, height: 800 });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   type Layout = {
