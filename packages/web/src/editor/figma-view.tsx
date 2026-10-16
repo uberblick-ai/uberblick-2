@@ -10,6 +10,8 @@ import { endUndoCapture } from "./block-menu.js";
 import { FigmaFields } from "./figma-fields.js";
 import type { FigmaFieldValues } from "./figma-fields.js";
 import { observeFigma } from "./figma-loading.js";
+import { lookupFigma } from "./figma-lookup.js";
+import type { FigmaLookup } from "./figma-lookup.js";
 import { figmaResize } from "./figma-resize.js";
 
 function appearance(): "light" | "dark" {
@@ -17,16 +19,20 @@ function appearance(): "light" | "dark" {
   return theme === "dark" || theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function frameTitle(node: PMNode): string {
+function frameTitle(node: PMNode, lookup: FigmaLookup | null): string {
   const { figma } = normalizeFigmaLink(node.attrs.url);
-  return node.attrs.title || figma.fileName || figma.file;
+  return node.attrs.title || lookup?.title || figma.fileName || figma.file;
 }
+
+// Preserve a reader's Load choice when the editor remounts a moved block.
+const privateLoads = new WeakMap<Document, Map<string, string>>();
 
 function elements(): {
   dom: HTMLElement; contentDOM: HTMLElement; viewer: HTMLElement; placeholder: HTMLElement;
   shield: HTMLButtonElement; fields: HTMLElement; handle: HTMLButtonElement; print: HTMLElement;
   header: ReturnType<typeof blockCaption>; edit: HTMLButtonElement; expand: HTMLButtonElement;
   done: HTMLButtonElement; open: HTMLAnchorElement; title: HTMLSpanElement;
+  message: HTMLSpanElement; load: HTMLButtonElement;
 } {
   const dom = document.createElement("article");
   dom.className = "ub-figma ub-block-frame";
@@ -51,6 +57,9 @@ function elements(): {
   viewer.contentEditable = "false";
   const placeholder = document.createElement("div");
   placeholder.className = "ub-figma-placeholder";
+  const message = document.createElement("span");
+  const load = makeButton("Load");
+  placeholder.append(message, load);
   const shield = makeButton("Click to interact");
   const hint = document.createElement("span");
   hint.textContent = "Click to interact";
@@ -70,7 +79,7 @@ function elements(): {
   print.className = "ub-figma-print";
   print.contentEditable = "false";
   dom.append(header.row, viewer, fields, print, contentDOM, handle);
-  return { dom, contentDOM, viewer, placeholder, shield, fields, handle, print, header, edit, expand, done, open, title };
+  return { dom, contentDOM, viewer, placeholder, shield, fields, handle, print, header, edit, expand, done, open, title, message, load };
 }
 
 class FigmaView implements NodeView {
@@ -83,17 +92,33 @@ class FigmaView implements NodeView {
   private fullscreen = false;
   private iframe: HTMLIFrameElement | null = null;
   private fieldsRoot: Root | null = null;
+  private lookup: FigmaLookup | null = null;
+  private lookupPending = false;
+  private lookupGeneration = 0;
+  private destroyed = false;
+  private readonly privateLoads: Map<string, string>;
   private readonly visibility: ReturnType<typeof observeFigma>;
   private readonly resize: ReturnType<typeof figmaResize>;
 
   constructor(private readonly props: NodeViewRendererProps) {
     this.current = props.node;
     this.dom = this.ui.dom; this.contentDOM = this.ui.contentDOM;
+    const owner = this.dom.ownerDocument;
+    let loads = privateLoads.get(owner);
+    if (loads === undefined) { loads = new Map(); privateLoads.set(owner, loads); }
+    this.privateLoads = loads;
+    if (loads.get(this.current.attrs.id) !== this.current.attrs.url) loads.delete(this.current.attrs.id);
     this.resize = figmaResize(this.ui.handle, () => this.height(), (height) => this.showHeight(height), (height) => this.save({ height: String(height) }));
     this.visibility = observeFigma({
       dom: this.dom, scroller: props.editor.view.dom.closest("section.ub-document-pane"),
       load: () => this.load(), unload: () => this.unload(),
       pinned: () => this.fullscreen,
+      ready: () => this.ready(),
+    });
+    this.ui.load.addEventListener("click", () => {
+      this.privateLoads.set(this.current.attrs.id, this.current.attrs.url);
+      this.sync();
+      this.visibility.refresh();
     });
     this.ui.shield.addEventListener("click", () => this.interact());
     this.ui.edit.addEventListener("click", () => this.openFields());
@@ -153,11 +178,30 @@ class FigmaView implements NodeView {
     this.visibility.refresh();
   };
 
+  private isPrivate(): boolean {
+    return this.lookup?.private === true && this.privateLoads.get(this.current.attrs.id) !== this.current.attrs.url;
+  }
+
+  private ready(): boolean {
+    if (this.lookup === null && !this.lookupPending) {
+      this.lookupPending = true;
+      const generation = this.lookupGeneration;
+      void lookupFigma(this.current.attrs.url, this.dom.ownerDocument).then((lookup) => {
+        if (this.destroyed || generation !== this.lookupGeneration) return;
+        this.lookup = lookup;
+        this.lookupPending = false;
+        this.sync();
+        this.visibility.refresh();
+      });
+    }
+    return this.lookup !== null && !this.isPrivate();
+  }
+
   private load(): void {
     if (this.iframe !== null) return;
     this.iframe = document.createElement("iframe");
     for (const [name, value] of Object.entries(FIGMA_PROVIDER.frameAttributes)) this.iframe.setAttribute(name, value);
-    this.iframe.title = frameTitle(this.current);
+    this.iframe.title = frameTitle(this.current, this.lookup);
     this.iframe.src = FIGMA_PROVIDER.embedAddress(this.current.attrs.url, appearance());
     this.ui.viewer.prepend(this.iframe);
     this.sync();
@@ -199,7 +243,7 @@ class FigmaView implements NodeView {
   private sync = (): void => {
     const writable = this.props.editor.isEditable;
     if (!writable && this.editing) { this.closeFields(); return; }
-    const title = frameTitle(this.current);
+    const title = frameTitle(this.current, this.lookup);
     this.dom.id = this.current.attrs.id ?? "";
     this.dom.dataset.figmaActive = String(this.active);
     this.ui.title.textContent = `Figma · ${title}`;
@@ -212,7 +256,10 @@ class FigmaView implements NodeView {
     this.ui.fields.hidden = !this.editing;
     this.ui.shield.hidden = this.active || this.iframe === null;
     this.ui.placeholder.hidden = this.iframe !== null;
-    this.ui.placeholder.textContent = navigator.onLine ? "Figma preview" : "The Figma preview needs a connection.";
+    const privateFile = this.isPrivate();
+    this.ui.message.textContent = !navigator.onLine ? "The Figma preview needs a connection." : privateFile
+      ? "Figma can't show this file publicly. If you have access, load it to sign in." : "Figma preview";
+    this.ui.load.hidden = !privateFile || !navigator.onLine;
     this.ui.handle.hidden = !writable || this.editing;
     this.resize.setDisabled(!writable || this.editing);
     if (!this.resize.isDragging()) this.showHeight(this.height());
@@ -223,7 +270,13 @@ class FigmaView implements NodeView {
     if (updated.type !== this.current.type || updated.attrs.id !== this.current.attrs.id) return false;
     const changedLink = updated.attrs.url !== this.current.attrs.url;
     this.current = updated;
-    if (changedLink) this.visibility.reset();
+    if (changedLink) {
+      this.lookupGeneration += 1;
+      this.lookup = null;
+      this.lookupPending = false;
+      this.privateLoads.delete(this.current.attrs.id);
+      this.visibility.reset();
+    }
     this.sync();
     return true;
   }
@@ -235,6 +288,7 @@ class FigmaView implements NodeView {
     return mutation.type !== "selection" && !this.contentDOM.contains(mutation.target);
   }
   destroy(): void {
+    this.destroyed = true;
     document.removeEventListener("pointerdown", this.outside, true);
     document.removeEventListener("fullscreenchange", this.fullscreenChanged);
     window.removeEventListener("online", this.sync);

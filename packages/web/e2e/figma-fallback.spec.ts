@@ -8,6 +8,7 @@ import * as Y from "yjs";
 import { docTitle, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import { expectMcp, proveBrowserArrival, proveMcpArrival } from "./settle.js";
+import { mockFigmaLookup } from "./figma-fixtures.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -46,6 +47,7 @@ for (const arrivesWhileBound of [false, true]) {
     const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, {
       upstream: true,
       beforeNavigate: async (target) => {
+        await mockFigmaLookup(target);
         await target.route("https://embed.figma.com/**", async (route) => {
           figmaRequests.push(route.request().url());
           await route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" });
