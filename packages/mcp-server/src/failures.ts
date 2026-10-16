@@ -124,8 +124,8 @@ export const TOOL_ANNOTATIONS: Readonly<Record<string, ToolHints>> = {
   edit_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   // Removes a block; repeating finds no block to remove.
   delete_block: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
-  // Replaces named fields and whole tag/link sets; repeating leaves the same values.
-  set_metadata: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  // Replaces named fields and sets; repeating a code check records a new time.
+  set_metadata: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
   // Overwrites lifecycle and answer; repeating leaves the same state or is refused.
   set_status: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   // Tombstones and unpins; every repeat raises the unpin counter, suppressing later pins.
@@ -374,6 +374,14 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_tldr_unsupported: {
     recoveryClass: "manual",
     guidance: "Decisions have no TL;DR. Put the answer in content blocks and omit tldr or pass null on an open record. Nothing was written.",
+  },
+  invalid_code_check: {
+    recoveryClass: "manual",
+    guidance: "Supply code_check with only repository (owner/name), a full 40- or 64-character hexadecimal commit, and result (matches, ahead or drift). Omit checked_at; this replica supplies it. Nothing was written.",
+  },
+  decision_code_check_unsupported: {
+    recoveryClass: "manual",
+    guidance: "Record code_check on the regular page whose described behavior was compared with code, and omit it from decision records. Nothing was written.",
   },
   tldr_opted_out: {
     recoveryClass: "manual",

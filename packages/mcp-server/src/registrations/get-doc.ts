@@ -9,22 +9,21 @@ export function registerGetDoc(server: ToolRegistrar, context: ToolContext): voi
   server.registerTool("get_doc", {
     title: "Read a document",
     description:
-      "Read metadata, blocks, threads. Regular pages return related then linked decision topics; " +
-      "decision discussion: RFC UUID/null, separate from curated links and recorded answer. " +
-      "Decisions have no TL;DR: tldr is null. Entries cache discussion (absent if unknown) and answerPreview (" +
-      "first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists " +
-      "collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return " +
-      "button: [Text](destination) lines after footer in authored order. Plain labels link to https or " +
-      "exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style " +
-      "outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style " +
-      "before color and omits defaults. Figma returns :::figma content without delimiters: normalized " +
-      "url, optional plain title and height, blank line and marked caption. Read-only figma: kind " +
-      "(frame, file, prototype, board, slides or community file), file, optional decoded fileName " +
-      "(dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive " +
-      "rev, including every button's text, destination, appearance and order; other rev ignores marks. " +
-      "Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma " +
-      "ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward " +
-      "this process's briefing." +
+      "Read metadata, blocks/rev and threads. Regular pages return related then linked decision topics; " +
+      "code_check is [] or latest repository/commit/checked_at/result entries: matches (agrees), ahead " +
+      "(intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions " +
+      "omit them. Decision discussion: RFC UUID/null, apart from curated links and recorded answer. Decisions " +
+      "have no TL;DR (tldr: null); entries cache discussion and answerPreview (first paragraph/list, max 300 " +
+      "chars), absent if unknown. Unset description/TL;DR: null; data lists collections/counts for get_data. " +
+      "Tables: canonical GFM. Cards: button: [Text](destination) after footer, authored order; plain labels " +
+      "link to https or exact claude://code/new, claude-cli://open, codex://new, optionally ?query. Style " +
+      "outline/filled, color neutral/blue/green/violet; default outline neutral omitted, style before color. " +
+      "Figma: :::figma content, no delimiters, normalized url, optional plain title/height, blank line, marked " +
+      "caption; read-only kind (frame/file/prototype/board/slides/community file), file, optional decoded " +
+      "fileName (dashes as spaces), node (12:345). Tables/cards/Figma rev includes formatting and button " +
+      "values/order; other rev ignores marks. Prose doc_links has ranges; containers have none. Card thread " +
+      "ranges name part; Figma uses caption offsets. No Figma request; eligible guidance counts toward this " +
+      "process's briefing." +
       helpPointer("get_doc"),
     outputSchema: outputSchemas.get_doc,
     inputSchema,

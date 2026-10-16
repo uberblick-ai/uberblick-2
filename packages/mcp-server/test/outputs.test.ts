@@ -90,6 +90,7 @@ describe("successful MCP output contracts", () => {
       uuid, title: "Output contract renamed", description: "The renamed contract fixture.",
       tldr: "All advertised tool answers are checked.",
       tags: tags.tags.slice(0, 1).map((tag: { id: string }) => tag.id), links: [target.uuid],
+      code_check: { repository: "uberblick-ai/uberblick-2", commit: "a".repeat(40), result: "matches" },
     });
     await success("set_status", { uuid: target.uuid, status: "open" });
     const edited = await success("edit_block", {

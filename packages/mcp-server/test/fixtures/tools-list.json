@@ -1045,6 +1045,43 @@
           ],
           "description": "Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR."
         },
+        "code_check": {
+          "description": "Regular documents return their latest comparison per repository, or [] when never checked. Decision records omit this field. Content edits leave checks unchanged.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "description": "Canonical lowercase repository as owner/name."
+              },
+              "commit": {
+                "type": "string",
+                "description": "Full hexadecimal commit compared with the page."
+              },
+              "checked_at": {
+                "type": "string",
+                "description": "UTC time this comparison was recorded by its writing replica."
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "matches",
+                  "ahead",
+                  "drift"
+                ],
+                "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+              }
+            },
+            "required": [
+              "repository",
+              "commit",
+              "checked_at",
+              "result"
+            ],
+            "additionalProperties": false
+          }
+        },
         "tldrOptOut": {
           "description": "Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records.",
           "type": "boolean",
@@ -1326,6 +1363,43 @@
                 "minimum": 0,
                 "maximum": 9007199254740991
               },
+              "code_check": {
+                "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string",
+                      "description": "Canonical lowercase repository as owner/name."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "Full hexadecimal commit compared with the page."
+                    },
+                    "checked_at": {
+                      "type": "string",
+                      "description": "UTC time this comparison was recorded by its writing replica."
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "matches",
+                        "ahead",
+                        "drift"
+                      ],
+                      "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                    }
+                  },
+                  "required": [
+                    "repository",
+                    "commit",
+                    "checked_at",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "inForce": {
                 "anyOf": [
                   {
@@ -1482,6 +1556,43 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "code_check": {
+                        "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "repository": {
+                              "type": "string",
+                              "description": "Canonical lowercase repository as owner/name."
+                            },
+                            "commit": {
+                              "type": "string",
+                              "description": "Full hexadecimal commit compared with the page."
+                            },
+                            "checked_at": {
+                              "type": "string",
+                              "description": "UTC time this comparison was recorded by its writing replica."
+                            },
+                            "result": {
+                              "type": "string",
+                              "enum": [
+                                "matches",
+                                "ahead",
+                                "drift"
+                              ],
+                              "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                            }
+                          },
+                          "required": [
+                            "repository",
+                            "commit",
+                            "checked_at",
+                            "result"
+                          ],
+                          "additionalProperties": false
+                        }
                       }
                     },
                     "required": [
@@ -1654,6 +1765,43 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
+                    },
+                    "code_check": {
+                      "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repository": {
+                            "type": "string",
+                            "description": "Canonical lowercase repository as owner/name."
+                          },
+                          "commit": {
+                            "type": "string",
+                            "description": "Full hexadecimal commit compared with the page."
+                          },
+                          "checked_at": {
+                            "type": "string",
+                            "description": "UTC time this comparison was recorded by its writing replica."
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "matches",
+                              "ahead",
+                              "drift"
+                            ],
+                            "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                          }
+                        },
+                        "required": [
+                          "repository",
+                          "commit",
+                          "checked_at",
+                          "result"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
@@ -1821,6 +1969,43 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 9007199254740991
+                    },
+                    "code_check": {
+                      "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "repository": {
+                            "type": "string",
+                            "description": "Canonical lowercase repository as owner/name."
+                          },
+                          "commit": {
+                            "type": "string",
+                            "description": "Full hexadecimal commit compared with the page."
+                          },
+                          "checked_at": {
+                            "type": "string",
+                            "description": "UTC time this comparison was recorded by its writing replica."
+                          },
+                          "result": {
+                            "type": "string",
+                            "enum": [
+                              "matches",
+                              "ahead",
+                              "drift"
+                            ],
+                            "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                          }
+                        },
+                        "required": [
+                          "repository",
+                          "commit",
+                          "checked_at",
+                          "result"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
@@ -2015,6 +2200,43 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "code_check": {
+                "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string",
+                      "description": "Canonical lowercase repository as owner/name."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "Full hexadecimal commit compared with the page."
+                    },
+                    "checked_at": {
+                      "type": "string",
+                      "description": "UTC time this comparison was recorded by its writing replica."
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "matches",
+                        "ahead",
+                        "drift"
+                      ],
+                      "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                    }
+                  },
+                  "required": [
+                    "repository",
+                    "commit",
+                    "checked_at",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -2182,6 +2404,43 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "code_check": {
+                "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "repository": {
+                      "type": "string",
+                      "description": "Canonical lowercase repository as owner/name."
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "Full hexadecimal commit compared with the page."
+                    },
+                    "checked_at": {
+                      "type": "string",
+                      "description": "UTC time this comparison was recorded by its writing replica."
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "matches",
+                        "ahead",
+                        "drift"
+                      ],
+                      "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                    }
+                  },
+                  "required": [
+                    "repository",
+                    "commit",
+                    "checked_at",
+                    "result"
+                  ],
+                  "additionalProperties": false
+                }
               }
             },
             "required": [
@@ -2351,6 +2610,43 @@
                   "minimum": 0,
                   "maximum": 9007199254740991
                 },
+                "code_check": {
+                  "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "repository": {
+                        "type": "string",
+                        "description": "Canonical lowercase repository as owner/name."
+                      },
+                      "commit": {
+                        "type": "string",
+                        "description": "Full hexadecimal commit compared with the page."
+                      },
+                      "checked_at": {
+                        "type": "string",
+                        "description": "UTC time this comparison was recorded by its writing replica."
+                      },
+                      "result": {
+                        "type": "string",
+                        "enum": [
+                          "matches",
+                          "ahead",
+                          "drift"
+                        ],
+                        "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                      }
+                    },
+                    "required": [
+                      "repository",
+                      "commit",
+                      "checked_at",
+                      "result"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
                 "inForce": {
                   "anyOf": [
                     {
@@ -2507,6 +2803,43 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "code_check": {
+                          "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repository": {
+                                "type": "string",
+                                "description": "Canonical lowercase repository as owner/name."
+                              },
+                              "commit": {
+                                "type": "string",
+                                "description": "Full hexadecimal commit compared with the page."
+                              },
+                              "checked_at": {
+                                "type": "string",
+                                "description": "UTC time this comparison was recorded by its writing replica."
+                              },
+                              "result": {
+                                "type": "string",
+                                "enum": [
+                                  "matches",
+                                  "ahead",
+                                  "drift"
+                                ],
+                                "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                              }
+                            },
+                            "required": [
+                              "repository",
+                              "commit",
+                              "checked_at",
+                              "result"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -2679,6 +3012,43 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "code_check": {
+                        "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "repository": {
+                              "type": "string",
+                              "description": "Canonical lowercase repository as owner/name."
+                            },
+                            "commit": {
+                              "type": "string",
+                              "description": "Full hexadecimal commit compared with the page."
+                            },
+                            "checked_at": {
+                              "type": "string",
+                              "description": "UTC time this comparison was recorded by its writing replica."
+                            },
+                            "result": {
+                              "type": "string",
+                              "enum": [
+                                "matches",
+                                "ahead",
+                                "drift"
+                              ],
+                              "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                            }
+                          },
+                          "required": [
+                            "repository",
+                            "commit",
+                            "checked_at",
+                            "result"
+                          ],
+                          "additionalProperties": false
+                        }
                       }
                     },
                     "required": [
@@ -2846,6 +3216,43 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "code_check": {
+                        "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "repository": {
+                              "type": "string",
+                              "description": "Canonical lowercase repository as owner/name."
+                            },
+                            "commit": {
+                              "type": "string",
+                              "description": "Full hexadecimal commit compared with the page."
+                            },
+                            "checked_at": {
+                              "type": "string",
+                              "description": "UTC time this comparison was recorded by its writing replica."
+                            },
+                            "result": {
+                              "type": "string",
+                              "enum": [
+                                "matches",
+                                "ahead",
+                                "drift"
+                              ],
+                              "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                            }
+                          },
+                          "required": [
+                            "repository",
+                            "commit",
+                            "checked_at",
+                            "result"
+                          ],
+                          "additionalProperties": false
+                        }
                       }
                     },
                     "required": [
@@ -3348,7 +3755,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read metadata, blocks, threads. Regular pages return related then linked decision topics; decision discussion: RFC UUID/null, separate from curated links and recorded answer. Decisions have no TL;DR: tldr is null. Entries cache discussion (absent if unknown) and answerPreview (first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. Read-only figma: kind (frame, file, prototype, board, slides or community file), file, optional decoded fileName (dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive rev, including every button's text, destination, appearance and order; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks/rev and threads. Regular pages return related then linked decision topics; code_check is [] or latest repository/commit/checked_at/result entries: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions omit them. Decision discussion: RFC UUID/null, apart from curated links and recorded answer. Decisions have no TL;DR (tldr: null); entries cache discussion and answerPreview (first paragraph/list, max 300 chars), absent if unknown. Unset description/TL;DR: null; data lists collections/counts for get_data. Tables: canonical GFM. Cards: button: [Text](destination) after footer, authored order; plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally ?query. Style outline/filled, color neutral/blue/green/violet; default outline neutral omitted, style before color. Figma: :::figma content, no delimiters, normalized url, optional plain title/height, blank line, marked caption; read-only kind (frame/file/prototype/board/slides/community file), file, optional decoded fileName (dashes as spaces), node (12:345). Tables/cards/Figma rev includes formatting and button values/order; other rev ignores marks. Prose doc_links has ranges; containers have none. Card thread ranges name part; Figma uses caption offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4101,6 +4508,43 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "code_check": {
+                    "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repository": {
+                          "type": "string",
+                          "description": "Canonical lowercase repository as owner/name."
+                        },
+                        "commit": {
+                          "type": "string",
+                          "description": "Full hexadecimal commit compared with the page."
+                        },
+                        "checked_at": {
+                          "type": "string",
+                          "description": "UTC time this comparison was recorded by its writing replica."
+                        },
+                        "result": {
+                          "type": "string",
+                          "enum": [
+                            "matches",
+                            "ahead",
+                            "drift"
+                          ],
+                          "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                        }
+                      },
+                      "required": [
+                        "repository",
+                        "commit",
+                        "checked_at",
+                        "result"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
                   "pinned": {
                     "type": "boolean"
                   }
@@ -4270,6 +4714,43 @@
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
+                  "code_check": {
+                    "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repository": {
+                          "type": "string",
+                          "description": "Canonical lowercase repository as owner/name."
+                        },
+                        "commit": {
+                          "type": "string",
+                          "description": "Full hexadecimal commit compared with the page."
+                        },
+                        "checked_at": {
+                          "type": "string",
+                          "description": "UTC time this comparison was recorded by its writing replica."
+                        },
+                        "result": {
+                          "type": "string",
+                          "enum": [
+                            "matches",
+                            "ahead",
+                            "drift"
+                          ],
+                          "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                        }
+                      },
+                      "required": [
+                        "repository",
+                        "commit",
+                        "checked_at",
+                        "result"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
                   "inForce": {
                     "anyOf": [
                       {
@@ -4426,6 +4907,43 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "code_check": {
+                            "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "repository": {
+                                  "type": "string",
+                                  "description": "Canonical lowercase repository as owner/name."
+                                },
+                                "commit": {
+                                  "type": "string",
+                                  "description": "Full hexadecimal commit compared with the page."
+                                },
+                                "checked_at": {
+                                  "type": "string",
+                                  "description": "UTC time this comparison was recorded by its writing replica."
+                                },
+                                "result": {
+                                  "type": "string",
+                                  "enum": [
+                                    "matches",
+                                    "ahead",
+                                    "drift"
+                                  ],
+                                  "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                                }
+                              },
+                              "required": [
+                                "repository",
+                                "commit",
+                                "checked_at",
+                                "result"
+                              ],
+                              "additionalProperties": false
+                            }
                           }
                         },
                         "required": [
@@ -4598,6 +5116,43 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "code_check": {
+                          "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repository": {
+                                "type": "string",
+                                "description": "Canonical lowercase repository as owner/name."
+                              },
+                              "commit": {
+                                "type": "string",
+                                "description": "Full hexadecimal commit compared with the page."
+                              },
+                              "checked_at": {
+                                "type": "string",
+                                "description": "UTC time this comparison was recorded by its writing replica."
+                              },
+                              "result": {
+                                "type": "string",
+                                "enum": [
+                                  "matches",
+                                  "ahead",
+                                  "drift"
+                                ],
+                                "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                              }
+                            },
+                            "required": [
+                              "repository",
+                              "commit",
+                              "checked_at",
+                              "result"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -4765,6 +5320,43 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "code_check": {
+                          "description": "Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repository": {
+                                "type": "string",
+                                "description": "Canonical lowercase repository as owner/name."
+                              },
+                              "commit": {
+                                "type": "string",
+                                "description": "Full hexadecimal commit compared with the page."
+                              },
+                              "checked_at": {
+                                "type": "string",
+                                "description": "UTC time this comparison was recorded by its writing replica."
+                              },
+                              "result": {
+                                "type": "string",
+                                "enum": [
+                                  "matches",
+                                  "ahead",
+                                  "drift"
+                                ],
+                                "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+                              }
+                            },
+                            "required": [
+                              "repository",
+                              "commit",
+                              "checked_at",
+                              "result"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -4875,7 +5467,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the record in force, else pending, else first, plus pending/conflicting records. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived entries, never permanently deleted UUIDs, and is not a predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, including inForce, pending and conflicts, caches its document's openThreadCount: threads whose resolved is not true, including deleted anchors; absent means unknown. A matching topic's representative may have zero or unknown count. Use include_superseded: true with has_open_threads to find each matching document, then get_doc for threads and annotate to reply or resolve. Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional approximate timestamps. Decision rows have no TL;DR; answerPreview is the first answer paragraph/list, null for none; discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. Both are absent when unknown. get_doc marks related or linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "description": "List synced directory stubs without opening rooms. Unfiltered omits decisions; kind/status/tag/has_open_threads predicates include them. Topics present in-force, else pending, else first record, plus pending/conflicts. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived, never permanently deleted UUIDs; it is no predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true (known openThreadCount >= 1); false refuses. Every entry, including inForce/pending/conflicts, caches openThreadCount: threads not resolved, including deleted anchors; absent means unknown. A representative may have zero/unknown count. Use include_superseded with has_open_threads for every matching document, get_doc for threads, annotate to reply/resolve. Regular code_check cache: latest repository/commit/checked_at/result per repository, [] if never checked, absent if uncached. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement); content edits preserve checks. Decisions omit code_check/TL;DR; answerPreview: first answer paragraph/list or null; discussion: RFC UUID/null, apart from curated links/recorded answer; both absent if unknown. Rows cache description/tags/lifecycle/authority metadata, sidebar-derived pinned, approximate timestamps. get_doc marks related/linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -6452,6 +7044,35 @@
               "type": "null"
             }
           ]
+        },
+        "code_check": {
+          "description": "Record a regular page's latest comparison for one repository, replacing only that repository's entry. The writer sets checked_at to current UTC; callers do not supply it. Content edits leave checks unchanged.",
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string",
+              "description": "Repository as owner/name; identity ignores letter case."
+            },
+            "commit": {
+              "type": "string",
+              "description": "Full 40- or 64-character hexadecimal commit id."
+            },
+            "result": {
+              "type": "string",
+              "enum": [
+                "matches",
+                "ahead",
+                "drift"
+              ],
+              "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+            }
+          },
+          "required": [
+            "repository",
+            "commit",
+            "result"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -6488,6 +7109,11 @@
         {
           "required": [
             "discussion"
+          ]
+        },
+        {
+          "required": [
+            "code_check"
           ]
         }
       ],
@@ -6620,6 +7246,43 @@
           ],
           "description": "Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR."
         },
+        "code_check": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "description": "Canonical lowercase repository as owner/name."
+              },
+              "commit": {
+                "type": "string",
+                "description": "Full hexadecimal commit compared with the page."
+              },
+              "checked_at": {
+                "type": "string",
+                "description": "UTC time this comparison was recorded by its writing replica."
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "matches",
+                  "ahead",
+                  "drift"
+                ],
+                "description": "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."
+              }
+            },
+            "required": [
+              "repository",
+              "commit",
+              "checked_at",
+              "result"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Latest code comparison per repository on a regular page; content edits leave these entries unchanged. Empty means never checked."
+        },
         "tags": {
           "type": "array",
           "items": {
@@ -6705,11 +7368,11 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set title, description, tldr, tags, curated links or decision discussion; name at least one. Omitted fields stay unchanged. Refusals write nothing; field failures name field. Returns metadata/durability, no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears while preserving the mark; marked pages refuse a summary with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. Use list_tags active ids/exact names; assigned retired/unresolved ids may remain. New links must be directory-known; archived/unchanged targets accepted. Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null tldr with decision_tldr_unsupported; open records accept null. Decisions have no TL;DR; metadata returns tldr: null. Decided records refuse tldr/discussion; title/description/tags/links writable. Title renames preserve approval. See lifecycle's Decision answers and topics section. Stub answerPreview uses the first answer paragraph/list; get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived documents refuse metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Metadata/durability; no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. list_tags active ids/exact names; assigned retired/unresolved ids may stay. New links must be directory-known; archived/unchanged accepted. Regular-only code_check: {repository, commit, result}; replaces that case-insensitive repository's entry, writer stamps UTC checked_at. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; no creation/RFC/page edits/tags or approvalFingerprint/approvalChanged change. Distinct from curated links/recorded answer; fixed on settling. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. Title renames preserve approval. See lifecycle's Decision answers and topics section; answerPreview: first answer paragraph/list; get_doc marks related/linked. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
-      "idempotentHint": true,
+      "idempotentHint": false,
       "openWorldHint": false
     }
   },

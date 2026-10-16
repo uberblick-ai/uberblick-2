@@ -1,7 +1,7 @@
 ---
 name: technical-audit
 description: >-
-  Run Uberblick's periodic read-only technical and corpus-to-code alignment
+  Run Uberblick's periodic technical and corpus-to-code alignment
   audit. Use for a weekly baseline or incremental project health review across
   architecture, security, persistence, synchronization, MCP, CLI, web, tests,
   dependencies, and whether the live product corpus matches current code. Do
@@ -11,8 +11,10 @@ description: >-
 # Technical audit
 
 Find a few consequential, evidence-backed risks without turning broad static
-analysis into hypothetical work. Write no code, corpus document, issue, label,
-branch, or PR. The only permitted external write is one report to [Technical
+analysis into hypothetical work. Write no code, corpus content, issue, label,
+branch, or PR. Its only corpus write is recording `code_check` metadata for
+the regular pages whose described behavior it compared with code, as specified
+below. The other permitted external write is one report to [Technical
 audit reports](https://github.com/uberblick-ai/uberblick-2/discussions/541),
 posted with the `technical-audit` recipe in `AGENTS.md`'s Project facts —
 never with a guessed discussion id, because a wrong one posts to a stranger's
@@ -89,6 +91,20 @@ Classify each material check:
 - `contradiction` — sources or code make incompatible claims;
 - `wrong-home` — truth is duplicated or maintained in the wrong authority; or
 - `unverifiable` — the link cannot be established with available evidence.
+
+For each regular page whose described behavior you compared with code, record
+one `code_check` through `set_metadata`, with repository
+`uberblick-ai/uberblick-2`, the audited `origin/main` commit and the result of
+that comparison: `aligned` maps to `matches`, `corpus-ahead` to `ahead`, and
+`code-ahead` or `contradiction` to `drift`. A page's intentional, undelivered
+behavior is `ahead` even when its availability boundary is already clear.
+When a page has several checked claims, use `drift` if any unintentionally
+disagree, otherwise `ahead` if any are intentionally undelivered, otherwise
+`matches`. `wrong-home` or `unverifiable` alone does not establish a code-check
+result. The writing replica supplies `checked_at`. Keep the sampled claims,
+evidence and coverage limits in the report: the entry records that comparison,
+not exhaustive verification of the page. Never write code checks on decision
+records or alter corpus content or other metadata.
 
 Do not demand one-to-one documentation for internal mechanics. Report only a
 gap that could mislead a user or agent, hide an invariant, cause a wrong product

@@ -187,6 +187,16 @@ export function readDocumentLifecycle(
   };
 }
 
+export interface CodeCheck {
+  repository: string;
+  commit: string;
+  /** UTC time recorded by the writing replica. */
+  checked_at: string;
+  result: "matches" | "ahead" | "drift";
+}
+
+export type CodeCheckInput = Omit<CodeCheck, "checked_at">;
+
 /** Document metadata. Identity is the uuid; title and tags are display data. */
 export interface DocMeta {
   uuid: string;
@@ -206,6 +216,8 @@ export interface DocMeta {
   tldr?: string | null;
   /** Present only for a regular document with no summary on purpose. */
   tldrOptOut?: true;
+  /** Latest check per repository; regular document reads include an empty list. */
+  code_check?: CodeCheck[];
   /** The record shape. Absent means an ordinary document. */
   kind?: DocumentKind;
   /** The lifecycle state, present only when it is legal for {@link kind}. */
@@ -332,6 +344,8 @@ export interface DirectoryEntry {
   status?: DocumentStatus;
   /** Cached unresolved thread count; absent when the cache is unknown. */
   openThreadCount?: number;
+  /** Regular-only check cache; absence means it has not been cached yet. */
+  code_check?: CodeCheck[];
   /** Decision-only metadata caches. Other document kinds carry none of these. */
   governs?: string;
   topic?: string;

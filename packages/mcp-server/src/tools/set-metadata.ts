@@ -1,8 +1,11 @@
 import {
   MAX_TLDR_LENGTH,
+  CODE_CHECK_RESULTS,
   assignDocumentTags,
   getMeta,
   getMetaMap,
+  normalizeCodeCheck,
+  setCodeCheck,
   setDescription,
   setDiscussion,
   setLinks,
@@ -17,10 +20,23 @@ import { documentOperation } from "./operation.js";
 import { descriptionArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { discussionTarget } from "./discussion.js";
 
-const fields = ["title", "description", "tldr", "tags", "links", "discussion"] as const;
+const fields = ["title", "description", "tldr", "tags", "links", "discussion", "code_check"] as const;
 const linkArg = z
   .uuid("a link is a target document UUID, never a path or a title")
   .describe("Target document UUID.");
+
+// Keep malformed entries intact for the shared validator so every refusal
+// carries field: code_check instead of the SDK's plain-text schema error.
+const codeCheckArg = z.unknown().meta({
+  type: "object",
+  properties: {
+    repository: { type: "string", description: "Repository as owner/name; identity ignores letter case." },
+    commit: { type: "string", description: "Full 40- or 64-character hexadecimal commit id." },
+    result: { type: "string", enum: CODE_CHECK_RESULTS, description: "matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement." },
+  },
+  required: ["repository", "commit", "result"],
+  additionalProperties: false,
+});
 
 export const inputSchema = strictInput({
   uuid: uuidArg,
@@ -31,12 +47,13 @@ export const inputSchema = strictInput({
   tags: z.array(z.string().min(1)).optional(),
   links: z.array(linkArg).optional(),
   discussion: uuidArg.nullable().optional().describe("RFC discussion document UUID, or null to clear. Only an open decision record accepts changes; the target must be live, locally readable and not a decision. Distinct from curated links and the recorded answer; no document is created or tagged."),
+  code_check: codeCheckArg.optional().describe("Record a regular page's latest comparison for one repository, replacing only that repository's entry. The writer sets checked_at to current UTC; callers do not supply it. Content edits leave checks unchanged."),
 })
   .superRefine((args, ctx) => {
     if (fields.every((field) => args[field] === undefined)) {
       ctx.addIssue({
         code: "custom",
-        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links` or `discussion`",
+        message: "set_metadata needs at least one of `title`, `description`, `tldr`, `tags`, `links`, `discussion` or `code_check`",
       });
     }
     if (args.tldr_opt_in !== undefined && (args.tldr === undefined || args.tldr === null)) {
@@ -75,8 +92,17 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
 }
 
 export const setMetadataOperation = documentOperation("set_metadata", inputSchema, (context, args, _request, replica) => {
-  const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion } = args;
+  const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
   const current = getMeta(replica.doc);
+  const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
+  if (codeCheck === null) {
+    throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit and matches, ahead or drift result; checked_at is assigned by this replica.", { uuid, field: "code_check" });
+  }
+  if (codeCheck !== undefined && current.kind === "decision") {
+    throw new ToolError("decision_code_check_unsupported", "Code checks describe regular pages' comparison with code and cannot be written to decision records.", {
+      uuid, kind: current.kind, status: current.status ?? null, field: "code_check",
+    });
+  }
   if (discussion !== undefined && (current.kind !== "decision" || current.status !== "open")) {
     const code = current.kind === "decision" && current.status === "decided" ? "decision_read_only" : "discussion_not_writable";
     throw new ToolError(code, "Only an open decision record's discussion reference can change; settled references remain in history.", {
@@ -120,6 +146,7 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     if (tldr !== undefined) setTldr(replica.doc, tldr);
     if (links !== undefined) setLinks(replica.doc, links);
     if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
+    if (codeCheck !== undefined) setCodeCheck(replica.doc, codeCheck);
   });
   const meta = getMeta(replica.doc);
   return {
@@ -130,5 +157,6 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     tags: context.documentTags(replica),
     links: meta.links,
     ...(meta.kind === "decision" ? { discussion: meta.discussion } : {}),
+    ...(meta.kind === "decision" ? {} : { code_check: meta.code_check }),
   };
 });

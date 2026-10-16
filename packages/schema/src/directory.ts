@@ -10,7 +10,9 @@ import { getMeta } from "./doc.js";
 import { listAnnotations } from "./annotations.js";
 import { decisionApprovalChanged } from "./approval.js";
 import { decisionAnswerPreview } from "./decision-answer.js";
+import { readCodeChecks } from "./code-check.js";
 import type {
+  CodeCheck,
   DirectoryEntry,
   DocMeta,
   DocumentKind,
@@ -39,6 +41,7 @@ interface StoredEntry {
   kind?: DocumentKind;
   status?: DocumentStatus;
   openThreadCount?: number;
+  code_check?: CodeCheck[];
   governs?: string;
   topic?: string;
   supersedes?: string;
@@ -60,6 +63,15 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
+function sameCodeChecks(a: CodeCheck[] | undefined, b: CodeCheck[]): boolean {
+  if (a === undefined || a.length !== b.length) return false;
+  const checks = new Map(a.map((check) => [check.repository, check]));
+  return b.every((check) => {
+    const cached = checks.get(check.repository);
+    return cached?.commit === check.commit && cached.checked_at === check.checked_at && cached.result === check.result;
+  });
+}
+
 /**
  * Repair from the hydrated document even when it lags the stub; tag order and
  * empty descriptions do not differ. Callers preserve ordinary tombstones,
@@ -79,6 +91,7 @@ export function directoryStubDiffers(
     stub.kind !== meta.kind ||
     stub.status !== meta.status ||
     (fields?.openThreadCount !== undefined && stub.openThreadCount !== fields.openThreadCount) ||
+    (meta.kind !== "decision" && fields?.code_check !== undefined && !sameCodeChecks(stub.code_check, fields.code_check)) ||
     (meta.kind === "decision" && (
       stub.governs !== meta.governs ||
       stub.topic !== meta.topic ||
@@ -112,6 +125,11 @@ function readCount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
+}
+
+function readRegularCodeChecks(kind: DocumentKind | undefined, value: unknown, cached?: CodeCheck[]): CodeCheck[] | undefined {
+  if (kind === "decision") return undefined;
+  return readCodeChecks(value === undefined ? cached : value);
 }
 
 export function getDirectoryMap(dirDoc: Y.Doc): Y.Map<unknown> {
@@ -252,6 +270,7 @@ function readStored(value: unknown): StoredEntry | null {
   const description = readDescription(candidate.description);
   const lifecycle = readDocumentLifecycle(candidate.kind, candidate.status);
   const openThreadCount = readCount(candidate.openThreadCount);
+  const codeCheck = readRegularCodeChecks(lifecycle.kind, candidate.code_check);
   return {
     title,
     tags,
@@ -261,6 +280,7 @@ function readStored(value: unknown): StoredEntry | null {
     ...(description === undefined ? {} : { description }),
     ...lifecycle,
     ...(openThreadCount === undefined ? {} : { openThreadCount }),
+    ...(codeCheck === undefined ? {} : { code_check: codeCheck }),
     ...(lifecycle.kind === "decision" ? readDecisionFields(value as Record<string, unknown>) : {}),
   };
 }
@@ -280,6 +300,7 @@ function carryForward(next: StoredEntry, from: StoredEntry | null): StoredEntry 
     ...(from?.kind === undefined ? {} : { kind: from.kind }),
     ...(from?.status === undefined ? {} : { status: from.status }),
     ...(from?.openThreadCount === undefined ? {} : { openThreadCount: from.openThreadCount }),
+    ...(from?.kind === "decision" || from?.code_check === undefined ? {} : { code_check: from.code_check }),
     ...(from?.kind === "decision" ? readDecisionFields(from as unknown as Record<string, unknown>) : {}),
   };
 }
@@ -316,6 +337,8 @@ export interface DirectoryUpsert {
   status?: DocumentStatus | "";
   /** Omission preserves the cache; null clears it to unknown. */
   openThreadCount?: number | null;
+  /** Regular-only cache: omission preserves it, null clears it to unknown. */
+  code_check?: CodeCheck[] | null;
   /** Decision-only fields: omission preserves, null/empty clears. */
   governs?: string | null;
   topic?: string | null;
@@ -333,13 +356,15 @@ export type DecisionDirectoryFields = Pick<DirectoryUpsert,
   "governs" | "topic" | "supersedes" | "agentStance" |
   "decidedBy" | "decidedAt" | "approvalChanged" | "commentCount" | "answerPreview" | "discussion">;
 
-export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number };
+export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number; code_check?: CodeCheck[] };
 
 /** Hydrated writers recompute every document cache instead of carrying stale values. */
 export function documentDirectoryFields(doc: Y.Doc): DocumentDirectoryFields {
+  const meta = getMeta(doc);
   return {
     ...decisionDirectoryFields(doc),
     openThreadCount: listAnnotations(doc).filter((thread) => thread.resolved !== true).length,
+    ...(meta.kind === "decision" ? {} : { code_check: meta.code_check ?? [] }),
   };
 }
 
@@ -401,6 +426,7 @@ export function upsertDirectoryEntry(
     const openThreadCount = readCount(
       entry.openThreadCount === undefined ? existing?.openThreadCount : entry.openThreadCount,
     );
+    const codeCheck = readRegularCodeChecks(kind, entry.code_check, existing?.code_check);
     const cache: Record<string, unknown> = {};
     for (const key of DECISION_CACHE_KEYS) cache[key] = entry[key] === undefined ? existing?.[key] : entry[key];
     const next: StoredEntry = {
@@ -413,6 +439,7 @@ export function upsertDirectoryEntry(
       ...(kind === undefined ? {} : { kind }),
       ...(status === undefined ? {} : { status }),
       ...(openThreadCount === undefined ? {} : { openThreadCount }),
+      ...(codeCheck === undefined ? {} : { code_check: codeCheck }),
       ...(kind === "decision" ? readDecisionFields(cache) : {}),
     };
     docs.set(entry.uuid, next);
@@ -525,6 +552,7 @@ function toEntry(uuid: string, stored: StoredEntry): DirectoryEntry {
     ...(stored.kind === undefined ? {} : { kind: stored.kind }),
     ...(stored.status === undefined ? {} : { status: stored.status }),
     ...(stored.openThreadCount === undefined ? {} : { openThreadCount: stored.openThreadCount }),
+    ...(stored.kind === "decision" || stored.code_check === undefined ? {} : { code_check: stored.code_check }),
     ...(stored.kind === "decision" ? readDecisionFields(stored as unknown as Record<string, unknown>) : {}),
   };
 }

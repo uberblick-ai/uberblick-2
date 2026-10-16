@@ -1,4 +1,4 @@
-import { DECISION_STATUSES, DOCUMENT_KINDS } from "@uberblick/schema";
+import { CODE_CHECK_RESULTS, DECISION_STATUSES, DOCUMENT_KINDS } from "@uberblick/schema";
 import { z } from "zod";
 import { strictInput } from "./inputs.js";
 
@@ -8,6 +8,12 @@ const description = z.string().nullable().describe("Agent-facing document descri
 const tldr = z.string().nullable().describe("Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR.");
 const discussion = z.string().nullable().describe("Explicit RFC discussion document UUID for this decision record; null when none. Distinct from curated links and the recorded answer.");
 const status = z.enum(DECISION_STATUSES);
+const codeChecks = z.array(z.object({
+  repository: z.string().describe("Canonical lowercase repository as owner/name."),
+  commit: z.string().describe("Full hexadecimal commit compared with the page."),
+  checked_at: z.string().describe("UTC time this comparison was recorded by its writing replica."),
+  result: z.enum(CODE_CHECK_RESULTS).describe("matches: page describes this code; ahead: intended behavior is missing; drift: unintended disagreement."),
+}).strict()).describe("Latest code comparison per repository on a regular page; content edits leave these entries unchanged. Empty means never checked.");
 const lifecycle = {
   kind: z.enum(DOCUMENT_KINDS).optional(),
   status: status.optional(),
@@ -96,6 +102,7 @@ const directoryEntry = z.object({
   approvalChanged: z.boolean().optional(),
   commentCount: count.optional(),
   openThreadCount: count.optional().describe("Cached count of this document's threads whose resolved is not true, including deleted anchors. Absent when unknown; each decision entry, including inForce, pending and conflicts, has its own count."),
+  code_check: codeChecks.optional().describe("Cached latest code comparisons on regular documents; empty means never checked, absent means not cached yet. Decision records omit this field. Content edits leave checks unchanged."),
 }).strict();
 const topicResolution = {
   topic: z.string().describe("First record's UUID identifying this decision topic."),
@@ -264,6 +271,7 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
+    code_check: codeChecks.optional().describe("Regular documents return their latest comparison per repository, or [] when never checked. Decision records omit this field. Content edits leave checks unchanged."),
     tldrOptOut: z.literal(true).optional().describe("Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records."),
     tags,
     links: z.array(z.string()),
@@ -323,6 +331,7 @@ export const outputSchemas = {
     title: z.string(),
     description,
     tldr,
+    code_check: codeChecks.optional(),
     tags,
     links: z.array(z.string()),
     discussion: discussion.optional(),

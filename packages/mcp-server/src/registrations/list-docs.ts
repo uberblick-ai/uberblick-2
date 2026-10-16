@@ -9,20 +9,21 @@ export function registerListDocs(server: ToolRegistrar, context: ToolContext): v
   server.registerTool("list_docs", {
     title: "List documents",
     description:
-      "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; " +
-      "kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the " +
-      "record in force, else pending, else first, plus pending/conflicting records. Predicates may match " +
-      "different live records; resolution uses the whole graph. include_superseded applies predicates per " +
-      "record. include_deleted admits archived entries, never permanently deleted UUIDs, and is not a predicate. Filters combine; unknown tags " +
-      "refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, " +
-      "including inForce, pending and conflicts, caches its document's openThreadCount: threads whose " +
-      "resolved is not true, including deleted anchors; absent means unknown. A matching topic's " +
-      "representative may have zero or unknown count. Use include_superseded: true with has_open_threads " +
-      "to find each matching document, then get_doc for threads and annotate to reply or resolve. " +
-      "Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional " +
-      "approximate timestamps. Decision rows have no TL;DR; answerPreview is the first answer paragraph/list, null for none; " +
-      "discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. " +
-      "Both are absent when unknown. get_doc marks related or linked topics." +
+      "List synced directory stubs without opening rooms. Unfiltered omits decisions; " +
+      "kind/status/tag/has_open_threads predicates include them. Topics present in-force, else pending, else " +
+      "first record, plus pending/conflicts. Predicates may match different live records; resolution uses " +
+      "the whole graph. include_superseded applies predicates per record. include_deleted admits archived, " +
+      "never permanently deleted UUIDs; it is no predicate. Filters combine; unknown tags refuse. " +
+      "has_open_threads accepts only true (known openThreadCount >= 1); false refuses. Every entry, including " +
+      "inForce/pending/conflicts, caches openThreadCount: threads not resolved, including deleted anchors; " +
+      "absent means unknown. A representative may have zero/unknown count. Use include_superseded with " +
+      "has_open_threads for every matching document, get_doc for threads, annotate to reply/resolve. Regular " +
+      "code_check cache: latest repository/commit/checked_at/result per repository, [] if never checked, absent " +
+      "if uncached. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended " +
+      "disagreement); content edits preserve checks. Decisions omit code_check/TL;DR; answerPreview: first " +
+      "answer paragraph/list or null; discussion: RFC UUID/null, apart from curated links/recorded answer; " +
+      "both absent if unknown. Rows cache description/tags/lifecycle/authority metadata, sidebar-derived " +
+      "pinned, approximate timestamps. get_doc marks related/linked topics." +
       helpPointer("list_docs"),
     outputSchema: outputSchemas.list_docs,
     inputSchema,
