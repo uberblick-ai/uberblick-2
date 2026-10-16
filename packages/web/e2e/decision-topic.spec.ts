@@ -293,8 +293,12 @@ test("decision title renames sync without approving answer changes", async ({ br
   const renamed = `Clearer question ${current.uuid}`;
   await title.fill(renamed);
   await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
-  expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: renamed, approvalChanged: false });
-  expect((await writer.call<StoredDoc>("get_doc", { uuid: pending.uuid })).title).toBe(pending.title);
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
+    expect(doc).toMatchObject({ title: renamed, approvalChanged: false });
+  });
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: pending.uuid }), doc => {
+    expect(doc.title).toBe(pending.title);
+  });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(editor(page)).toHaveText(answerText(current));
 
@@ -309,7 +313,9 @@ test("decision title renames sync without approving answer changes", async ({ br
   const mcpTitle = `MCP question ${current.uuid}`;
   await writer.call("set_metadata", { uuid: current.uuid, title: mcpTitle });
   await expect(title).toHaveValue(mcpTitle);
-  expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ approvalChanged: false });
+  await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
+    expect(doc).toMatchObject({ approvalChanged: false });
+  });
 
   const peer = await legacyDecisionPeer(harness(), current.uuid);
   try {
@@ -319,7 +325,9 @@ test("decision title renames sync without approving answer changes", async ({ br
     const changedTitle = `Changed answer question ${current.uuid}`;
     await title.fill(changedTitle);
     await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toContainText("Changed after approval");
-    expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: changedTitle, approvalChanged: true });
+    await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
+      expect(doc).toMatchObject({ title: changedTitle, approvalChanged: true });
+    });
   } finally { peer.close(); }
 });
 
