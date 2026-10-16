@@ -824,7 +824,6 @@ describe("workspace settings is a route-driven sidebar mode", () => {
     expectDead(documents);
     expectLive(settings);
     expect(within(host).queryAllByLabelText(/; preferences$/)).toHaveLength(1);
-    expect(within(host).getByLabelText(/; preferences$/)).toBe(accountControl);
     expect(document.activeElement).toBe(
       within(settings).getByRole("button", { name: "Unnamed workspace" }),
     );

@@ -313,7 +313,8 @@ for (const scheme of ["light"] as const) {
         }),
       );
     const treatment = (option: Locator) =>
-      option.evaluate((element) => {
+      option.evaluate(async (element) => {
+        await Promise.all(element.getAnimations().map((animation) => animation.finished));
         const style = getComputedStyle(element);
         return [style.backgroundColor, style.borderColor, style.color];
       });
@@ -346,6 +347,7 @@ for (const scheme of ["light"] as const) {
     await matching.click();
 
     await expect(matching).toHaveAttribute("aria-pressed", "true");
+    await expect.poll(() => paintedIn(matching, "border-top-color")).toBe(selectedCue);
     expect(await cue(matching)).toBe(selectedCue);
     expect(await paintedIn(system, "border-top-color")).not.toBe(selectedCue);
     expect(await boxes()).toEqual(before);
@@ -658,7 +660,7 @@ for (const scheme of ["light"] as const) {
     await checkHoverAndFocus(matching);
     await matching.tap();
     await expect(matching).toHaveAttribute("aria-pressed", "true");
-    expect(await treatment(matching)).toEqual(selected);
+    await expect.poll(() => treatment(matching)).toEqual(selected);
     await page.goBack();
     await openSidebar();
 
