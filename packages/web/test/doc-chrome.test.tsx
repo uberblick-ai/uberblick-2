@@ -186,8 +186,8 @@ describe("the document identity line keeps its local controls", () => {
     setStatus(decision.ydoc, "open");
     const mountedDecision = mount(decision);
     try {
-      expect(within(mountedDecision.host).getByText("Decision · open").textContent).toBe(
-        "Decision · open",
+      expect(within(mountedDecision.host).getByText("Decision").textContent).toBe(
+        "Decision",
       );
     } finally {
       mountedDecision.view.unmount();

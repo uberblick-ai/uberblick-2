@@ -182,7 +182,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     const replica = requireDoc(uuid);
     const meta = getMeta(replica.doc);
     if (contentMutation && decisionContentLocked(meta)) {
-      throw new ToolError("decision_read_only", "A decided record's title, answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
+      throw new ToolError("decision_read_only", "A decided record's answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
     return replica;
   };

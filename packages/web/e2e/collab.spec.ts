@@ -102,8 +102,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
 
   const calloutA = a.locator(".ub-tldr");
   const calloutB = b.locator(".ub-tldr");
-  await expect(calloutA).toContainText("Quick summary");
-  await expect(calloutA).toContainText("TL;DR");
+  await expect(calloutA.getByRole("heading", { name: "TL;DR", level: 2 })).toBeVisible();
   await expect(calloutB).toContainText("A short summary for readers.");
 
   const summaryB = b.getByLabel(

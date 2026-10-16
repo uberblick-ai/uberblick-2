@@ -170,13 +170,13 @@ test("lone plain-text GitHub paste keeps the original address and immediately sh
   await expect(page.locator(".ub-github-pill")).toHaveCount(2);
 });
 
-test("GitHub paste shortcuts preserve a table cell's single paragraph and longer pasted text", { tag: "@webkit" }, async ({ page }) => {
+test("GitHub paste shortcuts preserve a table cell's single paragraph and longer pasted text", { tag: "@webkit" }, async ({ page }, info) => {
   await newDoc(page);
   await page.keyboard.type("/table");
   await page.keyboard.press("Enter");
   const headers = page.locator(".ub-table th");
   await expect(headers).toHaveCount(3);
-  await placeCaretIn(headers.first());
+  await placeCaretIn(headers.first(), { touch: info.project.use.hasTouch === true });
   await pastePlain(page, TARGET);
   await expect(headers.first().locator(".ub-github-pill")).toBeVisible();
   await expect(headers.first().locator(".ub-github-link-text")).toHaveText(STORED);
@@ -339,12 +339,12 @@ test("light and dark pills keep the same typography in prose, table headers and 
   await page.keyboard.type("/table");
   await page.keyboard.press("Enter");
   const header = page.locator(".ub-table th").first();
-  await placeCaretIn(header);
+  await placeCaretIn(header, { touch: info.project.use.hasTouch === true });
   await page.keyboard.type(`[${STORED}](${TARGET})`);
   await page.locator(".ub-title").click();
   await expect(header.locator(".ub-github-pill")).toBeVisible();
   // Insert through block chrome rather than using Enter inside the cell.
-  await placeCaretIn(page.locator(".ub-table th").last());
+  await placeCaretIn(page.locator(".ub-table th").last(), { touch: info.project.use.hasTouch === true });
   await page.getByRole("button", { name: "Insert block below", exact: true }).click();
   await page.getByRole("option", { name: "Card", exact: true }).click();
   await page.keyboard.type("Evidence");

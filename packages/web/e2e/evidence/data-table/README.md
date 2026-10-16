@@ -2,12 +2,29 @@
 
 Synthetic generated and ordinary tables in the same document, under an author's
 Changelog heading: [light](light.png), [dark](dark.png). The browser proof compares
-computed cell borders, padding, font size/weight, text color and header background;
+computed cell borders, padding, font size/weight, line height, text color and header background;
 it also checks whole-word headers, footnote contrast, native naming, secondary
 source/copy actions, keyboard and no-hover access, source editing and locks.
 Revealed actions clear both table and footnote text, including at a 390px touch
 viewport. The ten-column timing workload and a thirty-column table scroll
 horizontally within their blocks.
+
+Both tables use horizontal rules, unshaded muted headers and compact body rows.
+The touch proof covers [iPad light](ipad-light.png), [iPad dark](ipad-dark.png),
+[narrow iPad light](ipad-narrow-light.png) and [narrow iPad dark](ipad-narrow-dark.png)
+at 820px and 600px widths. It checks 44px Markdown cells and sort targets and
+sorts through native touch input in both appearances. These captures show the
+sort button's existing focus and hover feedback after a tap.
+
+Regenerate appearance screenshots with:
+
+```sh
+mise run e2e -- data-table.spec.ts --project=chromium --project=webkit-ipad --workers=1 --grep 'all rows read|table rules and touch targets'
+```
+
+Copy the Chromium `data-table-light.png` and `data-table-dark.png` attachments
+to `light.png` and `dark.png`. Copy WebKit's `table-rules-820-*.png` attachments
+to `ipad-*.png` and its `table-rules-600-*.png` attachments to `ipad-narrow-*.png`.
 
 Regenerate the screenshots and timing attachments with:
 

@@ -211,10 +211,10 @@ async function openApp(path: string): Promise<HTMLElement> {
  * it. Writing through the *native* setter leaves React's record behind, which
  * is exactly the state a real keystroke leaves it in.
  */
-function typeInto(input: HTMLInputElement | null, value: string): void {
+function typeInto(input: HTMLTextAreaElement | null, value: string): void {
   if (input === null) return;
   const native = Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
+    HTMLTextAreaElement.prototype,
     "value",
   )?.set;
   native?.call(input, value);
@@ -318,9 +318,9 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(banner(host)).not.toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
-    const title = host.querySelector<HTMLElement>(".ub-title");
-    expect(title instanceof HTMLInputElement ? title.readOnly : title?.tagName === "H1").toBe(true);
-    if (title instanceof HTMLInputElement) act(() => typeInto(title, "changed"));
+    const title = within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" });
+    expect(title.readOnly).toBe(true);
+    act(() => typeInto(title, "changed"));
     expect(getMeta(ydoc).title).toBe("New lease");
     act(() => restoreButton(host)?.click());
     expect(banner(host)).toBeNull();
@@ -347,7 +347,7 @@ describe("an archived document is readable, says so, and offers one way back", (
       window.history.pushState(null, "", `/${nextWorkspace}/${OTHER}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").value).toBe("Other document");
+    expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").value).toBe("Other document");
     act(() => notice.action?.onClick({} as MouseEvent<HTMLButtonElement>));
     expect(getDirectoryEntry(directory, UUID)?.deleted).toBeUndefined();
     expect(getDirectoryEntry(nextDirectory, OTHER)?.deleted).toBeUndefined();
@@ -447,7 +447,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // tombstone only: coming back is not being an entry point again, and
     // re-pinning stays the reader's deliberate act.
     expect(readSidebar(sidebar)[0]?.docs).toEqual([]);
-    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
+    const title = within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled");
     title?.focus();
     act(() => tombstoneDirectoryEntry(directory, UUID));
     expect(document.activeElement).toBe(title);
@@ -634,7 +634,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // Read-only, and no chrome left that would write around it.
     expect(prose(host)?.getAttribute("contenteditable")).toBe("false");
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("true");
-    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(true);
+    expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").readOnly).toBe(true);
     // Caret chrome is layout-hidden in jsdom. Label queries preserve the proof
     // that the control is mounted only while editing is allowed.
     expect(within(host).queryByLabelText("Insert block below")).toBeNull();
@@ -645,7 +645,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     expect(banner(host)).toBeNull();
     expect(prose(host)?.getAttribute("contenteditable")).toBe("true");
     expect(prose(host)?.getAttribute("aria-readonly")).toBe("false");
-    expect(within(host).getByPlaceholderText<HTMLInputElement>("Untitled").readOnly).toBe(false);
+    expect(within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled").readOnly).toBe(false);
     expect(within(host).queryByLabelText("Insert block below")).not.toBeNull();
     // Lifted on the *other* client too, which is what "reappears in listings"
     // means: the second replica lists it again without asking for it.
@@ -666,7 +666,7 @@ describe("an archived document is readable, says so, and offers one way back", (
     // The title's *write* is guarded, not just its field. `readOnly` is a
     // statement to the browser about typing; a change event that reaches the
     // handler by another route must still not reach the document.
-    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
+    const title = within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled");
     act(() => typeInto(title, "typed anyway"));
     expect(getMeta(ydoc).title).toBe("Retired protocol");
   });

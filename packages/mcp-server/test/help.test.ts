@@ -246,6 +246,22 @@ it("describes decision reads and writes without a legacy TL;DR exception", async
   expect(lifecycle).toContain("stored values are ignored without changing them");
 });
 
+it("describes editable decision titles and answer-only approval while retaining answer locks", async () => {
+  const rig = await local();
+  const lifecycle = (await rig.ok("get_help", { topic: "lifecycle" })).text;
+  expect(lifecycle).toContain("Approval covers the answer, not the topic title");
+  expect(lifecycle).toContain("a title-only rename preserves approval and any existing changed-after-approval warning");
+  expect(lifecycle).toContain("A decided decision record's answer blocks and structured data are read-only");
+  expect(lifecycle).toContain("naming tldr or discussion");
+  expect(lifecycle).not.toMatch(/approves the current title|record's title, answer blocks|naming title, tldr/);
+  const metadata = (await rig.ok("get_help", { topic: "set_metadata" })).text;
+  expect(metadata).toContain("accepts title, description, tags and links");
+  expect(metadata).toContain("refuses tldr or discussion");
+  expect(metadata).toContain("An archived document refuses every metadata field");
+  const { tools } = await rig.client.listTools();
+  expect(tools.find(tool => tool.name === "set_metadata")?.description).toContain("Title renames preserve approval");
+});
+
 it("explains deliberate TL;DR removal and explicit opt-in in help and field contracts", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();

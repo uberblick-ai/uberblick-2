@@ -193,6 +193,7 @@ export function useDirectory(
         : entry,
     ));
     read();
+    // Resolved edit stamps can change independently of the cached stubs.
     ydoc.on("update", read);
     return () => ydoc.off("update", read);
   }, [includeDeleted]);

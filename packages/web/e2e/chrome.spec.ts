@@ -32,7 +32,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
@@ -736,117 +736,133 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   expect(await painted(page, ".ub-list", "background-color")).toBe(sidebar);
 });
 
-test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading widths", async ({
-  browser,
-}) => {
-  const page = await openAppearanceApp(browser, "light");
-  await page.getByRole("button", { name: "+ New page" }).click();
-  await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
-  await page.getByRole("button", { name: "Document actions" }).click();
-  await page.getByRole("menuitem", { name: "Add TL;DR" }).click();
-  await page
-    .getByLabel(
-      "Write one or two plain-English sentences that help a reader understand this document.",
-    )
-    .fill("Summary without layout surprises. ".repeat(9).slice(0, 300));
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.getByRole("button", { name: "Hide document list" }).click();
+for (const scheme of ["light", "dark"] as const) {
+  test(`the TL;DR index card keeps its tab, prose and editor at reading widths — ${scheme}`, { tag: "@webkit-touch" }, async ({ browser }, info) => {
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, "/", {
+      upstream: true,
+      readySelector: ".ub-pane",
+      contextOptions: {
+        colorScheme: scheme,
+        ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 900 } }),
+      },
+    });
+    const activate = async (control: Locator): Promise<void> => {
+      if (touch) await control.tap();
+      else await control.click();
+    };
+    if (touch) await activate(page.getByRole("button", { name: "Show document list", exact: true }));
+    await activate(page.getByRole("button", { name: "+ New page" }));
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    await activate(page.getByRole("button", { name: "Document actions" }));
+    await activate(page.getByRole("menuitem", { name: "Add TL;DR" }));
+    const input = page.getByRole("textbox", {
+      name: "Write one or two plain-English sentences that help a reader understand this document.",
+    });
+    const text = "Summary without layout surprises. ".repeat(9).slice(0, 300);
+    await input.fill(text);
+    await activate(page.getByRole("button", { name: "Save", exact: true }));
+    const hideList = page.getByRole("button", { name: "Hide document list" });
+    if (await hideList.isVisible()) await activate(hideList);
 
-  const callout = page.locator(".ub-tldr");
-  const title = callout.getByRole("heading", { name: "TL;DR" });
-  const summary = callout.locator(".ub-tldr-body > p");
-  const inlineEdit = summary.getByRole("button", { name: "Edit TL;DR", exact: true });
-  await expect(callout).toBeVisible();
-  expect(await paintedIn(title, "font-family")).toBe(
-    await painted(page, ".ub-title", "font-family"),
-  );
+    const card = page.getByRole("region", { name: "TL;DR", exact: true });
+    const title = card.getByRole("heading", { name: "TL;DR", level: 2 });
+    const summary = card.locator(".ub-tldr-body > p");
+    const inlineEdit = card.getByRole("button", { name: "Edit TL;DR", exact: true });
+    await expect(card.getByRole("heading")).toHaveCount(1);
+    await expect(card.getByText("Quick summary", { exact: true })).toHaveCount(0);
+    await expect(card.locator("svg")).toHaveCount(0);
+    await expect(title).toHaveCSS("font-family", /Fraunces/);
+    await expect(title).toHaveCSS("font-style", "italic");
+    await expect(title).toHaveCSS("font-size", "13px");
+    await expect(title).toHaveCSS("line-height", "18px");
 
-  const cardPaint = () =>
-    callout.evaluate((element) => {
+    const paint = await card.evaluate((element) => {
       const style = getComputedStyle(element);
-      return {
-        background: style.backgroundImage,
-        border: style.borderColor,
-        accentColor: getComputedStyle(element, "::before").backgroundColor,
+      const heading = element.querySelector("h2");
+      if (heading === null) throw new Error("TL;DR heading is missing");
+      const probe = document.createElement("span");
+      probe.style.cssText = "background:var(--card);border:1px solid var(--border);border-radius:var(--radius);color:var(--brand-ink)";
+      element.append(probe);
+      const tokens = getComputedStyle(probe);
+      const result = {
+        ground: style.backgroundColor === tokens.backgroundColor,
+        border: style.borderColor === tokens.borderColor && style.borderWidth === "1px",
+        radius: style.borderRadius === tokens.borderRadius,
+        image: style.backgroundImage,
+        shadow: style.boxShadow,
+        accent: getComputedStyle(element, "::before").content,
+        tabGround: getComputedStyle(heading).backgroundColor === tokens.backgroundColor,
+        tabInk: getComputedStyle(heading).color === tokens.color,
       };
+      probe.remove();
+      return result;
     });
-  const light = await cardPaint();
+    expect(paint).toEqual({ ground: true, border: true, radius: true, image: "none", shadow: "none", accent: "none", tabGround: true, tabInk: true });
 
-  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
-  const dark = await cardPaint();
-  expect(dark.background).not.toBe(light.background);
-  expect(dark.border).not.toBe(light.border);
-  expect(dark.accentColor).not.toBe(light.accentColor);
-
-  for (const width of [744, 1280]) {
-    await page.setViewportSize({ width, height: 900 });
-    // The native edit trigger must paint and wrap like the existing prose,
-    // without the browser's default button background, border or padding.
-    for (const property of ["font-family", "font-size", "line-height", "color"]) {
-      expect(await paintedIn(inlineEdit, property)).toBe(await paintedIn(summary, property));
-    }
-    expect(await paintedIn(inlineEdit, "background-color")).toBe("rgba(0, 0, 0, 0)");
-    expect(await paintedIn(inlineEdit, "border-width")).toBe("0px");
-    expect(await paintedIn(inlineEdit, "padding")).toBe("0px");
-    expect(Number.parseFloat(await paintedIn(title, "font-size"))).toBeGreaterThan(
-      Number.parseFloat(await paintedIn(summary, "font-size")),
-    );
-    // Pseudo-elements have no DOM rectangle. The engine's resolved height and
-    // inset place the accent in the card's padding box, inside its border.
-    const accent = await callout.evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const style = getComputedStyle(element, "::before");
-      const border = getComputedStyle(element);
-      const cardTop = box.top + Number.parseFloat(border.borderTopWidth);
-      const cardLeft = box.left + Number.parseFloat(border.borderLeftWidth);
-      const top = cardTop + Number.parseFloat(style.top);
-      return {
-        cardTop,
-        cardBottom: box.bottom - Number.parseFloat(border.borderBottomWidth),
-        cardLeft,
-        left: cardLeft + Number.parseFloat(style.left),
-        top,
-        bottom: top + Number.parseFloat(style.height),
-        width: Number.parseFloat(style.width),
-      };
-    });
-    expect(accent.top).toBeCloseTo(accent.cardTop, 1);
-    expect(accent.bottom).toBeCloseTo(accent.cardBottom, 1);
-    expect(accent.left).toBeCloseTo(accent.cardLeft, 1);
-    expect(accent.width).toBeGreaterThan(0);
-    const geometry = await callout.evaluate((element) => {
-      const header = element.querySelector<HTMLElement>(".ub-tldr-header");
-      const mark = element.querySelector<HTMLElement>(".ub-tldr-mark");
-      const label = element.querySelector<HTMLElement>(".ub-tldr-label");
-      const heading = element.querySelector<HTMLElement>("h2");
-      const text = element.querySelector<HTMLElement>(".ub-tldr-body > p");
-      if (header === null || mark === null || label === null || heading === null || text === null) {
-        throw new Error("TL;DR layout is incomplete");
+    for (const width of [touch ? 810 : 1280, 744, 640]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(summary).toHaveCSS("font-family", /Geist/);
+      await expect(summary).toHaveCSS("font-size", "16px");
+      await expect(summary).toHaveCSS("line-height", "27px");
+      for (const property of ["font-family", "font-size", "line-height", "color"]) {
+        expect(await paintedIn(inlineEdit, property)).toBe(await paintedIn(summary, property));
       }
-      const headerBox = header.getBoundingClientRect();
-      const markBox = mark.getBoundingClientRect();
-      const labelBox = label.getBoundingClientRect();
-      const headingBox = heading.getBoundingClientRect();
-      const textBox = text.getBoundingClientRect();
-      return {
-        aligned: Math.round(markBox.left) === Math.round(textBox.left),
-        labelAboveTitle: labelBox.bottom <= headingBox.top,
-        bodyBelowHeader: textBox.top >= headerBox.bottom,
-        wraps: textBox.height > Number.parseFloat(getComputedStyle(text).lineHeight),
-        fitsCard: element.scrollWidth <= element.clientWidth,
-        fitsBody: text.scrollWidth <= text.clientWidth,
-      };
-    });
-    expect(geometry).toEqual({
-      aligned: true,
-      labelAboveTitle: true,
-      bodyBelowHeader: true,
-      wraps: true,
-      fitsCard: true,
-      fitsBody: true,
-    });
-  }
-});
+      const geometry = await card.evaluate((element) => {
+        const heading = element.querySelector("h2");
+        const text = element.querySelector<HTMLElement>(".ub-tldr-body > p");
+        const status = element.closest(".ub-column")?.querySelector(".ub-status") ?? null;
+        if (heading === null || text === null || status === null) throw new Error("TL;DR layout is incomplete");
+        const box = element.getBoundingClientRect();
+        const tab = heading.getBoundingClientRect();
+        const body = text.getBoundingClientRect();
+        return {
+          onEdge: tab.top < box.top && tab.bottom > box.top,
+          nearLeft: tab.left > box.left && tab.right < box.left + box.width / 2,
+          belowStatus: tab.top >= status.getBoundingClientRect().bottom,
+          aboveSummary: tab.bottom <= body.top,
+          unclipped: [tab.top + 1, tab.bottom - 1].every((y) =>
+            document.elementsFromPoint(tab.left + tab.width / 2, y).includes(heading)),
+          wraps: body.height > Number.parseFloat(getComputedStyle(text).lineHeight),
+          fits: element.scrollWidth <= element.clientWidth && text.scrollWidth <= text.clientWidth,
+        };
+      });
+      expect(geometry).toEqual({ onEdge: true, nearLeft: true, belowStatus: true, aboveSummary: true, unclipped: true, wraps: true, fits: true });
+      const readings = await renderedText(page, "#ub-tldr-title");
+      expect(readings.length).toBeGreaterThan(0);
+      for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+      const image = info.outputPath(`tldr-${width}.png`);
+      await page.screenshot({ path: image });
+      await info.attach(`tldr-${width}`, { path: image, contentType: "image/png" });
+
+      if (touch) await inlineEdit.tap();
+      else {
+        await inlineEdit.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(input).toBeFocused();
+      expect(await card.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.scrollWidth <= element.clientWidth &&
+          [...element.querySelectorAll("textarea, button")].every((control) => {
+            const bounds = control.getBoundingClientRect();
+            return bounds.left >= box.left && bounds.right <= box.right;
+          });
+      })).toBe(true);
+      await input.fill("An unsaved replacement.");
+      await activate(card.getByRole("button", { name: "Cancel", exact: true }));
+      await expect(summary).toHaveText(text);
+    }
+    await activate(inlineEdit);
+    await input.fill("A saved replacement.");
+    if (touch) await activate(card.getByRole("button", { name: "Save", exact: true }));
+    else await input.press("Enter");
+    await expect(summary).toHaveText("A saved replacement.");
+    await activate(inlineEdit);
+    await activate(card.getByRole("button", { name: "Clear", exact: true }));
+    await expect(card).toHaveCount(0);
+  });
+}
 
 test("the open document owns the remaining chrome and its one sync-details handle", async ({
   browser,
@@ -1632,10 +1648,15 @@ for (const scheme of ["light", "dark"] as const) {
 
     await page.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Connection details", exact: true }).click();
     for (const fact of await page.locator("[data-settings-facts] > div").all()) {
       const label = await fact.locator("dt").innerText();
-      await (["Workspace UUID", "Address segment", "Hub"].includes(label) ? mono : ui)(fact.locator("dd"));
-      if (["Documents", "MCP connections"].includes(label)) {
+      const value = fact.locator("dd");
+      if (label === "Workspace ID") {
+        await mono(value.locator("span > span"));
+        await ui(value.getByRole("button", { name: "Copy workspace ID" }));
+      } else await (label === "Address segment" ? mono : ui)(value);
+      if (["Documents", "Tags", "Last edited", "MCP connections"].includes(label)) {
         await expect(fact.locator("dd")).toHaveCSS("font-variant-numeric", "tabular-nums");
       }
     }
@@ -2345,7 +2366,7 @@ for (const scheme of ["light", "dark"] as const) {
       setKind(doc, "decision");
       setStatus(doc, "open");
       const badge = page.locator(".ub-doc-meta .ub-lifecycle-badge");
-      await expect(badge).toHaveText("Decision · open");
+      await expect(badge).toHaveText("Decision");
       await badge.scrollIntoViewIfNeeded();
       expect(oklab(await paintedIn(badge, "color")).chroma).toBeLessThan(accentChroma);
       expect(oklab(await paintedIn(badge, "border-top-color")).chroma).toBeLessThan(accentChroma);
@@ -3082,7 +3103,7 @@ test("decision archive and restore follow the whole topic and its first record",
     map.set(first, { ...(map.get(first) as object), deleted: true });
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-    await expect(page.locator("input.ub-title")).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     expect(getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
     await page.getByRole("button", { name: "Restore", exact: true }).click();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");

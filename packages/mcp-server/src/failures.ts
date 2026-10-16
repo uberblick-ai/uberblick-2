@@ -329,8 +329,8 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "A decided record's title, answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
-      "for any content change, then record a person's answer to decide it. Comments stay open.",
+      "A decided record's answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
+      "for any answer change, then record a person's answer to decide it. Titles stay editable without changing approval; comments stay open.",
   },
   decision_answer_required: {
     recoveryClass: "manual",

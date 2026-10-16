@@ -412,8 +412,9 @@ export const toolHelpDetails = {
     "`field: \"discussion\"`. The reference is fixed once the record leaves open. Changing or clearing " +
     "it never creates a document, tags or edits the RFC or related page, or changes approvalFingerprint " +
     "or approvalChanged. It is distinct from curated links and recorded answer attribution.\n\n" +
-    "A decided record refuses title, tldr or discussion with `decision_read_only` and the refused field, " +
-    "but accepts description, tags and links. An archived document refuses every metadata field. A success " +
+    "A decided record refuses tldr or discussion with `decision_read_only` and the refused field, " +
+    "but accepts title, description, tags and links. Title-only renames preserve answer approval, including " +
+    "an existing changed-after-approval warning. An archived document refuses every metadata field. A success " +
     "returns uuid and the descriptive metadata fields, including unchanged values and " +
     "discussion for decision records, plus shared write durability and " +
     "applicable description or tag hints; it carries no `tldrHint`.",

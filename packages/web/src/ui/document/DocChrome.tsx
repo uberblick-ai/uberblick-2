@@ -379,7 +379,7 @@ export function DocMetaLine({
           tag in it either — but the row itself stands, holding the space. */}
       {meta !== null && meta.uuid !== "" && (
         <>
-          <LifecycleBadge kind={meta.kind} status={meta.status} />
+          <LifecycleBadge kind={meta.kind} />
           <TagStrip
             ydoc={connection.ydoc}
             tags={meta.tags}

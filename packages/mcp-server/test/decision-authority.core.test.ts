@@ -155,7 +155,6 @@ describe("decision authority through MCP", () => {
     const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
     const block = record.blocks[0];
     const mutations: [string, Record<string, unknown>][] = [
-      ["set_metadata", { title: "Reworded topic" }],
       ["set_metadata", { tldr: "Changed decision line." }],
       ["set_metadata", { tldr: null }],
       ["edit_block", { block_id: block.id, old_text: block.text, new_text: "Changed text.", rev: block.rev }],
@@ -166,10 +165,10 @@ describe("decision authority through MCP", () => {
     for (const [name, args] of mutations) {
       const refused = await refuse(rig, name, { uuid: record.uuid, ...args }, "decision_read_only", record.uuid);
       expect(refused).toMatchObject({
-        message: "A decided record's title, answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.",
+        message: "A decided record's answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.",
         recoveryClass: "manual",
-        recovery: "A decided record's title, answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
-          "for any content change, then record a person's answer to decide it. Comments stay open.",
+        recovery: "A decided record's answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
+          "for any answer change, then record a person's answer to decide it. Titles stay editable without changing approval; comments stay open.",
       });
     }
     const thread = await rig.ok("annotate", { uuid: record.uuid, block_id: block.id, start: 0, end: 3, text: "Discuss the rationale." });
@@ -177,8 +176,9 @@ describe("decision authority through MCP", () => {
     await rig.ok("set_metadata", { uuid: record.uuid, description: "Updated discovery copy." });
     await rig.ok("set_metadata", { uuid: record.uuid, tags: ["mcp"] });
     await rig.ok("set_metadata", { uuid: record.uuid, links: [target.uuid] });
+    await rig.ok("set_metadata", { uuid: record.uuid, title: "Reworded topic" });
     const read = await rig.ok("get_doc", { uuid: record.uuid });
-    expect(read).toMatchObject({ title: "Persistence", tldr: null, approvalChanged: false, description: "Updated discovery copy." });
+    expect(read).toMatchObject({ title: "Reworded topic", tldr: null, approvalChanged: false, description: "Updated discovery copy." });
     expect(read.blocks[0].text).toBe(block.text);
     expect(getDirectoryEntry(rig.instance.replicas.directory().doc, record.uuid)).toMatchObject({ approvalChanged: false, commentCount: 2 });
   });
@@ -241,7 +241,6 @@ describe("decision authority through MCP", () => {
     const doc = rig.instance.replicas.replica(record.uuid).doc;
     const changedAgain = { who: "Another workspace member", when: "2026-10-05T08:00:00Z", where: "An in-person review." };
     const edits: ((offline: Y.Doc) => void)[] = [
-      offline => setTitle(offline, "Updated persistence topic"),
       offline => setTldr(offline, "Use the database-backed log."),
       offline => {
         const block = getBlocks(offline)[0];
@@ -267,6 +266,42 @@ describe("decision authority through MCP", () => {
         offline.destroy();
       }
     }
+  });
+
+  it("preserves answer approval across local and synced title renames without clearing an answer warning", async () => {
+    const rig = await localRig();
+    const record = await legacyDecision(rig, { status: "decided", answer, tldr: "Use the update log." });
+    const untouched = await decision(rig, { status: "decided", answer });
+    const doc = rig.instance.replicas.replica(record.uuid).doc;
+    const fingerprint = getMetaMap(doc).get("approvalFingerprint");
+    await rig.ok("set_metadata", { uuid: record.uuid, title: "Which persistence should we use?" });
+    expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ approvalChanged: false });
+
+    const offline = new Y.Doc();
+    try {
+      Y.applyUpdate(offline, Y.encodeStateAsUpdate(doc));
+      const vector = Y.encodeStateVector(doc);
+      setTitle(offline, "What should store workspace updates?");
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(offline, vector), "remote");
+      expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({
+        title: "What should store workspace updates?", approvalChanged: false,
+      });
+    } finally {
+      offline.destroy();
+    }
+    const block = getBlocks(doc)[0]!;
+    editBlock(doc, block.id, block.text, "A changed answer that has not been approved.", { rev: block.rev });
+    expect((await rig.ok("get_doc", { uuid: record.uuid })).approvalChanged).toBe(true);
+    await rig.ok("set_metadata", { uuid: record.uuid, title: "How do we persist updates?" });
+    expect(await rig.ok("get_doc", { uuid: record.uuid })).toMatchObject({ approvalChanged: true });
+    expect(getMetaMap(doc).get("approvalFingerprint")).toBe(fingerprint);
+    const rows = (await rig.ok("list_docs", { kind: "decision" })).docs;
+    expect(rows.find((row: any) => row.uuid === record.uuid)).toMatchObject({
+      title: "How do we persist updates?", approvalChanged: true, inForce: { approvalChanged: true },
+    });
+    expect(rows.find((row: any) => row.uuid === untouched.uuid)).toMatchObject({
+      approvalChanged: false, inForce: { approvalChanged: false },
+    });
   });
 
   it("exposes stance and answer caches on representative, in-force, pending and conflict entries without opening record rooms", async () => {

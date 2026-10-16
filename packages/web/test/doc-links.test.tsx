@@ -457,7 +457,7 @@ describe("an unwritable document room", () => {
         onSelectThread={() => {}}
       />,
     );
-    const title = within(host).getByPlaceholderText<HTMLInputElement>("Untitled");
+    const title = within(host).getByPlaceholderText<HTMLTextAreaElement>("Untitled");
     expect(title?.readOnly).toBe(true);
     expect(within(host).queryByRole("button", { name: "Edit tags" })).toBeNull();
     const content = within(host).getByRole("textbox", { name: "Document content" });
@@ -471,7 +471,7 @@ describe("an unwritable document room", () => {
     expect(within(host).getByText("not saved").textContent).toContain("not saved");
 
     const setter = Object.getOwnPropertyDescriptor(
-      HTMLInputElement.prototype,
+      HTMLTextAreaElement.prototype,
       "value",
     )?.set;
     setter?.call(title, "Browser only");
