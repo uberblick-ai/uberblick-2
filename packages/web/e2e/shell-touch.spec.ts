@@ -92,7 +92,7 @@ for (const { coarse, width } of [
       await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet.");
       await expect(page.locator(".ub-document-sidebar .ub-nav-label, .ub-sidebar-unwritable")).toHaveCount(0);
       const title = "Pinned reference with a title long enough to truncate within its sidebar row ".repeat(3);
-      const name = "Reading group with a name long enough to truncate within its heading ".repeat(3);
+      const name = "Reading group with a name long enough to truncate within its heading ".repeat(3).trim();
       await seed(page, title, name);
       if ((page.viewportSize()?.width ?? width) < 1280) await expect(drawer(page)).toBeVisible();
       else await expect(drawer(page)).toHaveCount(0);
@@ -158,6 +158,7 @@ for (const { coarse, width } of [
       await group(page, name).getByRole("button", { name: `Rename group ${name}`, exact: true }).click();
       const rename = page.getByRole("textbox", { name: "Group name" });
       await expect(rename).toHaveValue(name);
+      await expect(rename).toHaveCSS("font-size", coarse ? "16px" : "12px");
       await expect(rename).toHaveCSS("text-transform", "none");
       await expect(rename).toHaveCSS("letter-spacing", "normal");
       await rename.press("Escape");
@@ -210,6 +211,15 @@ for (const { coarse, width } of [
       const dotBox = await dot.boundingBox();
       expect(dotBox?.width).toBeGreaterThan(0);
       expect(dotBox?.height).toBeGreaterThan(0);
+      expect(await dot.evaluate((element) => getComputedStyle(element).backgroundColor))
+        .toBe(await offline.evaluate((element) => {
+          const probe = document.createElement("span");
+          probe.style.backgroundColor = "var(--destructive)";
+          element.append(probe);
+          const colour = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return colour;
+        }));
       const footerOrder = await offline.evaluate((row) => {
         const settings = row.parentElement?.querySelector(".ub-settings-entry");
         return settings !== null && settings !== undefined && row.nextElementSibling === settings;
