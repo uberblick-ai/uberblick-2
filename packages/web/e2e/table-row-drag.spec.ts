@@ -425,7 +425,7 @@ test("an immediate touch swipe from a row handle scrolls without picking up a ro
   const session = await page.context().newCDPSession(page);
   try {
     const table = await openTable(page, fixture.uuid, 31);
-    await table.locator("tr").nth(3).locator("td").first().tap();
+    await placeCaretIn(table.locator("tr").nth(3).locator("td").first(), { touch: true });
     const bounds = await box(handle(page, 3));
     const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
     const pane = page.locator(".ub-document-pane");
