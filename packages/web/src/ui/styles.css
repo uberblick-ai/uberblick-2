@@ -945,16 +945,18 @@ h6.ub-heading {
 .ub-card-button:not([data-card-button-color="neutral"])[data-card-button-style="filled"]:hover {
   background: color-mix(in srgb, var(--card-button-ink) 90%, var(--background));
 }
-.ub-card-button-edit {
+.ub-card-edit-controls {
   position: absolute;
   top: 8px;
   right: 8px;
+  display: flex;
+  gap: 4px;
   opacity: 0;
   pointer-events: none;
 }
-.ub-card:hover .ub-card-button-edit,
-.ub-card[data-card-focused="true"] .ub-card-button-edit,
-.ub-card:focus-within .ub-card-button-edit {
+.ub-card:hover .ub-card-edit-controls,
+.ub-card[data-card-focused="true"] .ub-card-edit-controls,
+.ub-card:focus-within .ub-card-edit-controls {
   opacity: 1;
   pointer-events: auto;
 }

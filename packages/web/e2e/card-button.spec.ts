@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { join } from "node:path";
 import { editor, setupHarness } from "./app-helpers.js";
-import { placeCaretIn } from "./harness.js";
+import { caretAtEdge, placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { composite, contrast } from "../test/colour.js";
@@ -107,6 +107,7 @@ test("card buttons author, sync and activate with native input", { tag: "@webkit
   await writer.call("archive_doc", { uuid: created.uuid });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expect(page.getByRole("button", { name: "Edit buttons", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove card", exact: true })).toHaveCount(0);
   if (touch) await action.tap();
   else { await action.focus(); await page.keyboard.press("Enter"); }
   await expect.poll(() => page.evaluate(() => (window as unknown as Window & { cardAppLinks: string[] }).cardAppLinks.length)).toBe(touch ? 2 : 4);
@@ -180,6 +181,104 @@ test("card buttons author, sync and activate with native input", { tag: "@webkit
   await activate(page.getByRole("button", { name: "Remove button", exact: true }), touch);
   await expect(second).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add button", exact: true })).toBeVisible();
+});
+
+test("Remove card shares the hover controls and restores focus for native undo", { tag: "@webkit" }, async ({ browser }, info) => {
+  const touch = info.project.use.hasTouch === true;
+  const writer = session();
+  const created = await writer.call<{ uuid: string }>("create_doc", {
+    title: "Remove card browser proof", description: "Synthetic card removal and undo.",
+    blocks: [
+      { type: "paragraph", text: "Before" },
+      { type: "card", text: "label: Plan\ntitle: Ship **v0.5**\nfooter: [Details](https://example.invalid/details)\nbutton: [Discuss](codex://new?prompt=Ship) filled blue\n\nThe recommendation." },
+      { type: "paragraph", text: "After" },
+    ],
+  });
+  const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true });
+  const card = page.locator(".ub-card");
+  const controls = card.locator(".ub-card-edit-controls");
+  const remove = card.getByRole("button", { name: "Remove card", exact: true });
+  const edit = card.getByRole("button", { name: "Edit buttons", exact: true });
+  const paragraphs = editor(page).locator(":scope > p");
+  for (const appearance of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: appearance });
+    await placeCaretIn(paragraphs.first(), { touch, edge: "end" });
+    await page.mouse.move(0, 0);
+    await expect(controls).toHaveCSS("opacity", "0");
+    await expect(remove).toHaveCSS("pointer-events", "none");
+    await expect(edit).toHaveCSS("pointer-events", "none");
+    if (!touch) {
+      await card.hover();
+      await expect(controls).toHaveCSS("opacity", "1");
+      await page.mouse.move(0, 0);
+      await expect(controls).toHaveCSS("opacity", "0");
+      await remove.focus();
+      await expect(controls).toHaveCSS("opacity", "1");
+      await page.keyboard.press("Tab");
+      await expect(edit).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(remove).toBeFocused();
+    }
+    await placeCaretIn(card.locator(".ub-card-body p"), { touch, edge: "end" });
+    await page.mouse.move(0, 0);
+    await expect(controls).toHaveCSS("opacity", "1");
+    await expect(remove).toHaveCSS("pointer-events", "auto");
+    await expect(edit).toHaveCSS("pointer-events", "auto");
+    const layout = await controls.evaluate((element) => {
+      const [remove, edit] = [...element.querySelectorAll("button")];
+      if (remove === undefined || edit === undefined) throw new Error("e2e: missing card controls");
+      const left = remove.getBoundingClientRect();
+      const right = edit.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const paint = (button: Element) => {
+        const style = getComputedStyle(button);
+        return { color: style.color, background: style.backgroundColor, border: style.border,
+          font: style.font, radius: style.borderRadius };
+      };
+      return { top: style.top, right: style.right, gap: right.left - left.right,
+        sameRow: left.top === right.top, height: left.height, editHeight: right.height,
+        removePaint: paint(remove), editPaint: paint(edit), icons: element.querySelectorAll("svg").length };
+    });
+    expect(layout).toMatchObject({ top: "8px", right: "8px", gap: 4, sameRow: true, icons: 0 });
+    expect(layout.height).toBe(layout.editHeight);
+    if (touch) expect(layout.height).toBeGreaterThanOrEqual(44);
+    expect(layout.removePaint).toEqual(layout.editPaint);
+    await expect(remove).toHaveAttribute("data-variant", "outline");
+    await expect(remove).toHaveAttribute("data-size", "sm");
+    if (process.env.UB_AGENTS_SCRATCH !== undefined) {
+      await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `remove-card-${info.project.name}-${appearance}.png`) });
+    }
+    await activate(remove, touch);
+    await expect(card).toHaveCount(0);
+    await expect(paragraphs).toHaveText(["Before", "After"]);
+    await expect(editor(page)).toBeFocused();
+    await expect.poll(() => paragraphs.last().evaluate(caretAtEdge, "start" as const)).toBe(true);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect(card.locator(".ub-card-title strong")).toHaveText("v0.5");
+    await expect(card.getByRole("button", { name: "Discuss", exact: true })).toHaveAttribute("data-card-button-color", "blue");
+    if (!touch) {
+      for (const key of ["Enter", "Space"]) {
+        await remove.focus();
+        await page.keyboard.press(key);
+        await expect(card).toHaveCount(0);
+        await expect(editor(page)).toBeFocused();
+        await expect.poll(() => paragraphs.last().evaluate(caretAtEdge, "start" as const)).toBe(true);
+        await page.keyboard.press("ControlOrMeta+z");
+        await expect(card).toHaveCount(1);
+      }
+    }
+  }
+  await activate(card.locator(".ub-card-title p"), touch);
+  await activate(edit, touch);
+  await activate(page.getByRole("button", { name: "Remove button", exact: true }), touch);
+  const add = card.getByRole("button", { name: "Add button", exact: true });
+  await expect(add).toHaveCount(1);
+  await activate(card.locator(".ub-card-title p"), touch);
+  await expect(remove).toBeVisible();
+  const gap = await add.evaluate((element) => element.getBoundingClientRect().left -
+    (element.previousElementSibling?.getBoundingClientRect().right ?? 0));
+  expect(gap).toBe(4);
 });
 
 test("card button groups wrap, keep both appearances' contrast and ordered destinations", { tag: "@webkit" }, async ({ browser }, info) => {

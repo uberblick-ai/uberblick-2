@@ -3,6 +3,7 @@ import { useEffect, useId, useState } from "react";
 import type { ReactElement } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
 import {
   CARD_BUTTON_COLORS, CARD_BUTTON_STYLES, isCardButtonHref, parseCardButtons, writeCardButtons,
 } from "@uberblick/schema";
@@ -117,13 +118,28 @@ function CardActions({ id, editor, buttons, canWrite }: {
     }
     change({ text, href, style, color });
   };
+  const remove = (): void => {
+    if (!editor.isEditable || !canWrite()) return;
+    const live = findBlockById(editor.state.doc, id);
+    if (live?.node.type.name !== "card") return;
+    const hasFollowing = live.pos + live.node.nodeSize < editor.state.doc.content.size;
+    const tr = editor.state.tr.delete(live.pos, live.pos + live.node.nodeSize);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(live.pos, tr.doc.content.size)), hasFollowing ? 1 : -1));
+    const undo = yUndoPluginKey.getState(editor.state)?.undoManager;
+    undo?.stopCapturing();
+    editor.view.dispatch(tr);
+    undo?.stopCapturing();
+    editor.view.focus();
+  };
   return <>
     {keyedButtons.map(({ button, key }) => <Button key={key} type="button"
       variant={button.style === "filled" ? "default" : "outline"}
       className="ub-card-button" data-card-button-style={button.style ?? "outline"}
       data-card-button-color={button.color ?? "neutral"}
       onClick={() => openCardButton(button.href)}>{button.text}</Button>)}
-    {writable && <Popover open={open} onOpenChange={(next) => {
+    {writable && <div className="ub-card-edit-controls">
+      <Button type="button" variant="outline" size="sm" onClick={remove}>Remove card</Button>
+      <Popover open={open} onOpenChange={(next) => {
       if (next && (!editor.isEditable || !canWrite())) return;
       if (next) select(buttons.length === 0 ? null : 0);
       setOpen(next);
@@ -156,6 +172,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
           </div>
         </form>
       </PopoverContent>
-    </Popover>}
+      </Popover>
+    </div>}
   </>;
 }
