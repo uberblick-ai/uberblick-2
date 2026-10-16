@@ -17,7 +17,7 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
       "related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
       "discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. " +
       "Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. " +
-      "answerPreview: legacy TL;DR/first paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics." +
+      "Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics." +
       helpPointer("create_doc"),
     outputSchema: outputSchemas.create_doc,
     inputSchema,

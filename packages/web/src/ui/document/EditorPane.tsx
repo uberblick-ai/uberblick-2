@@ -991,7 +991,7 @@ export function EditorPane({
         />
         {beforeAnswer}
         <div className={answerClassName}>
-          <TldrCallout
+          {!decision && <TldrCallout
             key={connection.room}
             connection={connection}
             tldr={meta?.tldr ?? null}
@@ -1002,7 +1002,7 @@ export function EditorPane({
             onEditingChange={(editing) =>
               setTldrEditorRoom(editing ? connection.room : null)
             }
-          />
+          />}
           {foreign.length > 0 ? (
             <ForeignFallback
               connection={connection}

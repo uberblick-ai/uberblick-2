@@ -22,7 +22,7 @@ export function registerUpdateData(server: ToolRegistrar, context: ToolContext):
       "Decisions refuse data with decision_data_unsupported; decided records " +
       "keep decision_read_only, and legacy data stays readable. Decision answer guidance is in lifecycle's " +
       "Decision answers and topics section. Their " +
-      "directory answerPreview uses legacy TL;DR or the first paragraph/list; get_doc page " +
+      "directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page " +
       "decisions are marked related or linked. Recorded attribution {who, when, where} is separate from " +
       "the answer's content blocks." +
       helpPointer("update_data"),

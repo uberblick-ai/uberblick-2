@@ -81,7 +81,8 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
   const before = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.locator(".ub-tldr-body > p").click();
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Keep the approved wording.", { exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   const prose = editor(page).locator(":scope > p").first();
@@ -147,7 +148,7 @@ test("touch selection on a decided record starts a thread and its highlight open
       : {},
   });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-  await page.locator(".ub-tldr-body > p").tap();
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
   await expect(page.locator(".ub-tldr-form")).toHaveCount(0);
   const paragraph = editor(page).locator(":scope > p").first();
   await paragraph.tap();
@@ -197,6 +198,7 @@ test("an open decision keeps its title, prose and tables read-only through later
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   const view = editor(page);
   await expect(view).toHaveAttribute("contenteditable", "false");
+  await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
   const originalView = await view.elementHandle();
   if (originalView === null) throw new Error("e2e: missing live editor");
   const pane = page.locator(".ub-pane");
@@ -214,6 +216,8 @@ test("an open decision keeps its title, prose and tables read-only through later
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Add TL;DR", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Remove TL;DR", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Pin to sidebar", exact: true })).toBeEnabled();
   await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
@@ -247,6 +251,7 @@ test("an open decision keeps its title, prose and tables read-only through later
     peer.decide(status);
     await expect(page.locator(".ub-lifecycle-badge")).toHaveText(`Decision · ${status}`);
     await expect(view).toHaveAttribute("contenteditable", "false");
+    await expect(page.getByRole("region", { name: "TL;DR", exact: true })).toHaveCount(0);
     expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
   }

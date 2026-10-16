@@ -56,7 +56,7 @@ export const toolHelpDetails = {
     "under the existing recorded-answer contract. The reference is fixed once the record leaves open. " +
     "It is returned separately from curated links and recorded answer attribution. Directory decision " +
     "entries cache discussion, null for none and absent when unknown, and derive answerPreview from the " +
-    "legacy TL;DR or first paragraph/list; " +
+    "first answer paragraph/list; decisions have no TL;DR. " +
     "get_doc on the related page returns its topic marked related, and other linking topics marked linked.\n\n" +
     "`sidebar` is optional and is the only way to say where the document goes: omit it and the document is " +
     "created unpinned (the default, unchanged), or pass `{group: {id, position?}}` to pin it into a group " +
@@ -73,7 +73,7 @@ export const toolHelpDetails = {
     "`recovery` line — the earlier rooms stay durable, and recovery never risks creating the decision twice.",
   get_doc:
     "Read a document's metadata — including `description` and the person-facing `tldr`, each null when nobody " +
-    "has written one — its blocks and its annotation threads. A regular page with a deliberate TL;DR removal " +
+    "has written one, with tldr always null for decisions, which have no TL;DR — its blocks and its annotation threads. A regular page with a deliberate TL;DR removal " +
     "returns `tldr: null` and `tldrOptOut: true`; content writes give no TL;DR hints. Opt back in through the " +
     "web's Add TL;DR, or set_metadata with `tldr_opt_in: true` and a non-null `tldr`. Summary text takes " +
     "precedence over the mark, including after concurrent or older-client writes. Unmarked pages and " +
@@ -92,7 +92,7 @@ export const toolHelpDetails = {
     "attribution. The backlinks tool on the RFC lists its records; reading the RFC returns their topic marked " +
     "linked unless it is also the topic's related page. Renaming or archiving the RFC preserves each " +
     "reference, and an archived RFC remains readable. Decision entries include a cached answerPreview: " +
-    "legacy TL;DR or the first paragraph/list as plain " +
+    "the first answer paragraph/list as plain " +
     "text, list items joined by `; `, whitespace collapsed, at most 300 characters with `…` when cut. " +
     "It is null without a paragraph or list, or absent when the cache is unknown. For decision answers, " +
     "see [Decision answers and topics](uberblick://help/lifecycle). " +
@@ -153,9 +153,9 @@ export const toolHelpDetails = {
     "absent when unknown until a newer client repairs the stub. Each pending proposal therefore names " +
     "its own discussion without opening its room. The reference is distinct from curated links and " +
     "recorded answer attribution. Every decision directory entry also carries a derived " +
-    "answerPreview when known: legacy TL;DR, else plain text of the first paragraph or list, list items " +
+    "answerPreview when known: plain text of the first answer paragraph or list, list items " +
     "joined by `; ` and whitespace collapsed, at most 300 characters with `…` when cut. It is null when " +
-    "neither exists, and absent when unknown. Page get_doc reads mark related and linked topics separately; " +
+    "neither exists, and absent when unknown. Decisions have no TL;DR and their directory entries omit tldr. Page get_doc reads mark related and linked topics separately; " +
     "recorded `answer: {who, when, where}` is attribution, separate from these answer blocks.\n\n" +
     "Every entry, regular or decision, including `inForce`, `pending` and `conflicts`, carries " +
     "`openThreadCount` when known: the count of that document's threads whose `resolved` is not `true`, " +
@@ -389,9 +389,9 @@ export const toolHelpDetails = {
     "`tldr: null` alone preserves the mark. Summary text takes precedence over the mark, including " +
     "concurrent and older-client writes. Only get_doc reports the mark as `tldrOptOut: true`. " +
     "On an open decision, non-null tldr refuses with " +
-    "decision_tldr_unsupported; null clears a legacy value. Decision answer guidance is in " +
+    "decision_tldr_unsupported; null is accepted. Decisions have no TL;DR and return tldr: null. Decision answer guidance is in " +
     "[Decision answers and topics](uberblick://help/lifecycle). Their " +
-    "directory answerPreview derives from legacy TL;DR or the first paragraph/list. It is distinct from " +
+    "directory answerPreview derives from the first answer paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
     "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +

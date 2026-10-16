@@ -8,6 +8,7 @@ import {
   decisionDocAnswerFailure,
   getMetaMap,
   initDoc,
+  setKind,
   setTldr,
 } from "../src/index.js";
 import type { BlockInput } from "../src/index.js";
@@ -42,7 +43,7 @@ describe("decision answer contract", () => {
     expect(decisionAnswerFailure([{ type: "code", text: "value", inline: [{ text: " ", marks: {} }] }])).toBeNull();
   });
 
-  it("refuses legacy TL;DR and any raw stored data before a record becomes decided", () => {
+  it("refuses a regular page's TL;DR and any raw stored data before kind adoption", () => {
     const doc = new Y.Doc();
     initDoc(doc, { uuid: "22222222-2222-4222-8222-222222222222", title: "Answer" });
     appendBlock(doc, { type: "paragraph", text: "A recorded answer" });
@@ -55,5 +56,19 @@ describe("decision answer contract", () => {
     expect(decisionDocAnswerFailure(doc)).toBeNull();
     getMetaMap(doc).set("tldr", "   ");
     expect(decisionDocAnswerFailure(doc)).toBe("decision_tldr_unsupported");
+  });
+
+  it.each(["Legacy answer", "   "])("ignores a decision's stored legacy TL;DR %j when validating its answer", (tldr) => {
+    const doc = new Y.Doc();
+    initDoc(doc, { uuid: "22222222-2222-4222-8222-222222222222", title: "Answer" });
+    setKind(doc, "decision");
+    setTldr(doc, tldr);
+    expect(decisionDocAnswerFailure(doc)).toBe("decision_answer_empty");
+    appendBlock(doc, { type: "paragraph", text: "A recorded answer" });
+    const before = Y.encodeStateAsUpdate(doc);
+    expect(decisionDocAnswerFailure(doc)).toBeNull();
+    expect(getMetaMap(doc).get("tldr")).toBe(tldr);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    doc.destroy();
   });
 });
