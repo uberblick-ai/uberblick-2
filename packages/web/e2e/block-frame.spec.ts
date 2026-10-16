@@ -4,6 +4,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { installPageTimers, withPageTimers } from "./page-timers.js";
 import { alphaOf, contrast, oklab } from "../test/colour.js";
@@ -242,6 +243,7 @@ for (const touch of [false, true]) {
         contextOptions: { ...(touch ? devices["iPad Pro 11"] : { hasTouch: false, isMobile: false }),
           viewport: { width: touch ? 600 : 1366, height: 1100 }, colorScheme: appearance, reducedMotion: "reduce" },
       });
+      await waitForDocumentDraw(page, session, uuid, { index: "all" });
       await expect(page.locator(".ub-wireframe .wf-root")).toBeVisible();
       await expect(page.locator(".ub-mermaid")).toHaveAttribute("data-state", "ready");
       await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
@@ -301,7 +303,10 @@ for (const touch of [false, true]) {
         await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
       });
       await capture(page, info, `block-frames-${touch ? "ipad-narrow" : "desktop"}-${appearance}`);
-      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      await proveMcpArrival(page, session, uuid, { path: "upstream" });
+      await expectMcp(async () => {
+        expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      });
       const codeFrame = page.locator(".ub-code:not(.ub-wireframe)");
       const ground = await codeFrame.evaluate(element => getComputedStyle(element).backgroundColor);
       for (const token of ["comment", "keyword", "name", "string", "number"]) {
@@ -378,7 +383,11 @@ for (const appearance of ["light", "dark"] as const) {
       }
       await page.keyboard.press("Enter");
       await expect(cardButton).toBeFocused();
-      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      await page.clock.resume();
+      await proveMcpArrival(page, session, uuid, { path: "upstream" });
+      await expectMcp(async () => {
+        expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+      });
     });
   }
 }

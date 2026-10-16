@@ -1,6 +1,7 @@
 /** Data tables consume the document's data through the production ub open replica. */
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { activateControl, createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
@@ -8,6 +9,8 @@ import { renderedText } from "./contrast-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
+import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
+import { setNativeSelection } from "./native-selection.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -169,6 +172,7 @@ async function installProbe(page: Page, uuid: string, tables = 0, charts = 0): P
     let restoreEntries: (() => void) | undefined;
     let readsBeforeUpdate = 0;
     let completedAt = 0;
+    let completedRevision = "";
     const applied = (): void => { probe.appliedAt = performance.now(); readsBeforeUpdate = probe.reads; };
     const updated = (...args: unknown[]): void => {
       if ((args[3] as { local?: boolean } | undefined)?.local === true) probe.localUpdates += 1;
@@ -216,24 +220,20 @@ async function installProbe(page: Page, uuid: string, tables = 0, charts = 0): P
       const mounted = state?.plugins.find((plugin) => plugin.key.startsWith("y-sync"))?.getState(state).doc;
       if (mounted !== undefined) attach(mounted);
       if (tableCount === 0 || data === undefined || probe.availableAt === 0 || probe.appliedAt === completedAt) return;
-      const latest = data.get(JSON.stringify(["record", "observations", "observation-04034"])) as { value0?: number } | undefined;
-      if (latest?.value0 === undefined) return;
-      const expected = new Intl.NumberFormat(navigator.language, { maximumSignificantDigits: 12 }).format(latest.value0);
-      const summary = data.get(JSON.stringify(["record", "summaries", "summary-00364"])) as { value0?: number } | undefined;
-      const chartExpected = summary?.value0 === undefined ? "" : new Intl.NumberFormat(navigator.language, { maximumSignificantDigits: 12 }).format(summary.value0);
-      const renderedTables = [...document.querySelectorAll<HTMLTableElement>(".ub-data-table")];
-      const descriptions = [...document.querySelectorAll(".ub-chart-description")].filter((entry) => entry.textContent !== "");
-      if (renderedTables.length !== tableCount || descriptions.length !== chartCount ||
-          !renderedTables.every((table) => table.querySelector("tbody tr td:nth-child(2)")?.textContent === expected) ||
-          !descriptions.every((entry) => entry.textContent?.includes(`Metric 0: ${chartExpected} ms`))) return;
+      const drawn = [...document.querySelectorAll<HTMLElement>('.ub-chart[data-draw-state="success"]')];
+      const revisions = new Set(drawn.map(block => block.dataset.dataRev));
+      if (drawn.length !== tableCount + chartCount || revisions.size !== 1 ||
+          drawn.some(block => block.dataset.dataRev === completedRevision)) return;
       completedAt = probe.appliedAt;
+      completedRevision = drawn[0]?.dataset.dataRev ?? "";
       if (probe.first === null) probe.first = performance.now() - probe.availableAt;
       else {
         probe.durations.push(performance.now() - probe.appliedAt);
         probe.readsPerUpdate.push(probe.reads - readsBeforeUpdate);
       }
     });
-    mutations.observe(document, { childList: true, subtree: true, characterData: true });
+    mutations.observe(document, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ["data-source-rev", "data-data-rev", "data-draw-state"] });
     addEventListener("pagehide", () => {
       mutations.disconnect(); doc?.off("update", updated); data?.unobserve(applied); restoreEntries?.();
       for (const [initial, listener] of initialDocs) initial.off("afterTransaction", listener);
@@ -281,15 +281,18 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(source).toBeVisible();
     expect(await source.textContent()).not.toContain("pageSize");
     await source.click();
-    await source.evaluate((element) => {
+    await setNativeSelection(source, () => source.evaluate((element) => {
+      const root = element.closest(".ProseMirror") as (HTMLElement & { editor: Editor }) | null;
+      if (root === null) throw new Error("e2e: table source has no editor");
       const range = document.createRange(); range.selectNodeContents(element);
       const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range);
-    });
+      return { anchor: root.editor.view.posAtDOM(range.startContainer, range.startOffset),
+        head: root.editor.view.posAtDOM(range.endContainer, range.endOffset) };
+    }));
     await page.keyboard.insertText(JSON.stringify(MAPPING));
-    await expect.poll(async () => {
-      try { return (await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text; }
-      catch (error) { if (error instanceof Error && /doc_not_hydrated|doc_not_found/.test(error.message)) return null; throw error; }
-    }).toBe(JSON.stringify(MAPPING));
+    await expectMcp(() => session.call<DocPayload>("get_doc", { uuid }), doc => {
+      expect(doc.blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+    });
     const doc = await session.call<DocPayload>("get_doc", { uuid });
     const paragraph = doc.blocks.find((block) => block.type === "paragraph");
     const chart = doc.blocks.find((block) => block.type === "chart");
@@ -300,6 +303,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
       text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary table | 12.50 % | Jan 1, 2026 | Evidence |",
     });
     await measurements(session, uuid);
+    await waitForDocumentDraw(page, session, uuid);
     await editor(page).locator(":scope > p").first().click();
     const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
     await expect(table).toBeVisible();
@@ -407,8 +411,11 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await page.keyboard.press("ArrowRight");
     await page.screenshot({ path: screenshot, fullPage: true });
     await info.attach(`data-table-${appearance}`, { path: screenshot, contentType: "image/png" });
-    expect(await session.call("get_data", { uuid })).toEqual(before);
-    expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+    await proveMcpArrival(page, session, uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      expect(await session.call("get_data", { uuid })).toEqual(before);
+      expect((await session.call<DocPayload>("get_doc", { uuid })).blocks.find((block) => block.type === "chart")?.text).toBe(JSON.stringify(MAPPING));
+    });
   }
 });
 
@@ -424,6 +431,7 @@ test("every header sorts through native pointer and keyboard input without movin
     ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
     ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
   } });
+  await waitForDocumentDraw(page, session, uuid);
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table).toBeVisible();
   await expectHeaderOrder(table, "Day", "descending");
@@ -482,6 +490,7 @@ test("touch header sorting starts from record order when the mapping has no sort
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: info.project.name === "chromium" ? { hasTouch: true } : {},
   });
+  await waitForDocumentDraw(page, session, uuid);
   const table = page.getByRole("table", { name: "Touch order", exact: true });
   const rows = table.locator("tbody tr td:first-child");
   await expect(rows).toHaveText(["Third", "First", "Second"]);
@@ -518,28 +527,33 @@ test("chart and table problem states recover and locked views keep their source 
     ],
   });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(page, session, uuid, { index: "all", outcome: "error" });
   const tableRoot = page.locator(".ub-chart").first();
   const chartRoot = page.locator(".ub-chart").nth(1);
   const canvas = page.getByRole("img", { name: "Evidence trend", exact: true });
   const expectChartReady = async (): Promise<void> => {
-    await expect(chartRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
+    await waitForDocumentDraw(page, session, uuid, { index: 1 });
     await expect(canvas).toBeVisible();
   };
   await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "collection-absent");
   await expect(chartRoot.locator(".ub-chart-message")).toContainText(/collection.*(?:absent|not found|missing)/i);
   await editMapping(session, uuid, "{invalid JSON");
   await editMapping(session, uuid, "{invalid JSON", 1);
+  await waitForDocumentDraw(page, session, uuid, { index: "all", outcome: "error" });
   await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "invalid-configuration");
   await expect(chartRoot.locator(".ub-chart-message")).toContainText(/invalid.*(?:configuration|JSON)/i);
   await editMapping(session, uuid, JSON.stringify(MAPPING));
   await editMapping(session, uuid, JSON.stringify(chartMapping), 1);
   await measurements(session, uuid);
+  await waitForDocumentDraw(page, session, uuid);
   await expect(page.getByRole("table", { name: "Delivery evidence", exact: true })).toBeVisible();
   await expectChartReady();
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [] }] });
+  await waitForDocumentDraw(page, session, uuid, { outcome: "error" });
   await expect(tableRoot.locator(".ub-chart-panel")).toHaveAttribute("data-state", "no-records");
   await expect(chartRoot.locator(".ub-chart-message")).toContainText(/no plottable records/i);
   await measurements(session, uuid);
+  await waitForDocumentDraw(page, session, uuid);
   const table = page.getByRole("table", { name: "Delivery evidence", exact: true });
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   await expectChartReady();
@@ -569,9 +583,12 @@ test("chart and table problem states recover and locked views keep their source 
   await editor(page).locator(":scope > p").first().click();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/decision_read_only/);
   await expect(editMapping(session, uuid, "{}", 1)).rejects.toThrow(/decision_read_only/);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
-  expect(await session.call("get_data", { uuid })).toEqual(data);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
+    expect(await session.call("get_data", { uuid })).toEqual(data);
+    expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
+  });
   await session.call("archive_doc", { uuid });
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await expectChartReady();
@@ -593,9 +610,12 @@ test("chart and table problem states recover and locked views keep their source 
   await expect(tableRoot.locator(".ub-chart-source")).toBeVisible();
   await expect(editMapping(session, uuid, "{}")).rejects.toThrow(/doc_archived/);
   await expect(editMapping(session, uuid, "{}", 1)).rejects.toThrow(/doc_archived/);
-  expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
-  expect(await session.call("get_data", { uuid })).toEqual(data);
-  expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    expect((await session.call<DocPayload>("get_doc", { uuid })).blocks).toEqual(stored.blocks);
+    expect(await session.call("get_data", { uuid })).toEqual(data);
+    expect(await session.call("get_data", { uuid, collection: "measurements" })).toEqual(records);
+  });
 });
 
 test("a generated table wider than the document keeps horizontal scrolling inside its block", async ({ browser }) => {
@@ -608,6 +628,7 @@ test("a generated table wider than the document keeps horizontal scrolling insid
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: { viewport: { width: 800, height: 900 } },
   });
+  await waitForDocumentDraw(page, session, uuid);
   const table = page.getByRole("table", { name: "Wide observations", exact: true });
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const scroll = page.locator(".ub-table-scroll");
@@ -647,6 +668,7 @@ test("Recent days dates and fifteen number columns keep compact rows at laptop a
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       contextOptions: { locale: "en-US", viewport: { width, height: 1000 } },
     });
+    await waitForDocumentDraw(page, session, uuid);
     const table = page.getByRole("table", { name: "Recent days", exact: true });
     const cells = table.locator("tbody td");
     await expect(cells).toHaveCount(32);
@@ -690,6 +712,7 @@ test("short values stay together and long text, markers and links wrap completel
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       contextOptions: { viewport: { width, height: 1000 } },
     });
+    await waitForDocumentDraw(page, session, uuid);
     await page.context().route("https://example.invalid/**", route => route.fulfill({ contentType: "text/html", body: "<p>Evidence</p>" }));
     const table = page.getByRole("table", { name: "Bounded values", exact: true });
     await expect(table.locator("tbody tr")).toHaveCount(2);
@@ -738,6 +761,7 @@ test("short values stay together and long text, markers and links wrap completel
       // Plenty of available space must still cap long content at 32rem, even
       // though the single-column table itself fills the reading measure.
       await editMapping(session, uuid, JSON.stringify({ ...mapping, columns: [{ field: "url", format: "link" }] }));
+      await waitForDocumentDraw(page, session, uuid);
       await expect(table.locator("th")).toHaveCount(1);
       const bounds = await table.locator("tbody td").first().evaluate(element => ({
         cell: element.getBoundingClientRect().width,
@@ -748,6 +772,7 @@ test("short values stay together and long text, markers and links wrap completel
       expect(Math.abs(bounds.content - bounds.limit)).toBeLessThanOrEqual(1);
       expect((await cellLines(table.locator("tbody td").first()))[0]).toBeGreaterThan(1);
       await editMapping(session, uuid, JSON.stringify(mapping));
+      await waitForDocumentDraw(page, session, uuid);
       await expect(table.locator("th")).toHaveCount(6);
     }
   }
@@ -761,10 +786,12 @@ test("legacy page sizes keep all rows and source remains reachable without hover
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: { hasTouch: true, viewport: { width: 1280, height: 900 } },
   });
+  await waitForDocumentDraw(page, session, uuid);
   expect(await page.evaluate(() => matchMedia("(hover: none)").matches)).toBe(true);
   const table = page.getByRole("table", { name: "Data table of measurements", exact: true });
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   await editMapping(session, uuid, JSON.stringify({ ...withoutTitle, pageSize: 5 }));
+  await waitForDocumentDraw(page, session, uuid);
   await expect(table.locator("tbody tr")).toHaveCount(RECORDS.length);
   const openSource = page.getByRole("button", { name: "Open table source", exact: true });
   await expect(openSource).toBeVisible();
@@ -829,15 +856,22 @@ async function workload(session: McpSession, mixed: boolean): Promise<{ uuid: st
   for (let offset = 0; offset < observations.length; offset += 1000) {
     await session.call("update_data", { uuid: result.uuid, operations: [{ collection: "observations", ...(offset === 0 ? { schema: SCHEMA } : {}), upsert: observations.slice(offset, offset + 1000) }] });
   }
-  const summary = await session.call<{ data: { bytes: number } }>("get_data", { uuid: result.uuid });
-  return { uuid: result.uuid, bytes: summary.data.bytes };
+  let bytes = 0;
+  await expectMcp(async () => {
+    const summary = await session.call<{ data: { bytes: number } }>("get_data", { uuid: result.uuid });
+    bytes = summary.data.bytes;
+    expect(bytes).toBeGreaterThan(2_500_000);
+    expect(bytes).toBeLessThan(3_000_000);
+  });
+  return { uuid: result.uuid, bytes };
 }
 
 async function timingEvidence(page: Page, session: McpSession, uuid: string, mixed: boolean, bytes: number): Promise<Timings> {
   const readinessTimeout = mixed ? 180_000 : 20_000;
+  await waitForDocumentDraw(page, session, uuid, { index: "all", timeout: readinessTimeout });
   // Ten continuous tables contain over 400,000 cells. Repeated Playwright
   // selector walks dominate this workload; read one native DOM snapshot.
-  await expect.poll(() => page.evaluate(() => {
+  expect(await page.evaluate(() => {
     const tables = [...document.querySelectorAll<HTMLTableElement>(".ub-data-table")];
     return {
       tables: tables.length,
@@ -845,14 +879,13 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
       rows: tables.map(table => table.tBodies[0]?.rows.length ?? 0),
       headers: tables[0]?.querySelectorAll("thead th[scope='col']").length ?? 0,
     };
-  }), { timeout: readinessTimeout }).toEqual({
+  })).toEqual({
     tables: mixed ? 10 : 1,
     ready: mixed ? 20 : 1,
     rows: Array.from({ length: mixed ? 10 : 1 }, () => 4035),
     headers: 10,
   });
-  await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first),
-    { timeout: readinessTimeout }).not.toBeNull();
+  expect(await page.evaluate(() => (window as unknown as { tableProbe: { first: number | null } }).tableProbe.first)).not.toBeNull();
   const initial = await page.evaluate(() => (window as unknown as { tableProbe: { first: number; availableEntries: number } }).tableProbe);
   expect(initial.availableEntries).toBe(4402);
   expect(await page.evaluate(() => {
@@ -872,11 +905,13 @@ async function timingEvidence(page: Page, session: McpSession, uuid: string, mix
         ...(mixed ? [{ collection: "summaries", upsert: [{ id: "summary-00364", value: { day: new Date(Date.UTC(2012, 0, 365)).toISOString().slice(0, 10), value0: value, value1: value + 1, value2: value + 2 } }] }] : []),
       ],
     });
-    await expect.poll(() => page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length),
-      { timeout: readinessTimeout }).toBe(previous + 1);
+    await waitForDocumentDraw(page, session, uuid, { index: "all", timeout: readinessTimeout });
+    expect(await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[] } }).tableProbe.durations.length)).toBe(previous + 1);
   }
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
   const probe = await page.evaluate(() => (window as unknown as { tableProbe: { durations: number[]; readsPerUpdate: number[]; localUpdates: number } }).tableProbe);
-  expect(probe.localUpdates).toBe(0);
+  // The arrival proof adds one deliberate metadata update, without rendering writes.
+  expect(probe.localUpdates).toBe(1);
   expect(probe.readsPerUpdate).toEqual(Array.from({ length: 10 }, () => 1));
   return { first: initial.first, updates: probe.durations, readsPerUpdate: probe.readsPerUpdate, availableEntries: initial.availableEntries,
     bytes, records: 4400, tables: mixed ? 10 : 1, charts: mixed ? 10 : 0, cpuThrottle: 2 };
@@ -903,8 +938,6 @@ test("one table and twenty shared views record bounded Chromium live-update timi
   const session = writer();
   for (const mixed of [false, true]) {
     const { uuid, bytes } = await workload(session, mixed);
-    expect(bytes).toBeGreaterThan(2_500_000);
-    expect(bytes).toBeLessThan(3_000_000);
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       beforeNavigate: async (loading) => {
         const cdp = await loading.context().newCDPSession(loading);

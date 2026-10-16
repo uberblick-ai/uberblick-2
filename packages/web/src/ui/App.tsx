@@ -640,6 +640,7 @@ export function App(): ReactElement {
   const servingStatus = useServingRoomStatus(
     documentSearch,
     chromeRoom?.room ?? directory?.room ?? null,
+    chromeRoom ?? directory,
   );
   /**
    * The title retains departed agents exactly while their named editor

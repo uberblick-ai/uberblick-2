@@ -7,6 +7,7 @@ import type { NodeView } from "@tiptap/pm/view";
 import { COMMENT_MARK } from "@uberblick/schema";
 import { blockCaption, codeBlockChrome, copyButton, sourceEditingPlugin } from "./source-chrome.js";
 import rendererUrl from "./wireframe-renderer-url.js";
+import { dataRevision, recordDraw } from "./render-state.js";
 
 type WireframeRenderer = typeof import("@uberblick/wireframe");
 
@@ -76,6 +77,19 @@ export function wireframeBlockView(): NodeViewRenderer {
     const contentDOM = document.createElement("pre");
     contentDOM.className = "ub-wireframe-source";
     dom.append(header.row, panel, contentDOM);
+    const settled = (succeeded: boolean): void => {
+      recordDraw(dom, { type: "code", language: "wireframe", text: current.textContent }, dataRevision(null), succeeded);
+    };
+    const unavailable = (prefix: string, cause: unknown): void => {
+      const item = document.createElement("li");
+      const message = cause !== null && typeof cause === "object" && "message" in cause
+        ? String(cause.message) : String(cause);
+      item.textContent = `${prefix}: ${message}`;
+      diagnostics.replaceChildren(item);
+      diagnostics.hidden = false;
+      stale.hidden = !hasDrawing;
+      settled(false);
+    };
 
     const resize = (): void => {
       if (destroyed || !hasDrawing || viewport.clientWidth === 0) return;
@@ -96,31 +110,31 @@ export function wireframeBlockView(): NodeViewRenderer {
       if (renderer === null) {
         loadRenderer().then(() => { if (pending === null) draw(); }, (cause: unknown) => {
           if (destroyed || pending !== null) return;
-          const item = document.createElement("li");
-          const message = cause !== null && typeof cause === "object" && "message" in cause
-            ? String(cause.message) : String(cause);
-          item.textContent = `Preview cannot be loaded: ${message}`;
-          diagnostics.replaceChildren(item);
-          diagnostics.hidden = false;
+          unavailable("Preview cannot be loaded", cause);
         });
         return;
       }
-      const result = renderer.parseWireframe(current.textContent);
-      const rendered = renderer.renderWireframe(result, document);
-      if (rendered !== null) {
-        drawing.replaceChildren(rendered);
-        drawing.setAttribute("aria-label", renderer.summarizeWireframe(result));
-        hasDrawing = true;
+      try {
+        const result = renderer.parseWireframe(current.textContent);
+        const rendered = renderer.renderWireframe(result, document);
+        if (rendered !== null) {
+          drawing.replaceChildren(rendered);
+          drawing.setAttribute("aria-label", renderer.summarizeWireframe(result));
+          hasDrawing = true;
+        }
+        viewport.hidden = !hasDrawing;
+        stale.hidden = rendered !== null || !hasDrawing;
+        diagnostics.replaceChildren(...result.diagnostics.map(diagnostic => {
+          const item = document.createElement("li");
+          item.textContent = `Line ${diagnostic.line}: ${diagnostic.severity}: ${diagnostic.message}`;
+          return item;
+        }));
+        diagnostics.hidden = result.diagnostics.length === 0;
+        resize();
+        settled(rendered !== null);
+      } catch (cause) {
+        unavailable("Preview cannot be drawn", cause);
       }
-      viewport.hidden = !hasDrawing;
-      stale.hidden = rendered !== null || !hasDrawing;
-      diagnostics.replaceChildren(...result.diagnostics.map(diagnostic => {
-        const item = document.createElement("li");
-        item.textContent = `Line ${diagnostic.line}: ${diagnostic.severity}: ${diagnostic.message}`;
-        return item;
-      }));
-      diagnostics.hidden = result.diagnostics.length === 0;
-      resize();
     };
     const schedule = (): void => {
       if (pending !== null) clearTimeout(pending);
@@ -162,7 +176,7 @@ export function wireframeBlockView(): NodeViewRenderer {
         (header.row.contains(event.target) || panel.contains(event.target)),
       ignoreMutation: mutation => header.row.contains(mutation.target) || panel.contains(mutation.target) ||
         (mutation.type === "attributes" && mutation.target === dom &&
-          ["id", "data-language", "data-annotated"].includes(mutation.attributeName ?? "")),
+          ["id", "data-language", "data-annotated", "data-source-rev", "data-data-rev", "data-draw-state"].includes(mutation.attributeName ?? "")),
       destroy: () => {
         destroyed = true;
         if (pending !== null) clearTimeout(pending);

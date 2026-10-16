@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 
@@ -46,7 +47,7 @@ async function record(
   const peer = await legacyDecisionPeer(harness(), result.uuid);
   peers.push(peer);
   peer.decide(status, "Keep the approved wording.");
-  await expect.poll(async () => (await writer.call<{ status: string }>("get_doc", { uuid: result.uuid })).status).toBe(status);
+  await expectMcp(async () => { expect((await writer.call<{ status: string }>("get_doc", { uuid: result.uuid })).status).toBe(status); });
   return result.uuid;
 }
 
@@ -135,8 +136,11 @@ test("decided prose and cells offer only Comment, keep threads keyboard reachabl
     await expect(highlight).toHaveAccessibleName("Comment thread");
   }
   await expect(prose).toHaveText("Selected words remain readable after deciding.");
-  const after = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
-  expect(after.blocks).toEqual(before.blocks);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    const after = await writer.call<{ blocks: Array<{ text: string; rev: string }> }>("get_doc", { uuid });
+    expect(after.blocks).toEqual(before.blocks);
+  });
 });
 
 test("touch selection on a decided record starts a thread and its highlight opens the writable rail", { tag: "@webkit-touch" }, async ({ browser }, info) => {
@@ -255,9 +259,12 @@ test("an open decision keeps prose and tables read-only through later states whi
     expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
   }
-  const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
-  expect(saved.blocks[0]?.text).toBe(prose);
-  expect(saved.blocks[1]?.text).toContain("Approved cell");
-  expect(saved.blocks[1]?.text).toContain("Approved value");
-  expect(saved.blocks).toHaveLength(32);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    const saved = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid });
+    expect(saved.blocks[0]?.text).toBe(prose);
+    expect(saved.blocks[1]?.text).toContain("Approved cell");
+    expect(saved.blocks[1]?.text).toContain("Approved value");
+    expect(saved.blocks).toHaveLength(32);
+  });
 });

@@ -4,12 +4,13 @@ import type { Browser, CDPSession, Locator, Page } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
-import { getBlocksFragment, roomForDoc } from "@uberblick/schema";
+import { getBlocksFragment, getMeta, roomForDoc } from "@uberblick/schema";
 import * as Y from "yjs";
 import { activateControl, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
+import { expectMcp, proveBrowserTitleArrival, proveMcpArrival } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -72,7 +73,10 @@ test("menu drafts keep field navigation local until Done and return focus to the
   let field = page.getByRole("textbox", { name: "Figma link", exact: true });
   await expect(field).toBeFocused();
   await expect(block).toHaveAttribute("data-figma-draft", "true");
-  expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => {
+    expect(doc.blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  });
   await activateControl(page.getByRole("textbox", { name: "Title", exact: true }));
   await page.keyboard.type("Title first");
   await activateControl(field);
@@ -80,11 +84,17 @@ test("menu drafts keep field navigation local until Done and return focus to the
   await field.fill("https://figma.com/deck/refused");
   await activateControl(page.getByRole("textbox", { name: "Title", exact: true }));
   await expect(block.getByRole("alert")).toHaveCount(0);
-  expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => {
+    expect(doc.blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  });
   await activateControl(block.getByRole("button", { name: "Done", exact: true }));
   await expect(block).toHaveCount(0);
   await expect(editor(page)).toBeFocused();
-  expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => {
+    expect(doc.blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  });
 
   await placeCaretIn(editor(page).locator(":scope > p"), { touch: info.project.use.hasTouch === true });
   await page.keyboard.type("/figma");
@@ -103,12 +113,17 @@ test("menu drafts keep field navigation local until Done and return focus to the
   await expect(height).toBeFocused();
   await page.keyboard.type("600");
   await expect(block).toHaveAttribute("data-figma-draft", "true");
-  expect((await stored(writer, uuid)).blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => {
+    expect(doc.blocks.map((item) => item.type)).toEqual(["paragraph"]);
+  });
   await activateControl(block.getByRole("button", { name: "Done", exact: true }));
   await expect(block).not.toHaveAttribute("data-figma-draft", "true");
   await expect(editor(page)).toBeFocused();
   await expect(block.locator("iframe")).toHaveCount(1);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).toBe(`url: ${NORMALIZED}\ntitle: Typed title\nheight: 600\n\n`);
+  await expectMcp(() => stored(writer, uuid), doc => {
+    expect(doc.blocks[0]?.text).toBe(`url: ${NORMALIZED}\ntitle: Typed title\nheight: 600\n\n`);
+  });
 });
 
 test("bare accepted paste converts with a link undo step, while inline and refused links stay links", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -117,12 +132,12 @@ test("bare accepted paste converts with a link undo step, while inline and refus
   await placeCaretIn(paragraph, { touch: info.project.use.hasTouch === true });
   await paste(page, LINK);
   await expect(block.locator("iframe")).toHaveCount(1);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.type).toBe("figma");
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.type).toBe("figma"); });
   await editor(page).focus();
   await page.keyboard.press("ControlOrMeta+z");
   await expect(block).toHaveCount(0);
   await expect(paragraph.locator("a")).toHaveText(LINK);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.type).toBe("paragraph");
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.type).toBe("paragraph"); });
 
   await page.keyboard.press("ControlOrMeta+z");
   await expect(paragraph).toHaveText("");
@@ -142,7 +157,7 @@ test("bare accepted paste converts with a link undo step, while inline and refus
 });
 
 test("Edit validates fields and keeps the same hidden viewer through title and height changes", { tag: "@webkit" }, async ({ browser }, info) => {
-  const { writer, uuid, block } = await fixture(browser, true, info.project.use.hasTouch === true);
+  const { page, writer, uuid, block } = await fixture(browser, true, info.project.use.hasTouch === true);
   await block.locator("iframe").evaluate((frame) => { frame.dataset.identity = "existing-viewer"; });
   const before = (await stored(writer, uuid)).blocks[0];
   if (before === undefined) throw new Error("e2e: stored Figma block missing");
@@ -155,29 +170,33 @@ test("Edit validates fields and keeps the same hidden viewer through title and h
   await link.fill("https://figma.com/deck/refused");
   await activateControl(title);
   await expect(block.getByRole("alert")).toContainText("Figma links must use /design/");
-  expect((await stored(writer, uuid)).blocks[0]?.rev).toBe(before.rev);
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.rev).toBe(before.rev); });
   await link.fill(NORMALIZED);
   await activateControl(title);
   await title.fill("Changed title");
   await activateControl(height);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).toContain("title: Changed title");
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.text).toContain("title: Changed title"); });
   await height.fill("239");
   await activateControl(title);
   await expect(block.getByRole("alert")).toHaveText("Height must be a whole number of pixels from 240 to 960");
-  expect((await stored(writer, uuid)).blocks[0]?.text).toContain("height: 300");
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.text).toContain("height: 300"); });
   await height.fill("");
   await activateControl(title);
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).not.toContain("height:");
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.text).not.toContain("height:"); });
   await title.fill("");
   await activateControl(block.getByRole("button", { name: "Done", exact: true }));
   await expect(link).toHaveCount(0);
   await expect(block.locator("iframe")).toBeVisible();
   await expect(block.locator("iframe")).toHaveAttribute("data-identity", "existing-viewer");
   await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "480px");
-  await expect.poll(async () => (await stored(writer, uuid)).blocks[0]?.text).not.toContain("title:");
+  await proveMcpArrival(page, writer, uuid, { path: "upstream" });
+  await expectMcp(() => stored(writer, uuid), doc => { expect(doc.blocks[0]?.text).not.toContain("title:"); });
 });
 
-async function watchHeight(uuid: string): Promise<{ values: string[]; close: () => void }> {
+async function watchHeight(uuid: string): Promise<{ values: string[]; readTitle: () => string; close: () => void }> {
   const doc = new Y.Doc();
   const secret = await importRootSecret(harness().authSecret);
   const provider = new HocuspocusProvider({
@@ -193,7 +212,7 @@ async function watchHeight(uuid: string): Promise<{ values: string[]; close: () 
     if (!(block instanceof Y.XmlElement)) throw new Error("e2e: Figma block missing");
     const values: string[] = [];
     block.observe((event) => { if (event.attributesChanged.has("height")) values.push(block.getAttribute("height") ?? ""); });
-    return { values, close: () => { provider.destroy(); doc.destroy(); } };
+    return { values, readTitle: () => getMeta(doc).title, close: () => { provider.destroy(); doc.destroy(); } };
   } catch (error) { provider.destroy(); doc.destroy(); throw error; }
 }
 
@@ -232,12 +251,18 @@ test("mouse height drags keep their preview through peer edits, commit once, cla
     });
     await expect(block.locator(".ub-figma-caption")).toContainText("A peer edited this caption.");
     await expect.poll(() => viewer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(300);
+    // Keep the gesture active while one marker input is discarded.
+    await page.locator(".ub-title").evaluate(input => {
+      input.addEventListener("beforeinput", event => event.preventDefault(), { once: true });
+    });
+    await proveBrowserTitleArrival(page, { path: "upstream", readTitle: watch.readTitle });
     expect(watch.values).toEqual([]);
     await page.mouse.up();
     await expect.poll(() => watch.values).toEqual(["380"]);
     await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "380px");
     await mouseDrag(page, handle, 50, true);
     await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "380px");
+    await proveBrowserTitleArrival(page, { path: "upstream", readTitle: watch.readTitle });
     expect(watch.values).toEqual(["380"]);
     await mouseDrag(page, handle, 1100);
     await expect.poll(() => watch.values).toEqual(["380", "960"]);
@@ -267,6 +292,7 @@ test("iPad touch height drags commit once and browser cancellation restores stor
     await expect.poll(() => watch.values).toEqual(["400"]);
     await touchDrag(session, handle, 80, true);
     await expect(block.locator(".ub-figma-viewer")).toHaveCSS("height", "400px");
+    await proveBrowserTitleArrival(page, { path: "upstream", readTitle: watch.readTitle });
     expect(watch.values).toEqual(["400"]);
     await touchDrag(session, handle, 1100);
     await expect.poll(() => watch.values).toEqual(["400", "960"]);

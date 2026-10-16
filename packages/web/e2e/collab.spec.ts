@@ -1,3 +1,4 @@
+import { proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /**
  * The collaboration proof points, in a real browser against a real hub.
  *
@@ -125,12 +126,14 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.press("Enter");
   await expect(calloutB.getByRole("alert")).toHaveText("A TL;DR is at most 300 characters.");
   await expect(summaryB).toHaveValue("x".repeat(301));
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   await summaryB.press("End");
   await summaryB.press("Shift+Enter");
   await b.keyboard.insertText("A second line.");
   await expect(summaryB).toHaveValue("A short summary for readers.\nA second line.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.fill("A short summary for readers.");
   // Leaving an unchanged field closes it; a draft must stay local until saved.
@@ -142,6 +145,7 @@ test("a TL;DR added from the menu and edited inline follows in the other client"
   await summaryB.fill("Changed in the other tab.");
   await b.locator(".ub-title").click();
   await expect(summaryB).toHaveValue("Changed in the other tab.");
+  await proveDocumentPageArrival(b, a, { path: "relay" });
   await expect(calloutA.locator(".ub-tldr-body > p")).toHaveText("A short summary for readers.");
   await summaryB.press("Enter");
   await expect(calloutA).toContainText("Changed in the other tab.");
@@ -198,6 +202,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled with Escape.");
   await summary.press("Escape");
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
@@ -206,6 +211,7 @@ test("tapping a TL;DR focuses its inline field, cancels drafts and clears the sh
   await summary.fill("A draft cancelled by tapping Cancel.");
   await a.getByRole("button", { name: "Cancel", exact: true }).tap();
   await expect(summary).toHaveCount(0);
+  await proveDocumentPageArrival(a, b, { path: "relay" });
   await expect(displayed).toHaveText("A summary shared with readers.");
   await expect(remote).toHaveText("A summary shared with readers.");
 
@@ -392,6 +398,7 @@ test("a peer joining leaves the status row's height and the prose where they wer
   const peers = a.locator(".ub-peers > .ub-peer-control");
   // Both sync facts settled, so the reading beside the cluster is not still
   // resolving while the two geometries are read.
+  await waitForAcknowledged(a, { path: "upstream" });
   await expect(a.locator(".ub-not-saved")).not.toBeVisible();
   await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
   const geometry = async () => ({
@@ -488,6 +495,7 @@ test("the open document's last-updated reading follows its stub through status a
   expect(stablePosition).not.toBeNull();
   const saved = page.locator(".ub-not-saved");
   const upstream = page.locator(".ub-status-sync");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Synced with hub /));
 
@@ -496,6 +504,7 @@ test("the open document's last-updated reading follows its stub through status a
     // The browser remains connected to `ub open`; only its silent upstream
     // replica is offline, so the local durability boundary stays saved while
     // the separately polled upstream fact turns negative.
+    await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
     await withPageTimers(page, () => expect(upstream).toHaveAttribute("aria-label", /^Offline since /));
     await page.locator(".ub-sync-toggle").click();
@@ -533,12 +542,14 @@ test("a fresh browser hydrates from the ub open store while the upstream is offl
     // from the unavailable upstream.
     const fresh = await openApp(browser, path);
     await expect(editor(fresh)).toBeVisible();
+    await waitForAcknowledged(fresh, { path: "relay" });
     await expect(fresh.locator(".ub-not-saved")).not.toBeVisible();
     await withPageTimers(fresh, () => expect(fresh.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
 
     // Reload is another store hydration while upstream remains unavailable.
     await fresh.reload();
     await expect(editor(fresh)).toBeVisible();
+    await waitForAcknowledged(fresh, { path: "relay" });
     await expect(fresh.locator(".ub-not-saved")).not.toBeVisible();
     await withPageTimers(fresh, () => expect(fresh.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
   } finally {
@@ -563,6 +574,7 @@ test("a multi-author block survives upstream loss and converges back without dup
   await placeCaret(b);
   await type(b, "-peer");
   await expect.poll(() => blockText(a)).toBe("before-peer");
+  await waitForAcknowledged(a, { path: "upstream" });
   await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
   await harness().stopHub();
   try {
@@ -573,6 +585,7 @@ test("a multi-author block survives upstream loss and converges back without dup
     await a.reload();
     await openDoc(a, title);
     await expect.poll(() => blockText(a)).toBe("before-peer");
+    await waitForAcknowledged(a, { path: "relay" });
     await expect(a.locator(".ub-not-saved")).not.toBeVisible();
     await withPageTimers(a, () => expect(a.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Offline since /));
 

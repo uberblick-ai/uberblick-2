@@ -7,6 +7,7 @@ import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { SETTINGS_KEY } from "../src/settings.js";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { waitForDocumentDraw } from "./settle.js";
 
 const { harness, openApp, trackContext } = setupHarness();
 let agent: McpAgent | null = null;
@@ -109,6 +110,7 @@ test("workspace, supported renderers and the every-type document emit no report-
     await expect(page.locator(".ub-title")).toHaveValue(uuid === rendered.uuid ? "CSP supported blocks" : "CSP every block type");
     if (uuid === rendered.uuid) {
       await expect(editor(page)).toBeVisible();
+      await waitForDocumentDraw(page, writer, uuid, { index: "all" });
       for (const selector of [
         ".ub-code > code", ".ub-wireframe-drawing .wf-root", ".ub-mermaid-panel svg",
         ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",

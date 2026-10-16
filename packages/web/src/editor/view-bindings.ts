@@ -2,12 +2,14 @@
 import { DATA_KEY, readDocData } from "@uberblick/schema";
 import type { DocData } from "@uberblick/schema";
 import type * as Y from "yjs";
+import { dataRevision } from "./render-state.js";
 
-type Render = (data: DocData | null, error?: unknown) => void;
+type Render = (data: DocData | null, error: unknown, revision: string) => void;
 interface Binding {
   renderers: Set<Render>;
   pending: Set<Render>;
   snapshot: DocData | null;
+  revision: string;
   dirty: boolean;
   error: unknown;
   frame: number | null;
@@ -22,7 +24,7 @@ export function bindDocView(doc: Y.Doc | null, render: Render): { schedule: () =
     let frame: number | null = null;
     return {
       schedule: () => {
-        if (frame === null) frame = requestAnimationFrame(() => { frame = null; render(null); });
+        if (frame === null) frame = requestAnimationFrame(() => { frame = null; render(null, undefined, dataRevision(null)); });
       },
       destroy: () => { if (frame !== null) cancelAnimationFrame(frame); },
     };
@@ -31,7 +33,7 @@ export function bindDocView(doc: Y.Doc | null, render: Render): { schedule: () =
   if (binding === undefined) {
     const data = doc.getMap(DATA_KEY);
     const shared: Binding = {
-      renderers: new Set(), pending: new Set(), snapshot: null, dirty: true, error: undefined, frame: null,
+      renderers: new Set(), pending: new Set(), snapshot: null, revision: dataRevision(null), dirty: true, error: undefined, frame: null,
       schedule: () => {
         if (shared.frame !== null) return;
         shared.frame = requestAnimationFrame(() => {
@@ -41,9 +43,11 @@ export function bindDocView(doc: Y.Doc | null, render: Render): { schedule: () =
           if (shared.dirty) {
             try {
               shared.snapshot = readDocData(doc);
+              shared.revision = dataRevision(shared.snapshot);
               shared.error = undefined;
             } catch (error) {
               shared.snapshot = null;
+              shared.revision = dataRevision(null);
               shared.error = error;
             }
             shared.dirty = false;
@@ -51,7 +55,7 @@ export function bindDocView(doc: Y.Doc | null, render: Render): { schedule: () =
           const pending = [...shared.pending];
           shared.pending.clear();
           for (const callback of pending) {
-            if (shared.renderers.has(callback)) callback(shared.snapshot, shared.error);
+            if (shared.renderers.has(callback)) callback(shared.snapshot, shared.error, shared.revision);
           }
         });
       },

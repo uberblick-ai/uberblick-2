@@ -164,6 +164,11 @@ async function startOpen(
   throw new Error("e2e: ub open exhausted its web-port retries");
 }
 
+export type HubTextHistory = {
+  readings: { text: string; authenticated: boolean }[];
+  stop(): void;
+};
+
 export interface Harness {
   /** Public fixture identities for access-control browser proofs. */
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
@@ -194,6 +199,8 @@ export interface Harness {
   readonly secondHubUrl?: string;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
+  /** Record upstream admission synchronously across local credential changes. */
+  observeHubText(room: string): HubTextHistory;
   /** Verify browser navigation left the project's startup binding untouched. */
   projectBinding(): { workspaceId: string; hubUrl: string };
   /** Start the upstream hub again — same port, same database. */
@@ -510,13 +517,17 @@ export async function startHarness(options: {
     });
     chmodSync(credentials, 0o600);
 
-    const setStoredLogin = (authenticated: boolean): void => {
-      if (!authenticated) {
+    let authenticated = true;
+    const credentialObservers = new Set<() => void>();
+    const setStoredLogin = (available: boolean): void => {
+      authenticated = available;
+      if (!available) {
         rmSync(credentials, { force: true });
-        return;
+      } else {
+        writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, { mode: 0o600 });
+        chmodSync(credentials, 0o600);
       }
-      writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, { mode: 0o600 });
-      chmodSync(credentials, 0o600);
+      for (const record of credentialObservers) record();
     };
 
     if (options.compiledFallback === true) {
@@ -551,6 +562,18 @@ export async function startHarness(options: {
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
         return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
+      },
+      observeHubText(room) {
+        const document = hub?.hocuspocus.documents.get(room);
+        if (document === undefined) throw new Error("e2e: hub history needs a loaded document");
+        const readings: HubTextHistory["readings"] = [];
+        const record = (): void => {
+          readings.push({ text: getBlocks(document).map(block => block.text).join("\n"), authenticated });
+        };
+        record();
+        document.on("update", record);
+        credentialObservers.add(record);
+        return { readings, stop: () => { document.off("update", record); credentialObservers.delete(record); } };
       },
       projectBinding() {
         return JSON.parse(readFileSync(join(runDir, ".uberblick.json"), "utf8")) as { workspaceId: string; hubUrl: string };
