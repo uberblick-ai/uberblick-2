@@ -11,7 +11,7 @@ import * as Y from "yjs";
 import { editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
-import { waitForAcknowledged } from "./settle.js";
+import { expectMcp, waitForAcknowledged } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -96,13 +96,15 @@ test("MCP deletion retires an open browser document and rejects an offline write
 
     await placeCaret(healthyPage);
     await healthyPage.keyboard.type(" remains writable");
-    await expect.poll(async () => {
-      const doc = await writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid: healthy.uuid });
-      return doc.blocks.map((block) => block.text).join("\n");
-    }).toBe("Healthy content remains writable");
+    await expectMcp(
+      () => writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid: healthy.uuid }),
+      doc => { expect(doc.blocks.map((block) => block.text).join("\n")).toBe("Healthy content remains writable"); },
+    );
     const listed = await writer.call<{ docs: Array<{ uuid: string }> }>("list_docs", { include_deleted: true });
     expect(listed.docs.map((doc) => doc.uuid)).not.toContain(retired.uuid);
-    await expect(writer.call("get_doc", { uuid: retired.uuid })).rejects.toThrow(/doc_deleted/);
+    await expectMcp(async () => {
+      await expect(writer.call("get_doc", { uuid: retired.uuid })).rejects.toThrow(/doc_deleted/);
+    });
 
     await retiredPage.reload();
     await waitForAcknowledged(retiredPage, { path: "upstream" });

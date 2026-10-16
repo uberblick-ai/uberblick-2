@@ -37,7 +37,7 @@ describe("directory doc", () => {
     const directory = new Y.Doc();
     upsertDirectoryEntry(directory, {
       uuid: ALPHA, title: "Secret", tags: ["private"], description: "Description",
-      createdAt: 10, updatedAt: 20, kind: "decision", topic: ALPHA, tldr: "Answer",
+      createdAt: 10, updatedAt: 20, kind: "decision", topic: ALPHA, answerPreview: "Answer",
     });
     deleteDirectoryEntry(directory, ALPHA);
     expect(isDirectoryEntryDeleted(directory, ALPHA)).toBe(true);
