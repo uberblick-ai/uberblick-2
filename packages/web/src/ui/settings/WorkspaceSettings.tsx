@@ -529,6 +529,7 @@ export function WorkspaceSettings({
   agentSessions,
   serving = null,
   subject = "browser",
+  verifiedHandle = null,
 }: {
   admin: boolean;
   page?: SettingsPage;
@@ -540,12 +541,13 @@ export function WorkspaceSettings({
   agentSessions: number;
   serving?: LocalServing | null;
   subject?: string;
+  verifiedHandle?: string | null;
 }): ReactElement {
   if (!admin) return <section className="ub-pane ub-page-pane" data-settings-page>
     <div className="ub-column"><p role="status">Reading workspace permissions…</p></div>
   </section>;
   return page === "members" ? (
-    <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} />
+    <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} verifiedHandle={verifiedHandle} />
   ) : page === "tags" ? (
     <TagSettings workspace={workspace} connection={catalogConnection} />
   ) : (

@@ -27,6 +27,7 @@
 @source "./editor-controls/CaretMenu.tsx";
 @source "./editor-controls/MentionMenu.tsx";
 @source "./settings/WorkspaceSettings.tsx";
+@source "./settings/AccessSettings.tsx";
 @source "./settings/HubSettings.tsx";
 @source "./settings/PreferencesSettings.tsx";
 @source "./settings/DevicesSettings.tsx";

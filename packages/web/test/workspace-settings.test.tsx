@@ -846,14 +846,14 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
   let role: AccessRole = options.role ?? "admin";
   let members = [{ ...ADMIN }, { ...SECOND_ADMIN }];
   let ownRoleStatus = options.ownRoleStatus;
-  let override: ((action: AccessAction) => AccessAnswer | Response | null) | null = null;
+  let override: ((action: AccessAction) => AccessAnswer | Response | null | Promise<AccessAnswer | Response | null>) | null = null;
   const calls: { action: AccessAction; init: RequestInit }[] = [];
   const fetchImpl = vi.fn(async (path: RequestInfo | URL, init?: RequestInit) => {
     expect(path).toBe("/api/access");
     const action = JSON.parse(init?.body as string) as AccessAction;
     calls.push({ action, init: init ?? {} });
     let body: AccessAnswer;
-    const overridden = override?.(action);
+    const overridden = await override?.(action);
     if (overridden instanceof Response) return overridden;
     if (overridden !== undefined && overridden !== null) body = overridden;
     else if (options.status !== undefined) body = { status: options.status, hub: options.status === "local-only" ? null : ACCESS_HUB };
@@ -895,10 +895,10 @@ function accessHub(options: { role?: AccessRole; ownRoleStatus?: string; status?
     add: (member: AccessMember) => { members.push(member); } };
 }
 
-async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid): Promise<HTMLElement> {
+async function mountAccess(local = true, catalogConnection: RoomConnection | null = null, servingWorkspace = WORKSPACE.uuid, verifiedHandle: string | null = null): Promise<HTMLElement> {
   mounted = await renderSettled(<WorkspaceSettings admin={true} page="members" workspace={WORKSPACE}
     serving={local ? { workspace: servingWorkspace, remoteHubUrl: "ws://127.0.0.1:1234", rebound: false } : null}
-    subject="browser-person" endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />);
+    subject="browser-person" verifiedHandle={verifiedHandle} endpoint={ENDPOINT} connection={null} catalogConnection={catalogConnection} agentSessions={2} />);
   return mounted.container;
 }
 
@@ -909,13 +909,39 @@ async function clickAccess(host: HTMLElement, label: string): Promise<void> {
   await act(async () => accessButton(host, label).click());
 }
 async function lookUp(host: HTMLElement, handle = "old-agent-login"): Promise<void> {
-  act(() => typeInto(within(host).getByRole<HTMLInputElement>("textbox", { name: "GitHub account" }), handle));
-  await clickAccess(host, "Look up account");
+  act(() => typeInto(within(host).getByRole<HTMLInputElement>("textbox", { name: "GitHub handle" }), handle));
+  await clickAccess(host, "Look up");
 }
-function selectAccess(host: HTMLElement, label: string, value: AccessRole): void {
+async function selectAccess(host: HTMLElement, label: string, value: AccessRole): Promise<void> {
   const select = within(host).getByRole<HTMLSelectElement>("combobox", { name: label });
-  act(() => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
 }
+
+it("shows the role under the title and uses named member controls without a refresh or save step", async () => {
+  accessHub(); const host = await mountAccess();
+  const title = within(host).getByRole("heading", { level: 1, name: "Members" });
+  expect(title.nextElementSibling?.textContent).toBe("You are an admin of this workspace.");
+  expect(within(host).getByRole("heading", { level: 2, name: "Add a member" })).toBeTruthy();
+  const members = within(host).getByRole("table", { name: "Members" });
+  expect(within(members).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Account", "Role", "Actions"]);
+  const role = within(host).getByRole("combobox", { name: `Role for ${ADMIN.githubUsername}` });
+  expect(within(role).getAllByRole("option").map((option) => option.textContent)).toEqual(["Member", "Admin"]);
+  expect(accessButton(host, `Remove ${ADMIN.githubUsername}`).textContent).toBe("Remove");
+  expect(within(host).queryByRole("heading", { name: "Workspace access" })).toBeNull();
+  expect(within(host).queryByRole("button", { name: /Refresh|Save role/ })).toBeNull();
+  expect(host.textContent).not.toContain("Access is read from the hub on each visit");
+});
+
+it.each([
+  ["SIGNED-IN-ADMIN", ADMIN.githubUsername],
+  [null, null],
+  ["browser-person", null],
+])("marks only the verified account handle %s as you", async (verifiedHandle, currentHandle) => {
+  accessHub(); const host = await mountAccess(true, null, WORKSPACE.uuid, verifiedHandle);
+  const markers = within(within(host).getByRole("table", { name: "Members" })).queryAllByText("you", { exact: true });
+  expect(markers).toHaveLength(currentHandle === null ? 0 : 1);
+  if (currentHandle !== null) expect(markers[0]?.closest("th")?.textContent).toBe(`${currentHandle}you`);
+});
 
 it("confirms the hub-resolved login and account ID before the default member grant, then reads a fresh members table", async () => {
   const hub = accessHub();
@@ -924,15 +950,15 @@ it("confirms the hub-resolved login and account ID before the default member gra
   const before = Y.encodeStateAsUpdate(catalog.connection.ydoc);
   const host = await mountAccess(true, catalog.connection);
   await lookUp(host);
-  expect(host.textContent).toContain("current-agent-login (GitHub account 9001)");
+  expect(host.textContent).toContain("current-agent-login · GitHub account 9001");
   expect(hub.calls.some(({ action }) => action.operation === "grant-member")).toBe(false);
-  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: "Role for new account" }).value).toBe("member");
-  await clickAccess(host, "Confirm and add account");
+  expect(within(host).queryByRole("combobox", { name: "Role for new account" })).toBeNull();
+  await clickAccess(host, "Add as member");
   expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toEqual({
     operation: "grant-member", workspaceId: WORKSPACE.uuid, githubAccountId: "9001", role: "member",
   });
   expect(within(host).getByRole("table", { name: "Members" }).textContent).toContain("current-agent-login");
-  expect(host.textContent).toContain("current-agent-login added as member.");
+  expect(host.textContent).toContain("current-agent-login added as Member.");
   expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
   expect(Y.encodeStateAsUpdate(catalog.connection.ydoc)).toEqual(before);
   const bearers = hub.calls.map(({ init }) => (init.headers as Record<string, string>).Authorization);
@@ -942,16 +968,17 @@ it("confirms the hub-resolved login and account ID before the default member gra
   catalog.connection.ydoc.destroy();
 });
 
-it("requires an explicit admin choice and shows a concurrent existing grant with its preserved role", async () => {
+it("keeps a concurrent existing grant's role and offers no grant for a known member", async () => {
   const hub = accessHub(); const host = await mountAccess();
-  await lookUp(host); selectAccess(host, "Role for new account", "admin");
-  hub.add({ ...NEW_MEMBER, role: "member" });
-  await clickAccess(host, "Confirm and add account");
-  expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toMatchObject({ role: "admin" });
-  expect(host.textContent).toContain("current-agent-login is already a member as member.");
   await lookUp(host);
-  expect(host.textContent).toContain("Already a member as member.");
-  expect(within(host).queryByText("Confirm and add account")).toBeNull();
+  hub.add({ ...NEW_MEMBER, role: "admin" });
+  await clickAccess(host, "Add as member");
+  expect(hub.calls.find(({ action }) => action.operation === "grant-member")?.action).toMatchObject({ role: "member" });
+  expect(host.textContent).toContain("current-agent-login is already a member as Admin.");
+  await lookUp(host);
+  expect(host.textContent).toContain("Already a member as Admin.");
+  expect(within(host).queryByRole("button", { name: "Add as member" })).toBeNull();
+  expect(hub.calls.filter(({ action }) => action.operation === "grant-member")).toHaveLength(1);
 });
 
 it.each([ ["account-not-found", "No such GitHub account"], ["lookup-unavailable", "lookup is unavailable"] ])(
@@ -980,16 +1007,95 @@ it.each(["@octocat", "https://github.com/octocat", "octo cat"])(
   },
 );
 
+it("shows a member role without member management or device reads", async () => {
+  const hub = accessHub({ role: "member" }); const host = await mountAccess();
+  expect(host.textContent).toContain("You are a member of this workspace.");
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(within(host).queryByLabelText("GitHub handle")).toBeNull();
+  expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
+  expect(hub.calls.some(({ action }) => action.operation === "list-devices")).toBe(false);
+});
+
+it("shows a refused role read without member management or device reads", async () => {
+  const hub = accessHub({ ownRoleStatus: "forbidden" }); const host = await mountAccess();
+  expect(host.textContent).toContain("The hub refused access");
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(within(host).queryByLabelText("GitHub handle")).toBeNull();
+  expect(hub.calls.some(({ action }) => action.operation === "list-members")).toBe(false);
+  expect(hub.calls.some(({ action }) => action.operation === "list-devices")).toBe(false);
+});
+
 it("shows a hub role-change refusal and keeps the hub's unchanged role", async () => {
   const hub = accessHub(); const host = await mountAccess();
   hub.setOverride((action) => action.operation === "change-role" ? { status: "last-admin", hub: ACCESS_HUB } : null);
-  selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
-  await clickAccess(host, `Save role for ${ADMIN.githubUsername}`);
+  await selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
   expect(host.textContent).toContain("The hub refused this change: the last admin cannot be removed or demoted.");
-  const members = within(within(host).getByRole("table", { name: "Members" }));
-  expect(within(members.getAllByRole("row", { hidden: true })[1] as HTMLElement).getAllByRole("cell", { hidden: true })[0]?.textContent).toBe("admin");
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${ADMIN.githubUsername}` }).value).toBe("admin");
-  expect(host.textContent).not.toContain("role changed to member");
+  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
+});
+
+it("saves a different role on pick, disables management until the reread and announces success once", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  await lookUp(host);
+  await selectAccess(host, `Role for ${SECOND_ADMIN.githubUsername}`, "admin");
+  expect(hub.calls.some(({ action }) => action.operation === "change-role")).toBe(false);
+  let releaseChange: (answer: null) => void = () => { throw new Error("No pending role change"); };
+  hub.setOverride((action) => action.operation === "change-role"
+    ? new Promise<null>((resolve) => { releaseChange = resolve; }) : null);
+  await selectAccess(host, `Role for ${SECOND_ADMIN.githubUsername}`, "member");
+  expect(hub.calls.filter(({ action }) => action.operation === "change-role").map(({ action }) => action)).toEqual([
+    { operation: "change-role", workspaceId: WORKSPACE.uuid, principalId: SECOND_ADMIN.principalId, role: "member" },
+  ]);
+  expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "GitHub handle" }).disabled).toBe(true);
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("member");
+  expect(within(host).getAllByRole<HTMLSelectElement>("combobox").every((select) => select.disabled)).toBe(true);
+  expect(within(host).getAllByRole<HTMLButtonElement>("button").every((button) => button.disabled)).toBe(true);
+  expect(notifyTransient).not.toHaveBeenCalled();
+  await act(async () => releaseChange(null));
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("member");
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).disabled).toBe(false);
+  expect(notifyTransient).toHaveBeenCalledTimes(1);
+  expect(notifyTransient).toHaveBeenCalledWith(expect.objectContaining({ message: "Role changed", severity: "success" }));
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
+});
+
+it("rereads a failed role pick and displays the hub's role without a success toast", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  hub.setOverride((action) => {
+    if (action.operation === "change-role") throw new TypeError("Hub connection lost");
+    return null;
+  });
+  await selectAccess(host, `Role for ${SECOND_ADMIN.githubUsername}`, "member");
+  expect(within(host).getByRole("alert").textContent).toBe("The hub cannot be reached. Reconnect to the hub, then retry.");
+  expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("admin");
+  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
+});
+
+it("keeps member management unavailable when the reread after a failed pick also fails", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  hub.setOverride(() => ({ status: "hub-down", hub: ACCESS_HUB }));
+  await selectAccess(host, `Role for ${SECOND_ADMIN.githubUsername}`, "member");
+  expect(host.textContent).toContain("The hub cannot be reached. Reconnect to the hub, then retry.");
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(within(host).queryByRole("textbox", { name: "GitHub handle" })).toBeNull();
+  expect(within(host).queryByRole("combobox")).toBeNull();
+  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
+});
+
+it("applies self-demotion on pick and removes member management after the new role is read", async () => {
+  const hub = accessHub(); const host = await mountAccess();
+  await selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
+  expect(host.textContent).toContain("You are a member of this workspace.");
+  expect(within(host).queryByRole("alertdialog")).toBeNull();
+  expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
+  expect(notifyTransient).toHaveBeenCalledWith(expect.objectContaining({ message: "Role changed", severity: "success" }));
+  expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
 });
 
 it("confirms member removal on every device, then preserves acknowledged self-removal after access is forbidden", async () => {
@@ -1017,7 +1123,7 @@ it.each([
   expect(host.textContent).toContain(message); expect(host.textContent).toContain(step);
   expect(within(host).queryAllByRole("table", { hidden: true })).toHaveLength(0);
   expect(within(host).queryAllByRole("textbox", { hidden: true })).toHaveLength(0);
-  expect(within(host).getAllByRole("button", { hidden: true }).map((button) => button.textContent)).toEqual(["Refresh access"]);
+  expect(within(host).queryAllByRole("button", { hidden: true })).toHaveLength(0);
 });
 
 it("does not call the local management route from a direct-served page", async () => {
@@ -1027,14 +1133,17 @@ it("does not call the local management route from a direct-served page", async (
 });
 
 it("accepts the served workspace's decorated segment and makes new live reads on every visit", async () => {
-  const hub = accessHub({ role: "member" });
+  const hub = accessHub();
   const host = await mountAccess(true, null, WORKSPACE.segment);
-  expect(host.textContent).toContain("Your role: member.");
+  expect(host.textContent).toContain("You are an admin of this workspace.");
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(1);
   const priorSignals = hub.calls.map(({ init }) => init.signal);
   mounted?.unmount(); mounted = null;
   expect(priorSignals.every((signal) => signal?.aborted)).toBe(true);
-  await mountAccess(true, null, WORKSPACE.segment);
+  hub.add({ ...NEW_MEMBER });
+  const revisited = await mountAccess(true, null, WORKSPACE.segment);
+  expect(within(revisited).getByRole("table", { name: "Members" }).textContent).toContain(NEW_MEMBER.githubUsername);
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
   expect(hub.calls.filter(({ action }) => action.operation === "list-devices")).toHaveLength(0);
+  expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
 });
