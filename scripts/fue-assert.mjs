@@ -473,7 +473,7 @@ async function main() {
     // to IPv6 on Linux. Probe that host; the dev task below binds IPv4 instead.
     await waitFor("the local hub to listen", () => tcpOpen(HUB_PORT, "localhost"), { timeoutMs: 90_000, service: open });
     await waitFor("the local web app to listen", () => tcpOpen(OPEN_PORT), { timeoutMs: 90_000, service: open });
-    await waitFor("`ub open` to report its local hub", () => open.output().includes("started here"), { timeoutMs: 90_000, service: open });
+    await waitFor("`ub open` to print its web address", () => open.output().includes(`web        http://127.0.0.1:${OPEN_PORT}/`), { timeoutMs: 90_000, service: open });
     await waitFor("the local hub to accept the stored secret", async () => {
       const status = await callToolOverStdio("sync_status", { cwd: PROJECT_ROOT });
       return status.hub?.status === "connected";

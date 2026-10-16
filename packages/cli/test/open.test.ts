@@ -153,9 +153,11 @@ describe("ub open", () => {
     );
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
-      `hub        https://hub.example.ts.net (${signedIn ? "remote, nothing started here" : "not signed in, changes stay here"})\n` +
-      (signedIn ? "" : "             → ub auth login\n") +
-      `workspace  ${WORKSPACE} (https://hub.example.ts.net)\n\n` +
+      `workspace  ${WORKSPACE} (https://hub.example.ts.net)\n` +
+      (signedIn
+        ? "hub        unreachable, changes stay on this machine until it is back\n"
+        : "hub        not signed in, changes stay on this machine\n             → ub auth login\n") +
+      "\n" +
       "Ctrl-C to stop.\n",
     );
 
@@ -674,7 +676,7 @@ describe("ub open", () => {
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       expect(app.stdout()).toContain(
-        `hub        http://${host}:${port} (not signed in, changes stay here)\n` +
+        "hub        not signed in, changes stay on this machine\n" +
         "             → ub auth login\n",
       );
       expect(existsSync(credentials)).toBe(false);
@@ -696,13 +698,13 @@ it("opens a newly created local workspace in the browser without login or promot
   });
   expect((await get(running.url)).status).toBe(200);
   const binding = JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")) as { workspaceId: string; hubUrl: null };
-  expect(running.stdout()).toContain(`workspace  Local browser (${binding.workspaceId}, local)\n\nCtrl-C to stop.\n`);
+  expect(running.stdout()).toContain("workspace  Local browser (local)\n\nCtrl-C to stop.\n");
   expect(running.stdout() + running.stderr()).not.toMatch(/sign.in required|approve in a browser/i);
   expect(binding.hubUrl).toBeNull();
   expect((await running.interrupt()).status).toBe(0);
 });
 
-it("uses the served database's workspace name beside its external hub address", async () => {
+it.each([false, true])("uses the served database's workspace name beside its external hub address (verbose %s)", async verbose => {
   const { box, env } = configured();
   const selected = { ...box.env, WORKSPACE_ID: WORKSPACE };
   storeWorkspaceName(resolveMcpConfig(selected), "Default replica");
@@ -710,17 +712,25 @@ it("uses the served database's workspace name beside its external hub address", 
   storeWorkspaceName(resolveMcpConfig({ ...selected, UBERBLICK_DB: databasePath }), "Served replica");
   const hubUrl = "wss://named.example.ts.net/ws";
   pointAt(box, hubUrl);
-  const running = await open(box, ["--port", String(await freePort())], {
+  const running = await open(box, [...(verbose ? ["--verbose"] : []), "--port", String(await freePort())], {
     ...env, UBERBLICK_DB: databasePath,
   });
   try {
     expect(running.stdout()).toBe(
       `web        ${running.url}\n` +
-      "hub        https://named.example.ts.net (not signed in, changes stay here)\n" +
-      "             → ub auth login\n" +
-      `workspace  Served replica (${WORKSPACE}, https://named.example.ts.net)\n\n` +
+      (verbose
+        ? "hub        https://named.example.ts.net (not signed in, changes stay here)\n" +
+          "             → ub auth login\n" +
+          `workspace  Served replica (${WORKSPACE}, https://named.example.ts.net)\n\n`
+        : "workspace  Served replica (https://named.example.ts.net)\n" +
+          "hub        not signed in, changes stay on this machine\n" +
+          "             → ub auth login\n\n") +
       "Ctrl-C to stop.\n",
     );
     expect((await get(running.url)).status).toBe(200);
+    if (verbose) {
+      await sleep(11_100);
+      expect(running.stderr().split("\n").filter(line => line.startsWith("ub open:"))).toEqual([]);
+    }
   } finally { expect((await running.interrupt()).status).toBe(0); }
 });

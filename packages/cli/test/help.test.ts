@@ -106,6 +106,7 @@ Serve the web app for this project's workspace, with a hub behind it, and open t
 options:
   --no-browser      Print the address instead of opening a browser
   --port <n>        Port for the web app (default 13379)
+  --verbose         Also print hub, sync and startup details for debugging
   -h, --help        show this help
 
 BROWSER in the environment names the command used to open the URL; BROWSER=none

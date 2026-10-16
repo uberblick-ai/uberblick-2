@@ -18,7 +18,7 @@ it.each(["Iv23liLW6D5SqP77El3z", "invalid-client-id"])(
       ...env, HUB_GITHUB_CLIENT_ID: clientId,
     });
     try {
-      expect(app.stdout()).toContain(`${hubUrl} (started here)`);
+      expect(app.stdout()).not.toContain("hub        ");
       expect(await hubAnswers(box, hubUrl)).toBe(true);
       const cases = [
         { path: "/auth/claim-state", method: "GET", code: 200, body: { unclaimed: false, canClaim: false } },

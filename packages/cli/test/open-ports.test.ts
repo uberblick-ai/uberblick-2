@@ -9,8 +9,8 @@ import { chmodSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { resolveMcpConfig } from "@uberblick/mcp-server";
-import { directoryRoom } from "@uberblick/schema";
+import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
+import { directoryRoom, roomForDoc } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
@@ -43,22 +43,22 @@ import {
 afterEach(cleanUp);
 
 describe("ub open: hub, ports and serving role", () => {
-  it("creates the missing secret and gives it to the local hub and serving replica", async () => {
+  it.each([false, true])("creates the missing secret and gives it to the local hub and serving replica (verbose %s)", async verbose => {
     const { box, env } = configured();
     const path = join(configDir(box), "credentials.json");
     rmSync(path);
     const hubUrl = `ws://127.0.0.1:${await freePort()}`;
     pointAt(box, hubUrl);
 
-    const app = await open(box, ["--no-browser", "--port", String(await freePort())], env);
+    const app = await open(box, [...(verbose ? ["--verbose"] : []), "--no-browser", "--port", String(await freePort())], env);
     try {
       const secret = JSON.parse(readFileSync(path, "utf8")).signingSecret as string;
       expect(secret).toMatch(/^[0-9a-f]{64}$/);
       expect(statSync(path).mode & 0o777).toBe(0o600);
       expect(app.stdout()).toBe(
-        `secret     created ${path} (0600)\n` +
+        (verbose ? `secret     created ${path} (0600)\n` : "") +
         `web        ${app.url}\n` +
-        `hub        ${hubUrl} (started here)\n` +
+        (verbose ? `hub        ${hubUrl} (started here)\n` : "") +
         `workspace  ${WORKSPACE} (http://127.0.0.1:${new URL(hubUrl).port})\n\n` +
         "Ctrl-C to stop.\n",
       );
@@ -74,6 +74,46 @@ describe("ub open: hub, ports and serving role", () => {
       expect(JSON.parse(document)).not.toHaveProperty("rebound");
       expect(document).not.toContain(secret);
     } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each([false, true])("keeps page loads and clean shutdown quiet, with debug events only in verbose mode (%s)", async verbose => {
+    const { box, env } = configured();
+    const hubPort = await freePort();
+    pointAt(box, `ws://127.0.0.1:${hubPort}`);
+    const app = await open(box, [...(verbose ? ["--verbose"] : []), "--port", String(await freePort())], {
+      ...env, NODE_NO_WARNINGS: "1",
+    });
+    const banner = app.stdout();
+    const document = new Y.Doc();
+    const room = roomForDoc(WORKSPACE, "79013ca8-dc2f-4d36-bce7-3843bbe6f2f0");
+    const browser = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: room,
+      document,
+      token: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-write"),
+      ...{ WebSocketPolyfill: class extends WebSocket {
+        constructor(url: string | URL) { super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]); }
+      } },
+    });
+    try {
+      expect((await get(app.url)).status).toBe(200);
+      expect((await get(app.url)).status).toBe(200);
+      await waitUntil("the browser page's document to hydrate", () => browser.isSynced);
+      if (verbose) {
+        await waitUntil("verbose hub and browser authentication events", () =>
+          app.stderr().includes('"event":"hub.listen"') &&
+          app.stderr().includes('"event":"hub.auth.accepted"') &&
+          app.stderr().includes(room));
+      } else {
+        expect(app.stderr()).toBe("");
+      }
+    } finally {
+      browser.destroy(); document.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
+    expect(app.stdout()).toBe(banner);
+    if (verbose) expect(app.stderr()).toContain('"event":"hub.stopped"');
+    else expect(app.stderr()).toBe("");
   });
 
   it.each(["file", "environment"])("keeps the %s secret and credential store unchanged", async source => {
@@ -160,7 +200,7 @@ describe("ub open: hub, ports and serving role", () => {
     // and port held, the original store refusal still wins.
     const sameStore = await openFails(box, args, env);
     expect(sameStore.status).toBe(1);
-    expect(sameStore.output).toContain("another `ub open` is already serving this store");
+    expect(sameStore.output).toContain(`workspace ${WORKSPACE} is already open in another \`ub open\` (process `);
     expect(sameStore.output).not.toContain(`port ${port} is`);
 
     const other = configured();
@@ -209,7 +249,7 @@ describe("ub open: hub, ports and serving role", () => {
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       expect(app.stdout()).toContain(
-        `hub        ${endpoint} (not signed in, changes stay here)\n` +
+        "hub        not signed in, changes stay on this machine\n" +
         "             → ub auth login\n",
       );
       expect(existsSync(credentials)).toBe(false);
@@ -244,7 +284,6 @@ describe("ub open: hub, ports and serving role", () => {
     expect(await hubAnswers(box, hubUrl)).toBe(true);
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
-      `hub        ${hubUrl} (started here)\n` +
       `workspace  ${WORKSPACE} (http://127.0.0.1:${hubPort})\n\n` +
       "Ctrl-C to stop.\n",
     );
@@ -280,7 +319,6 @@ describe("ub open: hub, ports and serving role", () => {
     // EADDRINUSE and taken the command down before it ever served.
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
-      `hub        ${hubUrl} (already running — left alone)\n` +
       `workspace  ${WORKSPACE} (http://127.0.0.1:${hub.port})\n\n` +
       "Ctrl-C to stop.\n",
     );
@@ -303,7 +341,7 @@ describe("ub open: hub, ports and serving role", () => {
     pointAt(box, hubUrl);
 
     const first = await open(box, ["--port", String(webPort)], env);
-    expect(first.stdout()).toContain(`hub        ${hubUrl} (started here)\n`);
+    expect(await hubAnswers(box, hubUrl)).toBe(true);
     // A request first, so a keep-alive connection is open when the signal
     // arrives: `close()` alone waits for it, and the port would still be held.
     expect((await get(first.url)).status).toBe(200);
@@ -317,12 +355,12 @@ describe("ub open: hub, ports and serving role", () => {
     expect((await second.interrupt()).status).toBe(0);
   });
 
-  it("exits and releases the serving role when its replica refresh loop stops", async () => {
+  it.each([false, true])("exits and releases the serving role when its replica refresh loop stops (verbose %s)", async verbose => {
     const { box, env } = configured();
     const upstream = await startHub(box);
     pointAt(box, `ws://127.0.0.1:${upstream.port}`);
     const webPort = await freePort();
-    const app = await open(box, ["--port", String(webPort)], env);
+    const app = await open(box, [...(verbose ? ["--verbose"] : []), "--port", String(webPort)], env);
 
     const databasePath = resolveMcpConfig({
       ...box.env,
@@ -336,6 +374,8 @@ describe("ub open: hub, ports and serving role", () => {
     const stopped = await app.wait();
     expect(stopped).toEqual({ status: 1, signal: null });
     expect(app.stderr()).toContain("local replica refresh failed");
+    if (verbose) expect(app.stderr()).toContain("WARN uberblick/mcp-server transport-free engine refresh failed");
+    else expect(app.stderr()).not.toContain("uberblick/mcp-server");
     expect((await probePort("127.0.0.1", webPort)).state).toBe("free");
 
     // The same store and port can be served again immediately: the failed
@@ -426,15 +466,29 @@ describe("ub open: hub, ports and serving role", () => {
     expect(silent.output).not.toMatch(/stop/);
 
     const webPort = await freePort();
+    const databasePath = resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }).databasePath;
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }), "Held replica");
     const app = await open(box, ["--port", String(webPort)], env);
+    const database = openStore(databasePath);
+    const held = database.prepare("SELECT value FROM meta WHERE key = 'serving-replica-holder'").get() as { value: string };
+    const holder = JSON.parse(held.value) as { pid: number; sessionId: string };
+    database.close();
     const secondPort = await freePort();
     const second = await openFails(box, ["--port", String(secondPort)], env);
     expect(second.status).toBe(1);
     expect(second.output).toContain("`ub open`");
-    expect(second.output).toContain(WORKSPACE);
-    expect(second.output).toContain(".sqlite");
-    expect(second.output).toContain("process");
+    expect(second.output.split("\n").filter(line => line.startsWith("ub open:"))).toEqual([
+      `ub open: workspace Held replica is already open in another \`ub open\` (process ${holder.pid}). Stop that one first, or keep using it.`,
+    ]);
+    expect(second.output).not.toContain(databasePath);
+    expect(second.output).not.toContain(holder.sessionId);
     expect((await probePort("127.0.0.1", secondPort)).state).toBe("free");
+
+    const verbose = await openFails(box, ["--verbose", "--port", String(secondPort)], env);
+    expect(verbose.status).toBe(1);
+    expect(verbose.output).toContain(databasePath);
+    expect(verbose.output).toContain(holder.sessionId);
+    expect(verbose.output).toContain(`process ${holder.pid}`);
 
     expect((await app.interrupt()).status).toBe(0);
   });

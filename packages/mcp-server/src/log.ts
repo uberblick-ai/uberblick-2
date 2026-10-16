@@ -2,6 +2,7 @@
  * Write diagnostics only to stderr; stdout belongs exclusively to MCP frames.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { SourceMap } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,12 @@ import { fileURLToPath } from "node:url";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 let sourceMap: SourceMap | null | undefined;
+const disabledLogging = new AsyncLocalStorage<boolean>();
+
+/** Keep an embedded caller's diagnostics quiet without affecting other callers. */
+export function withLoggingDisabled<T>(run: () => T): T {
+  return disabledLogging.run(true, run);
+}
 
 /** Map only logged frames in the installed bundle, paying nothing until an error. */
 function loggedStack(stack: string): string {
@@ -55,6 +62,7 @@ function formatDetail(detail: unknown): string {
  * tests' logs; raw stderr writes bypass that attribution.
  */
 export function logAt(level: LogLevel, message: string, detail?: unknown): void {
+  if (disabledLogging.getStore()) return;
   const head = `${new Date().toISOString()} ${level.toUpperCase()} uberblick/mcp-server ${message}`;
   const line = detail === undefined ? head : `${head} ${formatDetail(detail)}`;
   // biome-ignore lint/suspicious/noConsole: the one sanctioned write; stderr, never stdout.

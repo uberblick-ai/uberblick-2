@@ -15,8 +15,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
-import { wrapToken } from "@uberblick/schema/protocol";
-import { createMcpServer, resolveMcpConfig } from "@uberblick/mcp-server";
+import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
+import { createMcpServer, resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import {
   appendBlock,
   directoryRoom,
@@ -75,6 +75,77 @@ async function expectP95Within250ms(
 }
 
 describe("ub open: sharing through the upstream hub", () => {
+  it.each(["0.0.0.0", "127.0.0.1"])("reports a signed-in unreachable hub at startup and its recovery (%s)", async host => {
+    const { box, env } = configured();
+    const databasePath = join(box.cwd, "recovering-device-hub.sqlite");
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath,
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://${host}:${hub.port}`;
+    pointAt(box, `ws://${host}:${hub.port}`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const { replacedAt: _replaced, ...record } = issued.record;
+    await writeHubLogin(origin, { identity: person, credential: {
+      record, key: Buffer.from(issued.keyBytes).toString("base64url"),
+    } }, box.env);
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }), "Product intent");
+    await hub.stop();
+
+    const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1" });
+    try {
+      expect(app.stdout()).toBe(
+        `web        ${app.url}\n` +
+        `workspace  Product intent (${origin})\n` +
+        "hub        unreachable, changes stay on this machine until it is back\n\n" +
+        "Ctrl-C to stop.\n",
+      );
+      expect(app.stderr()).toBe("");
+      expect((await get(app.url)).status).toBe(200);
+      const resumed = await createHub({ port: hub.port, address: "0.0.0.0", databasePath,
+        github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+      hubs.push(resumed);
+      const recovered = `ub open: hub ${origin} reachable again, syncing local changes`;
+      await waitUntil("the startup-unreachable hub to recover", () => app.stderr().includes(recovered));
+      expect(app.stderr().trim().split("\n")).toEqual([recovered]);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
+  it.each([-1, 1])("keeps serving and gives the correct protocol remedy when the hub differs by %s", async difference => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "protocol-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, protocolVersion: SYNC_PROTOCOL_VERSION + difference, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://0.0.0.0:${hub.port}`;
+    pointAt(box, `ws://0.0.0.0:${hub.port}`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const { replacedAt: _replaced, ...record } = issued.record;
+    await writeHubLogin(origin, { identity: person, credential: {
+      record, key: Buffer.from(issued.keyBytes).toString("base64url"),
+    } }, box.env);
+    const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1" });
+    try {
+      const fix = difference > 0 ? "run `ub update`" : `ask whoever runs ${origin} to update the hub`;
+      await waitUntil("the incompatible hub notice", () => app.stderr().includes(fix));
+      const lines = (): string[] => app.stderr().trim().split("\n");
+      if (difference > 0) expect(lines()).toEqual([
+        `ub open: hub ${origin} needs a newer Uberblick, changes stay here; run \`ub update\``,
+      ]);
+      else {
+        expect(lines()).toHaveLength(1);
+        expect(lines()[0]).toContain(origin);
+        expect(app.stderr()).not.toContain("run `ub update`");
+      }
+      expect(app.stderr()).not.toContain("ub auth login");
+      expect((await get(app.url)).status).toBe(200);
+      await sleep(1_100);
+      expect(lines()).toHaveLength(1);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it("discovers loopback device admission and later login keeps the same serving binding", async () => {
     const { box, env } = configured();
     const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "loopback-device-hub.sqlite"),
@@ -97,9 +168,10 @@ describe("ub open: sharing through the upstream hub", () => {
     try {
       expect(app.stdout()).toBe(
         `web        ${app.url}\n` +
-        `hub        ws://127.0.0.1:${hub.port}/custom-proxy-path (not signed in, changes stay here)\n` +
+        `workspace  ${WORKSPACE} (${origin}/custom-proxy-path)\n` +
+        "hub        not signed in, changes stay on this machine\n" +
         "             → ub auth login\n" +
-        `workspace  ${WORKSPACE} (${origin}/custom-proxy-path)\n\n` +
+        "\n" +
         "Ctrl-C to stop.\n",
       );
       expect(app.stdout()).not.toContain("HUB_AUTH_TOKEN");
@@ -149,9 +221,10 @@ describe("ub open: sharing through the upstream hub", () => {
 
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
-      `hub        ${origin} (not signed in, changes stay here)\n` +
+      `workspace  ${WORKSPACE} (${origin})\n` +
+      "hub        not signed in, changes stay on this machine\n" +
       "             → ub auth login\n" +
-      `workspace  ${WORKSPACE} (${origin})\n\n` +
+      "\n" +
       "Ctrl-C to stop.\n",
     );
     const localKey = localBrowserKey(WORKSPACE, box.env);
@@ -176,6 +249,8 @@ describe("ub open: sharing through the upstream hub", () => {
       await waitUntil("local edit durable", () => !browser.hasUnsyncedChanges).catch(error => { throw new Error(`${error.message}: ${app.stderr()}`); });
       await writeHubLogin(origin, login(), box.env);
       await waitUntil("login-first no workspace access", async () => (await status()).notSharedReason === "no-workspace-access");
+      await waitUntil("workspace access refusal notice", () => app.stderr().includes("ask a workspace admin"));
+      expect(app.stderr().split("\n").filter(line => line.startsWith("ub open:") && line.includes("ask a workspace admin"))).toHaveLength(1);
       // Advance the persisted cooldown, leaving the process and login intact.
       const configRoot = join(configDir(box));
       const { readdirSync } = await import("node:fs");
@@ -206,6 +281,9 @@ describe("ub open: sharing through the upstream hub", () => {
       await waitUntil("remote change in browser", () => getBlocks(document)[0]?.text === "other client edit");
       expect((await app.interrupt()).status).toBe(0);
       app = await open(box, ["--port", String(webPort)], env);
+      expect(app.stdout()).toBe(
+        `web        ${app.url}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`,
+      );
       await waitUntil("restart resumes stored login", async () => (await status()).caughtUp);
       expect(localBrowserKey(WORKSPACE, box.env)).toBe(localKey);
       const current = readHubLogins(box.env).logins[origin]!;
@@ -213,6 +291,11 @@ describe("ub open: sharing through the upstream hub", () => {
       else hub.memberships!.remove({ workspaceId: WORKSPACE, principalId: person.id, actorPrincipalId: admin.id });
       // Renewal cooldown plus the random polling ceiling can span two bands.
       await waitUntil("live remote authority ended", async () => (await status()).notSharedReason === (refusal === "revocation" ? "sign-in-required" : "no-workspace-access"), 80_000);
+      const remedy = refusal === "revocation"
+        ? `ub open: hub ${origin} refused this machine's sign-in, changes stay here; run \`ub auth login\``
+        : "ask a workspace admin";
+      await waitUntil("live remote refusal notice", () => app.stderr().includes(remedy));
+      expect(app.stderr().split("\n").filter(line => line.startsWith("ub open:") && line.includes(remedy))).toHaveLength(1);
       await waitUntil("browser remains locally admitted", () => browser.isSynced);
       expect(getBlocks(document)[0]?.text).toBe("other client edit");
       const localBlock = getBlocks(document)[0]!;
@@ -238,9 +321,10 @@ describe("ub open: sharing through the upstream hub", () => {
 
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
-      "hub        https://first.example.ts.net (not signed in, changes stay here)\n" +
+      `workspace  ${WORKSPACE} (https://first.example.ts.net)\n` +
+      "hub        not signed in, changes stay on this machine\n" +
       "             → ub auth login\n" +
-      `workspace  ${WORKSPACE} (https://first.example.ts.net)\n\n` +
+      "\n" +
       "Ctrl-C to stop.\n",
     );
 

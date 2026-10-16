@@ -6,7 +6,7 @@ import { userInfo } from "node:os";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import { createHub, type Hub } from "@uberblick/hub";
+import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { createLocalBrowserServer, type LocalBrowserServer } from "./local-browser-server.js";
 import { importRootSecret, verifyToken } from "@uberblick/schema/token";
 import { resolveHubConfig } from "./hub-config.js";
@@ -29,8 +29,11 @@ import {
   ServingReplicaHeldError,
   collectServingSyncStatus,
   createMcpEngine,
+  readWorkspaceName,
   usesDeviceLogin,
+  withLoggingDisabled,
   type ServingSyncStatus,
+  type HubState,
   type UberblickMcpEngine,
 } from "@uberblick/mcp-server";
 import { budget, resolveMcpConfig } from "./budget.js";
@@ -44,9 +47,11 @@ import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { readAccessAction, requestAccess, type AccessBinding } from "./open-access.js";
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
+import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
+import { openBanner } from "./open-output.js";
 import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
-import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
+import { displayWorkspaceHub } from "./workspace-use-output.js";
 import {
   endpointOf,
   hubBind,
@@ -81,6 +86,7 @@ Serve the web app for this project's workspace, with a hub behind it, and open t
 options:
   --no-browser      Print the address instead of opening a browser
   --port <n>        Port for the web app (default ${DEFAULT_WEB_PORT})
+  --verbose         Also print hub, sync and startup details for debugging
   -h, --help        show this help
 
 BROWSER in the environment names the command used to open the URL; BROWSER=none
@@ -835,7 +841,8 @@ interface HubDecision {
   /** The hub this command started, and is therefore responsible for stopping. */
   started: Hub | null;
   note: string;
-  signInRequired?: boolean;
+  showNote?: boolean;
+  deviceHub?: boolean;
 }
 
 /**
@@ -878,6 +885,7 @@ async function ensureHub(
   resolved: NodeJS.ProcessEnv,
   hubUrl: string,
   io: Io,
+  verbose: boolean,
 ): Promise<HubDecision> {
   const endpoint = endpointOf(hubUrl);
   if (endpoint === null) {
@@ -892,17 +900,15 @@ async function ensureHub(
   const displayHub = isLocalHost(endpoint.host) ? hubUrl : displayWorkspaceHub(hubUrl);
   const signInRequired = workspace !== null && readDeviceLogin(hubUrl, workspace, resolved).status === "sign-in-required";
   if (usesDeviceLogin(hubUrl, resolved) && signInRequired) {
-    return { started: null, note: `${displayHub} (not signed in, changes stay here)`, signInRequired: true };
+    return { started: null, note: `${displayHub} (not signed in, changes stay here)` };
   }
   if (!isLocalHost(endpoint.host)) {
     return { started: null, note: `${displayHub} (remote, nothing started here)` };
   }
 
   if (usesDeviceLogin(hubUrl, resolved)) {
-    const probe = workspace === null ? null : await probeHubState(resolveMcpConfig(resolved), hubUrl);
-    const state = probe?.status === "hub-down" || probe?.status === "connecting"
-      ? "hub unreachable" : probe?.reason ?? "device-authenticated hub";
-    return { started: null, note: `${hubUrl} (${state}; nothing started here)` };
+    // The serving replica supplies the bounded authenticated reading below.
+    return { started: null, note: `${hubUrl} (device-authenticated hub; nothing started here)`, deviceHub: true };
   }
 
   const secret = trimmed(resolved.HUB_AUTH_TOKEN);
@@ -911,6 +917,7 @@ async function ensureHub(
     // Refuse startup without a signing secret; absence is distinct from downtime.
     return {
       started: null,
+      showNote: true,
       note:
         `${hubUrl} (not started: no signing secret, so a hub here would accept ` +
         "anything — run `ub workspace create <name>` or `ub open` with a free local hub port)",
@@ -926,9 +933,10 @@ async function ensureHub(
       // Refused authority proves the endpoint is occupied, not permission to
       // replace its hub. Device refusal keeps its sign-in recovery wording.
       if (probe.authRecovery === "sign-in-required" && signInRequired) {
-        return { started: null, note: `${displayHub} (not signed in, changes stay here)`, signInRequired: true };
+        return { started: null, note: `${displayHub} (not signed in, changes stay here)`, deviceHub: true };
       }
-      return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)` };
+      return { started: null, note: `${hubUrl} (${probe.reason ?? "credential refused"}; nothing started here)`, showNote: true,
+        deviceHub: probe.authRecovery !== undefined };
     }
   } else {
     // Without a workspace, leave any occupied port alone and still serve the app.
@@ -959,11 +967,11 @@ async function ensureHub(
   try {
     // whyNotStartable has fenced this exact dialled address to loopback.
     hub = await createHub(
-      resolveHubConfig({
+      { ...resolveHubConfig({
         ...resolved,
         PORT: String(endpoint.port),
         HUB_HOST: endpoint.host,
-      }),
+      }), ...(!verbose ? { log: silentLogger } : {}) },
     );
   } catch (error) {
     // An occupied port after a failed auth probe has no identified holder;
@@ -983,11 +991,13 @@ async function ensureHub(
 interface Options {
   port: number;
   browser: boolean;
+  verbose: boolean;
 }
 
 export const OPEN_OPTIONS = {
   "no-browser": { type: "boolean" },
   port: { type: "string" },
+  verbose: { type: "boolean" },
 } as const;
 
 function parseOptions(argv: string[]): Options {
@@ -1007,7 +1017,7 @@ function parseOptions(argv: string[]): Options {
       throw new Error(`--port must be an integer in 1..65535, got ${JSON.stringify(raw)}`);
     }
   }
-  return { port, browser: !values["no-browser"] };
+  return { port, browser: !values["no-browser"], verbose: values.verbose ?? false };
 }
 
 /** What this command started, and is therefore responsible for stopping. */
@@ -1018,12 +1028,36 @@ interface Owned {
   engine: UberblickMcpEngine | null;
   engineMonitor: EngineMonitor | null;
   replicas: BrowserReplicas | null;
+  hubMonitor: { stop(): void } | null;
 }
 
 interface EngineMonitor {
   readonly failed: Promise<string>;
   failure(): string | null;
   stop(): void;
+}
+
+function openHubSource(engine: UberblickMcpEngine, hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean) {
+  const sync = engine.replicas.sync;
+  return {
+    state: (): HubState => {
+      const state = sync.state();
+      if (state.authRecovery !== undefined) deviceHub = true;
+      // A missing local login cannot establish whether the hub is reachable.
+      if ((state.status === "connecting" || state.status === "hub-down") && missingHubLogin(hubUrl, env, deviceHub)) {
+        return { ...state, status: "auth-failed", authRecovery: "sign-in-required" };
+      }
+      return state;
+    },
+    onStateChange: (listener: () => void) => sync.onStateChange(listener),
+    deviceAuthenticated: () => deviceHub,
+  };
+}
+
+function missingHubLogin(hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean): boolean {
+  const workspace = trimmed(env.WORKSPACE_ID);
+  return workspace !== null && deviceHub &&
+    readDeviceLogin(hubUrl, workspace, env).status === "sign-in-required";
 }
 
 function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
@@ -1048,7 +1082,7 @@ function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
   const timer = setInterval(inspect, 1_000);
   return {
     failed,
-    failure: () => failure,
+    failure: () => { inspect(); return failure; },
     stop: () => clearInterval(timer),
   };
 }
@@ -1084,6 +1118,7 @@ function takeForeground(owned: Owned, io: Io): Foreground {
     process.off("SIGTERM", onSignal);
 
     owned.engineMonitor?.stop();
+    owned.hubMonitor?.stop();
     let result = code;
 
     if (owned.localServer !== null) {
@@ -1128,7 +1163,6 @@ function takeForeground(owned: Owned, io: Io): Foreground {
   return { interrupted: () => seen, signalled, shutdown };
 }
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
 export async function openCommand(
   argv: string[],
   io: Io = processIo,
@@ -1143,6 +1177,12 @@ export async function openCommand(
     return 2;
   }
 
+  const serve = () => serveOpen(options, io);
+  return options.verbose ? serve() : withLoggingDisabled(serve);
+}
+
+// biome-ignore lint/complexity/noExcessiveLinesPerFunction: This startup lifecycle predates the length limit.
+async function serveOpen(options: Options, io: Io): Promise<number> {
   // Retain the original environment for refreshes; resolved file values are not pins.
   const startupEnv: NodeJS.ProcessEnv = { ...process.env };
   let initial = await initialConfig(startupEnv);
@@ -1161,10 +1201,12 @@ export async function openCommand(
     engine: null,
     engineMonitor: null,
     replicas: null,
+    hubMonitor: null,
   };
   const foreground = takeForeground(owned, io);
   let hubNote = "";
-  let hubSignInRequired = false;
+  let showHubNote = false;
+  let hubDeviceAuthenticated = false;
 
   const plan = bundlePlan(env);
   // Before ensureHub: a bundle refusal starts no hub and creates no database.
@@ -1183,10 +1225,11 @@ export async function openCommand(
     projectBinding = requireBinding(initial.resolved);
     hubUrl = trimmed(initial.resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
     env = { ...initial.resolved.env, HUB_URL: hubUrl };
-    const decided = await ensureHub(env, hubUrl, io);
+    const decided = await ensureHub(env, hubUrl, io, options.verbose);
     owned.hub = decided.started;
     hubNote = decided.note;
-    hubSignInRequired = decided.signInRequired ?? false;
+    showHubNote = decided.showNote ?? false;
+    hubDeviceAuthenticated = decided.deviceHub ?? usesDeviceLogin(hubUrl, env);
   } catch (error) {
     io.err(`ub open: ${message(error)}\n`);
     return await foreground.shutdown(1);
@@ -1243,6 +1286,7 @@ export async function openCommand(
         return engine;
       };
       localServer = await createLocalBrowserServer({
+        ...(!options.verbose ? { log: silentLogger } : {}),
         port: options.port,
         workspaces: new Map([...workspaces].map(([id, entry]) => [id, entry.browserKey])),
         expectedOrigin: servedUrl.origin,
@@ -1295,8 +1339,10 @@ export async function openCommand(
     const code = (error as NodeJS.ErrnoException).code;
     if (error instanceof ServingReplicaHeldError) {
       io.err(
-        `ub open: another \`ub open\` is already serving this store: ${message(error)}\n`,
+        `ub open: workspace ${readWorkspaceName(error.databasePath, projectBinding.workspaceId) ?? projectBinding.workspaceId} ` +
+        `is already open in another \`ub open\` (process ${error.holder.pid}). Stop that one first, or keep using it.\n`,
       );
+      if (options.verbose) io.err(`ub open: another \`ub open\` is already serving this store: ${message(error)}\n`);
     } else if (code === "EADDRINUSE") {
       io.err(portTakenMessage(options.port, await whoHoldsPort(options.port)));
     } else {
@@ -1309,12 +1355,6 @@ export async function openCommand(
     return await foreground.shutdown(0);
   }
 
-  const earlyFailure = owned.engineMonitor?.failure() ?? null;
-  if (earlyFailure !== null) {
-    io.err(`ub open: ${earlyFailure}\n`);
-    return await foreground.shutdown(1);
-  }
-
   try {
     await rememberWorkspaceBinding(projectBinding, startupEnv);
   } catch (error) {
@@ -1323,14 +1363,29 @@ export async function openCommand(
   }
 
   const url = servedUrl.href;
-  let banner = "";
-  if (initial.secretCreated !== null) banner += useField("secret", `created ${initial.secretCreated} (0600)`);
-  banner += useField("web", url);
-  banner += useField("hub", hubNote);
-  if (hubSignInRequired) banner += useField("", "  → ub auth login");
-  banner += useField("workspace", workspaceLabel(projectBinding, owned.engine?.replicas.config.databasePath));
-  banner += "\nCtrl-C to stop.\n";
-  io.out(banner);
+  const sync = owned.engine === null ? null : openHubSource(owned.engine, hubUrl, env, hubDeviceAuthenticated);
+  const hubState = sync === null ? null : await waitForOpenHubState(sync, owned.engine?.replicas.config.connectTimeoutMs ?? 0);
+  if (foreground.interrupted()) return await foreground.shutdown(0);
+  const earlyFailure = owned.engineMonitor?.failure() ?? null;
+  if (earlyFailure !== null) {
+    io.err(`ub open: ${earlyFailure}\n`);
+    return await foreground.shutdown(1);
+  }
+  const deviceHub = sync?.deviceAuthenticated() ?? hubDeviceAuthenticated;
+  const hubSignInRequired = missingHubLogin(hubUrl, env, deviceHub);
+  const unreachable = !hubSignInRequired && hubState?.status === "hub-down";
+  io.out(openBanner({
+    url, verbose: options.verbose, secretCreated: initial.secretCreated,
+    binding: projectBinding, databasePath: owned.engine?.replicas.config.databasePath,
+    hubNote, signInRequired: hubSignInRequired, showHubNote,
+    deviceHub, hubUrl, hubState,
+  }));
+  if (sync !== null) {
+    owned.hubMonitor = monitorOpenHub(sync, displayWorkspaceHub(hubUrl), text => io.err(text), {
+      unreachableAtStart: unreachable,
+      notSignedInAtStart: hubSignInRequired,
+    });
+  }
 
   if (options.browser) {
     openBrowser(url, env, io);

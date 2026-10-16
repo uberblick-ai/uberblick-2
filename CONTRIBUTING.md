@@ -254,7 +254,7 @@ container started with `--network none`, `scripts/fue-assert.mjs` then checks:
   local report, with `pending.count` 0 in JSON.
 - `list_docs` answers over a real `ub mcp serve` client using newline-delimited
   JSON-RPC on stdio and returns both starter documents.
-- `ub open --no-browser` starts the local hub, which accepts the generated
+- `ub open --no-browser` prints its web address and starts the local hub, which accepts the generated
   secret as checked through the `sync_status` MCP tool. Ctrl-C releases its hub
   and web ports.
 - `mise run dev` brings up a hub accepting this machine's credential and a web
