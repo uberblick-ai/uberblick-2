@@ -1276,12 +1276,7 @@ h6.ub-heading {
 }
 
 .ub-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
-.ub-data-table { width: 100%; border-collapse: collapse; font-size: var(--type-body-size); line-height: var(--type-body-leading); }
 .ub-data-table th, .ub-data-table td {
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
@@ -1291,7 +1286,7 @@ h6.ub-heading {
 .ub-data-cell[data-wrap="long"] { min-width: 12ch; }
 .ub-data-cell[data-wrap="short"] { max-width: none; white-space: pre; }
 .ub-data-cell[data-wrap="scalar"] { max-width: none; white-space: nowrap; }
-.ub-data-table th { font-size: var(--type-ui-size); line-height: var(--type-ui-leading); max-width: 32rem; background: var(--muted); font-weight: 600; color: var(--foreground); }
+.ub-data-table th { max-width: 32rem; }
 .ub-data-sort {
   display: flex; align-items: center; gap: 0.3rem;
   width: 100%; min-height: 1.5rem;
@@ -1300,7 +1295,6 @@ h6.ub-heading {
 }
 .ub-data-sort:hover { background: var(--accent); color: var(--accent-foreground); }
 @media (any-pointer: coarse) { .ub-data-sort { min-height: 2.75rem; min-width: 2.75rem; } }
-.ub-data-table td { color: var(--prose-text); }
 .ub-data-table td[data-state="absent"], .ub-data-table td[data-state="null"], .ub-data-table td[data-state="invalid"] {
   color: var(--muted-foreground);
 }
@@ -1410,39 +1404,51 @@ h6.ub-heading {
 }
 
 .ub-table,
+.ub-data-table,
 .ub-docs-table {
   border-collapse: collapse;
   width: 100%;
 }
 
-.ub-table {
+.ub-table,
+.ub-data-table {
   font-size: var(--type-body-size);
   line-height: var(--type-body-leading);
+}
+
+.ub-table th,
+.ub-table td,
+.ub-data-table th,
+.ub-data-table td {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0.2rem 0.55rem;
+  text-align: left;
+  vertical-align: top;
 }
 
 .ub-table th,
 .ub-table td {
   position: relative;
   min-width: 120px;
-  border: 1px solid var(--border);
-  padding: 0.3rem 0.55rem;
-  text-align: left;
-  vertical-align: top;
 }
 
 .ub-table p {
   margin: 0;
+  color: inherit;
 }
 
-.ub-table th {
+.ub-table th,
+.ub-data-table th {
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
-  background: var(--muted);
-  font-weight: 600;
-  color: var(--foreground);
+  background: transparent;
+  font-weight: 500;
+  color: var(--muted-foreground);
 }
 
-.ub-table td {
+.ub-table td,
+.ub-data-table td {
   color: var(--prose-text);
 }
 

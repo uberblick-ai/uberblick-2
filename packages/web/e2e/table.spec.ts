@@ -23,6 +23,10 @@ test("TableKit cells stay drawn and wide tables contain horizontal scrolling", {
   await expect(table).toBeVisible();
   await expect(table.locator("th")).toHaveCount(3);
   await expect(table.locator("td")).toHaveCount(6);
+  if (await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)) {
+    const heights = await table.locator("th, td").evaluateAll(cells => cells.map(cell => cell.getBoundingClientRect().height));
+    for (const height of heights) expect(height + 0.001).toBeGreaterThanOrEqual(44);
+  }
   const first = table.locator("th").first();
   await activateControl(first, { touch: info.project.use.hasTouch === true });
   await page.keyboard.type("Direct");

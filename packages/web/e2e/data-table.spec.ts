@@ -119,9 +119,48 @@ async function cellStyle(cell: Locator): Promise<Record<string, string>> {
     const style = getComputedStyle(element);
     return Object.fromEntries([
       "border-top", "border-right", "border-bottom", "border-left", "padding",
-      "font-size", "font-weight", "color", "background-color",
+      "font-size", "line-height", "font-weight", "color", "background-color",
     ].map((property) => [property, style.getPropertyValue(property)]));
   });
+}
+
+async function expectTableRules(table: Locator, mutedInk: string, proseInk: string): Promise<void> {
+  const cells = await table.locator("th, td").evaluateAll((elements) => elements.map((element) => {
+    const style = getComputedStyle(element);
+    return {
+      header: element.tagName === "TH", state: element.getAttribute("data-state"),
+      left: style.borderLeftWidth, right: style.borderRightWidth,
+      bottom: style.borderBottomWidth, rule: style.borderBottomStyle,
+      paddingLeft: style.paddingLeft, paddingRight: style.paddingRight,
+      size: style.fontSize, leading: style.lineHeight, weight: style.fontWeight,
+      ink: style.color, textInk: getComputedStyle(element.querySelector("p, button") ?? element).color,
+      ground: style.backgroundColor,
+    };
+  }));
+  expect(cells.length).toBeGreaterThan(0);
+  for (const cell of cells) {
+    expect(cell).toMatchObject({ left: "0px", right: "0px", bottom: "1px", rule: "solid",
+      paddingLeft: "8.8px", paddingRight: "8.8px", ground: "rgba(0, 0, 0, 0)" });
+    if (cell.header) {
+      expect(cell).toMatchObject({ size: "14px", leading: "20px", weight: "500", ink: mutedInk, textInk: mutedInk });
+    } else {
+      const marker = cell.state !== null && cell.state !== "valid";
+      expect(cell).toMatchObject({ size: "16px", leading: "27px", weight: "400",
+        ink: marker ? mutedInk : proseInk, textInk: marker ? mutedInk : proseInk });
+    }
+  }
+}
+
+async function expectTouchTargets(targets: Locator): Promise<void> {
+  const bounds = await targets.evaluateAll((elements) => elements.map(element => {
+    const { width, height } = element.getBoundingClientRect();
+    return { width, height };
+  }));
+  expect(bounds.length).toBeGreaterThan(0);
+  for (const target of bounds) {
+    expect(target.width + 0.001).toBeGreaterThanOrEqual(44);
+    expect(target.height + 0.001).toBeGreaterThanOrEqual(44);
+  }
 }
 
 /** Measure text nodes rather than wrapper rectangles, including preserved newlines. */
@@ -344,6 +383,15 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await expect(block.locator(".ub-table-controls, .ub-table-control, [contenteditable='true']")).toHaveCount(0);
     const notice = block.locator(".ub-chart-notice");
     await expect(notice).toHaveText("Generated from document data · read-only");
+    const mutedInk = await notice.evaluate(element => getComputedStyle(element).color);
+    const proseInk = await editor(page).locator(":scope > p").first().evaluate(element => getComputedStyle(element).color);
+    await expectTableRules(table, mutedInk, proseInk);
+    await expectTableRules(ordinary, mutedInk, proseInk);
+    for (const row of [ordinary.locator("tr").last(), table.locator("tbody tr").nth(2)]) {
+      const height = await row.evaluate(element => element.getBoundingClientRect().height);
+      expect(height).toBeGreaterThanOrEqual(27);
+      expect(height).toBeLessThan(38);
+    }
     const tableBounds = await table.boundingBox();
     const noticeBounds = await notice.boundingBox();
     expect(tableBounds).not.toBeNull();
@@ -419,6 +467,58 @@ test("all rows read like an ordinary table with secondary source and isolated li
   }
 });
 
+test("table rules and touch targets match on iPad and narrow windows in both appearances", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "table", collection: "measurements", title: "Touch table rules",
+    columns: [{ field: "name", label: "Name" }, { field: "value", label: "Value", format: "number" }],
+  };
+  const { uuid } = await session.call<{ uuid: string }>("create_doc", {
+    title: "Touch table comparison", description: "Synthetic ordinary and generated table appearance.",
+    blocks: [
+      { type: "paragraph", text: "Both tables share the same quiet rules." },
+      { type: "table", text: "| Name | Value |\n| --- | --- |\n| First | 1 |\n| Second | 2 |" },
+      { type: "chart", text: JSON.stringify(mapping) },
+    ],
+  });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+    replaceRecords: [{ id: "a", value: { name: "First", value: 1 } }, { id: "b", value: { name: "Second", value: 2 } }],
+  }] });
+  for (const width of [820, 600]) {
+    for (const colorScheme of ["light", "dark"] as const) {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, { contextOptions: {
+        hasTouch: true, isMobile: info.project.use.isMobile === true,
+        viewport: { width, height: 1000 }, colorScheme,
+        ...(info.project.use.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: info.project.use.deviceScaleFactor }),
+        ...(info.project.use.userAgent === undefined ? {} : { userAgent: info.project.use.userAgent }),
+      } });
+      await waitForDocumentDraw(page, session, uuid);
+      expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
+      const ordinary = page.locator(".ub-table");
+      const generated = page.getByRole("table", { name: "Touch table rules", exact: true });
+      await expect(ordinary).toBeVisible();
+      await expect(generated).toBeVisible();
+      const mutedInk = await page.locator(".ub-chart-notice").evaluate(element => getComputedStyle(element).color);
+      const proseInk = await editor(page).locator(":scope > p").first().evaluate(element => getComputedStyle(element).color);
+      await expectTableRules(ordinary, mutedInk, proseInk);
+      await expectTableRules(generated, mutedInk, proseInk);
+      expect(await cellStyle(generated.locator("th").first())).toEqual(await cellStyle(ordinary.locator("th").first()));
+      expect(await cellStyle(generated.locator("td").first())).toEqual(await cellStyle(ordinary.locator("td").first()));
+      for (const height of await ordinary.locator("th, td").evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height))) {
+        expect(height + 0.001).toBeGreaterThanOrEqual(44);
+      }
+      await expectTouchTargets(generated.getByRole("button"));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      const sort = generated.getByRole("button", { name: "Name", exact: true });
+      await sort.tap();
+      await expectHeaderOrder(generated, "Name", "ascending");
+      const screenshot = info.outputPath(`table-rules-${width}-${colorScheme}.png`);
+      await page.screenshot({ path: screenshot, fullPage: true });
+      await info.attach(`table-rules-${width}-${colorScheme}`, { path: screenshot, contentType: "image/png" });
+    }
+  }
+});
+
 test("every header sorts through native pointer and keyboard input without moving the document selection", { tag: "@webkit" }, async ({ browser }, info) => {
   const session = writer();
   const mapping = { ...MAPPING, sort: { field: "day", direction: "desc" } };
@@ -437,6 +537,7 @@ test("every header sorts through native pointer and keyboard input without movin
   await expectHeaderOrder(table, "Day", "descending");
   expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
   expect(page.viewportSize()).toEqual(info.project.use.viewport);
+  if (touch) await expectTouchTargets(table.getByRole("button"));
   for (const { label } of MAPPING.columns) {
     await placeCaretIn(editor(page).locator(":scope > p").first(), { touch });
     const selection = await documentSelection(page);
