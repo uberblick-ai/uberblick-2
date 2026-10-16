@@ -17,7 +17,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -525,8 +525,7 @@ describe("the sidebar is the _sidebar document", () => {
     act(() => within(screen.getByRole("alertdialog", { name: "Delete group Reading?" })).getByRole("button", { name: "Delete group" }).click());
     expect(groupNames(host)).toEqual(["Elsewhere"]);
     expect(stored(peer)).toEqual([["Elsewhere", []]]);
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
-    expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "+ New group" }));
+    await waitFor(() => expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "+ New group" })));
   });
 
   it("writes nothing when group deletion is cancelled", async () => {
@@ -601,11 +600,10 @@ describe("the sidebar is the _sidebar document", () => {
     });
     await act(async () => {
       within(dialog).getByRole("button", { name: "Cancel" }).click();
-      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(screen.queryByRole("alertdialog", { name: "Delete group Reading?" })).toBeNull();
     expect(writes).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "All documents" }));
+    await waitFor(() => expect(document.activeElement).toBe(sidebarControls(host).getByRole("button", { name: "All documents" })));
   });
 
   it("collapses a group, and remembers it", async () => {
