@@ -4,11 +4,12 @@ import * as Y from "yjs";
 import { createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
+import { installPageTimers } from "./page-timers.js";
 import {
   expectOfflineHubText, expectUpstreamHub, proveDocumentPageArrival, waitForAcknowledged,
 } from "./settle.js";
 
-const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
 
 type CapturedUpdates = { stop: () => number[][] };
 
@@ -35,6 +36,7 @@ test("offline admission proof rejects premature sharing hidden by held observer 
   const observer = await openApp(browser, new URL(page.url()).pathname, {
     upstream: true,
     beforeNavigate: async opening => {
+      await installPageTimers(opening);
       await opening.routeWebSocket(/.*/, socket => {
         const server = socket.connectToServer();
         server.onMessage(message => {

@@ -5,22 +5,25 @@ import { inlinePlainText } from "./marks.js";
 import { writeGfmTable } from "./table.js";
 import { CARD_PARTS, writeCardText } from "./card.js";
 import type { CardInline, CardPart } from "./card.js";
-import { getMeta } from "./doc.js";
+import { getMeta, getMetaMap } from "./doc.js";
 import { getDocDataEntries } from "./data.js";
 import { blockRev } from "./rev.js";
 
 /**
- * Hash title, decision line, ordered block text and raw data with JSON boundaries.
+ * Hash title, stored legacy summary, ordered block text and raw data with JSON boundaries.
  * Identities, layout attributes, marks, comments, link targets and approval
  * bookkeeping are excluded.
  * The browser-safe revision hash detects changes; it does not prove attribution.
  */
 export function decisionApprovalFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
+  // Preserve historical approvals even though decision reads hide this value.
+  const storedTldr = getMetaMap(doc).get("tldr");
+  const tldr = typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
   // Use plain table text so formatting alone cannot invalidate approval.
-  const content: unknown[] = [meta.title, meta.tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButtons }) =>
+  const content: unknown[] = [meta.title, tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButtons }) =>
     card !== undefined
       ? cardApprovalText(card, cardButtons?.map((button) => button.text) ?? [])
       : table !== undefined && table.length > 0

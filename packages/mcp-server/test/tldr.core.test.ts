@@ -96,7 +96,7 @@ describe("set_metadata", () => {
       expect(refused).toMatchObject({ isError: true, payload: { error: "decision_tldr_unsupported", field: "tldr" } });
     }
     raw.set("tldr", "Legacy summary.");
-    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: "Legacy summary." });
+    expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: null });
     expect(await rig.ok("get_doc", { uuid: doc.uuid })).not.toHaveProperty("tldrOptOut");
     await rig.ok("set_metadata", { uuid: doc.uuid, tldr: null });
     expect(await rig.ok("get_doc", { uuid: doc.uuid })).toMatchObject({ tldr: null });

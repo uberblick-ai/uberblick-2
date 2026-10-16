@@ -5,8 +5,9 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createDoc, docTitle, editor, openDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
+import { installPageTimers, withPageTimers } from "./page-timers.js";
 
-const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-list-head" } });
+const { harness, openApp } = setupHarness({ app: { readySelector: ".ub-document-sidebar", beforeNavigate: installPageTimers } });
 
 async function documentText(page: Page): Promise<string | null> {
   return editor(page).evaluate((element) => {
@@ -14,6 +15,14 @@ async function documentText(page: Page): Promise<string | null> {
     for (const cursor of copy.querySelectorAll(".ProseMirror-yjs-cursor")) cursor.remove();
     return copy.textContent;
   });
+}
+
+/** A refusal still permits the independent local-save acknowledgement. */
+async function expectSavedHere(page: Page): Promise<void> {
+  await page.locator(".ub-status-sync").click();
+  await expect(page.locator('.ub-sync-fact:has(dt:text-is("State")) dd')).toHaveText("saved here");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
 }
 
 async function statusGeometry(page: Page) {
@@ -41,10 +50,10 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await expect.poll(() => documentText(observer)).toBe("before restart");
 
   const pageInstance = await page.evaluate(() => performance.timeOrigin);
-  const saved = page.locator(".ub-status-word--saved");
-  const shared = page.locator(".ub-status-word--hub");
+  const saved = page.locator(".ub-not-saved");
+  const shared = page.locator(".ub-status-sync");
   const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
-  await expect(shared).toHaveText("synced with hub");
+  await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
   const authenticatedGeometry = await statusGeometry(page);
 
   const room = `${harness().workspaceUuid}/${uuid}`;
@@ -52,9 +61,9 @@ test("local-only edits survive a restart and reach the hub after authentication 
   try {
     await harness().restartOpen({ authenticated: false });
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
-    await expect(shared).toHaveText("not shared with hub");
-    await expect(reason).toBeVisible();
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await withPageTimers(page, () => expect(reason).toBeVisible());
     await expect(reason).toHaveAttribute("data-type", "warning");
     await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
     await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
@@ -75,7 +84,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
     await placeCaret(page);
     await page.keyboard.type("; saved locally");
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
+    await expect(saved).not.toBeVisible();
+    await expectSavedHere(page);
     await expect(reason).toBeVisible();
     await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
     const localGeometry = await statusGeometry(page);
@@ -84,8 +94,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
     // boot, as well as across both authentication transitions below.
     await harness().restartOpen({ authenticated: false });
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
-    await expect(shared).toHaveText("not shared with hub");
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
     await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
     expect(await statusGeometry(page)).toEqual(localGeometry);
 
@@ -93,16 +103,16 @@ test("local-only edits survive a restart and reach the hub after authentication 
     await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
     await proveDocumentPageArrival(page, observer, { path: "upstream" });
     expectOfflineHubText(history, "before restart");
-    await expect(shared).toHaveText("synced with hub");
+    await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
     await expect(reason).toBeHidden();
     await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
     expect(await statusGeometry(page)).toEqual(localGeometry);
 
     await harness().restartOpen({ authenticated: false });
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
-    await expect(shared).toHaveText("not shared with hub");
-    await expect(reason).toBeVisible();
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await withPageTimers(page, () => expect(reason).toBeVisible());
     expect(await statusGeometry(page)).toEqual(localGeometry);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
   } finally { history.stop(); }
@@ -118,6 +128,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     await placeCaret(seed);
     await seed.keyboard.type("the prose stays here");
     await waitForAcknowledged(seed, { path: "relay" });
+    await expectSavedHere(seed);
     paths.push(new URL(seed.url()).pathname);
   }
   await seed.close();
@@ -132,6 +143,7 @@ test("local-only status answers leave the readings and prose in place", async ({
       contextOptions: { viewport: { width, height: 844 }, hasTouch: width === 820, reducedMotion: "reduce" },
       readySelector: ".ub-editor .ProseMirror",
       beforeNavigate: async (opening) => {
+        await installPageTimers(opening);
         await opening.route("**/api/status", async (route) => {
           if (blankAnswers || failNext) {
             failNext = false;
@@ -143,18 +155,18 @@ test("local-only status answers leave the readings and prose in place", async ({
       },
     });
     const pageInstance = await page.evaluate(() => performance.timeOrigin);
-    const saved = page.locator(".ub-status-word--saved");
-    const shared = page.locator(".ub-status-word--hub");
+    const saved = page.locator(".ub-not-saved");
+    const shared = page.locator(".ub-status-sync");
     const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-description]", { hasText: "this machine has no credentials for its hub" }) });
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
-    await expect(shared).toHaveText("");
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     const beforeFirstAnswer = await statusGeometry(page);
     blankAnswers = false;
-    await expect(reason).toBeVisible();
+    await withPageTimers(page, () => expect(reason).toBeVisible());
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
-    await expect(shared).toHaveText("not shared with hub");
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
 
@@ -167,23 +179,23 @@ test("local-only status answers leave the readings and prose in place", async ({
       await openDoc(page, title);
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
       await waitForAcknowledged(page, { path: "relay" });
-      await expect(saved).toHaveText("saved here");
-      await expect(shared).toHaveText("");
+      await expect(saved).not.toBeVisible();
+      await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
       expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
       blankAnswers = false;
-      await expect(shared).toHaveText("not shared with hub");
-      await expect(reason).toBeVisible();
+      await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+      await withPageTimers(page, () => expect(reason).toBeVisible());
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
       expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     }
 
     failNext = true;
-    await expect(shared).toHaveText("");
+    await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
-    await expect(shared).toHaveText("not shared with hub");
-    await expect(reason).toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await withPageTimers(page, () => expect(reason).toBeVisible());
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
     expect(await statusGeometry(page)).toEqual(beforeFirstAnswer);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
@@ -210,6 +222,7 @@ test("device recovery notices preserve local editing and native tablet touch con
     contextOptions: { viewport: { width: 820, height: 1180 }, hasTouch: true, colorScheme: "light" },
     readySelector: ".ub-docs-heading",
     beforeNavigate: async (opening) => {
+      await installPageTimers(opening);
       await opening.route("**/api/status", async (route) => {
         const response = await route.fetch();
         const body = await response.json();
@@ -230,9 +243,9 @@ test("device recovery notices preserve local editing and native tablet touch con
   await createDoc(page, docTitle("device-recovery"));
   await placeCaret(page);
   await page.keyboard.type("kept here");
-  const saved = page.locator(".ub-status-word--saved");
-  const shared = page.locator(".ub-status-word--hub");
-  await expect(shared).toHaveText("synced with hub");
+  const saved = page.locator(".ub-not-saved");
+  const shared = page.locator(".ub-status-sync");
+  await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   // A new document clears this marker; pagehide also catches a departure
   // followed by restoration from the back/forward cache. Clock readings vary.
@@ -247,36 +260,36 @@ test("device recovery notices preserve local editing and native tablet touch con
 
   notSharedReason = "sign-in-required";
   await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(shared).toHaveText("not shared with hub");
+  await expect(saved).not.toBeVisible();
+  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   const notices = page.locator("[data-sonner-toast]");
-  await expect(notices).toHaveCount(1);
+  await withPageTimers(page, () => expect(notices).toHaveCount(1));
   await expect(notices).toHaveAttribute("data-type", "warning");
-  await expect(notices).toContainText(/run ub auth login/);
+  await withPageTimers(page, () => expect(notices).toContainText(/run ub auth login/));
   await expect(notices).toBeInViewport();
   await expect(page.locator(".ub-status")).not.toContainText(/run ub auth login/);
   // The tablet uses the primitive's native close control. Dismissing the
   // notice leaves the unresolved compact fact and its recovery discoverable.
   await notices.getByRole("button", { name: "Dismiss notification" }).tap();
-  await expect(notices).toHaveCount(0);
-  await expect(shared).toHaveText("not shared with hub");
-  await page.getByRole("button", { name: /^Sync details/ }).tap();
+  await withPageTimers(page, () => expect(notices).toHaveCount(0));
+  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+  await page.locator(".ub-status-sync").tap();
   await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd')).toContainText(/run ub auth login/);
   await page.keyboard.press("Escape");
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while sign-in is required");
   await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(notices).toHaveCount(0);
+  await expect(saved).not.toBeVisible();
+  await withPageTimers(page, () => expect(notices).toHaveCount(0));
 
   notSharedReason = "no-workspace-access";
-  await expect(notices).toHaveCount(1);
-  await expect(notices).toContainText(/ask its administrator for membership/);
+  await withPageTimers(page, () => expect(notices).toHaveCount(1));
+  await withPageTimers(page, () => expect(notices).toContainText(/ask its administrator for membership/));
   await expect(notices).toBeInViewport();
   await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
-  await expect(shared).toHaveText("not shared with hub");
+  await expect(saved).not.toBeVisible();
+  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   await page.locator(".ub-title").focus();
   await page.keyboard.press("Shift+F8");
   await expect(page.locator("[data-sonner-toaster]")).toBeFocused();
@@ -285,14 +298,14 @@ test("device recovery notices preserve local editing and native tablet touch con
   await page.keyboard.press("Tab");
   await expect(notices.getByRole("button", { name: "Dismiss notification" })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(notices).toHaveCount(0);
+  await withPageTimers(page, () => expect(notices).toHaveCount(0));
   await expect(page.locator(".ub-title")).toBeFocused();
-  await expect(shared).toHaveText("not shared with hub");
+  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while membership is refused");
   await waitForAcknowledged(page, { path: "relay" });
-  await expect(saved).toHaveText("saved here");
+  await expect(saved).not.toBeVisible();
   await expect.poll(() => documentText(page))
     .toBe("kept here; edited while sign-in is required; edited while membership is refused");
 
@@ -302,14 +315,14 @@ test("device recovery notices preserve local editing and native tablet touch con
     ["renewal-unavailable", "this hub cannot renew the login — ask its operator to configure sign-in"],
   ] as const) {
     notSharedReason = cause;
-    await expect(notices).toHaveCount(1);
-    await expect(notices).toContainText(recovery);
+    await withPageTimers(page, () => expect(notices).toHaveCount(1));
+    await withPageTimers(page, () => expect(notices).toContainText(recovery));
     await expect(notices).toHaveAttribute("data-type", "warning");
-    await expect(shared).toHaveText("not shared with hub");
     await waitForAcknowledged(page, { path: "relay" });
-    await expect(saved).toHaveText("saved here");
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await expect(saved).not.toBeVisible();
     await expect(page.locator(".ub-status")).not.toContainText(recovery);
-    await page.getByRole("button", { name: /^Sync details/ }).tap();
+    await page.locator(".ub-status-sync").tap();
     await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd')).toHaveText(recovery);
     await page.keyboard.press("Escape");
     if (cause === "no-hub-credentials") {
@@ -323,8 +336,8 @@ test("device recovery notices preserve local editing and native tablet touch con
   }
 
   notSharedReason = null;
-  await expect(shared).toHaveText("synced with hub");
-  await expect(notices).toHaveCount(0);
+  await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
+  await withPageTimers(page, () => expect(notices).toHaveCount(0));
   expect(await page.evaluate(
     (key) => (window as unknown as Record<string, unknown>)[key] === true,
     samePageMarker,

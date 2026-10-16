@@ -31,7 +31,7 @@ const { harness } = setupHarness();
 /** A fresh document, open and focused, with one paragraph of prose in it. */
 async function openDoc(page: Page, seed: string): Promise<void> {
   await page.goto(harness().appUrl);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, "block menu");
 
   await placeCaret(page);

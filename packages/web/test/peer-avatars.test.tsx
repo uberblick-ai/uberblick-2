@@ -299,6 +299,38 @@ describe("the compact collaborator cluster", () => {
     draw([]);
     expect(document.activeElement).toBe(within(host).getByRole("button", { name: "Sync details" }));
   });
+
+  it("returns focus to Document actions when the final peer leaves a workspace without a hub", () => {
+    const fix = roomFixture(`${WORKSPACE}/${DOC_UUID}`);
+    const tree = (sessions: readonly RemotePresence[]) => (
+      <section className="ub-document-pane">
+        <header>
+          <button type="button" aria-label="Document actions">⋯</button>
+        </header>
+        <StatusLine
+          connection={fix.connection}
+          presence={sessions}
+          endpoint={{ url: "local", source: "document" }}
+          documentLayout
+        />
+      </section>
+    );
+    const view = render(tree(peers(1)));
+    try {
+      const actions = within(view.container).getByRole("button", { name: "Document actions" });
+      expect(view.container.querySelector(".ub-status-sync")).toBeNull();
+      act(() => within(view.container).getByRole("button", { name: "Peer 1 · person · editing block 1" }).focus());
+
+      view.rerender(tree([]));
+
+      expect(document.activeElement).toBe(actions);
+      expect(within(view.container).queryByRole("button", { name: /^Peer 1/ })).toBeNull();
+    } finally {
+      view.unmount();
+      fix.awareness.destroy();
+      fix.ydoc.destroy();
+    }
+  });
 });
 
 /**

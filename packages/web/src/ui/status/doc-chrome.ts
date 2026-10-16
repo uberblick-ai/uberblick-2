@@ -200,9 +200,6 @@ export function samePresence(
   );
 }
 
-/** How much of the document rev the meta line shows. */
-const REV_LENGTH = 8;
-
 /** The top-level block containing an event, or null for a fragment event. */
 function blockElementOf(
   target: Y.AbstractType<unknown>,
@@ -244,7 +241,7 @@ export function observeDocRev(ydoc: Y.Doc, emit: (rev: string) => void): () => v
       lines.push(`${id} ${rev}`);
     }
     revs = next;
-    return blockRev({ type: "paragraph", text: lines.join("\n") }).slice(0, REV_LENGTH);
+    return blockRev({ type: "paragraph", text: lines.join("\n") });
   };
 
   const onChange = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>): void => {

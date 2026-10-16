@@ -85,7 +85,7 @@ interface StatusClaim {
   words: string[];
 }
 
-/** Record every sync word painted during a navigation. */
+/** Record every visible sync claim and the dot's accessible reading. */
 async function watchStatusClaims(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as Record<string, unknown>;
@@ -93,9 +93,10 @@ async function watchStatusClaims(page: Page): Promise<void> {
     const read = (): void => {
       claims.push({
         path: window.location.pathname,
-        words: [...document.querySelectorAll(".ub-status-word")].map(
-          (node) => node.textContent ?? "",
-        ),
+        words: [
+          ...[...document.querySelectorAll(".ub-status-word, .ub-status-offline, .ub-not-saved")].map((node) => node.textContent ?? ""),
+          document.querySelector(".ub-status-sync")?.getAttribute("aria-label") ?? "",
+        ],
       });
     };
     read();
@@ -104,6 +105,8 @@ async function watchStatusClaims(page: Page): Promise<void> {
       childList: true,
       characterData: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-label"],
     });
     w.__statusClaims = claims;
     w.__statusClaimsStop = () => {
@@ -167,7 +170,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   browser,
 }) => {
   const author = await openApp(browser);
-  await expect(author.locator(".ub-list-head")).toBeVisible();
+  await expect(author.locator(".ub-document-sidebar")).toBeVisible();
 
   // `/` is not an address; the workspace is. The redirect comes from the
   // build-time `WORKSPACE_ID`, which is the only thing that answers `/`.
@@ -194,7 +197,7 @@ test("a document's URL is its address: the sidebar writes it, history walks it, 
   expect(await sessionSurvived(author)).toBe(true);
   expect(await wasEverInserted(author)).toBe(false);
   const claims = await statusClaims(author);
-  expect(claims.flatMap(({ words }) => words)).not.toContain("offline");
+  expect(claims.flatMap(({ words }) => words).filter((word) => /^Offline|^not saved$/.test(word))).toEqual([]);
 
   // ---- Back and Forward re-open what was viewed ----
   await author.goBack();
@@ -241,7 +244,8 @@ test("a reloaded document whose server is unreachable shows no prior content", a
   try {
     await page.reload();
 
-    await expect(page.locator(".ub-status-word")).toHaveText("offline");
+    await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
+    await expect(page.locator(".ub-status")).not.toContainText("Changes are saved on this device.");
     await expect(page.locator(".ub-notice")).toContainText("Waiting for sync");
     await expect(page.locator(".ub-title")).toHaveCount(0);
     await expect(editor(page)).toHaveCount(0);
@@ -274,7 +278,7 @@ test("the switcher moves between two workspaces, and their corpora do not mix", 
   await expect(page).toHaveURL(new RegExp(`/${harness().secondWorkspace}$`));
   // Synced *and* empty — the difference between a corpus this hub kept to
   // itself and a directory that simply had not arrived yet.
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
   // The sidebar is per workspace like every other room, so the second one has
   // nothing pinned in it — not even the document just made in the first.
   await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet");
@@ -302,7 +306,7 @@ test("a development binding keeps its local key with its loopback endpoint", asy
     });
     const page = await context.newPage();
     await page.goto(fallback.appUrl);
-    await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+    await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     const title = docTitle("unbound-dev");
     const uuid = await createDoc(page, title);
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
@@ -365,12 +369,12 @@ test("the served configuration names the workspaces, and the build's define is o
 
   // The endpoint came out of the same document: an empty corpus that reports
   // itself *synced* is a hub that answered, not a socket that never opened.
-  await expect(page.locator(".ub-list-head .ub-muted")).toHaveText("directory synced");
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
 
-  // And the surfaces say *which* document decided it. This is the only
+  // Sync details says which document decided it. This is the only
   // place that can be shown end to end: `resolveClientConfig` memoises per
   // module, so a component test can hold one resolved endpoint, never the path
-  // from a served document through the shell to both surfaces. On a document
+  // from a served document through the shell to the panel. On a document
   // route, because that is where the status surfaces are.
   await createDoc(page, docTitle("served"), { pin: true });
   await page.locator(".ub-sync-toggle").click();
@@ -382,12 +386,9 @@ test("the served configuration names the workspaces, and the build's define is o
   // `test/sync-panel.test.tsx` — matched loosely here so this test says only
   // what it is for.
   await expect(source).toHaveText(/^served\b/);
-  // The pill a reader glances at carries the panel's own answer. Read from one
-  // surface and matched against the other, because what breaks is one of them
-  // keeping the resolved endpoint while the other quietly falls back.
-  expect(await page.locator(".ub-sync-toggle").getAttribute("title")).toContain(
-    `(${(await source.innerText()).trim()})`,
-  );
+  await expect(page.getByRole("dialog", { name: "Sync and presence" })
+    .locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(harness().hubUrl);
+  await expect(page.locator(".ub-sync-toggle")).toHaveAccessibleName(/^(Sync details|Synced with hub .+)$/);
   await page.keyboard.press("Escape");
 
   // And the menu navigates, exactly as it does for a configured build.
@@ -424,7 +425,7 @@ test("a rebound local-serving document stays visible without blocking the page",
 
   // The state is information, not an interlock: an ordinary write still takes
   // the same path to the local serving process underneath it.
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-title")).toHaveValue("Untitled");
   await expect(notice).toBeVisible();
 

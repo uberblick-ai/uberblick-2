@@ -198,6 +198,19 @@ export async function proveBrowserArrival(page: Page, options: {
   });
 }
 
+/** A title input can write a marker without releasing an active pointer gesture. */
+export async function proveBrowserTitleArrival(page: Page, options: {
+  path: "upstream"; readTitle: () => string | Promise<string>;
+}): Promise<void> {
+  await test.step("later browser title reaches the upstream hub replica reader", async () => {
+    const input = page.locator(".ub-title");
+    const title = `${await input.inputValue()} arrival`;
+    await input.fill(title);
+    await waitForAcknowledged(page, { path: options.path });
+    await expect.poll(options.readTitle).toBe(title);
+  });
+}
+
 /** Observe a later metadata write at both pages before checking unchanged document content. */
 export async function proveDocumentPageArrival(actor: Page, reader: Page, options: { path: SyncPath }): Promise<void> {
   const throughRelay = await actor.locator(".ub-status[data-local-sync]").getAttribute("data-upstream-sync") !== null;

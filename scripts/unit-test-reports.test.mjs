@@ -130,28 +130,37 @@ test("CI=true outside GitHub Actions creates no report", () => {
 });
 
 const workflowPath = join(root, ".github/workflows/ci.yml");
-test("report uploads use distinct attempt names and cannot change either required check's conclusion", {
+function workflowExpression(value) {
+  return ["$", `{{ ${value} }}`].join("");
+}
+
+test("report uploads isolate each Linux job and attempt without changing test conclusions", {
   skip: existsSync(workflowPath) ? undefined : ".github/workflows is absent from the isolated review context",
 }, () => {
   const workflow = readFileSync(workflowPath, "utf8");
-  const checks = workflow.match(/^ {2}checks:\n([\s\S]*?)(?=^ {2}[\w-]+:)/m)?.[1];
-  assert.ok(checks, "the required test matrix exists");
-  assert.match(checks, /^ {4}name: \$\{\{ matrix.name \}\}$/m);
-  assert.match(checks, /^ {12}name: lint, typecheck and tests$/m);
-  assert.match(checks, /^ {12}name: macOS tests$/m);
-  assert.doesNotMatch(checks, /^ {4}continue-on-error:/m);
-  const steps = checks.split(/^ {6}- /m).slice(1);
-  const upload = steps.find((step) => step.includes("uses: actions/upload-artifact@"));
-  assert.ok(upload, "per-test reports are uploaded");
-  for (const id of ["test-linux", "test-macos"]) {
-    const step = steps.find((entry) => entry.includes(`id: ${id}\n`));
-    assert.ok(step, `${id} has an observable outcome`);
-    assert.ok(steps.indexOf(step) < steps.indexOf(upload), "upload follows both test steps");
+  for (const [job, testId, artifact] of [
+    ["unit-tests", "test-packages", `vitest-Linux-${workflowExpression("matrix.id")}-${workflowExpression("github.run_id")}-attempt-${workflowExpression("github.run_attempt")}`],
+    ["macos", "test-macos", `vitest-${workflowExpression("runner.os")}-${workflowExpression("github.run_id")}-attempt-${workflowExpression("github.run_attempt")}`],
+  ]) {
+    const body = workflow.match(new RegExp(`^ {2}${job}:\\n((?: {4}.*\\n|\\n)*)`, "m"))?.[0];
+    assert.ok(body, `${job} runs test suites`);
+    assert.doesNotMatch(body, /^ {4}continue-on-error:/m);
+    const steps = body.split(/^ {6}- /m).slice(1);
+    const uploads = steps.filter((step) => step.includes("uses: actions/upload-artifact@"));
+    assert.equal(uploads.length, 1, `${job} uploads its own per-test reports`);
+    const [upload] = uploads;
+    const step = steps.find((entry) => entry.includes(`id: ${testId}\n`));
+    assert.ok(step, `${testId} has an observable outcome`);
+    assert.ok(steps.indexOf(step) < steps.indexOf(upload), "upload follows the package test step");
     assert.doesNotMatch(step, /continue-on-error:/, "package failures still fail their check");
+    assert.equal(upload.match(/^ {8}if: (.+)$/m)?.[1],
+      workflowExpression(`always() && (steps.${testId}.outcome == 'success' || steps.${testId}.outcome == 'failure')`),
+      "uploads remain eligible after a failed test step");
+    assert.match(upload, /^ {8}continue-on-error: true$/m);
+    assert.match(upload, /^ {8}timeout-minutes: 1$/m);
+    assert.match(upload, /^ {8}uses: actions\/upload-artifact@[a-f0-9]{40}(?: #.*)?$/m);
+    assert.equal(upload.match(/^ {10}name: (.+)$/m)?.[1], artifact);
+    assert.match(upload, /^ {10}path: \$\{\{ runner.temp \}\}\/vitest-results\/$/m);
+    assert.doesNotMatch(upload, /^ {10}overwrite: true$/m);
   }
-  assert.match(upload, /^ {8}if: .*always\(\)/m, "uploads remain eligible after a failed step");
-  assert.match(upload, /^ {8}continue-on-error: true$/m);
-  assert.match(upload, /^ {8}uses: actions\/upload-artifact@[a-f0-9]{40}(?: #.*)?$/m);
-  assert.match(upload, /^ {10}name: .*\$\{\{ runner.os \}\}.*\$\{\{ github.run_id \}\}.*\$\{\{ github.run_attempt \}\}.*$/m);
-  assert.match(upload, /^ {10}path: \$\{\{ runner.temp \}\}\/vitest-results\/$/m);
 });

@@ -11,7 +11,7 @@ for (const path of ["relay", "upstream"] as const) {
     const replies: (() => void)[] = [];
     const page = await openApp(browser, "/", {
       upstream: path === "upstream",
-      readySelector: ".ub-list-head",
+      readySelector: ".ub-document-sidebar",
       beforeNavigate: async page => {
         await page.routeWebSocket(/.*/, socket => {
           const server = socket.connectToServer();

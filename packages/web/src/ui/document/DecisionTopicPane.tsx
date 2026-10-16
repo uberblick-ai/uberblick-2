@@ -39,33 +39,108 @@ function recordState(topic: DecisionTopicResolution, record: DirectoryEntry): st
   return "Decided";
 }
 
-function RecordedAttribution({ record }: { record: DirectoryEntry }): ReactElement | null {
-  if (record.agentStance || (record.status !== "decided" && record.status !== "rejected")) return null;
-  if (!record.decidedBy && !record.decidedAt) return null;
-  return <p className="ub-muted ub-decision-attribution">
-    {record.status === "rejected" ? "Rejected" : "Decided"}
-    {record.decidedBy && <> by {record.decidedBy}</>}
-    {record.decidedAt && <> · {record.decidedAt}</>}
-  </p>;
+const ANSWER_STATES = {
+  ...TOPIC_STATES,
+  conflict: "Conflicting answer",
+  "open-proposal": "Open proposal",
+  superseded: "Superseded",
+  rejected: "Rejected",
+  withdrawn: "Withdrawn",
+  decided: "Decided",
+};
+
+type AnswerState = keyof typeof ANSWER_STATES;
+
+function answerState(topic: DecisionTopicResolution, record: DirectoryEntry): AnswerState {
+  if (topic.conflicts.some((entry) => entry.uuid === record.uuid)) return "conflict";
+  if (topic.superseded.some((entry) => entry.uuid === record.uuid)) return "superseded";
+  if (record.status === "open") {
+    if (topic.inForce !== null) return "under-review";
+    return topic.conflicts.length > 0 ? "open-proposal" : "not-yet-decided";
+  }
+  if (topic.inForce?.uuid === record.uuid) return record.agentStance ? "agent-stance" : "in-force";
+  return record.status ?? "decided";
 }
 
-function TopicNotice({ topic, docLinks }: {
-  topic: DecisionTopicResolution; docLinks: DocLinkContext | null;
+function RecordedAttribution({ record, state, now }: {
+  record: DirectoryEntry; state: AnswerState; now: number;
+}): ReactElement | null {
+  const opened = record.status === "open" || record.status === "withdrawn";
+  const date = opened || record.agentStance ? record.createdAt : record.decidedAt;
+  const time = date === undefined ? null : formatTimestamp(date, now, true);
+  const label = opened ? (time === null ? null : "Opened")
+    : record.agentStance ? (state === "agent-stance" ? null : "Agent stance")
+    : record.decidedBy?.trim() ? record.decidedBy : null;
+  if (!label && time === null) return null;
+  return <span className="ub-decision-attribution">
+    {label}
+    {label && time !== null && (opened ? " " : " · ")}
+    {time !== null && <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}
+  </span>;
+}
+
+function TopicNotice({ topic, state: selectedState, docLinks }: {
+  topic: DecisionTopicResolution; state: AnswerState; docLinks: DocLinkContext | null;
 }): ReactElement | null {
   const state = decisionTopicState(topic);
   if (state === "conflict") return <p className="ub-decision-notice"><strong>Nothing is in force.</strong> Approved answers conflict. Select an answer in the timeline to read it.</p>;
   if (state === "not-yet-decided") {
     const latestOpen = topic.records.findLast((record) => record.status === "open");
-    return <p className="ub-decision-notice">Not yet decided.
+    if (selectedState === state && !latestOpen?.discussion) return null;
+    return <p className="ub-decision-notice">{selectedState !== state && "Not yet decided."}
       {latestOpen?.discussion && <> <DocumentReference uuid={latestOpen.discussion} label="Open proposal" context={docLinks} /></>}
     </p>;
   }
   if (state !== "under-review") return null;
   const single = topic.pending.length === 1 ? topic.pending[0] : undefined;
-  return <p className="ub-decision-notice"><strong>Under review.</strong>{" "}
+  return <p className="ub-decision-notice">{selectedState !== state && <><strong>Under review.</strong>{" "}</>}
     {single === undefined ? `${topic.pending.length} pending proposals.` : "The current answer stays in force."}
     {single?.discussion && <> <DocumentReference uuid={single.discussion} label="Open proposal" context={docLinks} /></>}
   </p>;
+}
+
+function replacementRecord(topic: DecisionTopicResolution, selected: string): DirectoryEntry | undefined {
+  const byId = new Map(topic.records.map((record) => [record.uuid, record]));
+  // Records are oldest first; a missing first replacement date must not fall through to a later answer.
+  return topic.records.find((record) => {
+    if (record.status !== "decided" || record.uuid === selected) return false;
+    const visited = new Set<string>([record.uuid]);
+    let next = record.supersedes;
+    while (next !== undefined && !visited.has(next)) {
+      if (next === selected) return true;
+      visited.add(next);
+      next = byId.get(next)?.supersedes;
+    }
+    return false;
+  });
+}
+
+function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
+  topic: DecisionTopicResolution; record: DirectoryEntry; topicPath: string;
+  navigate: Navigate; docLinks: DocLinkContext | null;
+}): ReactElement {
+  const now = useTimestampClock();
+  const state = answerState(topic, record);
+  const replacement = state === "superseded" ? replacementRecord(topic, record.uuid) : undefined;
+  const replacedAt = replacement?.decidedAt === undefined ? null : formatTimestamp(replacement.decidedAt, now, true);
+  return <>
+    <TopicNotice topic={topic} state={state} docLinks={docLinks} />
+    <div className="ub-decision-answer-header">
+      <div className="ub-decision-answer-heading">
+        <span className="ub-decision-answer-caption">ANSWER</span>
+        <span className="ub-decision-answer-state" data-state={state}>
+          <span className="ub-decisions-mark" aria-hidden="true" />{ANSWER_STATES[state]}
+        </span>
+      </div>
+      <RecordedAttribution record={record} state={state} now={now} />
+    </div>
+    {state === "superseded" && <p className="ub-decision-earlier-answer">
+      Earlier answer. {replacedAt === null ? "It no longer applies." : <>Replaced <time dateTime={replacedAt.dateTime} title={replacedAt.title}>{replacedAt.label}</time>; it no longer applies.</>}
+    </p>}
+    {topic.inForce !== null && topic.inForce.uuid !== record.uuid && <p className="ub-decision-current-answer">
+      <a href={topicPath} onClick={(event) => navigateLink(event, navigate)}>Go to the current answer</a>
+    </p>}
+  </>;
 }
 
 function Timeline({ topic, selected, linkedRecord, segment, navigate, docLinks }: {
@@ -115,27 +190,23 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
   const history = topic.inForce?.uuid !== selected;
   const topicPath = docPath(segment, topic.topic);
   const rejectionReason = connection === null ? undefined : getMeta(connection.ydoc).rejectionReason;
-  const relatedTitle = current.governs === undefined || directoryConnection === null ? undefined
-    : getDirectoryEntry(directoryConnection.ydoc, current.governs)?.title || undefined;
+  const discussionTitle = !record.discussion || directoryConnection === null ? undefined
+    : getDirectoryEntry(directoryConnection.ydoc, record.discussion)?.title || undefined;
   return <EditorPane {...editorProps}
     decisionView
     copyPath={explicit ? decisionRecordPath(segment, topic.topic, selected) : topicPath}
-    header={<>
-      <h1 className="ub-title">{current.title || "Untitled"}</h1>
-      {current.governs && <p className="ub-decision-related">Related page: <DocumentReference uuid={current.governs} label={relatedTitle} context={docLinks} /></p>}
-    </>}
+    header={<h1 className="ub-title">{current.title || "Untitled"}</h1>}
     beforeAnswer={<>
-      <p className="ub-decision-topic-state">{TOPIC_STATES[decisionTopicState(topic)]}</p>
-      <TopicNotice topic={topic} docLinks={docLinks} />
-      <div className="ub-decision-answer-label">
-        <strong>{history ? `History · ${recordState(topic, record)}` : recordState(topic, record)}</strong>
-        {history && record.agentStance && <span>Agent stance</span>}
-        {history && topic.inForce !== null && <a href={topicPath} onClick={(event) => navigateLink(event, navigate)}>Go to the current answer</a>}
-      </div>
-      <RecordedAttribution record={record} />
+      <AnswerHeader topic={topic} record={record} topicPath={topicPath} navigate={navigate} docLinks={docLinks} />
       {record.status === "rejected" && rejectionReason && <p className="ub-decision-rejection">Rejection reason: {rejectionReason}</p>}
     </>}
     answerClassName={history ? "ub-decision-answer ub-decision-answer-history" : "ub-decision-answer"}
-    afterAnswer={<Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} />}
+    afterAnswer={<>
+      {record.discussion && docLinks !== null && <p className="ub-decision-rfc">
+        <span>RFC</span>{" "}
+        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} />
+      </p>}
+      <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} />
+    </>}
   />;
 }

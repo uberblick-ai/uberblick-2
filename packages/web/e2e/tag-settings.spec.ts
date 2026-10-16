@@ -56,7 +56,7 @@ test("a workspace rename reaches another page live and preserves its document li
   await expect(second.getByRole("button", { name: "Back to Product Research", exact: true })).toBeVisible();
 
   await second.getByRole("button", { name: "Back to Product Research", exact: true }).click();
-  await second.getByRole("button", { name: "+ new doc" }).click();
+  await second.getByRole("button", { name: "+ New page" }).click();
   await expect(second.locator(".ub-title")).toHaveValue("Untitled");
   await second.locator(".ub-title").fill("Workspace rename links");
   await waitForAcknowledged(second, { path: "relay" });
@@ -147,7 +147,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   // control, overlaid without shifting the title, and the same identity on a
   // second client.
   await first.locator(".ub-settings-back").click();
-  await first.getByRole("button", { name: "+ new doc" }).click();
+  await first.getByRole("button", { name: "+ New page" }).click();
   const documentUrl = first.url();
   const title = first.locator(".ub-title");
   const titleBefore = await title.boundingBox();

@@ -186,7 +186,7 @@ test("a release bundle makes no implicit connection and uses a valid served endp
       if (kind === "valid") {
         await expect.poll(() => sockets.length).toBeGreaterThan(0);
         expect(sockets.every((url) => url === endpoint || url === `${endpoint}/`)).toBe(true);
-        await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
       } else {
         await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
         expect(sockets, kind).toEqual([]);
@@ -236,7 +236,7 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await commands.last().scrollIntoViewIfNeeded();
       await expect(commands.last()).toBeInViewport({ ratio: 1 });
-      await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "+ New page" })).toHaveCount(0);
       await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
       expect(sockets).toEqual([]);
     }
@@ -263,7 +263,7 @@ test("ub open's local page ignores remote claim state and keeps its editor", asy
     } });
   });
   await page.goto(`${appUrl}/${WORKSPACE}`);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Hub setup guide" })).toHaveCount(0);
   expect(claimReads).toBe(0);
 });
@@ -307,7 +307,7 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
     await page.goto(`${running.appUrl}/${result.claimedWorkspaceId}/00000000-0000-4000-8000-000000000002`);
     await expect(page.getByText("Signed in as browser-person.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "+ new doc" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "+ New page" })).toHaveCount(0);
     await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Hub setup guide" })).toContainText("ub open");
     expect(sockets).toEqual([]);

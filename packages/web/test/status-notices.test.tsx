@@ -1,5 +1,6 @@
 /** Status notices follow the same settled, room-scoped facts as their header. */
 import { act, cleanup, render } from "./react-render.js";
+import * as Y from "yjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/document/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
@@ -44,15 +45,16 @@ function room(
     tokenMissing: false,
     ...patch,
   };
-  let observer: ((next: RoomStatus) => void) | undefined;
+  const observers = new Set<(next: RoomStatus) => void>();
   const connection = {
     room: key,
+    ydoc: new Y.Doc(),
     provider: { awareness: null },
     get status() { return status; },
     onStatusChange: (listener: (next: RoomStatus) => void) => {
-      observer = listener;
+      observers.add(listener);
       listener(status);
-      return () => { observer = undefined; };
+      return () => { observers.delete(listener); };
     },
   } as unknown as RoomConnection;
   return {
@@ -60,7 +62,7 @@ function room(
     change: (next) => {
       act(() => {
         status = { ...status, ...next };
-        observer?.(status);
+        for (const observer of observers) observer(status);
       });
     },
   };
@@ -180,7 +182,7 @@ describe("notices agree with the header's settled reading", () => {
     const current = room();
     const view = render(line({ connection: current.connection, hubAcked: false, notSharedReason }));
     settle();
-    expect(view.container.textContent).toContain("saved here");
+    expect(view.container.textContent).not.toContain("saved here");
     expect(view.container.textContent).toContain("not shared with hub");
     expect(view.container.textContent).not.toContain(message);
     expect(onlyNotice()).toMatchObject({ severity: "warning", message });
@@ -204,7 +206,7 @@ describe("notices agree with the header's settled reading", () => {
     const current = room();
     const view = render(line({ connection: current.connection, hubAcked: false }));
     settle();
-    expect(view.container.textContent).toContain("not synced with hub");
+    expect(view.container.textContent).not.toContain("not synced with hub");
     expect(notices.notifySticky).not.toHaveBeenCalled();
   });
 
@@ -212,9 +214,7 @@ describe("notices agree with the header's settled reading", () => {
     const current = room({ unsyncedChanges: 4 });
     const view = render(line({ connection: current.connection, ...(hubAcked === undefined ? {} : { hubAcked }) }));
     settle();
-    expect(view.container.querySelector(".ub-status-word")?.textContent).toBe(
-      hubAcked === undefined ? "syncing…" : "saving here…",
-    );
+    expect(view.container.querySelector(".ub-status-word")).toBeNull();
     expect(view.container.textContent).not.toContain("sync messages");
     expect(notices.notifySticky).not.toHaveBeenCalled();
   });

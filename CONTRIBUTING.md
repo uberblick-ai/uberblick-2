@@ -285,12 +285,25 @@ On `main` the same run records whether `main` itself is clean. A pull
 request's run uses that pull request's own recipe, so a change to what CI runs
 is reviewed as a change to the merge rules.
 
-The two unit-test jobs keep their dot logs and upload `vitest-Linux-<run>-attempt-<n>`
-and `vitest-macOS-<run>-attempt-<n>` artifacts, including on test failure. Each
-package's JUnit XML gives the test file (the suite name), full test name, result,
-duration and failure details. `package-times.json` gives package wall times.
+Linux unit tests run in four independent jobs: `cli tests`, `mcp-server tests`,
+`web tests` and `hub, schema and scripts tests`. A failing job leaves the others
+running. `lint, typecheck and site` runs those three checks together, continuing
+after a failure. The required `lint, typecheck and tests` aggregate succeeds only
+when that job and all four Linux unit-test jobs succeed; failure, cancellation
+or a skipped job fails the aggregate. A new workspace package must be assigned
+to a Linux job or the script contract tests fail.
+
+Unit-test jobs keep their dot logs and upload
+`vitest-Linux-<group>-<run>-attempt-<n>` (`cli`, `mcp-server`, `web` or
+`hub-schema-scripts`) and `vitest-macOS-<run>-attempt-<n>` artifacts, including
+on test failure. Each package's JUnit XML gives the test file (the suite name),
+full test name, result,
+duration and failure details. Shared package runs also include
+`package-times.json` with package wall times.
 Rerunning failed or selected jobs (`gh run rerun <run> --failed` or `--job <job-id>`)
-keeps earlier attempts' reports beside the new reports. "Re-run all jobs" deletes
+keeps earlier attempts' reports beside the new reports. A failed Linux package
+job reruns with its aggregate, leaving successful jobs alone. Uploads are best
+effort and cannot change a job's conclusion. "Re-run all jobs" deletes
 earlier attempts' reports. A process killed before reporting, or a job timeout,
 can leave a missing report; check its log for the cause.
 Reports live in the Actions runner's temporary directory; local runs, including
@@ -307,8 +320,10 @@ attempts' artifacts. A job timeout or cancellation can prevent an upload.
 `pnpm test` and `pnpm run test:os` share one worker budget across concurrent
 packages. Each command divides a budget of three times the machine's available
 cores among its slots: up to four concurrent suites for `pnpm test`, and two for
-`pnpm run test:os`. `pnpm --filter <package> test` uses that package's standalone
-worker setting.
+`pnpm run test:os`. The shared Linux hub/schema job uses the same budget with
+two slots. `pnpm --filter <package> test`, including each standalone Linux
+package job, uses that package's standalone worker setting. Local
+`mise run test`, `mise run ci` and `mise run review` retain the full suites.
 
 Merging also requires CodeQL code scanning results: a pull request that introduces
 a security alert at high or above cannot merge. Lower-severity and non-security

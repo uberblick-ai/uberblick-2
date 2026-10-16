@@ -9,6 +9,7 @@ import {
   COMMENT_MARK,
   CARD_PARTS,
   cardPartTexts,
+  figmaCaptionTexts,
   getAnnotationsMap,
   getBlocks,
   getBlocksFragment,
@@ -151,7 +152,7 @@ interface Anchor {
   end: number;
   row?: number;
   column?: number;
-  part?: CardPart;
+  part?: CardPart | "caption";
   text: string;
 }
 
@@ -179,7 +180,7 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
     const blockId = child.getAttribute("id") ?? "";
     if (blockId === "" || claimed.has(blockId)) continue;
     claimed.add(blockId);
-    const read = (texts: Y.XmlText[], coordinates: { row: number; column: number } | { part: CardPart } | undefined): void => {
+    const read = (texts: Y.XmlText[], coordinates: { row: number; column: number } | { part: CardPart | "caption" } | undefined): void => {
       const plain = texts.map(plainXmlText).join("");
       // Adjacent ops carrying the same thread are one run, even across texts
       // left by concurrent first writes into a cell paragraph.
@@ -221,6 +222,8 @@ function anchorsByThread(ydoc: Y.Doc): Map<string, Anchor> {
       }
     } else if (child.nodeName === "card") {
       for (const part of CARD_PARTS) read(cardPartTexts(child, part), { part });
+    } else if (child.nodeName === "figma") {
+      read(figmaCaptionTexts(child), { part: "caption" });
     } else {
       const text = child.firstChild;
       if (text instanceof Y.XmlText) read([text], undefined);
@@ -286,7 +289,8 @@ export function threadsFromDoc(ydoc: Y.Doc): ThreadView[] {
     const index = order.get(anchor?.blockId ?? view.blockId) ?? Number.MAX_SAFE_INTEGER;
     // Use -1 for orphan offsets so UUID order cannot tie them with a live
     // anchor at offset zero.
-    const partOrder = anchor?.part === undefined ? anchor?.row ?? -1 : CARD_PARTS.indexOf(anchor.part);
+    const partOrder = anchor?.part === undefined ? anchor?.row ?? -1
+      : anchor.part === "caption" ? 0 : CARD_PARTS.indexOf(anchor.part);
     return [index, partOrder, anchor?.column ?? -1, anchor?.start ?? -1];
   };
   return views.sort((a, b) => {

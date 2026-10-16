@@ -247,7 +247,7 @@ export async function openUpstreamApp(
     const page = await context.newPage();
     await options.beforeNavigate?.(page);
     await page.goto(new URL(path, running.appUrl).href);
-    const readySelector = options.readySelector === undefined ? ".ub-list-head" : options.readySelector;
+    const readySelector = options.readySelector === undefined ? ".ub-document-sidebar" : options.readySelector;
     if (readySelector !== null) await expect(page.locator(readySelector)).toBeVisible();
     return { context, page };
   } catch (error) {
@@ -378,6 +378,8 @@ export async function startHarness(options: {
   compiledFallback?: boolean;
   /** Offer a real on-machine replica backed by a separate authenticated hub. */
   multiWorkspace?: boolean;
+  /** Offer a healthy second replica that stays entirely on this device. */
+  localReplica?: boolean;
 } = {}): Promise<Harness> {
   const startupStarted = performance.now();
   const shared = sharedAppBundle();
@@ -477,7 +479,7 @@ export async function startHarness(options: {
         foreignDeviceId: foreignDevice.record.deviceId, deviceName };
     }
     let secondHubUrl: string | undefined;
-    if (options.multiWorkspace === true) {
+    if (options.multiWorkspace === true || options.localReplica === true) {
       // Use the real CLI to create a healthy on-machine replica before serving.
       // Its separate project leaves the startup project's binding untouched.
       const project = join(runDir, "second-project");
@@ -489,24 +491,26 @@ export async function startHarness(options: {
       if (created.status !== 0) throw new Error(`e2e: second replica creation failed\n${created.stderr}`);
       const binding = JSON.parse(readFileSync(join(project, ".uberblick.json"), "utf8")) as { workspaceId: string };
       secondWorkspace = binding.workspaceId;
-      secondHub = await createHub({ ...config, databasePath: join(runDir, "second-hub.sqlite") }, { deviceCredentials: true });
-      secondHubUrl = `ws://127.0.0.1:${secondHub.port}`;
-      writeFileSync(join(project, ".uberblick.json"),
-        `${JSON.stringify({ workspaceId: secondWorkspace, hubUrl: secondHubUrl }, null, 2)}\n`, { mode: 0o600 });
-      const { principals, memberships, credentials: registry } = secondHub;
-      if (principals === undefined || memberships === undefined || registry === undefined) throw new Error("Second hub needs device registries");
-      const principal = principals.identify("4321", "second-person");
-      memberships.grant({ workspaceId: secondWorkspace, principalId: principal.id, role: "admin" });
-      const issued = registry.issue({ principalId: principal.id, deviceId: randomUUID(), workspaces: [secondWorkspace] });
-      const { replacedAt: _replaced, ...record } = issued.record;
-      const logins = storedCredentials as { hubLogins: Record<string, unknown> };
-      logins.hubLogins[`http://127.0.0.1:${secondHub.port}`] = {
-        identity: principal, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") },
-      };
-      // This fixture represents a replica already fetched from that hub.
-      writeFileSync(join(configDir, "workspaces.json"), `${JSON.stringify({
-        [workspaceUuid]: hubUrl, [secondWorkspace]: secondHubUrl,
-      }, null, 2)}\n`, { mode: 0o600 });
+      if (options.multiWorkspace === true) {
+        secondHub = await createHub({ ...config, databasePath: join(runDir, "second-hub.sqlite") }, { deviceCredentials: true });
+        secondHubUrl = `ws://127.0.0.1:${secondHub.port}`;
+        writeFileSync(join(project, ".uberblick.json"),
+          `${JSON.stringify({ workspaceId: secondWorkspace, hubUrl: secondHubUrl }, null, 2)}\n`, { mode: 0o600 });
+        const { principals, memberships, credentials: registry } = secondHub;
+        if (principals === undefined || memberships === undefined || registry === undefined) throw new Error("Second hub needs device registries");
+        const principal = principals.identify("4321", "second-person");
+        memberships.grant({ workspaceId: secondWorkspace, principalId: principal.id, role: "admin" });
+        const issued = registry.issue({ principalId: principal.id, deviceId: randomUUID(), workspaces: [secondWorkspace] });
+        const { replacedAt: _replaced, ...record } = issued.record;
+        const logins = storedCredentials as { hubLogins: Record<string, unknown> };
+        logins.hubLogins[`http://127.0.0.1:${secondHub.port}`] = {
+          identity: principal, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") },
+        };
+        // This fixture represents a replica already fetched from that hub.
+        writeFileSync(join(configDir, "workspaces.json"), `${JSON.stringify({
+          [workspaceUuid]: hubUrl, [secondWorkspace]: secondHubUrl,
+        }, null, 2)}\n`, { mode: 0o600 });
+      }
     }
     writeFileSync(credentials, `${JSON.stringify(storedCredentials, null, 2)}\n`, {
       mode: 0o600,

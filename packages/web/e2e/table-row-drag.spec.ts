@@ -14,6 +14,7 @@ import * as Y from "yjs";
 import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { proveBrowserArrival } from "./settle.js";
+import { advancePageTimers, installPageTimers, pausePageTimers, resumePageTimers } from "./page-timers.js";
 
 const { harness, trackContext, ws } = setupHarness();
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | one |\n| beta | two |\n| gamma | three |";
@@ -362,6 +363,8 @@ test("pane edge scrolling reaches the gap after a tall table's last row", async 
     await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(initialScroll + 80);
     await expect.poll(async () => (await box(table.locator("tr").last())).y).toBeLessThan(paneBox.y + paneBox.height - 15);
     await expect(bodyNames(table)).toHaveText(names);
+    // Measure the final gap after edge scrolling stops moving its position.
+    await expect.poll(() => pane.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
     await overGap(page, table, 36);
     await page.mouse.up();
     await expect(bodyNames(table)).toHaveText([...names.slice(1), names[0] ?? ""]);
@@ -417,6 +420,7 @@ test("an immediate touch swipe from a row handle scrolls without picking up a ro
   test.skip(browserName !== "chromium", "Native swipe automation requires Chromium's input protocol");
   const source = `| A | B |\n| --- | --- |\n${Array.from({ length: 30 }, (_, index) => `| row ${index + 1} | value |`).join("\n")}`;
   const page = await nativeTouchPage(browser);
+  await installPageTimers(page);
   const fixture = await publishTable(source);
   const session = await page.context().newCDPSession(page);
   try {
@@ -427,19 +431,29 @@ test("an immediate touch swipe from a row handle scrolls without picking up a ro
     const pane = page.locator(".ub-document-pane");
     const before = await pane.evaluate((element) => element.scrollTop);
     const sharedBefore = Y.encodeStateVector(fixture.doc);
+    await pausePageTimers(page);
     await touch(session, "touchStart", point);
+    // Cross the pickup tolerance before the browser takes over native scrolling.
+    await touch(session, "touchMove", { x: point.x, y: point.y - 6 });
+    await advancePageTimers(page, 251);
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+    await expect(indicator(page)).toHaveCount(0);
     for (let step = 1; step <= 6; step += 1) {
       await touch(session, "touchMove", { x: point.x, y: point.y - step * 15 });
-      // Pace six moves within the 250 ms touch pickup delay.
-      await page.waitForTimeout(20);
+      await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     }
     await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(before);
     await expect(indicator(page)).toHaveCount(0);
     await expect(page.getByRole("menu")).toHaveCount(0);
+    await resumePageTimers(page);
     await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(fixture.doc).tags });
     expectOnlyTagWrite(fixture.doc, sharedBefore);
   } finally {
-    try { await session.detach(); } finally { fixture.close(); }
+    try { await resumePageTimers(page); } finally {
+      try { await session.detach(); } finally { fixture.close(); }
+    }
   }
 });

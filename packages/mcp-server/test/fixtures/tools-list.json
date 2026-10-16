@@ -129,7 +129,7 @@
         "title": {
           "type": "string",
           "minLength": 1,
-          "description": "Display title. Identity is the document's UUID, never this. A decision title names the stable topic or question, never the answer; successors keep the title. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". Use one to three short answer blocks with brief reasons; a superseding record carries the new answer. Do not repeat the topic as a \"Topic:\" line or write a specification: detailed behavior and guidance belong on the related regular page, discussion in the RFC. Answer blocks are distinct from recorded answer: {who, when, where}."
+          "description": "Display title. Identity is the document's UUID, never this. A decision title names the stable topic or question, never the answer; successors keep the title. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}."
         },
         "description": {
           "type": "string",
@@ -148,7 +148,7 @@
               "type": "null"
             }
           ],
-          "description": "One or two sentences of plain English for a person opening the document. At most 300 characters; null clears it."
+          "description": "One or two sentences of plain English for a person opening a regular document. At most 300 characters; null clears it. Decisions have no TL;DR."
         },
         "answer": {
           "type": "object",
@@ -345,7 +345,7 @@
       "additionalProperties": false,
       "oneOf": [
         {
-          "title": "A decision document (`kind: decision`). A decision title names the stable topic or question, never the answer; successors keep the title. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". Use one to three short answer blocks with brief reasons; a superseding record carries the new answer. Do not repeat the topic as a \"Topic:\" line or write a specification: detailed behavior and guidance belong on the related regular page, discussion in the RFC. Answer blocks are distinct from recorded answer: {who, when, where}.",
+          "title": "A decision document (`kind: decision`). A decision title names the stable topic or question, never the answer; successors keep the title. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". For decision answers, see lifecycle's Decision answers and topics section. Answer blocks are distinct from recorded answer: {who, when, where}.",
           "required": [
             "kind"
           ],
@@ -596,7 +596,7 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
+          "description": "Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR."
         },
         "tldrHint": {
           "description": "Non-blocking request to review the TL;DR after changing regular document content; absent for decision records and pages with a deliberate TL;DR removal.",
@@ -986,7 +986,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. Decision title names stable topic, never answer; successors keep it. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". 1–3 short answer blocks with brief reasons; successors give new answer. No \"Topic:\" line or specification: details/guidance on related page, discussion in RFC. Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. answerPreview: legacy TL;DR/first paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. Decision title names stable topic, never answer; successors keep it. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". For decision answers, see lifecycle's Decision answers and topics section. Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -1043,7 +1043,7 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
+          "description": "Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR."
         },
         "tldrOptOut": {
           "description": "Present only when a person removed a regular page's TL;DR on purpose and tldr is null. Content writes omit TL;DR hints. To opt back in, pass tldr_opt_in: true with a non-null tldr to set_metadata; the web's Add TL;DR also lifts the mark. Absent when summary text exists and on decision records.",
@@ -1280,11 +1280,8 @@
               "supersedes": {
                 "type": "string"
               },
-              "tldr": {
-                "type": "string"
-              },
               "answerPreview": {
-                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -1439,11 +1436,8 @@
                       "supersedes": {
                         "type": "string"
                       },
-                      "tldr": {
-                        "type": "string"
-                      },
                       "answerPreview": {
-                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -1613,11 +1607,8 @@
                     "supersedes": {
                       "type": "string"
                     },
-                    "tldr": {
-                      "type": "string"
-                    },
                     "answerPreview": {
-                      "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                      "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                       "anyOf": [
                         {
                           "type": "string"
@@ -1782,11 +1773,8 @@
                     "supersedes": {
                       "type": "string"
                     },
-                    "tldr": {
-                      "type": "string"
-                    },
                     "answerPreview": {
-                      "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                      "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                       "anyOf": [
                         {
                           "type": "string"
@@ -1978,11 +1966,8 @@
               "supersedes": {
                 "type": "string"
               },
-              "tldr": {
-                "type": "string"
-              },
               "answerPreview": {
-                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -2147,11 +2132,8 @@
               "supersedes": {
                 "type": "string"
               },
-              "tldr": {
-                "type": "string"
-              },
               "answerPreview": {
-                "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -2317,11 +2299,8 @@
                 "supersedes": {
                   "type": "string"
                 },
-                "tldr": {
-                  "type": "string"
-                },
                 "answerPreview": {
-                  "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                  "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                   "anyOf": [
                     {
                       "type": "string"
@@ -2476,11 +2455,8 @@
                         "supersedes": {
                           "type": "string"
                         },
-                        "tldr": {
-                          "type": "string"
-                        },
                         "answerPreview": {
-                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                           "anyOf": [
                             {
                               "type": "string"
@@ -2650,11 +2626,8 @@
                       "supersedes": {
                         "type": "string"
                       },
-                      "tldr": {
-                        "type": "string"
-                      },
                       "answerPreview": {
-                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -2819,11 +2792,8 @@
                       "supersedes": {
                         "type": "string"
                       },
-                      "tldr": {
-                        "type": "string"
-                      },
                       "answerPreview": {
-                        "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                        "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -3368,7 +3338,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Read metadata, blocks and threads. Regular pages return related then linked decision topics; decisions return discussion (RFC UUID or null), separate from curated links and recorded answer attribution. Entries cache discussion (absent if unknown) and answerPreview (legacy TL;DR or first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. Read-only figma: kind (frame, file, prototype, board, slides or community file), file, optional decoded fileName (dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive rev, including every button's text, destination, appearance and order; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
+    "description": "Read metadata, blocks, threads. Regular pages return related then linked decision topics; decision discussion: RFC UUID/null, separate from curated links and recorded answer. Decisions have no TL;DR: tldr is null. Entries cache discussion (absent if unknown) and answerPreview (first paragraph/list, max 300 chars). Missing description/TL;DR is null; data lists collections/counts for get_data. Blocks include rev. Tables return canonical GFM; cards return button: [Text](destination) lines after footer in authored order. Plain labels link to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output puts style before color and omits defaults. Figma returns :::figma content without delimiters: normalized url, optional plain title and height, blank line and marked caption. Read-only figma: kind (frame, file, prototype, board, slides or community file), file, optional decoded fileName (dashes as spaces) and optional node (12:345 form). Tables/cards/Figma have formatting-sensitive rev, including every button's text, destination, appearance and order; other rev ignores marks. Prose doc_links has ranges; container links have none. Card thread ranges name their part; Figma ranges name caption with caption-text offsets. No Figma request; eligible guidance counts toward this process's briefing.\n\nHelp: get_doc, workspaces, lifecycle, tool-contracts, markdown, data.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -3903,7 +3873,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Apply one validated batch through applyDocData, naming each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. The batch is one local transaction; identical refreshes return `changed: false` without an update. The result summarizes touched collection names, counts and deletion with durability, without values.\n\nRefresh producer-owned collections by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. Read with get_data; get_doc summarizes collections. Decisions refuse data with decision_data_unsupported; decided records keep decision_read_only, and legacy data stays readable. Decisions use one to three short answer blocks with a brief reason, guidance on the related regular page and discussion in an RFC. Their directory answerPreview uses legacy TL;DR or the first paragraph/list; get_doc page decisions are marked related or linked. Recorded attribution {who, when, where} is separate from the answer's content blocks.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data.",
+    "description": "Apply one validated batch through applyDocData, naming each touched collection once. Within each collection, set `schema`, optionally `replaceRecords`, then `deleteRecords`, then `upsert` whole `{id, value}` records. `deleteCollection: true` excludes other changes. Schema and value JSON reach validation unaltered; unsupported schemas and invalid retained records refuse before mutation. The batch is one local transaction; identical refreshes return `changed: false` without an update. The result summarizes touched collection names, counts and deletion with durability, without values.\n\nRefresh producer-owned collections by upsert or full-set replacement. Keep human dispositions in a separate collection keyed by producer record ids. Split changes above the 1 MiB schema/value budget across calls; they are not atomic together and supply no CAS or distributed lock. Read with get_data; get_doc summarizes collections. Decisions refuse data with decision_data_unsupported; decided records keep decision_read_only, and legacy data stays readable. Decision answer guidance is in lifecycle's Decision answers and topics section. Their directory answerPreview uses the first answer paragraph/list; decisions have no TL;DR. get_doc page decisions are marked related or linked. Recorded attribution {who, when, where} is separate from the answer's content blocks.\n\nHelp: update_data, workspaces, lifecycle, tool-contracts, data.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -4074,11 +4044,8 @@
                   "supersedes": {
                     "type": "string"
                   },
-                  "tldr": {
-                    "type": "string"
-                  },
                   "answerPreview": {
-                    "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                    "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                     "anyOf": [
                       {
                         "type": "string"
@@ -4245,11 +4212,8 @@
                   "supersedes": {
                     "type": "string"
                   },
-                  "tldr": {
-                    "type": "string"
-                  },
                   "answerPreview": {
-                    "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                    "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                     "anyOf": [
                       {
                         "type": "string"
@@ -4404,11 +4368,8 @@
                           "supersedes": {
                             "type": "string"
                           },
-                          "tldr": {
-                            "type": "string"
-                          },
                           "answerPreview": {
-                            "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                            "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                             "anyOf": [
                               {
                                 "type": "string"
@@ -4578,11 +4539,8 @@
                         "supersedes": {
                           "type": "string"
                         },
-                        "tldr": {
-                          "type": "string"
-                        },
                         "answerPreview": {
-                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                           "anyOf": [
                             {
                               "type": "string"
@@ -4747,11 +4705,8 @@
                         "supersedes": {
                           "type": "string"
                         },
-                        "tldr": {
-                          "type": "string"
-                        },
                         "answerPreview": {
-                          "description": "Cached decision answer preview: legacy TL;DR, else first paragraph or list truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
+                          "description": "Cached decision answer preview from the first paragraph or list, truncated to 300 characters. Null when neither exists; absent when the cache is unknown.",
                           "anyOf": [
                             {
                               "type": "string"
@@ -4904,7 +4859,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the record in force, else pending, else first, plus pending/conflicting records. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived topics but is not a predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, including inForce, pending and conflicts, caches its document's openThreadCount: threads whose resolved is not true, including deleted anchors; absent means unknown. A matching topic's representative may have zero or unknown count. Use include_superseded: true with has_open_threads to find each matching document, then get_doc for threads and annotate to reply or resolve. Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional approximate timestamps. Decision answerPreview is legacy TL;DR or first paragraph/list, null for none; discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. Both are absent when unknown. get_doc marks related or linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
+    "description": "List synced directory stubs without opening document rooms. Unfiltered listing omits decisions; kind, status, tag or has_open_threads predicates include matching decisions. Topic rows present the record in force, else pending, else first, plus pending/conflicting records. Predicates may match different live records; resolution uses the whole graph. include_superseded applies predicates per record. include_deleted admits archived topics but is not a predicate. Filters combine; unknown tags refuse. has_open_threads accepts only true: known openThreadCount >= 1; false refuses. Every entry, including inForce, pending and conflicts, caches its document's openThreadCount: threads whose resolved is not true, including deleted anchors; absent means unknown. A matching topic's representative may have zero or unknown count. Use include_superseded: true with has_open_threads to find each matching document, then get_doc for threads and annotate to reply or resolve. Rows carry cached description, tags, lifecycle/authority metadata, sidebar-derived pinned and optional approximate timestamps. Decision rows have no TL;DR; answerPreview is the first answer paragraph/list, null for none; discussion is its explicit RFC UUID, null for none, distinct from curated links and recorded answer. Both are absent when unknown. get_doc marks related or linked topics.\n\nHelp: list_docs, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -6436,7 +6391,7 @@
           "description": "Agent-facing description used to choose whether to open the document."
         },
         "tldr": {
-          "description": "Person-facing summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true.",
+          "description": "Person-facing regular-document summary, at most 300 characters. Null clears it without changing a deliberate removal mark. On a marked page, a non-null summary requires tldr_opt_in: true. Decisions have no TL;DR; open records accept null.",
           "anyOf": [
             {
               "type": "string",
@@ -6647,7 +6602,7 @@
               "type": "null"
             }
           ],
-          "description": "Person-facing document summary; legacy decision summaries remain readable. Null when unwritten."
+          "description": "Person-facing regular-document summary; null when unwritten and always null for decisions, which have no TL;DR."
         },
         "tags": {
           "type": "array",
@@ -6734,7 +6689,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set title, description, tldr, tags, curated links or decision discussion together; name at least one. Omitted fields stay unchanged. Refusals write nothing; field failures name field. Returns metadata/durability, no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears while preserving the mark; marked pages refuse a summary with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. Use list_tags active ids/exact names; assigned retired/unresolved ids may remain. New links must be directory-known; archived/unchanged targets accepted. Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null tldr with decision_tldr_unsupported; null clears legacy TL;DR. Decided records refuse title/tldr/discussion; description/tags/links writable. Decision answers use one to three short answer blocks and a brief reason; guidance on related page, discussion in RFC. Stub answerPreview uses legacy TL;DR/first paragraph/list; get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived documents refuse metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set title, description, tldr, tags, curated links or decision discussion; name at least one. Omitted fields stay unchanged. Refusals write nothing; field failures name field. Returns metadata/durability, no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears while preserving the mark; marked pages refuse a summary with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. Use list_tags active ids/exact names; assigned retired/unresolved ids may remain. New links must be directory-known; archived/unchanged targets accepted. Only open decisions accept discussion: a live, locally readable non-decision RFC UUID or null. Reuse/create RFC first; no document creation, RFC/page edits or tags, or approvalFingerprint/approvalChanged changes. Discussion is separate from curated links/recorded answer, fixed after settling. Decisions refuse non-null tldr with decision_tldr_unsupported; open records accept null. Decisions have no TL;DR; metadata returns tldr: null. Decided records refuse title/tldr/discussion; description/tags/links writable. See lifecycle's Decision answers and topics section for decision answer guidance. Stub answerPreview uses the first answer paragraph/list; get_doc marks related or linked topics. Recorded answer {who, when, where} is attribution. Archived documents refuse metadata; lifecycle uses set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

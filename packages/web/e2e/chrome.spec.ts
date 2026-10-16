@@ -40,6 +40,7 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
   EXAMPLE_TAGS,
+  applyDocData,
   appendBlock,
   assignDocumentTags,
   createAnnotation,
@@ -60,6 +61,7 @@ import {
   seedTagCatalog,
   setAnnotationResolved,
   setKind,
+  setStatus,
   settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
@@ -172,7 +174,7 @@ function tagStripGeometry(page: Page): Promise<{
     if (strip === null || row === null) {
       throw new Error("e2e: no tag strip in the identity line");
     }
-    const neighbours = [".ub-doc-ids", ".ub-document-actions"].flatMap((selector) => {
+    const neighbours = [".ub-document-actions"].flatMap((selector) => {
       const element = document.querySelector(selector);
       return element === null ? [] : [[selector, element.getBoundingClientRect()] as const];
     });
@@ -443,7 +445,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
   await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
   await expectPaneRejectsPointer(settings);
 
@@ -491,7 +493,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goBack();
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "+ new doc" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expectPaneRejectsPointer(page.locator(".ub-settings-sidebar"));
   await expectNoSidebarMotion(page);
   await page.goForward();
@@ -505,7 +507,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
  * the same column in the same two appearances.
  *
  * The sidebar's row controls share one hover rule, and two of them can be
- * unavailable: `+ new doc`, which creates into the directory room and has none
+ * unavailable: `+ New page`, which creates into the directory room and has none
  * at an address naming no workspace this client can use, and Navigation's
  * placeholder destinations, which are `aria-disabled` rather than `disabled`
  * because they stay in the tab order. Only a browser can be asked —
@@ -519,8 +521,9 @@ for (const scheme of ["light"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme, "not-a-workspace");
-    const create = page.getByRole("button", { name: "new doc unavailable" });
+    const create = page.getByRole("button", { name: "+ New page" });
     await expect(create).toBeDisabled();
+    await expect(page.locator(".ub-directory-status")).toHaveCount(0);
 
     const disabled = await paintedIn(create, "background-color");
     await create.hover();
@@ -623,7 +626,7 @@ for (const scheme of ["light"] as const) {
     };
 
     await openSidebar();
-    const create = page.getByRole("button", { name: "+ new doc", exact: true });
+    const create = page.getByRole("button", { name: "+ New page", exact: true });
     await expect(create).toBeEnabled();
     const createRest = await checkHoverAndFocus(create);
     await create.tap();
@@ -684,7 +687,7 @@ for (const scheme of ["light"] as const) {
 
     await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
     await openSidebar();
-    for (const disabled of [page.getByRole("button", { name: "new doc unavailable", exact: true }), page.locator(".ub-group-add")]) {
+    for (const disabled of [page.getByRole("button", { name: "+ New page", exact: true }), page.locator(".ub-group-add")]) {
       await expect(disabled).toBeDisabled();
       const rest = await treatment(disabled);
       await disabled.hover();
@@ -704,7 +707,7 @@ test("the appearance choice re-themes the app from tokens alone, and survives a 
   const page = await openAppearanceApp(browser, "light");
   // A document, so there is an editor on screen to re-theme — its ink comes
   // from `--prose-text`, a token nothing else in the app reads.
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   const sidebar = await painted(page, ".ub-list", "background-color");
   const prose = await painted(page, ".ub-editor .ub-paragraph", "color");
@@ -737,7 +740,7 @@ test("the TL;DR callout keeps its hierarchy, themes and wrapping at both reading
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Add TL;DR" }).click();
@@ -853,12 +856,12 @@ test("the open document owns the remaining chrome and its one sync-details handl
   await expect(removed).toHaveCount(0);
   await expect(page.locator(".ub-sync-toggle")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await expect(page.locator(".ub-title")).toBeVisible();
   await expect(page.locator(".ub-doc-meta")).toBeVisible();
-  await expect(page.locator(".ub-doc-ids")).toBeVisible();
-  await expect(page.locator(".ub-copy-link")).toBeVisible();
+  await expect(page.locator(".ub-doc-ids, .ub-doc-meta .ub-copy-link")).toHaveCount(0);
+  await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();
   await expect(page.getByRole("button", { name: "Document actions" })).toBeVisible();
   await expect(page.locator(".ub-threads-toggle")).toHaveCount(0);
 
@@ -878,7 +881,7 @@ test("the open document owns the remaining chrome and its one sync-details handl
 test("a multiline comment composer stays above its selected passage", async ({ browser }) => {
   const page = await openAppearanceApp(browser, "light");
   await page.setViewportSize({ width: 1400, height: 800 });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   await placeCaret(page);
   for (let index = 1; index <= 10; index += 1) {
@@ -927,18 +930,16 @@ test("document actions stay reachable, close with the route, and archive into Re
     contextOptions: { colorScheme: "light" },
     readySelector: ".ub-workspace",
   });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill("Lifecycle notes");
   await page.setViewportSize({ width: 810, height: 720 });
   await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Document actions" });
-  const uuid = page.locator(".ub-doc-meta .ub-copy-link");
   const title = page.locator(".ub-title");
   for (const [name, control] of [
     ["title", title],
-    ["uuid", uuid],
     ["actions", trigger],
   ] as const) {
     await expect(control).toBeVisible();
@@ -947,7 +948,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(box.x, name).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, name).toBeLessThanOrEqual(page.viewportSize()?.width ?? 0);
   }
-  await expect(uuid).toHaveText(/^uuid [0-9a-f]{8}/);
+  await expect(page.locator(".ub-doc-meta")).not.toContainText(/uuid |rev /);
   await expect(page.locator(".ub-doc-meta")).not.toContainText("Copy link");
   const layout = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>(".ub-body");
@@ -964,7 +965,8 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(scroll).toBeLessThanOrEqual(client ?? 0);
   }
 
-  await uuid.click();
+  await trigger.click();
+  await page.getByRole("menuitem", { name: "Copy link", exact: true }).click();
   await expect(copyNotice(page, "URL copied to clipboard")).toBeVisible();
   // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
@@ -1003,7 +1005,12 @@ test("document actions stay reachable, close with the route, and archive into Re
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore).toBeVisible();
   await expect(restore).toBeFocused();
-  await expect(trigger).toHaveCount(0);
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Copy document id", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await expect(page.locator(".ub-editor .ProseMirror")).toHaveAttribute(
     "contenteditable",
     "false",
@@ -1030,7 +1037,7 @@ for (const scheme of ["light"] as const) {
     browser,
   }) => {
     const page = await openAppearanceApp(browser, scheme);
-    await page.getByRole("button", { name: "+ new doc" }).click();
+    await page.getByRole("button", { name: "+ New page" }).click();
     await page.locator(".ub-title").fill("Lifecycle notes");
     await page.getByRole("button", { name: "Document actions" }).click();
     await page.getByRole("menuitem", { name: "Archive document" }).click();
@@ -1068,7 +1075,7 @@ test(`the document collaborator cluster stays compact and jumps once without mov
   // The narrow drawer closes on creation, leaving the full-width document pane.
   await page.setViewportSize({ width: viewport, height: 640 });
   if (viewport < 1280) await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill("Live collaborators");
   const firstBlock = page.locator(".ub-editor .ProseMirror > *").first();
   await firstBlock.click();
@@ -1471,7 +1478,7 @@ test("the document title uses the bundled Fraunces while prose keeps its own fac
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   // A title that reaches into all three vendored cuts proves more than a
@@ -1544,15 +1551,13 @@ for (const scheme of ["light", "dark"] as const) {
     const mono = async (locator: Locator): Promise<void> => {
       await expect(locator).toHaveCSS("font-family", monoFace);
     };
-    await ui(page.locator(".ub-list-head .ub-muted"));
+    await ui(page.getByRole("button", { name: "+ New page", exact: true }));
     await page.setViewportSize(viewport);
     await expect(page.locator(".ub-last-updated time")).toBeVisible();
-    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-ids", ".ub-copy-link", ".ub-doc-rev"]) {
+    for (const selector of [".ub-status", ".ub-status-word", ".ub-last-updated time", ".ub-doc-rev"]) {
       for (const element of await page.locator(selector).all()) await ui(element);
     }
-    await expect(page.locator(".ub-doc-meta .ub-copy-link")).toHaveAccessibleName(
-      `uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`,
-    );
+    await expect(page.locator(".ub-doc-meta")).not.toContainText(uuid);
     for (const id of await page.locator(".ub-doc-id").all()) await mono(id);
     const revision = page.locator(".ub-doc-rev .ub-doc-id");
     await expect(revision).toHaveText(/^[0-9a-f]{8}$/);
@@ -1574,10 +1579,10 @@ for (const scheme of ["light", "dark"] as const) {
     for (const width of [767, 744]) {
       await page.setViewportSize({ width, height: viewport.height });
       await expect(page.locator(".ub-doc-rev")).toBeHidden();
-      await expect(page.locator(".ub-copy-link")).toBeVisible();
+      await expect(page.locator(".ub-last-updated")).toBeVisible();
     }
     await page.setViewportSize(viewport);
-    await page.getByRole("button", { name: /^Sync details/ }).click();
+    await page.locator(".ub-status-sync").click();
     const sync = page.getByRole("dialog", { name: "Sync and presence" });
     await expect(sync).toBeVisible();
     for (const fact of await sync.locator(".ub-sync-fact").all()) {
@@ -1638,19 +1643,19 @@ for (const scheme of ["light", "dark"] as const) {
 }
 
 /**
- * The copy-link control's touch target.
+ * The document-actions control's target.
  *
  * The control's own 44x44 box must take clicks at rest and after scrolling.
  * An overhanging target could steal taps from `.ub-title` below or borrow
  * `.ub-pane` padding above that scrolls away while the control stays visible.
  * Only browser layout can prove the full target at both offsets.
  */
-test("the copy-link control is a 44px target, at rest and once the pane has scrolled", async ({
+test("the document-actions control is a 44px target, at rest and once the pane has scrolled", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
   await ensureExampleCatalog(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   // Enough prose to scroll: a clipped target cannot be exposed in a short page.
@@ -1683,7 +1688,7 @@ test("the copy-link control is a 44px target, at rest and once the pane has scro
     scrolled: number;
   }> =>
     page.evaluate((flush) => {
-      const control = document.querySelector(".ub-copy-link");
+      const control = document.querySelector(".ub-actions-trigger");
       const revision = document.querySelector(".ub-doc-rev");
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
@@ -1775,7 +1780,7 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
       receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
     };
   })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
-  for (const control of [page.locator(".ub-doc-meta .ub-copy-link"), page.getByRole("button", { name: "Document actions" })]) {
+  for (const control of [page.locator(".ub-status-sync"), page.getByRole("button", { name: "Document actions" })]) {
     expect(await control.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
@@ -1785,6 +1790,7 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
 
 /** Wait for native dismissal before inspecting the replacement's content. */
 async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
+  if (await control.count() === 0) await page.getByRole("button", { name: "Document actions" }).click();
   const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
   if (keyboard) await control.press("Enter");
   else await control.click();
@@ -1871,9 +1877,10 @@ for (const scheme of ["light"] as const) {
       for (const [, type, text] of sources) appendBlock(doc, { type, text });
       await expect(page.locator(".ub-copy")).toHaveCount(5);
       await clipboardMode(page, "modern");
-      const link = page.locator(".ub-doc-meta .ub-copy-link");
+      const link = page.getByRole("menuitem", { name: "Copy link", exact: true });
       const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href;
-      await expect(link).toHaveAccessibleName(`uuid ${uuid.slice(0, 8)} — copies the canonical document URL for ${harness().workspace}/${uuid}`);
+      await page.getByRole("button", { name: "Document actions" }).click();
+      await expect(link).toHaveAccessibleName("Copy link");
       await activateCopy(page, link);
       await expect(copyNotice(page, "URL copied to clipboard")).toHaveAttribute("data-type", "success");
       await activateCopy(page, link, true);
@@ -1985,7 +1992,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   const page = await openAppearanceApp(browser, "dark");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await ensureExampleCatalog(page);
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
   const documentUrl = page.url();
   const trigger = page.getByRole("button", { name: "Edit tags" });
@@ -2168,14 +2175,14 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
 async function contrastDocument(
   page: Page,
   scheme: "light" | "dark",
-  prove: () => Promise<void>,
+  prove: (doc: Y.Doc) => Promise<void>,
   preserveViewport = false,
 ): Promise<void> {
   if (!preserveViewport) await page.setViewportSize({ width: 1400, height: 1000 });
   else if ((page.viewportSize()?.width ?? 1280) < 1280) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await page.locator(".ub-title").fill(`Contrast ${scheme}`);
   const uuid = new URL(page.url()).pathname.split("/")[2];
   const secret = await importRootSecret(harness().authSecret);
@@ -2229,7 +2236,7 @@ async function contrastDocument(
     }
     await expect(page.locator(".ub-peer-more")).toBeVisible();
     await page.mouse.move(1399, 999);
-    await prove();
+    await prove(doc);
   } finally {
     for (const { provider, doc } of peers) {
       provider.destroy();
@@ -2270,6 +2277,133 @@ function activeHoverRules(control: Locator): Promise<string[]> {
     };
     for (const sheet of document.styleSheets) inspect(sheet.cssRules);
     return found;
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, "/", {
+      upstream: true, contextOptions: { colorScheme: scheme, hasTouch: touch }, readySelector: ".ub-pane",
+    });
+    await contrastDocument(page, scheme, async (doc) => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const uuid = new URL(page.url()).pathname.split("/")[2];
+      if (uuid === undefined) throw new Error("e2e: no current document UUID");
+      const target = "https://example.invalid/neutral-link";
+      const annotated = appendBlock(doc, { type: "paragraph", inline: [
+        { text: "External", marks: { link: target } }, { text: " and ", marks: {} },
+        { text: "reference", marks: { docLink: uuid } }, { text: " with ", marks: {} },
+        { text: "code link", marks: { link: target, inlineCode: true } },
+      ] });
+      createAnnotation(doc, annotated, 0, 37, "Reader", "Linked text stays readable.");
+      appendBlock(doc, { type: "paragraph", inline: [
+        { text: "External on the page", marks: { link: target } },
+        { text: " and a code reference", marks: { docLink: uuid, inlineCode: true } },
+      ] });
+      appendBlock(doc, { type: "card", text: `title: Linked card\n\n[External](${target}) and [reference](${uuid}) with [\`code link\`](${target}).` });
+      const directory = new Y.Doc();
+      try {
+        applyDocData(doc, directory, [{ collection: "evidence", schema: { version: 1, schema: { type: "object" } },
+          replaceRecords: [{ id: "one", value: { url: target } }],
+        }]);
+      } finally { directory.destroy(); }
+      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "evidence",
+        columns: [{ field: "url", format: "link" }],
+      }) });
+      const ink = await painted(page, ".ub-title", "color");
+      const neutralText = async (root: string) => {
+        let readings: Awaited<ReturnType<typeof renderedText>> = [];
+        await expect.poll(async () => {
+          await page.locator(root).scrollIntoViewIfNeeded();
+          readings = await renderedText(page, root);
+          return readings.length;
+        }, { message: `Rendered text must be inside the viewport: ${root}` }).toBeGreaterThan(0);
+        for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+      };
+      await expect(page.locator(".ub-data-link")).toBeVisible();
+      for (const selector of [
+        '.ub-editor a.ub-link[href="https://example.invalid/neutral-link"]',
+        `.ub-editor a.ub-doclink[data-doc-id="${uuid}"]`, ".ub-data-link",
+      ]) {
+        const links = page.locator(selector);
+        expect(await links.count()).toBeGreaterThan(0);
+        for (const link of await links.all()) {
+          await link.scrollIntoViewIfNeeded();
+          await expect(link).toHaveCSS("color", ink);
+          await expect(link).toHaveCSS("text-decoration-line", "underline");
+          await expect(link).toHaveCSS("text-decoration-style", selector.includes("ub-doclink") ? "dotted" : "solid");
+          await link.evaluate((element) => element.setAttribute("data-neutral-link-proof", ""));
+          await neutralText("[data-neutral-link-proof]");
+          await link.evaluate((element) => element.removeAttribute("data-neutral-link-proof"));
+        }
+      }
+      const unresolved = page.locator('.ub-doclink[data-doc-link-state="unresolved"]');
+      await expect(unresolved).toHaveCSS("text-decoration-style", "wavy");
+      expect(await paintedIn(unresolved, "color")).not.toBe(ink);
+
+      setKind(doc, "decision");
+      setStatus(doc, "open");
+      const badge = page.locator(".ub-doc-meta .ub-lifecycle-badge");
+      await expect(badge).toHaveText("Decision · open");
+      await badge.scrollIntoViewIfNeeded();
+      expect(oklab(await paintedIn(badge, "color")).chroma).toBeLessThan(accentChroma);
+      expect(oklab(await paintedIn(badge, "border-top-color")).chroma).toBeLessThan(accentChroma);
+      await neutralText(".ub-doc-meta .ub-lifecycle-badge");
+      const trigger = page.getByRole("button", { name: "Document actions" });
+      await trigger.click();
+      await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+      await trigger.click();
+      const copy = page.getByRole("menuitem", { name: "Copy link", exact: true });
+      const unpin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
+      const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
+      const restingInk = await paintedIn(copy, "color");
+      const highlightedInk = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent-foreground)";
+        document.body.append(probe);
+        const colour = getComputedStyle(probe).color;
+        probe.remove();
+        return colour;
+      });
+      const checkActions = async () => {
+        for (const item of [unpin, archive]) {
+          expect(await paintedIn(item, "color")).toBe(await item.getAttribute("data-highlighted") === null ? restingInk : highlightedInk);
+          expect(oklab(await paintedIn(item, "color")).chroma).toBeLessThan(accentChroma);
+        }
+        await neutralText("[data-slot=dropdown-menu-content]");
+      };
+      await checkActions();
+      if (!touch) for (const item of [unpin, archive]) {
+        await item.hover();
+        await expect(item).toHaveAttribute("data-highlighted", "");
+        await checkActions();
+      }
+      await page.keyboard.press("Escape");
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("End");
+      await expect(archive).toBeFocused();
+      await checkActions();
+      await page.keyboard.press("ArrowUp");
+      await expect(unpin).toBeFocused();
+      await checkActions();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      const confirmation = page.getByRole("alertdialog");
+      await expect(confirmation).toContainText("read-only");
+      await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(trigger).toBeFocused();
+      if (touch) await trigger.tap();
+      else await trigger.click();
+      if (touch) await archive.tap();
+      else await archive.click();
+      await expect(confirmation).toBeVisible();
+      await confirmation.getByRole("button", { name: "Archive document", exact: true }).click();
+      const banner = page.locator(".ub-archived-banner");
+      await expect(banner).toBeVisible();
+      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeGreaterThan(accentChroma);
+    }, true);
   });
 }
 
@@ -2314,7 +2448,7 @@ for (const scheme of ["light"] as const) {
           expect((await controlPaint(tap)).color).not.toBe(beforeFocus.color);
         }
       };
-      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger"]) {
+      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger"]) {
         await check(page.locator(selector));
       }
       await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
@@ -2328,7 +2462,7 @@ for (const scheme of ["light"] as const) {
       if ((page.viewportSize()?.width ?? 1280) < 1280) {
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       for (const selector of [".ub-docs-mode", ".ub-docs-sort"]) {
         for (const control of await page.locator(selector).all()) await check(control);
       }
@@ -2354,7 +2488,7 @@ for (const scheme of ["light"] as const) {
     await contrastDocument(page, scheme, async () => {
       expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
       await page.addStyleTag({ content: "* { transition: none !important; }" });
-      for (const selector of [".ub-sync-toggle", ".ub-copy-link", ".ub-actions-trigger", ".ub-tag-chevron"]) {
+      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger", ".ub-tag-chevron"]) {
         const control = page.locator(selector);
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);
@@ -2394,7 +2528,7 @@ for (const scheme of ["light"] as const) {
         await copy.hover();
         expect(await controlPaint(copy)).toEqual(revealed);
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       const selected = page.locator(".ub-docs-mode[aria-pressed=true]");
       await page.mouse.move(1399, 999);
       const selectedPaint = await controlPaint(selected);
@@ -2589,10 +2723,8 @@ for (const scheme of ["light"] as const) {
         await item.hover();
         await check(actions);
       }
-      const danger = await painted(page, ".ub-action-danger", "color");
-      const red = oklab(danger);
-      expect(red.a).toBeGreaterThan(0.05);
-      expect(red.b).toBeGreaterThan(0);
+      const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
+      expect(oklab(await paintedIn(archive, "color")).chroma).toBeLessThan(accentChroma);
       await page.keyboard.press("Escape");
       await page.locator(".ub-tags").click();
       const picker = ".ub-tag-picker-panel";
@@ -2667,7 +2799,7 @@ for (const scheme of ["light"] as const) {
           enabled.push(...await renderedText(page, root));
         }
       }
-      await page.getByRole("button", { name: "All docs", exact: true }).click();
+      await page.getByRole("button", { name: "All documents", exact: true }).click();
       await collect();
       for (const row of await page.locator(".ub-docs-row").all()) {
         await row.hover();
@@ -2760,9 +2892,10 @@ for (const [device, width, hasTouch] of [
       await page.getByRole("button", { name: "Show document list", exact: true }).click();
     }
     for (const destination of ["Dashboard"]) {
-      const row = page.getByRole("button", { name: new RegExp(`${destination}.*coming soon`, "i") });
+      const row = page.getByRole("button", { name: destination, exact: true });
       await expect(row).toBeVisible();
       await expect(row).toHaveAttribute("aria-disabled", "true");
+      await expect(row).toHaveAttribute("title", "Coming soon");
     }
     const uuid = await createDoc(page, `Hover paths ${device}`);
     const doc = new Y.Doc();
@@ -2807,7 +2940,7 @@ for (const [device, width, hasTouch] of [
       await expect(updated).toBeVisible();
       const exact = await updated.getAttribute("title");
       const stamp = await updated.getAttribute("datetime");
-      const sync = page.getByRole("button", { name: /^Sync details/ });
+      const sync = page.locator(".ub-status-sync");
       if (hasTouch) await sync.tap();
       else { await sync.focus(); await page.keyboard.press("Enter"); }
       const panel = page.getByRole("dialog", { name: "Sync and presence" });
@@ -2955,7 +3088,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   const page = await openAppearanceApp(browser, "light");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 1400, height: 800 });
-  await page.getByRole("button", { name: "+ new doc" }).click();
+  await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   type Layout = {

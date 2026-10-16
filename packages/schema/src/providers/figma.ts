@@ -7,6 +7,8 @@ export interface FigmaFields {
   node?: string;
 }
 
+export type FigmaAppearance = "light" | "dark";
+
 export const FIGMA_PROVIDER = {
   hosts: ["www.figma.com", "figma.com"],
   frameOrigins: ["https://embed.figma.com", "https://www.figma.com"],
@@ -14,10 +16,29 @@ export const FIGMA_PROVIDER = {
   paths: ["design", "file", "proto", "board", "slides", "community/file"],
   parameters: ["node-id", "starting-point-node-id", "version-id"],
   normalizeLink: normalizeFigmaLink,
+  embedAddress: figmaEmbedAddress,
+  frameAttributes: {
+    sandbox: "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-storage-access-by-user-activation",
+    allow: "fullscreen; clipboard-write",
+    referrerpolicy: "no-referrer",
+    allowfullscreen: "",
+  },
 } as const;
 
 const HOST_MESSAGE = "figma blocks take figma.com links only; use a plain link for other sites";
 const PATH_MESSAGE = "Figma links must use /design/, /file/, /proto/, /board/, /slides/ or /community/file/, followed by a file key and optional file name";
+
+/** Use only the stored view identity; reader and document addresses are never inputs. */
+export function figmaEmbedAddress(storedLink: string, appearance: FigmaAppearance): string {
+  const { url, figma } = normalizeFigmaLink(storedLink);
+  const address = new URL(url);
+  address.hostname = "embed.figma.com";
+  address.searchParams.set("embed-host", "uberblick");
+  address.searchParams.set("footer", "false");
+  address.searchParams.set("theme", appearance);
+  if (figma.kind === "frame") address.searchParams.set("page-selector", "false");
+  return address.href;
+}
 
 /** Keep only the provider's view identity, without contacting the provider. */
 export function normalizeFigmaLink(source: string): { url: string; figma: FigmaFields } {

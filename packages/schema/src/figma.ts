@@ -12,6 +12,18 @@ import type { InlineRun } from "./types.js";
 export interface FigmaText { url: string; title?: string; height?: number; caption: string }
 export interface FigmaInline { caption: InlineRun[] }
 
+export const FIGMA_DEFAULT_HEIGHT = 480;
+export const FIGMA_MIN_HEIGHT = 240;
+export const FIGMA_MAX_HEIGHT = 960;
+
+export function parseFigmaHeight(source: string): number {
+  const height = Number(source);
+  if (!/^\d+$/.test(source) || height < FIGMA_MIN_HEIGHT || height > FIGMA_MAX_HEIGHT) {
+    throw new InvalidFigmaError("Height must be a whole number of pixels from 240 to 960");
+  }
+  return height;
+}
+
 export function parseFigmaInput(source: string): FigmaText {
   const lines = source.replace(/\r\n?/g, "\n").split("\n");
   const values: Partial<Record<"url" | "title" | "height", string>> = {};
@@ -29,10 +41,7 @@ export function parseFigmaInput(source: string): FigmaText {
   }
   if (values.url === undefined) throw new InvalidFigmaError("A url header is required");
   const { url } = normalizeFigmaLink(values.url);
-  const height = values.height === undefined ? undefined : Number(values.height);
-  if (values.height !== undefined && (!/^\d+$/.test(values.height) || height === undefined || height < 240 || height > 960)) {
-    throw new InvalidFigmaError("Height must be a whole number of pixels from 240 to 960");
-  }
+  const height = values.height === undefined ? undefined : parseFigmaHeight(values.height);
   return {
     url,
     ...(values.title === undefined || values.title === "" ? {} : { title: values.title }),
@@ -124,6 +133,20 @@ export function buildFigmaElement(id: string): Y.XmlElement {
   caption.insert(0, [paragraph]);
   element.insert(0, [caption]);
   return element;
+}
+
+/** Seed a newly created caption before its first concurrent writers. */
+export function seedNewFigmaCaptions(transaction: Y.Transaction): void {
+  if (!transaction.local) return;
+  const doc = transaction.doc;
+  const start = transaction.beforeState.get(doc.clientID) ?? 0;
+  for (const figma of doc.getXmlFragment("blocks").toArray()) {
+    if (!(figma instanceof Y.XmlElement) || figma.nodeName !== "figma") continue;
+    const paragraph = figmaCaptionElement(figma)?.firstChild;
+    if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || paragraph.length !== 0) continue;
+    const id = Y.createRelativePositionFromTypeIndex(paragraph, 0).type;
+    if (id?.client === doc.clientID && id.clock >= start) paragraph.insert(0, [new Y.XmlText()]);
+  }
 }
 
 export function writeFigmaInline(element: Y.XmlElement, parts: Readonly<FigmaText>): void {

@@ -472,7 +472,7 @@ function observeRoomPresence(
 
 /**
  * Subscribe to the per-block revision cache; each keystroke must not reread
- * and rehash the whole document for eight characters of chrome.
+ * and rehash the whole document for the revision in the header.
  */
 export function useDocRev(connection: RoomConnection | null): string | null {
   return useConnectionReading<string | null>(

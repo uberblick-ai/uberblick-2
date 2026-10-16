@@ -7,7 +7,7 @@ import type { Extensions } from "@tiptap/core";
 import type { Schema } from "@tiptap/pm/model";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
-import { seedNewCardParts, seedNewTableCells } from "@uberblick/schema";
+import { seedNewCardParts, seedNewFigmaCaptions, seedNewTableCells } from "@uberblick/schema";
 import { BlockIds } from "./block-ids.js";
 import { CaretMenuKeys } from "./caret-menu.js";
 import { Collaboration } from "./collaboration.js";
@@ -26,6 +26,8 @@ import { CodeHighlighting } from "./syntax-highlighting.js";
 import { TableBlocks } from "./table.js";
 import { TerminalBlocks } from "./terminal.js";
 import { CardBlocks } from "./card.js";
+import { FigmaBlocks } from "./figma.js";
+import { FigmaCreation } from "./figma-creation.js";
 
 /** The palette without collaboration — the schema, and nothing that needs a Y.Doc. */
 export const paletteOnlyExtensions: Extensions = [...paletteExtensions];
@@ -65,6 +67,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     if (options.canWrite?.() !== false) {
       seedNewTableCells(transaction);
       seedNewCardParts(transaction);
+      seedNewFigmaCaptions(transaction);
     }
   };
   const extensions: Extensions = [
@@ -88,6 +91,8 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     // cell content and keeps the typed and pasted GFM doors.
     TableBlocks,
     CardBlocks,
+    FigmaBlocks,
+    FigmaCreation,
     // Opening transcript source also pauses its derived playback.
     TerminalBlocks,
     ChartBlocks,

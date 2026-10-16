@@ -316,7 +316,7 @@ const RECOVERIES: Record<string, Recovery> = {
   decision_read_only: {
     recoveryClass: "manual",
     guidance:
-      "A decided record's title, answer blocks, legacy TL;DR, structured data and discussion reference are read-only. Create an open superseding record " +
+      "A decided record's title, answer blocks, structured data and discussion reference are read-only. Decisions have no TL;DR. Create an open superseding record " +
       "for any content change, then record a person's answer to decide it. Comments stay open.",
   },
   decision_answer_required: {
@@ -360,7 +360,7 @@ const RECOVERIES: Record<string, Recovery> = {
   },
   decision_tldr_unsupported: {
     recoveryClass: "manual",
-    guidance: "Put the answer in content blocks. Omit tldr at creation, or clear a legacy TL;DR with set_metadata and tldr: null before deciding. Nothing was written.",
+    guidance: "Decisions have no TL;DR. Put the answer in content blocks and omit tldr or pass null on an open record. Nothing was written.",
   },
   tldr_opted_out: {
     recoveryClass: "manual",

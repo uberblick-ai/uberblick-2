@@ -1,420 +1,141 @@
-/** Compact document status: facts stay here, recovery and counts have details. */
-
-import { act, render } from "./react-render.js";
+/** Header truth: edit freshness, quiet ordinary states, and distinct save failures. */
+import * as Y from "yjs";
+import { act, cleanup, render } from "./react-render.js";
 import { within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
-import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status/status-reading.js";
-import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
-import type { HubEndpoint } from "../src/config.js";
-import type { RemotePresence } from "../src/ui/status/doc-chrome.js";
+import type { NotSharedReason } from "../src/shell/document-search.js";
 
-/** The workspace these stub room keys sit in. A workspace id is a uuid. */
-const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
+const copy = vi.hoisted(() => vi.fn(async () => true));
+vi.mock("../src/editor/source-chrome.js", async (original) => ({
+  ...await original<object>(), writeToClipboard: copy,
+}));
 
-/** Nobody else in the room: this suite is about the line, not the strip. */
-const NOBODY: readonly RemotePresence[] = [];
-
-/** A connection that only reports status — no socket, no awareness, no peers. */
-function stubConnection(
-  unsyncedChanges: number,
-  patch: Partial<RoomStatus> = {},
-): RoomConnection {
-  const status: RoomStatus = {
-    connected: false,
-    synced: false,
-    hasReceivedServerState: true,
-    writable: true,
-    storeRefused: false,
-    unsyncedChanges,
-    hasAnswered: true,
-    protocolMismatch: null,
-    authFailed: false,
-    tokenMissing: false,
-    ...patch,
+const ROOM = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc";
+function fixture(patch: Partial<RoomStatus> = {}) {
+  let status: RoomStatus = {
+    connected: true, synced: true, writable: true, hasReceivedServerState: true,
+    storeRefused: false, unsyncedChanges: 0, hasAnswered: true,
+    protocolMismatch: null, authFailed: false, tokenMissing: false, ...patch,
   };
-  return {
-    room: `${WORKSPACE}/doc`,
-    provider: { awareness: null },
-    status,
-    onStatusChange: (listener: (next: RoomStatus) => void) => {
-      listener(status);
-      return () => {};
+  const listeners = new Set<(value: RoomStatus) => void>();
+  const ydoc = new Y.Doc();
+  const connection = {
+    room: ROOM, ydoc, provider: { awareness: null },
+    get status() { return status; },
+    onStatusChange(listener: (value: RoomStatus) => void) {
+      listeners.add(listener); listener(status); return () => listeners.delete(listener);
     },
   } as unknown as RoomConnection;
+  return { connection, change(next: Partial<RoomStatus>) {
+    act(() => { status = { ...status, ...next }; for (const listener of listeners) listener(status); });
+  } };
 }
 
-function label(
-  unsyncedChanges: number,
-  patch: Partial<RoomStatus> = {},
-): string | null {
-  const view = render(
-    <StatusLine
-      connection={stubConnection(unsyncedChanges, patch)}
-      presence={NOBODY}
-    />,
-  );
-  const host = view.container;
-  const text = within(host).queryByText(/^\d+ sync messages? unacked$/)?.textContent ?? null;
+beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+function settle() { act(() => void vi.advanceTimersByTime(5_000)); }
 
-  return text?.replace(/\s+/g, " ").trim() ?? null;
-}
-
-describe("the backlog stays out of the compact status line", () => {
-  it("never renders a count, including while messages await acknowledgement", () => {
-    expect(label(38)).toBeNull();
-    expect(label(1)).toBeNull();
-    expect(label(0)).toBeNull();
-  });
-});
-
-describe("an unwritable document", () => {
-  it("waits for a cause before saying that a newly opened room is not saved", () => {
-    expect(line({ connected: true, synced: false, writable: false })).toBe("");
-  });
-
-  it("says browser changes are not saved while the live link is gone", () => {
-    expect(line({ writable: false })).toContain("not saved");
-  });
-
-  it("keeps a store refusal compact", () => {
-    const refused = line({ writable: false, storeRefused: true });
-    expect(refused).toContain("edit refused");
-    expect(refused).not.toContain(STORE_REFUSED);
-  });
-});
-
-/** The whole line, for a room in the given state. */
-function line(patch: Partial<RoomStatus>): string {
-  const view = render(
-    <StatusLine
-      connection={stubConnection(0, patch)}
-      presence={NOBODY}
-    />,
-  );
-  const host = view.container;
-  const text = host.textContent ?? "";
-
-  return text.replace(/\s+/g, " ").trim();
-}
-
-function updatedReading(
-  lastUpdated: number | undefined,
-  patch: Partial<RoomStatus> = {},
-): {
-  text: string | null;
-  line: string;
-  dateTime: string | null;
-  title: string | null;
-} {
-  const view = render(
-    <StatusLine
-      connection={stubConnection(0, patch)}
-      presence={NOBODY}
-      lastUpdated={lastUpdated}
-    />,
-  );
-  const host = view.container;
-  const updated = within(host).queryByText(/last updated/);
-  const time = updated === null ? null : within(updated).getByRole("time");
-  const reading = {
-    text: updated?.textContent ?? null,
-    line: host.textContent?.replace(/\s+/g, " ").trim() ?? "",
-    dateTime: time?.getAttribute("dateTime") ?? null,
-    title: time?.getAttribute("title") ?? null,
-  };
-
-  return reading;
-}
-
-describe("the selected document's edit freshness", () => {
-  it("uses the shared semantic timestamp and omits unusable values", () => {
-    const stamp = Date.now() - 2 * 60 * 60_000;
-    const reading = updatedReading(stamp);
-    expect(reading.text?.replace(/\s+/g, " ").trim()).toBe(
-      "· last updated 2 hours ago",
-    );
-    expect(reading.dateTime).toBe(new Date(stamp).toISOString());
-    expect(reading.title).not.toBeNull();
-
-    for (const unusable of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
-      expect(
-        updatedReading(unusable, { connected: true, synced: true }),
-      ).toEqual({
-        text: null,
-        line: "",
-        dateTime: null,
-        title: null,
-      });
+describe("the edited row", () => {
+  it("keeps edit freshness visible before sync is known, with the existing exact-time hover", () => {
+    const stamp = Date.now() - 120_000;
+    const current = fixture();
+    const view = render(<StatusLine connection={current.connection} presence={[]} lastUpdated={stamp} />);
+    expect(view.container.textContent).toBe("Edited 2 minutes ago");
+    const time = within(view.container).getByRole("time");
+    expect(time.getAttribute("dateTime")).toBe(new Date(stamp).toISOString());
+    expect(time.getAttribute("title")).toBeTruthy();
+    expect(view.container.querySelector("[aria-live]")).toBeNull();
+    for (const lastUpdated of [undefined, Number.NaN, Infinity, Number.MAX_VALUE]) {
+      view.rerender(<StatusLine connection={current.connection} presence={[]} lastUpdated={lastUpdated} />);
+      expect(within(view.container).queryByRole("time")).toBeNull();
     }
   });
 
-  it("waits for the sync word and follows a compact refusal", () => {
-    const stamp = Date.now();
-    expect(updatedReading(stamp, { connected: true, synced: true }).line).toBe("");
-    expect(updatedReading(stamp, { authFailed: true }).line).toMatch(
-      /^not authorized\s*· last updated just now$/,
-    );
+  it("copies the full revision and shows only its prefix in mono", async () => {
+    const view = render(<StatusLine connection={fixture().connection} presence={[]} revision="e9faf4df1234abcd" />);
+    const revision = within(view.container).getByRole("button", { name: "Copy revision e9faf4df1234abcd" });
+    expect(revision.textContent).toBe("rev e9faf4df");
+    expect(revision.querySelector(".ub-doc-id")?.textContent).toBe("e9faf4df");
+    await act(async () => revision.click());
+    expect(copy).toHaveBeenCalledWith("e9faf4df1234abcd");
   });
 });
 
-describe("a hub that refuses this page", () => {
-  it("keeps the update-required word without its recovery sentence", () => {
-    // A reading of its own, not a fourth sync state: the other three describe a
-    // connection that works or is coming back, and this one describes a page
-    // that will not sync again until somebody updates something. Both integers
-    // belong to the notice and Sync details, rather than the compact header.
-    const older = line({ protocolMismatch: { hub: 2, client: 1 } });
-    expect(older).toContain("update required");
-    expect(older).not.toContain("this app is older than the hub");
-    expect(older).not.toContain("(app 1, hub 2)");
-    expect(older).not.toContain("not saved");
-
-    const newer = line({ protocolMismatch: { hub: 1, client: 2 } });
-    expect(newer).toContain("update required");
-    expect(newer).not.toContain("the hub is older than this app");
-    expect(newer).not.toContain("(app 2, hub 1)");
-
-    // Neither reading appears without its refusal, whichever sync state the
-    // room is in — they replace the line, so a false positive hides the truth.
-    expect(line({})).not.toContain("update required");
-    expect(line({ connected: true, synced: true })).not.toContain("update required");
-    expect(line({})).not.toContain(AUTH_REJECTED);
-  });
-
-  it("keeps an authorization refusal without its recovery sentence", () => {
-    // An older hub cannot read our envelope and answers exactly as a wrong
-    // secret does, so this is the one direction nothing can detect: the copy
-    // names both causes rather than guessing, and it is composed locally —
-    // the hub's own words never reach the line.
-    expect(line({ authFailed: true })).toContain("not authorized");
-    expect(line({ authFailed: true })).not.toContain(AUTH_REJECTED);
-    expect(line({ authFailed: true })).not.toContain("not saved");
-  });
-});
-
-describe("an app served without a token", () => {
-  it("names the missing token rather than blaming the hub", () => {
-    // The secret arrives in the served configuration document, so a
-    // deployment can be complete in every other way and still hand out an app
-    // that cannot authenticate. The reader is told which half is missing: no
-    // token was ever sent, so "the hub refused us" would be false, and the
-    // deployment is what can be fixed. Composed locally — the missing value is
-    // the whole subject, so there is nothing remote to echo.
-    const missing = line({ tokenMissing: true });
-    expect(missing).toContain("no hub token");
-    expect(missing).not.toContain(TOKEN_MISSING);
-    expect(missing).not.toContain(AUTH_REJECTED);
-    expect(missing).not.toContain("not saved");
-
-    // It outranks a refusal left over from before the secret went missing, and
-    // it never appears without one.
-    expect(line({ tokenMissing: true, authFailed: true })).toContain("no hub token");
-    expect(line({ connected: true, synced: true })).not.toContain(TOKEN_MISSING);
-  });
-});
-
-/**
- * A backlog is itself what stops the state being `synced`. The trap
- * is `provider.isSynced`: the initial handshake raises it and nothing ever
- * lowers it, so a room with writes stranded at the hub keeps reporting
- * `synced: true` — and reading that flag alone would leave the line showing a
- * green dot for as long as the outage lasted.
- *
- * This has to be asserted on the *settled* line. Each source starts with an
- * empty slot and earns its reading, so a line read before the window
- * is up cannot establish what the persistent backlog will report.
- */
-describe("a backlog keeps the settled status busy without a header count", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  function settledLine(status: Partial<RoomStatus>): {
-    word: string | null;
-    badge: string | null;
-  } {
-    vi.useFakeTimers();
-    const view = render(
-      <StatusLine
-        connection={stubConnection(4, status)}
-        presence={NOBODY}
-      />,
-    );
-    const host = view.container;
-    // Past every settle window, so what is on screen is what the reader sees.
-    act(() => void vi.advanceTimersByTime(5_000));
-    const read = {
-      // The fixed-width styling slot is the contract, including blank words.
-      word: host.querySelector(".ub-status-word")?.textContent ?? null,
-      badge:
-        within(host).queryByText(/^\d+ sync messages? unacked$/)?.textContent?.replace(/\s+/g, " ").trim() ??
-        null,
-    };
-
-    return read;
+describe("hub status", () => {
+  function mount(hubAcked: boolean | null | undefined, patch: Partial<RoomStatus> = {}, reason: NotSharedReason | null = null, endpoint = "wss://hub.example/ws") {
+    const current = fixture(patch);
+    const tree = (ack: boolean | null | undefined) => <Popover><StatusLine connection={current.connection}
+      presence={[]} endpoint={{ url: endpoint, source: "document" }} hubAcked={ack}
+      notSharedReason={reason} lastUpdated={Date.now()} syncDetails /></Popover>;
+    const view = render(tree(hubAcked));
+    settle();
+    return { ...view, current, ack(value: boolean | null) { view.rerender(tree(value)); } };
   }
 
-  it("reports a backlog the provider's synced flag has stopped tracking", () => {
-    expect(settledLine({ connected: true, synced: true })).toEqual({
-      word: "syncing…",
-      badge: null,
-    });
+  it("shows a silent resting dot and no sync prose in ordinary states", () => {
+    const view = mount(true);
+    expect(view.container.textContent).toBe("Edited just now");
+    expect(within(view.container).getByRole("button", { name: "Synced with hub just now" })).toBeTruthy();
+    expect(view.container.querySelector(".ub-sync-dot")?.getAttribute("data-pulse")).toBe("0");
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("");
+    view.current.change({ unsyncedChanges: 4 });
+    settle();
+    expect(view.container.textContent).toBe("Edited just now");
+    expect(within(view.container).getByRole("button", { name: "Sync details" })).toBeTruthy();
   });
 
-  it("says synced, with no badge, once the backlog is actually empty", () => {
-    vi.useFakeTimers();
-    const view = render(
-      <StatusLine
-        connection={stubConnection(0, { connected: true, synced: true })}
-        presence={NOBODY}
-      />,
-    );
-    const host = view.container;
-    act(() => void vi.advanceTimersByTime(5_000));
-    expect(host.querySelector(".ub-status-word")?.textContent).toBe("synced");
-    expect(within(host).queryByText(/^\d+ sync messages? unacked$/)).toBeNull();
-  });
-});
-
-describe("a directly connected document's sync reading opens its details", () => {
-  afterEach(() => {
-    vi.useRealTimers();
+  it("has no dot or details trigger in a workspace on this device alone", () => {
+    const view = mount(true, {}, null, "local");
+    expect(view.container.querySelector(".ub-sync-dot")).toBeNull();
+    expect(within(view.container).queryByRole("button")).toBeNull();
+    expect(view.container.textContent).toBe("Edited just now");
   });
 
-  it("is one named button carrying the settled state and hub", () => {
-    vi.useFakeTimers();
-    const endpoint: HubEndpoint = {
-      url: "wss://hub.example/ws",
-      source: "document",
-    };
-    const toggle = vi.fn();
-    const view = render(
-      <Popover onOpenChange={toggle}>
-        <StatusLine
-          connection={stubConnection(0, { connected: true, synced: true })}
-          presence={NOBODY}
-          endpoint={endpoint}
-          syncDetails
-        />
-      </Popover>,
-    );
-    const host = view.container;
-    act(() => void vi.advanceTimersByTime(5_000));
-
-    const button = within(host).getByRole<HTMLButtonElement>("button", { name: /^Sync details —/ });
-    expect(button?.tagName).toBe("BUTTON");
-    expect(host.querySelectorAll(".ub-status-word")).toHaveLength(1);
-    expect(button?.textContent?.trim()).toBe("synced");
-    expect(button?.getAttribute("aria-label")).toBe(
-      "Sync details — synced, hub wss://hub.example/ws (served /uberblick-config.json)",
-    );
-    act(() => button?.click());
-    expect(toggle).toHaveBeenCalledOnce();
-  });
-});
-
-describe("the locally served document's two sync facts", () => {
-  afterEach(() => {
-    vi.useRealTimers();
+  it("uses neutral details for unknown acknowledgement and never calls it offline", () => {
+    const view = mount(null);
+    expect(within(view.container).getByRole("button", { name: "Sync details" })).toBeTruthy();
+    expect(view.container.textContent).toBe("Edited just now");
   });
 
-  function localLine(
-    hubAcked: boolean | null,
-    patch: Partial<RoomStatus> = {},
-    notSharedReason: import("../src/shell/document-search.js").NotSharedReason | null = null,
-    endpoint = "wss://remote.example/ws",
-  ): { words: string[]; label: string | null; text: string } {
-    vi.useFakeTimers();
-    const view = render(
-      <Popover>
-        <StatusLine
-          connection={stubConnection(0, {
-            connected: true,
-            synced: true,
-            writable: true,
-            ...patch,
-          })}
-          presence={NOBODY}
-          endpoint={{ url: endpoint, source: "document" }}
-          hubAcked={hubAcked}
-          notSharedReason={notSharedReason}
-          syncDetails
-        />
-      </Popover>,
-    );
-    const host = view.container;
-    act(() => void vi.advanceTimersByTime(5_000));
-    const visible = host.cloneNode(true) as HTMLElement;
-    // aria-hidden is the accessibility contract for ink omitted from this reading.
-    for (const hidden of visible.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
-    const answer = {
-      words: [...host.querySelectorAll(".ub-status-word")].map(
-        (word) => word.textContent ?? "",
-      ),
-      label: within(host).getByRole("button", { name: /^Sync details/ }).getAttribute("aria-label"),
-      text: visible.textContent ?? "",
-    };
-
-    return answer;
-  }
-
-  it("keeps edits saved here while keeping device recovery out of the header", () => {
-    const signIn = localLine(false, {}, "sign-in-required");
-    expect(signIn.words).toEqual(["saved here", "not shared with hub"]);
-    expect(signIn.text).not.toContain("ub auth login");
-    const noAccess = localLine(false, {}, "no-workspace-access");
-    expect(noAccess.words).toEqual(["saved here", "not shared with hub"]);
-    expect(noAccess.text).not.toContain("administrator");
-    expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
+  it("claims device saving only for a saved replica with known unacknowledged hub state", () => {
+    const view = mount(false);
+    const button = within(view.container).getByRole("button", { name: /^Offline since \d\d:\d\d$/ });
+    expect(button.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("offline");
+    expect(view.container.querySelector(".ub-status-offline")?.textContent).toBe("Offline. Changes are saved on this device.");
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("Offline. Changes are saved on this device.");
+    view.ack(null);
+    expect(view.container.querySelector(".ub-status-offline")).toBeNull();
+    expect(within(view.container).getByRole("button", { name: "Sync details" })).toBeTruthy();
+    view.ack(true);
+    expect(document.querySelector(".ub-sync-announcement")?.textContent).toBe("Synced with hub.");
   });
 
-  it("names an explicit local workspace without claiming that its edits reached a hub", () => {
-    const local = localLine(true, {}, null, "local");
-    expect(local.words).toEqual(["saved here"]);
-    expect(local.label).toContain("local (served /uberblick-config.json)");
-    expect(local.text).not.toContain("synced with hub");
+  it.each([
+    ["update required", { protocolMismatch: { hub: 2, client: 1 } }],
+    ["edit refused", { storeRefused: true }],
+    ["no hub token", { tokenMissing: true }],
+    ["not authorized", { authFailed: true }],
+  ] as const)("keeps the %s refusal with neutral details", (word, patch) => {
+    const view = mount(false, patch);
+    expect(view.container.querySelector(".ub-status-word")?.textContent).toBe(word);
+    expect(within(view.container).getByRole("button", { name: "Sync details" })).toBeTruthy();
+    expect(view.container.querySelector(".ub-sync-dot")?.getAttribute("data-state")).toBe("error");
+    expect(view.container.textContent).not.toContain("Changes are saved on this device.");
   });
 
-  it("distinguishes local durability from upstream acknowledgement", () => {
-    expect(localLine(false).words).toEqual([
-      "saved here",
-      "not synced with hub",
-    ]);
-    expect(localLine(true).words).toEqual(["saved here", "synced with hub"]);
-    expect(localLine(null).words).toEqual(["saved here", ""]);
+  it("retains not shared with hub without the saved-device offline claim", () => {
+    const view = mount(false, {}, "no-hub-credentials");
+    expect(view.container.querySelector(".ub-status-word")?.textContent).toBe("not shared with hub");
+    expect(view.container.textContent).not.toContain("Changes are saved on this device.");
   });
 
-  it("names the remote hub from the served configuration", () => {
-    expect(localLine(false).label).toBe(
-      "Sync details — saved here, not synced with hub; hub " +
-        "wss://remote.example/ws (served /uberblick-config.json)",
-    );
-  });
-
-  it("lets an unsaved or refused reading suppress the upstream fact", () => {
-    const unsaved = localLine(true, {
-      connected: false,
-      synced: false,
-      writable: false,
-    });
-    expect(unsaved.words).toEqual(["offline"]);
-    expect(unsaved.label).toBe("Sync details — offline");
-    const refused = localLine(true, { writable: false, tokenMissing: true });
-    expect(refused.words).toEqual(["no hub token"]);
-    expect(refused.label).toBe("Sync details — no hub token");
-  });
-
-  it("names local-only saving without inline recovery or hub acknowledgement", () => {
-    const localOnly = localLine(false, {}, "no-hub-credentials");
-    expect(localOnly.words).toEqual(["saved here", "not shared with hub"]);
-    expect(localOnly.text).not.toContain("this machine has no credentials for its hub");
-    const blank = localLine(null, {}, "no-hub-credentials");
-    expect(blank.words).toEqual(["saved here", ""]);
-    expect(blank.text).not.toContain("this machine has no credentials for its hub");
-    expect(localLine(false, { storeRefused: true }, "no-hub-credentials").words).toEqual(["edit refused"]);
-    expect(localLine(false, { writable: false }, "no-hub-credentials").text).not.toContain("credentials");
+  it("keeps not saved when the page loses its own server", () => {
+    const view = mount(false, { connected: false, synced: false, writable: false });
+    expect(view.container.querySelector(".ub-not-saved")?.textContent).toBe("not saved");
+    expect(view.container.querySelector(".ub-status-offline")).toBeNull();
+    expect(view.container.textContent).not.toContain("Changes are saved on this device.");
   });
 });

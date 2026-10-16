@@ -17,9 +17,8 @@ import { discussionTarget } from "./discussion.js";
 const DECISION_GUIDANCE =
   "A decision title names the stable topic or question, never the answer; successors keep the title. " +
   'Example: "Exact behavior of milestone setting `gate`", not "Milestone gate skips milestones with nothing to start". ' +
-  "Use one to three short answer blocks with brief reasons; a superseding record carries the new answer. " +
-  'Do not repeat the topic as a "Topic:" line or write a specification: detailed behavior and guidance belong ' +
-  "on the related regular page, discussion in the RFC. Answer blocks are distinct from recorded answer: {who, when, where}.";
+  "For decision answers, see lifecycle's Decision answers and topics section. " +
+  "Answer blocks are distinct from recorded answer: {who, when, where}.";
 
 const CREATE_DOC_LIFECYCLE_MODES: readonly ToolMode[] = [
   {
