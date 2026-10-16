@@ -37,7 +37,7 @@ import { expect, test } from "@playwright/test";
 import { devConfigDocument } from "../dev-config-document.js";
 import { createDoc, docButton, docTitle, editor, openPath, setupHarness } from "./app-helpers.js";
 import { openUpstreamApp, startHarness } from "./harness.js";
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 
 const { harness, openApp, trackContext, ws } = setupHarness();
 
@@ -296,16 +296,18 @@ test("a development binding keeps its local key with its loopback endpoint", asy
   // The file's ordinary harness continues serving the shared run artifact.
   const context = trackContext(await browser.newContext());
   const fallback = await startHarness({ compiledFallback: true });
+  let observerContext: BrowserContext | undefined;
   try {
+    const appUrl = await fallback.upstreamAppUrl();
     await context.route("**/uberblick-config.json", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json",
         body: devConfigDocument({
           UB_WORKSPACE_ID: fallback.workspace, UB_HUB_URL: fallback.hubUrl, HUB_AUTH_TOKEN: fallback.authSecret,
-        }),
+        }, undefined, new URL("/ws", appUrl).href.replace("http:", "ws:")),
       });
     });
     const page = await context.newPage();
-    await page.goto(fallback.appUrl);
+    await page.goto(appUrl);
     await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
     const title = docTitle("unbound-dev");
     const uuid = await createDoc(page, title);
@@ -315,6 +317,7 @@ test("a development binding keeps its local key with its loopback endpoint", asy
     // A separate upstream browser receives the new document and edit, proving
     // admission and transport through the dev document rather than only a UI state.
     const upstream = await openUpstreamApp(browser, fallback, `/${fallback.workspace}/${uuid}`);
+    observerContext = upstream.context;
     const observer = upstream.page;
     trackContext(upstream.context);
     await expect(observer.locator(".ub-title")).toHaveValue(title);
@@ -323,7 +326,7 @@ test("a development binding keeps its local key with its loopback endpoint", asy
     try {
       await context.close();
     } finally {
-      await fallback.stop();
+      try { await observerContext?.close(); } finally { await fallback.stop(); }
     }
   }
 });
@@ -337,6 +340,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // reads it, mints from the secret it carries, dials the endpoint it names,
   // and joins that workspace's rooms.
   const served = [`served-${randomUUID()}`, randomUUID()];
+  const appUrl = await harness().upstreamAppUrl();
   const context = await browser.newContext();
   trackContext(context);
   await context.route("**/uberblick-config.json", async (route) => {
@@ -344,7 +348,7 @@ test("the served configuration names the workspaces, and the build's define is o
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        hubUrl: harness().hubUrl,
+        hubUrl: new URL("/ws", appUrl).href.replace("http:", "ws:"),
         workspaces: served,
         // The whole configuration comes from this document, the
         // credential included — a body without it could not connect at all.
@@ -353,7 +357,7 @@ test("the served configuration names the workspaces, and the build's define is o
     });
   });
   const page = await context.newPage();
-  await page.goto(harness().appUrl);
+  await page.goto(appUrl);
 
   // `/` opens the *served* list's first entry — not the `WORKSPACE_ID` the
   // shared bundle carries. Ordinary tests open the runtime document's workspace.
@@ -387,7 +391,7 @@ test("the served configuration names the workspaces, and the build's define is o
   // what it is for.
   await expect(source).toHaveText(/^served\b/);
   await expect(page.getByRole("dialog", { name: "Sync and presence" })
-    .locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(harness().hubUrl);
+    .locator('.ub-sync-fact:has(dt:text-is("Hub")) dd')).toHaveText(new URL("/ws", appUrl).href.replace("http:", "ws:"));
   await expect(page.locator(".ub-sync-toggle")).toHaveAccessibleName(/^(Sync details|Synced with hub .+)$/);
   await page.keyboard.press("Escape");
 

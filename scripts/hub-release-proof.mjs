@@ -97,12 +97,12 @@ function request(port, path, websocket = false, host = `localhost:${port}`, meth
     req.once("error", reject);
     req.once("upgrade", (response, socket) => {
       socket.destroy();
-      resolve({ status: response.statusCode, headers: response.headers, body: "" });
+      resolve({ status: response.statusCode, headers: response.headers, rawHeaders: response.rawHeaders, body: "" });
     });
     req.once("response", (response) => {
       let body = "";
       response.setEncoding("utf8").on("data", (chunk) => { body += chunk; });
-      response.once("end", () => resolve({ status: response.statusCode, headers: response.headers, body }));
+      response.once("end", () => resolve({ status: response.statusCode, headers: response.headers, rawHeaders: response.rawHeaders, body }));
       response.once("error", reject);
     });
     req.end(method === "POST" ? "{}" : undefined);
@@ -125,6 +125,7 @@ async function main() {
   for (const key of ["HUB_URL", "WORKSPACE_ID", "WORKSPACES", "HUB_AUTH_TOKEN", "HUB_GITHUB_CLIENT_ID",
     "WEB_HUB_URL", "WEB_WORKSPACES", "WEB_HOST", "HTTPS_BIND_IP", "LOOPBACK_PORT", "TAILSCALE_HOST", "TAILSCALE_IP", "COMPOSE_FILE", "COMPOSE_PROFILES"]) delete environment[key];
   let deployment;
+  let candidateDeployment = false;
   let cleanupDeployment;
   let cleaningUp = false;
   let namedRoute = false;
@@ -195,6 +196,7 @@ db.close(); console.log(JSON.stringify(result));`;
       assert.equal(labels["io.uberblick.sync-protocol-version"], String(metadata.syncProtocolVersion));
     }
     writeFileSync(join(directory, ".env"), localSettings, { mode: 0o600 });
+    candidateDeployment = index === 1;
     console.log(`Extracted hub ${version} from ${metadata.sourceCommit}, sync protocol ${metadata.syncProtocolVersion}.`);
     return directory;
   }
@@ -208,6 +210,20 @@ db.close(); console.log(JSON.stringify(result));`;
         const home = await request(port, "/");
         assert.equal(home.status, 200);
         assert.match(home.headers["content-type"], /text\/html/);
+        if (candidateDeployment) {
+          const fragment = (await compose(["exec", "-T", "caddy", "cat", "/etc/caddy/uberblick-csp.caddy"])).stdout;
+          const policy = fragment.match(/^header Content-Security-Policy ("[^\n]+")\n$/);
+          assert.ok(policy, "the web image imports one generated enforcing policy");
+          const expectedPolicy = JSON.parse(policy[1]);
+          for (const page of [home, await request(port, `/${WORKSPACE}/${SETUP}`)]) {
+            assert.equal(page.status, 200);
+            assert.match(page.headers["content-type"], /text\/html/);
+            assert.equal(page.headers["content-security-policy"], expectedPolicy);
+            assert.equal(page.rawHeaders.filter((name, index) =>
+              index % 2 === 0 && name.toLowerCase() === "content-security-policy").length, 1);
+            assert.equal(page.headers["content-security-policy-report-only"], undefined);
+          }
+        }
         const config = await request(port, "/uberblick-config.json");
         assert.equal(config.status, 200);
         assert.equal(config.headers["cache-control"], "no-store");

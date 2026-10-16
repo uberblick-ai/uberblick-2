@@ -91,8 +91,9 @@ async function openAppearanceApp(
 
 /** Visit the owner surface once so its ordinary example catalog is available. */
 async function ensureExampleCatalog(page: Page): Promise<void> {
+  const appUrl = page.url();
   await page.goto(
-    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+    new URL(`/${harness().workspace}/settings/tags`, appUrl).href,
   );
   await expect(page.getByRole("heading", { name: "Tags", level: 1 })).toBeVisible();
   await expect(
@@ -100,7 +101,7 @@ async function ensureExampleCatalog(page: Page): Promise<void> {
   ).toHaveCount(EXAMPLE_TAGS.length);
   await page.locator(".ub-settings-back").click();
   await expect(page).toHaveURL(
-    new URL(`/${harness().workspace}`, harness().appUrl).href,
+    new URL(`/${harness().workspace}`, appUrl).href,
   );
 }
 
@@ -430,6 +431,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   browser,
 }) => {
   const page = await openAppearanceApp(browser, "light");
+  const appUrl = page.url();
   const workspacePath = `/${harness().workspace}`;
   const settingsPath = `${workspacePath}/settings`;
   const documents = page.locator(".ub-document-sidebar");
@@ -440,7 +442,7 @@ test("settings panes reject the pointer and follow browser history", async ({
     exact: true,
   });
   await settingsEntry.click();
-  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(settingsPath, appUrl).href);
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   const back = settings.locator(".ub-settings-back");
   await expect(back).toBeVisible();
@@ -448,7 +450,7 @@ test("settings panes reject the pointer and follow browser history", async ({
 
   // The route is the selection: browser Back restores the document sidebar.
   await page.goBack();
-  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(workspacePath, appUrl).href);
   await expect(page.getByRole("button", { name: "+ New page" })).toBeVisible();
   await expect(settingsEntry).toBeFocused();
   await expectPaneRejectsPointer(settings);
@@ -458,23 +460,23 @@ test("settings panes reject the pointer and follow browser history", async ({
   const workspaceMenu = page.locator("[data-slot=dropdown-menu-content]");
   await expect(workspaceMenu).toBeVisible();
   await page.goForward();
-  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(settingsPath, appUrl).href);
   await expect(workspaceMenu).toBeHidden();
   await expect(back).toBeFocused();
   await page.goBack();
-  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(workspacePath, appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
   await page.getByTestId("account-menu").click();
   const userPanel = page.getByRole("menu");
   await expect(userPanel).toBeVisible();
   await page.goForward();
-  await expect(page).toHaveURL(new URL(settingsPath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(settingsPath, appUrl).href);
   // Radix dismisses the menu when the sidebar focuses the incoming header.
   await expect(userPanel).toBeHidden();
   await expect(back).toBeFocused();
   await page.goBack();
-  await expect(page).toHaveURL(new URL(workspacePath, harness().appUrl).href);
+  await expect(page).toHaveURL(new URL(workspacePath, appUrl).href);
   await expect(settingsEntry).toBeFocused();
 
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -689,7 +691,7 @@ for (const scheme of ["light"] as const) {
     await openSidebar(true);
     await expect(general).toHaveAttribute("aria-current", "page");
 
-    await page.goto(new URL("/not-a-workspace", harness().appUrl).href);
+    await page.goto(new URL("/not-a-workspace", page.url()).href);
     await openSidebar();
     for (const disabled of [page.getByRole("button", { name: "+ New page", exact: true }), page.locator(".ub-group-add")]) {
       await expect(disabled).toBeDisabled();
@@ -1657,7 +1659,7 @@ for (const scheme of ["light", "dark"] as const) {
       doc.destroy();
     }
 
-    await page.goto(new URL(`/${harness().workspace}/settings`, harness().appUrl).href);
+    await page.goto(new URL(`/${harness().workspace}/settings`, page.url()).href);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Connection details", exact: true }).click();
     for (const fact of await page.locator("[data-settings-facts] > div").all()) {
@@ -1909,7 +1911,7 @@ for (const scheme of ["light"] as const) {
       await expect(page.locator(".ub-copy")).toHaveCount(4);
       await clipboardMode(page, "modern");
       const link = page.getByRole("menuitem", { name: "Copy link", exact: true });
-      const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href;
+      const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, page.url()).href;
       await page.getByRole("button", { name: "Document actions" }).click();
       await expect(link).toHaveAccessibleName("Copy link");
       await activateCopy(page, link);
@@ -1998,7 +2000,7 @@ for (const scheme of ["light"] as const) {
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     await activateCopy(waiting, waitingCopy);
     await expect(copyNotice(waiting, "Link copied")).toHaveAttribute("data-type", "success");
-    expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, harness().appUrl).href]);
+    expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, waiting.url()).href]);
     await expect(waiting.locator(".ub-copied")).toHaveCount(0);
     await clipboardMode(waiting, "failed");
     await activateCopy(waiting, waitingCopy, true);
@@ -2110,7 +2112,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   // search icon, on a ground no lighter than the panel under it.
   await page.setViewportSize({ width: 1280, height: 620 });
   await page.goto(
-    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+    new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   for (const name of ["design", "hub", "release", "schema", "storage"]) {
     await page.getByLabel("Create a tag").fill(name);
@@ -2142,7 +2144,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   // own pill.
   const longest = "a".repeat(MAX_TAG_NAME_LENGTH);
   await page.goto(
-    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+    new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   await page.getByLabel("Create a tag").fill(longest);
   await page.getByRole("button", { name: "Create", exact: true }).click();
@@ -2191,7 +2193,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   // Leave the seeded catalog as this file's other tests expect to find it.
   await page.setViewportSize({ width: 1280, height: 620 });
   await page.goto(
-    new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href,
+    new URL(`/${harness().workspace}/settings/tags`, page.url()).href,
   );
   for (const name of ["design", "hub", "release", "schema", "storage", longest]) {
     await page.getByRole("button", { name: `Retire ${name}` }).click();

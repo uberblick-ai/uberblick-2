@@ -11,6 +11,7 @@ import { placeCaretIn } from "./harness.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
 import { expectMcp, proveBrowserTitleArrival, proveMcpArrival } from "./settle.js";
+import { mockFigmaLookup } from "./figma-fixtures.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -42,6 +43,7 @@ async function fixture(browser: Browser, figma = false, touch = false): Promise<
     upstream: true,
     contextOptions: { viewport: { width: touch ? 810 : 1440, height: 1400 }, ...(touch ? { hasTouch: true } : {}) },
     beforeNavigate: async (target) => {
+      await mockFigmaLookup(target);
       await target.route("https://embed.figma.com/**", (route) => route.fulfill({
         contentType: "text/html", body: "<html><body>Figma viewer stub</body></html>",
       }));

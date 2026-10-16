@@ -95,6 +95,34 @@ describe("Figma viewer provider contract", () => {
   });
 });
 
+describe("Figma title lookup address", () => {
+  it("sends only the normalized stored link to the fixed oEmbed endpoint", () => {
+    const address = new globalThis.URL(FIGMA_PROVIDER.lookupAddress(
+      `${URL.replace("www.figma.com", "figma.com")}&starting-point-node-id=12%3A401&version-id=987&document=secret&workspace=private&t=tracking#private`,
+    )!);
+    expect(address.origin).toBe("https://www.figma.com");
+    expect(address.pathname).toBe("/api/oembed");
+    expect([...address.searchParams]).toEqual([
+      ["url", `${URL}&starting-point-node-id=12%3A401&version-id=987`],
+    ]);
+  });
+
+  it.each(["design/key?node-id=12-345", "design/key", "file/key", "proto/key?node-id=12-345", "board/key", "slides/key"])(
+    "looks up public-file information for the supported kind %s", (path) => {
+      const address = new globalThis.URL(FIGMA_PROVIDER.lookupAddress(`https://figma.com/${path}`)!);
+      expect(address.searchParams.get("url")).toBe(`https://www.figma.com/${path}`);
+    },
+  );
+
+  it("skips community files rather than treating an unsupported public kind as private", () => {
+    expect(FIGMA_PROVIDER.lookupAddress("https://www.figma.com/community/file/123456/Public-file")).toBeNull();
+  });
+
+  it("refuses non-Figma destinations before constructing a request address", () => {
+    expect(() => FIGMA_PROVIDER.lookupAddress("https://example.test/design/key")).toThrow(InvalidFigmaError);
+  });
+});
+
 describe("Figma block contract", () => {
   it("stores only kept identity, literal title, explicit height and a marked caption", () => {
     const title = `**Literal** [target](${TARGET})`;

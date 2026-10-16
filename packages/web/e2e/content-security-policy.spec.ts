@@ -1,13 +1,14 @@
-/** Report-only policy and classic appearance bootstrap through production `ub open`. */
-import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+/** Enforced policy and classic appearance bootstrap through production `ub open`. */
+import { devices, expect, test } from "@playwright/test";
+import type { Page, Response } from "@playwright/test";
 import { BLOCK_TYPES } from "@uberblick/schema";
 import type { BlockInput } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { SETTINGS_KEY } from "../src/settings.js";
 import { editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
-import { waitForDocumentDraw } from "./settle.js";
+import { expectMcp, waitForDocumentDraw } from "./settle.js";
+import { FIGMA_LOOKUP, mockFigmaLookup } from "./figma-fixtures.js";
 
 const { harness, openApp, trackContext } = setupHarness();
 let agent: McpAgent | null = null;
@@ -40,11 +41,25 @@ async function watchViolations(page: Page): Promise<void> {
 }
 
 async function expectNoViolations(page: Page): Promise<void> {
-  // Reports are queued as DOM events; let renderer work and its event delivery finish.
+  // Violations are queued as DOM events; let renderer work and event delivery finish.
   await page.evaluate(() => new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)));
   }));
   expect(await page.evaluate(() => (window as unknown as { cspViolations: Violation[] }).cspViolations)).toEqual([]);
+}
+
+async function expectEnforcingPolicy(response: Response): Promise<void> {
+  const headers = await response.headersArray();
+  expect(headers.filter((header) => header.name.toLowerCase() === "content-security-policy")
+    .map((header) => header.value)).toEqual([WEB_CONTENT_SECURITY_POLICY]);
+  expect(headers.some((header) => header.name.toLowerCase() === "content-security-policy-report-only")).toBe(false);
+}
+
+async function expectWorkspaceSynced(page: Page): Promise<void> {
+  if ((page.viewportSize()?.width ?? 1280) < 1280) {
+    await page.getByRole("button", { name: "Show document list", exact: true }).click();
+  }
+  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
 }
 
 const blocks: BlockInput[] = [
@@ -64,18 +79,18 @@ const blocks: BlockInput[] = [
 ];
 const figma: BlockInput = {
   type: "figma",
-  text: "url: https://www.figma.com/design/k3Lm9QzT2x/Example\ntitle: Design reference\n\nA caption.",
+  text: "url: https://www.figma.com/design/k3Lm9QzT2x/Example\n\nA caption.",
 };
 
-test("workspace, supported renderers and the every-type document emit no report-only CSP violations", async ({ browser }) => {
+test("workspace and every block render, load Figma and sync edits without CSP violations", { tag: "@webkit" }, async ({ browser }, info) => {
   if (agent === null) throw new Error("e2e: the CSP MCP agent is not configured");
   const writer = agent.open({ name: "csp-e2e" });
   expect([...new Set([...blocks, figma].map((block) => block.type))].sort()).toEqual([...BLOCK_TYPES].sort());
-  const rendered = await writer.call<{ uuid: string }>("create_doc", {
-    title: "CSP supported blocks", description: "Production renderer coverage.", blocks,
+  const allTypes = await writer.call<{ uuid: string }>("create_doc", {
+    title: "CSP every block type", description: "Includes the live Figma view.", blocks: [...blocks, figma],
   });
   await writer.call("update_data", {
-    uuid: rendered.uuid,
+    uuid: allTypes.uuid,
     operations: [{
       collection: "measurements",
       schema: { version: 1, schema: {
@@ -88,46 +103,78 @@ test("workspace, supported renderers and the every-type document emit no report-
       ],
     }],
   });
-  const allTypes = await writer.call<{ uuid: string }>("create_doc", {
-    title: "CSP every block type", description: "Includes the live Figma view.",
-    blocks: [...blocks, figma],
-  });
+  let workspaceResponse: Response | undefined;
   const page = await openApp(browser, "/", { beforeNavigate: async (target) => {
     await watchViolations(target);
-    await target.route("https://embed.figma.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Figma fixture</title>" }));
-  } });
-  await expect(page.locator(".ub-document-sidebar")).toHaveAttribute("data-directory-state", "synced");
+    target.on("response", (response) => {
+      if (response.url() === new URL("/", harness().appUrl).href) workspaceResponse = response;
+    });
+    await mockFigmaLookup(target);
+    await target.route("https://embed.figma.com/**", (route) => route.fulfill({
+      contentType: "text/html", body: "<!doctype html><title>Figma fixture</title><p id='viewer'>Live Figma fixture</p>",
+    }));
+  }, contextOptions: info.project.use.hasTouch === true ? devices["iPad (gen 7)"] : {} });
+  if (workspaceResponse === undefined) throw new Error("e2e: the workspace navigation returned no response");
+  await expectEnforcingPolicy(workspaceResponse);
+  await expectWorkspaceSynced(page);
   await expectNoViolations(page);
 
-  for (const uuid of [rendered.uuid, allTypes.uuid]) {
-    const response = await page.goto(new URL(`/${harness().workspace}/${uuid}`, harness().appUrl).href);
-    if (response === null) throw new Error("e2e: the document navigation returned no response");
-    const headers = await response.headersArray();
-    expect(headers.filter((header) => header.name.toLowerCase() === "content-security-policy-report-only")
-      .map((header) => header.value)).toEqual([WEB_CONTENT_SECURITY_POLICY]);
-    expect(headers.some((header) => header.name.toLowerCase() === "content-security-policy")).toBe(false);
-    await expect(page.locator(".ub-title")).toHaveValue(uuid === rendered.uuid ? "CSP supported blocks" : "CSP every block type");
-    if (uuid === rendered.uuid) {
-      await expect(editor(page)).toBeVisible();
-      await waitForDocumentDraw(page, writer, uuid, { index: "all" });
-      for (const selector of [
-        ".ub-code > code", ".ub-wireframe-drawing .wf-root",
-        ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
-        ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card",
-      ]) await expect(page.locator(selector).first()).toBeVisible();
-      await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
-      await page.getByRole("button", { name: "Document actions", exact: true }).click();
-      await expect(page.getByRole("menu")).toBeVisible();
-      await page.keyboard.press("Escape");
-    } else {
-      await expect(editor(page)).toBeVisible();
-      await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-      await expect(page.locator(".ub-figma")).toBeVisible();
-      await page.locator(".ub-figma").scrollIntoViewIfNeeded();
-      await expect(page.locator(".ub-figma iframe")).toHaveAttribute("src", /^https:\/\/embed\.figma\.com\//);
-    }
-    await expectNoViolations(page);
-  }
+  const lookupResponse = page.waitForResponse(FIGMA_LOOKUP);
+  const response = await page.goto(new URL(`/${harness().workspace}/${allTypes.uuid}`, harness().appUrl).href);
+  if (response === null) throw new Error("e2e: the document navigation returned no response");
+  await expectEnforcingPolicy(response);
+  await expect(page.locator(".ub-title")).toHaveValue("CSP every block type");
+  await expect(editor(page)).toBeVisible();
+  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+  await waitForDocumentDraw(page, writer, allTypes.uuid, { index: "all" });
+  for (const selector of [
+    ".ub-code > code", ".ub-wireframe-drawing .wf-root",
+    ".ProseMirror h2", ".ProseMirror li", ".ProseMirror blockquote",
+    ".ProseMirror table", ".ub-terminal-screen", ".ub-chart canvas", ".ub-card",
+  ]) await expect(page.locator(selector).first()).toBeVisible();
+  await expect(page.locator(".ub-chart-panel")).toHaveAttribute("data-state", "ready");
+  await page.getByRole("button", { name: "Document actions", exact: true }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.locator(".ub-figma").scrollIntoViewIfNeeded();
+  const lookup = await lookupResponse;
+  expect(lookup.status()).toBe(200);
+  expect(await lookup.json()).toEqual({ title: "Figma fixture title" });
+  await expect(page.locator(".ub-figma .ub-block-label")).toHaveText("Figma · Figma fixture title");
+  await expect(page.locator(".ub-figma iframe")).toHaveAttribute("src", /^https:\/\/embed\.figma\.com\//);
+  await expect(page.frameLocator(".ub-figma iframe").locator("#viewer")).toHaveText("Live Figma fixture");
+
+  await page.locator(".ub-editor .ub-paragraph").first().click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText(" CSP edit reached the hub.");
+  await expectMcp(() => writer.call<{ blocks: Array<{ text: string }> }>("get_doc", { uuid: allTypes.uuid }), (doc) => {
+    expect(doc.blocks[0]?.text).toContain("CSP edit reached the hub.");
+  });
+  await expectNoViolations(page);
+});
+
+test("frame-src enforces the Figma-only boundary before a forbidden frame reaches the network", { tag: "@webkit" }, async ({ browser }, info) => {
+  let forbiddenRequests = 0;
+  const page = await openApp(browser, "/", {
+    contextOptions: info.project.use.hasTouch === true ? devices["iPad (gen 7)"] : {},
+    beforeNavigate: async (target) => {
+      await watchViolations(target);
+      await target.route("https://example.com/**", async (route) => {
+        forbiddenRequests += 1;
+        await route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Forbidden fixture</title>" });
+      });
+    },
+  });
+  await expectWorkspaceSynced(page);
+  await expectNoViolations(page);
+  await page.evaluate(() => {
+    const frame = document.createElement("iframe");
+    frame.src = "https://example.com/";
+    document.body.append(frame);
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { cspViolations: Violation[] }).cspViolations))
+    .toEqual([{ directive: "frame-src", blocked: expect.stringMatching(/^https:\/\/example\.com\/?$/), disposition: "enforce" }]);
+  expect(forbiddenRequests).toBe(0);
 });
 
 const appearance = { raw: JSON.stringify({ appearance: "dark" }), theme: "dark", system: "light" } as const;

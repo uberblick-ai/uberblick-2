@@ -103,7 +103,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan("On this page");
       await page.keyboard.press("Escape");
 
-      const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href;
+      const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, page.url()).href;
       await page.goto(tagsUrl);
       await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
       await page.goto(documentUrl);
@@ -178,7 +178,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
       await page.setViewportSize({ width: 1280, height: 800 });
       for (const [surface, suffix] of [["workspace settings", "settings"], ["tag settings", "settings/tags"]]) {
-        await page.goto(new URL(`/${harness().workspace}/${suffix}`, harness().appUrl).href);
+        await page.goto(new URL(`/${harness().workspace}/${suffix}`, page.url()).href);
         await expect(page.locator("[data-settings-page]")).toBeVisible();
         await scan(surface ?? "settings");
       }
