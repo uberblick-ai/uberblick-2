@@ -205,7 +205,11 @@ export async function proveBrowserTitleArrival(page: Page, options: {
   await test.step("later browser title reaches the upstream hub replica reader", async () => {
     const input = page.locator(".ub-title");
     const title = `${await input.inputValue()} arrival`;
-    await input.fill(title);
+    // An active drag can clear the selection before the browser inserts text.
+    await expect(async () => {
+      await input.fill(title);
+      expect(await input.inputValue()).toBe(title);
+    }).toPass({ timeout: 20_000 });
     await waitForAcknowledged(page, { path: options.path });
     await expect.poll(options.readTitle).toBe(title);
   });

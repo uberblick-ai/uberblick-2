@@ -251,6 +251,10 @@ test("mouse height drags keep their preview through peer edits, commit once, cla
     });
     await expect(block.locator(".ub-figma-caption")).toContainText("A peer edited this caption.");
     await expect.poll(() => viewer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(300);
+    // Keep the gesture active while one marker input is discarded.
+    await page.locator(".ub-title").evaluate(input => {
+      input.addEventListener("beforeinput", event => event.preventDefault(), { once: true });
+    });
     await proveBrowserTitleArrival(page, { path: "upstream", readTitle: watch.readTitle });
     expect(watch.values).toEqual([]);
     await page.mouse.up();
