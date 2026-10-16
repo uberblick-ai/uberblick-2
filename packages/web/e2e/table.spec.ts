@@ -1,3 +1,4 @@
+import { waitForAcknowledged } from "./settle.js";
 /** Composed TableKit surface: direct input, contained overflow and caret reveal. */
 import { devices, expect, test } from "@playwright/test";
 import { join } from "node:path";
@@ -208,7 +209,7 @@ for (const colorScheme of ["light", "dark"] as const) {
     await author.goto(new URL(`/${ws()}/${source}`, harness().appUrl).href);
     await expect(author.locator(".ub-table th").last().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", second);
     await expect(author.locator(".ub-table td").first().locator("a.ub-doclink")).toHaveAttribute("data-doc-id", first);
-    await expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /);
+    await waitForAcknowledged(page, { path: "relay" });
     await page.reload();
     await expect(headerLink).toHaveText(secondTitle);
     await expect(bodyLink).toHaveText(firstTitle);

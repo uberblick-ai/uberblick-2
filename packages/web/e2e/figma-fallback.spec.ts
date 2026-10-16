@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { expect, test } from "@playwright/test";
-import { findBlockElement, roomForDoc } from "@uberblick/schema";
+import { findBlockElement, getMeta, roomForDoc } from "@uberblick/schema";
 import { wrapToken } from "@uberblick/schema/protocol";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import * as Y from "yjs";
 import { docTitle, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveBrowserArrival, proveMcpArrival } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
 let agent: McpAgent | null = null;
@@ -64,13 +65,21 @@ for (const arrivesWhileBound of [false, true]) {
     await expect(view.locator(".ub-figma-caption strong")).toHaveText("marked");
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
     await expect(page.locator(".ub-foreign")).toHaveCount(0);
-    expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
-    expect(before.blocks[1]?.text).not.toContain("Tracking");
+    await proveMcpArrival(page, writer, created.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      const stored = await writer.call<StoredDoc>("get_doc", { uuid: created.uuid });
+      expect(stored.blocks).toEqual(before.blocks);
+      expect(stored.blocks[1]?.text).toContain("A **marked** design reference.");
+      expect(stored.blocks[1]?.text).not.toContain("Tracking");
+    });
 
     await page.reload();
     await expect(view).toBeVisible();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-    expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
+    await proveMcpArrival(page, writer, created.uuid, { path: "upstream" });
+    await expectMcp(async () => {
+      expect((await writer.call<StoredDoc>("get_doc", { uuid: created.uuid })).blocks).toEqual(before.blocks);
+    });
     await expect.poll(() => figmaRequests.length).toBe(2);
   });
 }
@@ -101,6 +110,7 @@ test("an unsupported Figma shape still names the block and makes the document re
     await expect(fallback.locator(".ub-foreign-banner")).toContainText("unsupported type (#figma-shape)");
     await expect(editor(page)).toHaveCount(0);
     await expect(page.locator('[contenteditable="true"]')).toHaveCount(0);
+    await proveBrowserArrival(page, { path: "upstream", readTags: () => getMeta(doc).tags });
     expect(block.getAttribute("future")).toBe("unrecognized");
     await expect(page.locator("iframe")).toHaveCount(0);
   } finally { provider.destroy(); doc.destroy(); }

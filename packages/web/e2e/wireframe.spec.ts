@@ -6,6 +6,7 @@ import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 
 const { harness, openApp } = setupHarness();
@@ -134,7 +135,8 @@ test("the renderer loads on first use and later edits recover from failed chunk 
   await caretEnd(page.locator(".ub-code > code"));
   await chooseLanguage(page, "wireframe", true);
   // The block rev covers its language, so MCP edits wait for the browser's change.
-  await expect.poll(async () => (await codeBlock(session, uuid)).language).toBe("wireframe");
+  await expectMcp(async () => { expect((await codeBlock(session, uuid)).language).toBe("wireframe"); });
+  await waitForDocumentDraw(page, session, uuid, { source: SOURCE, outcome: "error" });
   const diagnostics = page.locator(".ub-wireframe-diagnostics");
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
   await expect(preview(page).locator(".wf-root")).toHaveCount(0);
@@ -143,19 +145,22 @@ test("the renderer loads on first use and later edits recover from failed chunk 
   if (firstDiagnostic === null) throw new Error("e2e: missing renderer load diagnostic");
   const failedEdit = SOURCE.replace("Delete draft?", "Still unavailable?");
   await editSource(session, uuid, failedEdit);
-  await expect.poll(() => requests.length).toBe(2);
-  await expect.poll(() => firstDiagnostic.evaluate(element => element.isConnected)).toBe(false);
+  await waitForDocumentDraw(page, session, uuid, { source: failedEdit, outcome: "error" });
+  expect(requests).toHaveLength(2);
+  expect(await firstDiagnostic.evaluate(element => element.isConnected)).toBe(false);
   await expect(diagnostics).toContainText("Preview cannot be loaded:");
   unavailable = false;
   const recovered = SOURCE.replace("Delete draft?", "Recovered draft?");
   await editSource(session, uuid, recovered);
+  await waitForDocumentDraw(page, session, uuid, { source: recovered });
   await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Recovered draft?");
   await expect(diagnostics).toBeHidden();
   expect(requests).toHaveLength(3);
   expect(new Set(requests).size).toBe(3);
   expect(await authoredText(source(page))).toBe(recovered);
-  expect((await codeBlock(session, uuid)).text).toBe(recovered);
+  await expectMcp(async () => { expect((await codeBlock(session, uuid)).text).toBe(recovered); });
   await editSource(session, uuid, SOURCE);
+  await waitForDocumentDraw(page, session, uuid, { source: SOURCE });
   await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
   expect(requests).toHaveLength(3);
   expect(new URL(page.url()).pathname).toBe(`/${harness().workspace}/${uuid}`);
@@ -167,6 +172,7 @@ test("the language picker makes a wireframe, Source returns its caret, and anoth
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   await caretEnd(page.locator(".ub-code > code"));
   await chooseLanguage(page, "wireframe", true);
+  await waitForDocumentDraw(page, session, uuid, { source: SOURCE });
   await expect(page.locator(".ub-code")).toHaveAttribute("data-language", "wireframe");
   await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
   await expect(source(page)).toBeVisible();
@@ -178,9 +184,11 @@ test("the language picker makes a wireframe, Source returns its caret, and anoth
   await expect(source(page)).toBeVisible();
   await expect.poll(() => source(page).evaluate((element) => element.contains(document.getSelection()?.focusNode ?? null))).toBe(true);
   await expect(editor(page)).toBeFocused();
-  await expect.poll(() => codeBlock(session, uuid)).toMatchObject({ type: "code", language: "wireframe", text: SOURCE });
-  expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
-    .toContain(`\`\`\`wireframe\n${SOURCE}\n\`\`\``);
+  await expectMcp(async () => { expect(await codeBlock(session, uuid)).toMatchObject({ type: "code", language: "wireframe", text: SOURCE }); });
+  await expectMcp(async () => {
+    expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
+      .toContain(`\`\`\`wireframe\n${SOURCE}\n\`\`\``);
+  });
   await chooseLanguage(page, "python", true);
   await expect(page.locator(".ub-wireframe")).toHaveCount(0);
   await expect(page.locator(".ub-code > code")).toHaveText(SOURCE);
@@ -191,6 +199,7 @@ test("MCP-created source keeps its preview and comments visible, including after
   const session = writer();
   const uuid = await wireframeDoc(session, "Annotated wireframe");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(page, session, uuid);
   await expect(preview(page).locator(".wf-root")).toBeVisible();
   await neighbor(page).click();
   await expect(source(page)).toBeHidden();
@@ -210,9 +219,11 @@ test("MCP-created source keeps its preview and comments visible, including after
   await expect(preview(page).locator(".wf-dialog-title")).toHaveText("Delete draft?");
   await source(page).click();
   await page.keyboard.type("do not mutate");
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
   expect(await authoredText(source(page))).toBe(SOURCE);
-  expect(await codeBlock(session, uuid)).toEqual(before);
+  await expectMcp(async () => { expect(await codeBlock(session, uuid)).toEqual(before); });
   const fresh = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(fresh, session, uuid);
   await expect(editor(fresh)).toHaveAttribute("contenteditable", "false");
   await expect(preview(fresh).locator(".wf-root")).toBeVisible();
   await expect(source(fresh)).toBeVisible();
@@ -257,6 +268,7 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
   const peer = await openApp(browser, `/${harness().workspace}/${uuid}`, { upstream: true });
   for (const client of [page, peer]) {
+    await waitForDocumentDraw(client, session, uuid);
     await expect(preview(client).locator(".wf-button").last()).toHaveText("Delete");
     await observePaints(client);
   }
@@ -265,8 +277,9 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
   const suffix = " changed";
   await page.keyboard.type(suffix, { delay: 5 });
   expect(await authoredText(source(page))).toBe(SOURCE + suffix);
-  await expect.poll(async () => (await codeBlock(session, uuid)).text).toBe(SOURCE + suffix);
+  await expectMcp(async () => { expect((await codeBlock(session, uuid)).text).toBe(SOURCE + suffix); });
   for (const client of [page, peer]) {
+    await waitForDocumentDraw(client, session, uuid, { source: SOURCE + suffix });
     await expect(preview(client).locator(".wf-button").last()).toHaveText(`Delete${suffix}`);
     const recorded = await paints(client);
     expect(recorded.length).toBeGreaterThan(0);
@@ -278,11 +291,14 @@ test("local keystrokes, collaborator changes and agent writes redraw only after 
   await caretEnd(source(peer));
   await peer.keyboard.type(" peer", { delay: 5 });
   expect(await authoredText(source(peer))).toBe(`${SOURCE}${suffix} peer`);
-  await expect.poll(async () => (await codeBlock(session, uuid)).text).toBe(`${SOURCE}${suffix} peer`);
+  await expectMcp(async () => { expect((await codeBlock(session, uuid)).text).toBe(`${SOURCE}${suffix} peer`); });
+  await waitForDocumentDraw(page, session, uuid, { source: `${SOURCE}${suffix} peer` });
+  await waitForDocumentDraw(peer, session, uuid, { source: `${SOURCE}${suffix} peer` });
   await expect(preview(page).locator(".wf-button").last()).toHaveText("Delete changed peer");
   await expect(preview(peer).locator(".wf-button").last()).toHaveText("Delete changed peer");
   await editSource(session, uuid, SOURCE.replace("Delete draft?", "Agent-updated draft?"));
   for (const client of [page, peer]) {
+    await waitForDocumentDraw(client, session, uuid, { source: SOURCE.replace("Delete draft?", "Agent-updated draft?") });
     await expect(preview(client).locator(".wf-dialog-title")).toHaveText("Agent-updated draft?");
     const recorded = await paints(client);
     expect(recorded.every((entry) => entry.at - entry.sourceAt >= 150)).toBe(true);
@@ -317,6 +333,7 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
     contextOptions: { colorScheme: "light" },
   });
+  await waitForDocumentDraw(page, session, uuid);
   await expect(preview(page).locator(".wf-root")).toBeVisible();
   await activateControl(openSource(page), { touch });
   await expect(source(page)).toBeVisible();
@@ -347,6 +364,7 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
   await activateControl(neighbor(page), { touch });
   await evidence(page, info, `wireframe-${touch ? "ipad" : "desktop"}-dark`);
   await editSource(session, uuid, wideSource(12));
+  await waitForDocumentDraw(page, session, uuid, { source: wideSource(12) });
   await expect(preview(page).locator(".wf-button")).toHaveCount(12);
   await expect.poll(() => fitScale(page)).toBeCloseTo(0.6, 2);
   const viewport = page.locator(".ub-wireframe-viewport");
@@ -364,6 +382,7 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
     return Math.ceil(element.clientWidth * 1.2 / context.measureText("x").width);
   });
   await editSource(session, uuid, wideSource(1, mediumLength));
+  await waitForDocumentDraw(page, session, uuid, { source: wideSource(1, mediumLength) });
   await expect(preview(page).locator(".wf-button")).toHaveCount(1);
   await expect.poll(() => fitScale(page)).toBeGreaterThan(0.6);
   expect(await fitScale(page)).toBeLessThan(1);
@@ -372,8 +391,10 @@ test("desktop and iPad wireframes fit inside their column and follow both appear
 });
 
 test("warning banners use the product warning colours in both appearances", { tag: "@webkit" }, async ({ browser }, info) => {
-  const uuid = await wireframeDoc(writer(), "Wireframe banner tones", "banner\n  icon archive\n  text Archived.\nbanner.warning\n  icon archive\n  text Archived.");
+  const session = writer();
+  const uuid = await wireframeDoc(session, "Wireframe banner tones", "banner\n  icon archive\n  text Archived.\nbanner.warning\n  icon archive\n  text Archived.");
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
+  await waitForDocumentDraw(page, session, uuid);
   const banners = preview(page).locator(".wf-banner");
   await expect(banners).toHaveCount(2);
   for (const appearance of ["light", "dark"]) {
@@ -413,6 +434,7 @@ test("100 wireframes do no rendering work during prose typing and record compara
   test.setTimeout(120_000);
   const session = writer();
   const pages: Page[] = [];
+  let wireframeUuid: string | null = null;
   for (const language of ["", "wireframe"]) {
     const { uuid } = await session.call<{ uuid: string }>("create_doc", {
       title: `100 ${language || "ordinary code"} blocks`, description: "Prose typing with one hundred source blocks.",
@@ -420,7 +442,11 @@ test("100 wireframes do no rendering work during prose typing and record compara
     });
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`);
     await expect(page.locator(".ub-code")).toHaveCount(100);
-    if (language === "wireframe") await expect(preview(page).locator(".wf-root")).toHaveCount(100);
+    if (language === "wireframe") {
+      wireframeUuid = uuid;
+      await waitForDocumentDraw(page, session, uuid, { index: "all" });
+      await expect(preview(page).locator(".wf-root")).toHaveCount(100);
+    }
     await page.evaluate(() => {
       const target = document.querySelector(".ub-editor .ProseMirror > p");
       if (target === null) throw new Error("e2e: missing prose timing target");
@@ -465,10 +491,13 @@ test("100 wireframes do no rendering work during prose typing and record compara
     (index === 0 ? plain : wireframe).push(median(samples));
   }
   const wireframePage = pages[1];
-  if (wireframePage === undefined) throw new Error("e2e: wireframe workload page is missing");
-  // Observe beyond the 200 ms redraw debounce without faking the performance clock.
-  await wireframePage.waitForTimeout(300);
-  expect(await wireframePage.evaluate(() => (window as unknown as { wireframeTyping: { redraws: number } }).wireframeTyping.redraws)).toBe(0);
+  if (wireframePage === undefined || wireframeUuid === null) throw new Error("e2e: wireframe workload page is missing");
+  // This later source change must reach the same drawing reader after prose
+  // input. Its one draw accounts for the marker; every other draw is a failure.
+  const marker = SOURCE.replace("Delete draft?", "Later drawing proves arrival");
+  await editSource(session, wireframeUuid, marker);
+  await waitForDocumentDraw(wireframePage, session, wireframeUuid, { source: marker });
+  expect(await wireframePage.evaluate(() => (window as unknown as { wireframeTyping: { redraws: number } }).wireframeTyping.redraws)).toBe(1);
   const measured = { ordinaryCode: plain, wireframes: wireframe, ordinaryMedianMs: median(plain), wireframeMedianMs: median(wireframe), blocks: 100 };
   console.log(`wireframe prose timing: ${JSON.stringify(measured)}`);
   const path = info.outputPath("wireframe-prose-timing.json");

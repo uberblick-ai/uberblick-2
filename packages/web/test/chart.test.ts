@@ -3,10 +3,12 @@ import * as Y from "yjs";
 import {
   appendBlock, applyDocData, createAnnotation, editBlock, getBlocks, getBlocksFragment,
   initDoc, readDocData,
+  blockRev,
 } from "@uberblick/schema";
 import { mountEditor, typeText } from "./helpers.js";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { prepareTable } from "../src/editor/table-data.js";
+import { dataRevision } from "../src/editor/render-state.js";
 import type { ChartConfiguration } from "chart.js";
 
 type RecordedChart = typeof charts.instances[number];
@@ -108,6 +110,32 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("the chart's derived lifecycle", () => {
+  it.each([mapping, tableMapping])("exposes only the source and data revision whose drawing completed: %s", (source) => {
+    const { doc, directory, id } = fixture();
+    if (source !== mapping) editBlock(doc, id, mapping, source);
+    const { editor } = mountEditor(doc);
+    const root = editor.view.dom.querySelector<HTMLElement>(".ub-chart")!;
+    expect(root.dataset.sourceRev).toBeUndefined();
+    flush();
+    const firstDataRev = dataRevision(readDocData(doc));
+    expect(root.dataset).toMatchObject({ sourceRev: blockRev({ type: "chart", text: source }), dataRev: firstDataRev, drawState: "success" });
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "b", value: { day: 2, value: 7 } }] }]);
+    expect(root.dataset.dataRev).toBe(firstDataRev);
+    flush();
+    expect(root.dataset.dataRev).toBe(dataRevision(readDocData(doc)));
+    expect(root.dataset.dataRev).not.toBe(firstDataRev);
+    const invalid = "invalid mapping";
+    editBlock(doc, id, source, invalid);
+    expect(root.dataset.sourceRev).toBe(blockRev({ type: "chart", text: source }));
+    flush();
+    expect(root.dataset).toMatchObject({ sourceRev: blockRev({ type: "chart", text: invalid }), drawState: "error" });
+    expect(root.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("invalid-configuration");
+    editBlock(doc, id, invalid, source);
+    flush();
+    expect(root.dataset.drawState).toBe("success");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("sorts only a mounted table's cached window without reads, projection, selection or writes", () => {
     const { doc, directory, id } = fixture();
     const source = JSON.stringify({ ...JSON.parse(tableMapping), limit: 2, sort: { field: "day", direction: "desc" } });
@@ -368,6 +396,7 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(readDocData).toHaveBeenCalledTimes(1);
     expect(editor.view.dom.querySelectorAll(".ub-chart-panel[data-state=collection-unusable]")).toHaveLength(2);
+    expect(editor.view.dom.querySelectorAll('.ub-chart[data-draw-state="error"]')).toHaveLength(2);
     const table = editor.view.dom.querySelector('.ub-chart[data-view="table"]');
     expect(table).not.toBeNull();
     expect(table?.querySelector(".ub-block-caption")?.hasAttribute("hidden")).toBe(true);
@@ -378,6 +407,7 @@ describe("the chart's derived lifecycle", () => {
     flush();
     expect(readDocData).toHaveBeenCalledTimes(2);
     expect(editor.view.dom.querySelectorAll(".ub-chart-panel[data-state=ready]")).toHaveLength(2);
+    expect(editor.view.dom.querySelectorAll('.ub-chart[data-draw-state="success"]')).toHaveLength(2);
     expect(editor.view.dom.querySelector(".ub-data-table tbody")?.textContent).toBe("19");
     peer.getMap("data").set(JSON.stringify(["record", "trend", "a"]), { day: 1, value: NaN });
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer, Y.encodeStateVector(doc)));

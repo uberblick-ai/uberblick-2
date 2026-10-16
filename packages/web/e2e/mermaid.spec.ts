@@ -4,6 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 import { McpAgent } from "./mcp-agent.js";
+import { expectMcp, proveMcpArrival } from "./settle.js";
 import type { McpSession } from "./mcp-agent.js";
 
 const { harness, openApp } = setupHarness();
@@ -257,12 +258,14 @@ test("typing, collaborator edits and MCP edits redraw while preserving source an
   await activateControl(neighbor(page));
   await expect(source(page)).toBeVisible();
   await expect(source(page).locator("[data-comment-thread]")).toHaveText("MCP");
-  const stored = await storedBlock(session, uuid);
-  expect(stored.type).toBe("mermaid");
-  expect(stored.text).toBe(`${before.text}; Finish --> Annotated[Annotated edit]`);
-  expect(await copySource(page)).toBe(stored.text);
-  expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
-    .toContain(`\`\`\`mermaid\n${stored.text}\n\`\`\``);
+  await expectMcp(async () => {
+    const stored = await storedBlock(session, uuid);
+    expect(stored.type).toBe("mermaid");
+    expect(stored.text).toBe(`${before.text}; Finish --> Annotated[Annotated edit]`);
+    expect(await copySource(page)).toBe(stored.text);
+    expect((await session.call<{ markdown: string }>("export_markdown", { uuid, frontmatter: false })).markdown)
+      .toContain(`\`\`\`mermaid\n${stored.text}\n\`\`\``);
+  });
 });
 
 test("invalid and unsupported source clears only its diagram and recovers without a reload", { tag: "@webkit" }, async ({ browser }) => {
@@ -314,9 +317,12 @@ test("locked and archived documents draw and reveal source without allowing edit
     await expect(source(page)).toBeVisible();
     await activateControl(source(page));
     await page.keyboard.type("must stay unchanged");
+    await proveMcpArrival(page, session, uuid, { path: "upstream" });
     expect(await authoredText(source(page))).toBe(SOURCE);
     expect(await copySource(page)).toBe(SOURCE);
-    expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+    await expectMcp(async () => {
+      expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+    });
   }
 });
 
@@ -345,7 +351,7 @@ test("renderer download and unsupported-runtime failures keep readable source an
     if (failure === "download") expect(requested.length).toBeGreaterThan(0);
     const previousError = await block(page).locator(".ub-mermaid-error").evaluateHandle((element) => element.firstChild);
     await appendStatement(page, "Finish --> Editable[Still editable]");
-    await expect.poll(async () => (await storedBlock(session, uuid)).text).toContain("Still editable");
+    await expectMcp(async () => { expect((await storedBlock(session, uuid)).text).toContain("Still editable"); });
     await expect.poll(() => previousError.evaluate((node) => node?.isConnected ?? false)).toBe(false);
     await expect(block(page)).toHaveAttribute("data-state", "error");
     await expect(neighbor(page)).toHaveText("Neighbor prose.");
@@ -379,7 +385,10 @@ test("documents without Mermaid never fetch the renderer, and viewing source or 
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   await expect.poll(() => lightDrawing.evaluate((element) => element.isConnected)).toBe(false);
   await expectReady(page);
-  expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  await expectMcp(async () => {
+    expect((await session.call<Document>("get_doc", { uuid })).blocks).toEqual(before.blocks);
+  });
 });
 
 test("strict rendering prevents source callbacks, script execution and styles outside the block", { tag: "@webkit" }, async ({ browser }) => {
@@ -442,7 +451,8 @@ test("strict rendering prevents source callbacks, script execution and styles ou
     }
     expect(await page.evaluate(() => (window as unknown as { mermaidAttack: number }).mermaidAttack)).toBe(0);
     expect(await paint()).toEqual(before);
-    expect((await storedBlock(session, uuid)).text).toBe(hostile);
+    await proveMcpArrival(page, session, uuid, { path: "upstream" });
+    await expectMcp(async () => { expect((await storedBlock(session, uuid)).text).toBe(hostile); });
   }
   await editSource(session, uuid, SOURCE);
   await expect.poll(() => authoredText(source(page))).toBe(SOURCE);

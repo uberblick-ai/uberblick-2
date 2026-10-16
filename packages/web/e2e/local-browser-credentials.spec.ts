@@ -1,3 +1,4 @@
+import { expectOfflineHubText, proveDocumentPageArrival, waitForAcknowledged } from "./settle.js";
 /** An open page survives local serving restarts and credential changes. */
 
 import { expect, test } from "@playwright/test";
@@ -42,7 +43,7 @@ test("local-only edits survive a restart and reach the hub after authentication 
   // A shared-secret connection has no GitHub account to claim, even though
   // the hub accepts edits from this running local service.
   await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
-  await createDoc(page, docTitle("local-credentials"), { pin: true });
+  const uuid = await createDoc(page, docTitle("local-credentials"), { pin: true });
   await placeCaret(page);
   await page.keyboard.type("before restart");
   const observer = await openApp(browser, new URL(page.url()).pathname, { upstream: true });
@@ -55,55 +56,66 @@ test("local-only edits survive a restart and reach the hub after authentication 
   await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
   const authenticatedGeometry = await statusGeometry(page);
 
-  await harness().restartOpen({ authenticated: false });
-  await expect(saved).not.toBeVisible();
-  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
-  await withPageTimers(page, () => expect(reason).toBeVisible());
-  await expect(reason).toHaveAttribute("data-type", "warning");
-  await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
-  await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
-  expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
-  for (const width of [810]) {
-    await page.setViewportSize({ width, height: 844 });
-    await expect(reason).toBeInViewport({ ratio: 1 });
-    const trigger = page.locator(".ub-sync-toggle");
-    await expect(trigger).toBeInViewport({ ratio: 1 });
-    await trigger.click();
-    await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
-      .toHaveText("this machine has no credentials for its hub");
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
-  }
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-  await placeCaret(page);
-  await page.keyboard.type("; saved locally");
-  await expect(saved).not.toBeVisible();
-  await expectSavedHere(page);
-  await expect.poll(() => documentText(observer)).toBe("before restart");
-  const localGeometry = await statusGeometry(page);
+  const room = `${harness().workspaceUuid}/${uuid}`;
+  const history = harness().observeHubText(room);
+  try {
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await withPageTimers(page, () => expect(reason).toBeVisible());
+    await expect(reason).toHaveAttribute("data-type", "warning");
+    await expect(page.locator(".ub-status")).not.toContainText("this machine has no credentials for its hub");
+    await expect(page.getByTestId("account-menu")).toContainText("Account unavailable");
+    expect(await statusGeometry(page)).toEqual(authenticatedGeometry);
+    for (const width of [810]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(reason).toBeInViewport({ ratio: 1 });
+      const trigger = page.locator(".ub-sync-toggle");
+      await expect(trigger).toBeInViewport({ ratio: 1 });
+      await trigger.click();
+      await expect(page.locator('.ub-sync-fact:has(dt:text-is("Reason")) dd'))
+        .toHaveText("this machine has no credentials for its hub");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "Sync and presence", exact: true })).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await placeCaret(page);
+    await page.keyboard.type("; saved locally");
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).not.toBeVisible();
+    await expectSavedHere(page);
+    await expect(reason).toBeVisible();
+    await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
+    const localGeometry = await statusGeometry(page);
 
-  // This page retains its original imported browser key on another local-only
-  // boot, as well as across both authentication transitions below.
-  await harness().restartOpen({ authenticated: false });
-  await expect(saved).not.toBeVisible();
-  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
-  await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
-  expect(await statusGeometry(page)).toEqual(localGeometry);
+    // This page retains its original imported browser key on another local-only
+    // boot, as well as across both authentication transitions below.
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await expect.poll(() => documentText(page)).toBe("before restart; saved locally");
+    expect(await statusGeometry(page)).toEqual(localGeometry);
 
-  await harness().restartOpen({ authenticated: true });
-  await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
-  await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
-  await expect(reason).toBeHidden();
-  await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
-  expect(await statusGeometry(page)).toEqual(localGeometry);
+    await harness().restartOpen({ authenticated: true });
+    await expect.poll(() => documentText(observer)).toBe("before restart; saved locally");
+    await proveDocumentPageArrival(page, observer, { path: "upstream" });
+    expectOfflineHubText(history, "before restart");
+    await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", /^Synced with hub /));
+    await expect(reason).toBeHidden();
+    await expect(page.getByTestId("account-menu")).toContainText("Not signed in");
+    expect(await statusGeometry(page)).toEqual(localGeometry);
 
-  await harness().restartOpen({ authenticated: false });
-  await expect(saved).not.toBeVisible();
-  await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
-  await withPageTimers(page, () => expect(reason).toBeVisible());
-  expect(await statusGeometry(page)).toEqual(localGeometry);
-  expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+    await harness().restartOpen({ authenticated: false });
+    await waitForAcknowledged(page, { path: "relay" });
+    await expect(saved).not.toBeVisible();
+    await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
+    await withPageTimers(page, () => expect(reason).toBeVisible());
+    expect(await statusGeometry(page)).toEqual(localGeometry);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(pageInstance);
+  } finally { history.stop(); }
 });
 
 test("local-only status answers leave the readings and prose in place", async ({ browser }) => {
@@ -115,6 +127,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     await createDoc(seed, title, { pin: true });
     await placeCaret(seed);
     await seed.keyboard.type("the prose stays here");
+    await waitForAcknowledged(seed, { path: "relay" });
     await expectSavedHere(seed);
     paths.push(new URL(seed.url()).pathname);
   }
@@ -145,6 +158,7 @@ test("local-only status answers leave the readings and prose in place", async ({
     const saved = page.locator(".ub-not-saved");
     const shared = page.locator(".ub-status-sync");
     const reason = page.locator("[data-sonner-toast]").filter({ has: page.locator("[data-title]", { hasText: "this machine has no credentials for its hub" }) });
+    await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();
     await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
@@ -164,6 +178,7 @@ test("local-only status answers leave the readings and prose in place", async ({
       }
       await openDoc(page, title);
       await expect(page.getByRole("dialog", { name: "Sidebar", exact: true })).toHaveCount(0);
+      await waitForAcknowledged(page, { path: "relay" });
       await expect(saved).not.toBeVisible();
       await withPageTimers(page, () => expect(shared).toHaveAttribute("aria-label", "Sync details"));
       await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
@@ -244,6 +259,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   }, samePageMarker);
 
   notSharedReason = "sign-in-required";
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   const notices = page.locator("[data-sonner-toast]");
@@ -263,6 +279,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while sign-in is required");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(notices).toHaveCount(0));
 
@@ -270,6 +287,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await withPageTimers(page, () => expect(notices).toHaveCount(1));
   await withPageTimers(page, () => expect(notices).toContainText(/ask its administrator for membership/));
   await expect(notices).toBeInViewport();
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
   await page.locator(".ub-title").focus();
@@ -286,6 +304,7 @@ test("device recovery notices preserve local editing and native tablet touch con
   await expect(editor(page)).toHaveAttribute("contenteditable", "true");
   await placeCaret(page);
   await page.keyboard.type("; edited while membership is refused");
+  await waitForAcknowledged(page, { path: "relay" });
   await expect(saved).not.toBeVisible();
   await expect.poll(() => documentText(page))
     .toBe("kept here; edited while sign-in is required; edited while membership is refused");
@@ -299,6 +318,7 @@ test("device recovery notices preserve local editing and native tablet touch con
     await withPageTimers(page, () => expect(notices).toHaveCount(1));
     await withPageTimers(page, () => expect(notices).toContainText(recovery));
     await expect(notices).toHaveAttribute("data-type", "warning");
+    await waitForAcknowledged(page, { path: "relay" });
     await withPageTimers(page, () => expect(page.locator(".ub-status-word")).toHaveText("not shared with hub"));
     await expect(saved).not.toBeVisible();
     await expect(page.locator(".ub-status")).not.toContainText(recovery);

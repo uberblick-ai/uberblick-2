@@ -26,6 +26,7 @@ import { dataTableView } from "./table-view.js";
 import { bindDocView } from "./view-bindings.js";
 import { observationEndpoints, observationTicks } from "./chart-ticks.js";
 import { chartAxes, chartPanelRanges, chartPointRadius, formatChartTick } from "./chart-presentation.js";
+import { recordDraw } from "./render-state.js";
 
 // Both axes are linear. Epoch milliseconds plus Intl date labels require no
 // date adapter. No auto registry, decimator, transform or chart plugin package.
@@ -265,8 +266,9 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
     };
 
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-    const draw = (data: DocData | null, readError?: unknown): void => {
+    const draw = (data: DocData | null, readError: unknown, dataRev: string): void => {
       if (destroyed) return;
+      let succeeded = false;
       try {
         if (dirty || prepared === null || snapshot !== data) {
           try { tableSource = JSON.parse(current.textContent)?.type === "table"; }
@@ -315,6 +317,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
           text(notice, `Generated from document data · read-only${result.notice ? ` · ${result.notice}` : ""}`);
           text(diagnostics, tableDiagnosticsText(result));
           table.render(result);
+          succeeded = true;
           return;
         }
         table.clear();
@@ -379,6 +382,7 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         });
         // Updated after the synchronous canvas draw, without a live region.
         description.textContent = chartAccessibleDescription(result);
+        succeeded = true;
       } catch (error) {
         releaseChart();
         screen.hidden = true;
@@ -387,6 +391,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         if (tableSource) text(notice, "");
         panel.dataset.state = "collection-unusable";
         text(message, `Chart unavailable: ${error instanceof Error ? error.message : "Rendering failed"}`);
+      } finally {
+        recordDraw(dom, { type: "chart", text: current.textContent }, dataRev, succeeded);
       }
     };
     const binding = bindDocView(ydoc, draw);
@@ -436,7 +442,8 @@ export function chartBlockView(ydoc: Y.Doc | null): NodeViewRenderer {
         (header.row.contains(event.target) || panel.contains(event.target) || footer.contains(event.target)),
       // The derived root presentation is chrome too, never content to reparse.
       ignoreMutation: mutation =>
-        (mutation.type === "attributes" && mutation.target === dom && mutation.attributeName === "data-view") ||
+        (mutation.type === "attributes" && mutation.target === dom &&
+          ["data-view", "data-source-rev", "data-data-rev", "data-draw-state"].includes(mutation.attributeName ?? "")) ||
         header.row.contains(mutation.target) || panel.contains(mutation.target) || footer.contains(mutation.target),
       destroy: () => {
         destroyed = true;

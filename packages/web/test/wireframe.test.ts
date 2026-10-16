@@ -4,10 +4,12 @@ import * as Y from "yjs";
 import {
   appendBlock, createAnnotation, editBlock, exportMarkdown, getBlocks,
   getBlocksFragment, importMarkdown,
+  blockRev,
 } from "@uberblick/schema";
 import { parseWireframe, renderWireframe } from "@uberblick/wireframe";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { mountEditor, snapshotFragment, typeText } from "./helpers.js";
+import { dataRevision } from "../src/editor/render-state.js";
 
 vi.mock("@uberblick/wireframe", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@uberblick/wireframe")>();
@@ -99,6 +101,8 @@ describe("wireframe code blocks", () => {
     await draw();
     const drawing = root(fix.element).querySelector(".ub-wireframe-drawing");
     expect(drawing?.textContent).toContain("It will be gone.");
+    const revision = blockRev({ type: "code", language: "wireframe", text: SOURCE });
+    expect(root(fix.element).dataset).toMatchObject({ sourceRev: revision, dataRev: dataRevision(null), drawState: "success" });
     vi.mocked(parseWireframe).mockClear();
     vi.mocked(renderWireframe).mockClear();
     const start = position(fix.editor, fix.id) + 1;
@@ -108,6 +112,7 @@ describe("wireframe code blocks", () => {
     expect(root(fix.element).querySelector(".ub-wireframe-source")?.textContent).toContain("It will be gone. Soon");
     vi.advanceTimersByTime(199);
     expect(parseWireframe).not.toHaveBeenCalled();
+    expect(root(fix.element).dataset.sourceRev).toBe(revision);
     typeText(fix.editor, "!");
     vi.advanceTimersByTime(199);
     expect(renderWireframe).not.toHaveBeenCalled();
@@ -115,6 +120,8 @@ describe("wireframe code blocks", () => {
     expect(parseWireframe).toHaveBeenCalledTimes(1);
     expect(renderWireframe).toHaveBeenCalledTimes(1);
     expect(drawing?.textContent).toContain("It will be gone. Soon!");
+    expect(root(fix.element).dataset.sourceRev).toBe(blockRev({ type: "code", language: "wireframe",
+      text: SOURCE.replace("It will be gone.", "It will be gone. Soon!") }));
 
     const peer = new Y.Doc();
     Y.applyUpdate(peer, Y.encodeStateAsUpdate(fix.doc));
@@ -152,11 +159,15 @@ describe("wireframe code blocks", () => {
     expect(wireframe.querySelector(".ub-wireframe-stale")?.textContent).toBe("Preview is stale");
     expect(wireframe.querySelector(".ub-wireframe-diagnostics")?.textContent).toMatch(/(?:line|Line) 2.*(?:error|Error)/);
     expect(snapshotFragment(fix.doc)).toEqual(stored);
+    expect(wireframe.dataset).toMatchObject({
+      sourceRev: blockRev({ type: "code", language: "wireframe", text: INVALID }), drawState: "error",
+    });
     editBlock(fix.doc, fix.id, INVALID, SOURCE.replace("Delete draft?", "Delete another draft?"));
     await draw();
     expect(wireframe.querySelector(".wf-root")?.textContent).toContain("Delete another draft?");
     expect(wireframe.querySelector<HTMLElement>(".ub-wireframe-stale")?.hidden).toBe(true);
     expect(wireframe.querySelector<HTMLElement>(".ub-wireframe-diagnostics")?.hidden).toBe(true);
+    expect(wireframe.dataset.drawState).toBe("success");
     fix.editor.destroy(); fix.doc.destroy();
   });
 
@@ -178,6 +189,22 @@ describe("wireframe code blocks", () => {
     expect(diagnostics?.querySelectorAll("li")).toHaveLength(7);
     expect(wireframe.querySelector<HTMLElement>(".ub-wireframe-stale")?.hidden).toBe(true);
     expect(getBlocks(fix.doc).find((block) => block.id === fix.id)?.text).toBe(warningSource);
+    fix.editor.destroy(); fix.doc.destroy();
+  });
+
+  it("reports a failed drawing for its attempted source and recovers on the next edit", async () => {
+    const fix = fixture();
+    await draw();
+    vi.mocked(renderWireframe).mockImplementationOnce(() => { throw new Error("Cannot draw"); });
+    const failed = SOURCE.replace("Delete draft?", "Changed title");
+    editBlock(fix.doc, fix.id, SOURCE, failed);
+    await draw();
+    expect(root(fix.element).dataset).toMatchObject({ sourceRev: blockRev({ type: "code", language: "wireframe", text: failed }), drawState: "error" });
+    expect(root(fix.element).querySelector(".ub-wireframe-diagnostics")?.textContent).toContain("Cannot draw");
+    expect(root(fix.element).querySelector<HTMLElement>(".ub-wireframe-stale")?.hidden).toBe(false);
+    editBlock(fix.doc, fix.id, failed, SOURCE);
+    await draw();
+    expect(root(fix.element).dataset.drawState).toBe("success");
     fix.editor.destroy(); fix.doc.destroy();
   });
 
