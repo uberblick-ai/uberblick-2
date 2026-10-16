@@ -53,5 +53,5 @@ export type {
   ServingSyncStatus,
   SyncStatus,
 } from "./status.js";
-export { log, logAt } from "./log.js";
+export { log, logAt, withLoggingDisabled } from "./log.js";
 export type { LogLevel } from "./log.js";
