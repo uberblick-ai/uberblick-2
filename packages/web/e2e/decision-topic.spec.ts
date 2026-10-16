@@ -266,6 +266,7 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
     const pane = element.closest(".ub-document-pane");
     if (pane === null) throw new Error("e2e: missing timeline pane");
     const probe = document.createElement("span");
+    probe.style.color = "var(--muted-foreground)";
     probe.style.backgroundColor = "var(--card-accent)";
     probe.style.fontFamily = "var(--font-sans)";
     element.append(probe);
@@ -274,16 +275,19 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
         const record = row.querySelector<HTMLAnchorElement>(".ub-decision-record");
         const date = row.querySelector(".ub-decision-record-date");
         const count = row.querySelector(".ub-decision-record-comments");
+        const preview = row.querySelector(".ub-decision-preview");
         if (record === null || date === null) throw new Error("e2e: incomplete timeline row");
         const style = getComputedStyle(row);
         const lines = [...row.querySelectorAll(".ub-decision-record-line, .ub-decision-preview, .ub-decision-record-rfc .ub-doclink, .ub-decision-rfc-title")].map((line) => ({
           whiteSpace: getComputedStyle(line).whiteSpace,
+          flexWrap: getComputedStyle(line).flexWrap,
           height: line.getBoundingClientRect().height,
           rfc: line.matches(".ub-doclink"),
           left: line.getBoundingClientRect().left, right: line.getBoundingClientRect().right,
         }));
         return {
-          uuid: row.dataset.record, selected: row.dataset.selected,
+          uuid: row.dataset.record, selected: row.dataset.selected, state: row.dataset.state,
+          previewColor: preview === null ? null : getComputedStyle(preview).color,
           fill: style.backgroundColor, borderStyle: style.borderTopStyle, borderWidth: style.borderTopWidth,
           outline: style.outlineStyle, rowHeight: row.getBoundingClientRect().height,
           dateFont: getComputedStyle(date).fontFamily,
@@ -295,7 +299,7 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
         };
       });
       return {
-        rows, accent: getComputedStyle(probe).backgroundColor,
+        rows, accent: getComputedStyle(probe).backgroundColor, muted: getComputedStyle(probe).color,
         font: getComputedStyle(probe).fontFamily,
         width: element.clientWidth, scroll: element.scrollWidth,
         left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right,
@@ -319,9 +323,11 @@ async function timelineLayout(page: Page, selectedUuid: string, touch: boolean, 
       expect(row.countFigures).toBe("tabular-nums");
     }
     if (touch) expect(row.rowHeight).toBeGreaterThanOrEqual(44);
+    if (["superseded", "rejected", "withdrawn"].includes(row.state ?? "") && row.previewColor !== null) expect(row.previewColor).toBe(layout.muted);
     expect(row.scroll).toBeLessThanOrEqual(row.width + 1);
     for (const line of row.lines) {
-      expect(line.whiteSpace).toBe("nowrap");
+      if (line.rfc) expect(line.flexWrap).toBe("nowrap");
+      else expect(line.whiteSpace).toBe("nowrap");
       if (touch && line.rfc) expect(line.height).toBeGreaterThanOrEqual(44);
       expect(line.left).toBeGreaterThanOrEqual(layout.left - 1);
       expect(line.right).toBeLessThanOrEqual(layout.right + 1);
