@@ -162,7 +162,7 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
     status: "open",
   });
   await expect(page.locator(".ub-lifecycle-badge")).toHaveText(
-    "Decision · open",
+    "Decision",
   );
   await page.getByRole("button", { name: "All documents" }).click();
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(0);
@@ -334,7 +334,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     if (touch) await open.tap();
     else { await open.focus(); await page.keyboard.press("Enter"); }
     await expect(page).toHaveURL(new RegExp(`/${first.uuid}$`));
-    await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(currentTitle);
     await expect(editor(page)).toHaveText(currentAnswer);
     await expect(page.locator(`.ub-decision-timeline > li[data-record="${current.uuid}"] .ub-decision-record`)).toHaveAttribute("aria-current", "true");
 
@@ -348,7 +348,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(listedTitles(page)).toHaveText([currentTitle]);
 
     await page.goForward();
-    await expect(page.getByRole("heading", { name: currentTitle, exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(currentTitle);
     if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).tap();
     await activateControl(page.getByRole("button", { name: "All documents", exact: true }), { touch });
     await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");

@@ -441,7 +441,7 @@ describe("the failure contract", () => {
       answer: { who: "A member", when: "2026-10-04T12:00:00Z", where: "A team discussion." },
     })).payload);
     record((await rig.call("set_status", { uuid: firstDecision.uuid, status: "open" })).payload);
-    record((await rig.call("set_metadata", { uuid: firstDecision.uuid, title: "Frozen" })).payload);
+    record((await rig.call("set_metadata", { uuid: firstDecision.uuid, tldr: null })).payload);
     record((await rig.call("set_metadata", { uuid: regular.uuid, discussion: null })).payload);
     record((await rig.call("create_doc", {
       title: "Wrong discussion kind",

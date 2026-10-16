@@ -111,7 +111,6 @@ it("retains decided-content locks without locking editable metadata", async () =
     ["insert_block", () => operations.insert_block(rig.context, { uuid: decided.uuid, type: "paragraph", text: "Changed" }, request)],
     ["delete_block", () => operations.delete_block(rig.context, { uuid: decided.uuid, block_id: block.id }, request)],
     ["link_range", () => operations.link_range(rig.context, { uuid: decided.uuid, block_id: block.id, start: 0, end: 1, doc_id: decided.uuid, rev: block.rev }, request)],
-    ["set_metadata", () => operations.set_metadata(rig.context, { uuid: decided.uuid, title: "Changed" }, request)],
     ["set_metadata", () => operations.set_metadata(rig.context, { uuid: decided.uuid, tldr: "Changed" }, request)],
     ["update_data", () => operations.update_data(rig.context, { uuid: decided.uuid, operations: [] }, request)],
   ] as const;
@@ -122,8 +121,8 @@ it("retains decided-content locks without locking editable metadata", async () =
     });
     expect(rig.store.logSize(), tool).toBe(size);
   }
-  expect(await setMetadataOperation(rig.context, { uuid: decided.uuid, description: "Editable metadata" }, request)).toMatchObject({ applied: true });
-  expect(getMeta(rig.replicas.replica(decided.uuid).doc).description).toBe("Editable metadata");
+  expect(await setMetadataOperation(rig.context, { uuid: decided.uuid, title: "Changed", description: "Editable metadata" }, request)).toMatchObject({ applied: true });
+  expect(getMeta(rig.replicas.replica(decided.uuid).doc)).toMatchObject({ title: "Changed", description: "Editable metadata" });
 });
 
 it("assembles ordinary and content durability on the operation path", async () => {

@@ -263,14 +263,14 @@ describe("read-only decision records", () => {
 
     expect(binding).toHaveBeenCalledOnce();
     expect(binding.mock.calls[0]?.[0].editable).toBe(false);
-    expect(initialTitles).toEqual([true]);
+    expect(initialTitles).toEqual([false]);
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
     expect(editorElement(host).getAttribute("aria-readonly")).toBe("true");
     expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
-    const title = host.querySelector<HTMLElement>(".ub-title")!;
-    if (title instanceof HTMLInputElement) act(() => typeInto(title, "A wording fix"));
-    else expect(title.textContent).toBe("Chosen protocol");
-    expect(getMeta(ydoc).title).toBe("Chosen protocol");
+    const title = host.querySelector<HTMLInputElement>(".ub-title")!;
+    expect(title.readOnly).toBe(false);
+    act(() => typeInto(title, "A wording fix"));
+    expect(getMeta(ydoc).title).toBe("A wording fix");
     expect(host.querySelector(".ub-tldr")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit TL;DR" })).toBeNull();
     expect(host.querySelector(".ub-tldr-form")).toBeNull();
@@ -426,6 +426,10 @@ describe("read-only decision records", () => {
     act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);
     expect(item.querySelector(".ub-thread-actions")).toBeNull();
+    const archivedTitle = host.querySelector<HTMLInputElement>(".ub-title")!;
+    expect(archivedTitle.readOnly).toBe(true);
+    act(() => typeInto(archivedTitle, "Archived rename"));
+    expect(getMeta(ydoc).title).toBe("Chosen protocol");
     const editor = binding.mock.results[0]?.value.editor;
     act(() => editor.commands.setTextSelection({ from: 17, to: 20 }));
     expect(document.querySelector('[data-slot="selection-composer"]')).toBeNull();
@@ -435,8 +439,8 @@ describe("read-only decision records", () => {
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
     expect(prose.getAttribute("contenteditable")).toBe("false");
-    const title = host.querySelector<HTMLElement>(".ub-title");
-    expect(title instanceof HTMLInputElement ? title.readOnly : title?.tagName === "H1").toBe(true);
+    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    expect(title?.readOnly).toBe(false);
     expect(button(item, "Reply")).toBeDefined();
     expect(host.querySelector('[aria-label="Edit tags"]')).not.toBeNull();
     expect(getMeta(ydoc).status).toBe("decided");

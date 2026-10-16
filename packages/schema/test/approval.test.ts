@@ -94,6 +94,10 @@ describe("decision approval content", () => {
     });
     expect(getMeta(doc).tldr).toBeNull();
     expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    getMetaMap(doc).set("approvalFingerprint", historical);
+    setTitle(doc, "A better question");
+    expect(decisionApprovalFingerprint(doc)).toBe(historical);
+    expect(decisionApprovalChanged(doc)).toBe(false);
     doc.destroy();
   });
 
@@ -155,7 +159,6 @@ describe("decision approval content", () => {
   });
 
   it.each([
-    ["title", (doc: Y.Doc) => setTitle(doc, "Changed topic")],
     ["decision line", (doc: Y.Doc) => setTldr(doc, "Changed decision.")],
     ["block text", (doc: Y.Doc) => editBlock(doc, getBlocks(doc)[0]!.id, "First reason", "Changed reason")],
     ["inserted block", (doc: Y.Doc) => appendBlock(doc, { type: "paragraph", text: "New reason" })],
@@ -169,6 +172,88 @@ describe("decision approval content", () => {
     expect(decisionApprovalChanged(doc)).toBe(true);
     approve(doc);
     expect(decisionApprovalChanged(doc)).toBe(false);
+  });
+
+  it("keeps historical approval through repeated title renames and hydration", () => {
+    const doc = decision();
+    approve(doc);
+    const fingerprint = decisionApprovalFingerprint(doc);
+    setTitle(doc, "A better question");
+    setTitle(doc, "The final question");
+    expect(getMeta(doc).title).toBe("The final question");
+    expect(getMeta(doc).approvalFingerprint).toBe(fingerprint);
+    expect(getMeta(doc)).not.toHaveProperty("approvalTitle");
+    expect(decisionApprovalFingerprint(doc)).toBe(fingerprint);
+    expect(decisionApprovalChanged(doc)).toBe(false);
+    const hydrated = new Y.Doc();
+    Y.applyUpdate(hydrated, Y.encodeStateAsUpdate(doc));
+    const before = Y.encodeStateAsUpdate(hydrated);
+    const directory = new Y.Doc();
+    repair(directory, hydrated);
+    expect(getDirectoryEntry(directory, UUID)).toMatchObject({ title: "The final question", approvalChanged: false });
+    expect(Y.encodeStateAsUpdate(hydrated)).toEqual(before);
+    doc.destroy();
+    hydrated.destroy();
+    directory.destroy();
+  });
+
+  it.each([
+    ["legacy summary", (doc: Y.Doc) => setTldr(doc, "Another answer")],
+    ["block text", (doc: Y.Doc) => appendBlock(doc, { type: "paragraph", text: "Another answer" })],
+    ["structured data", (doc: Y.Doc) => doc.getMap("data").set(JSON.stringify(["record", "facts", "a"]), { value: 1 })],
+  ] as const)("does not approve changed %s while renaming", (_field, change) => {
+    const doc = decision();
+    approve(doc);
+    change(doc);
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    const fingerprint = getMeta(doc).approvalFingerprint;
+    setTitle(doc, "A better question");
+    expect(getMeta(doc).approvalFingerprint).toBe(fingerprint);
+    expect(decisionApprovalChanged(doc)).toBe(true);
+    doc.destroy();
+  });
+
+  it("merges concurrent renames without changing approval", () => {
+    const first = decision();
+    approve(first);
+    const second = new Y.Doc();
+    syncDocs(first, second);
+    setTitle(first, "First question");
+    setTitle(second, "Second question");
+    syncDocs(first, second);
+    expect(getMeta(first).title).toBe(getMeta(second).title);
+    expect(decisionApprovalChanged(first)).toBe(false);
+    expect(decisionApprovalChanged(second)).toBe(false);
+    first.destroy();
+    second.destroy();
+  });
+
+  it.each(["before", "after"])("detects offline answer changes merged %s a title rename", (order) => {
+    const first = decision();
+    approve(first);
+    const second = new Y.Doc();
+    syncDocs(first, second);
+    appendBlock(second, { type: "paragraph", text: "Offline answer" });
+    if (order === "before") syncDocs(first, second);
+    setTitle(first, "A better question");
+    syncDocs(first, second);
+    expect(decisionApprovalChanged(first)).toBe(true);
+    expect(decisionApprovalChanged(second)).toBe(true);
+    first.destroy();
+    second.destroy();
+  });
+
+  it("merges a first approval with a concurrent title rename", () => {
+    const first = decision();
+    const second = new Y.Doc();
+    syncDocs(first, second);
+    approve(first);
+    setTitle(second, "A better question");
+    syncDocs(first, second);
+    expect(decisionApprovalChanged(first)).toBe(false);
+    expect(decisionApprovalChanged(second)).toBe(false);
+    first.destroy();
+    second.destroy();
   });
 
   it("ignores discussion, anchors and metadata outside approved content", () => {

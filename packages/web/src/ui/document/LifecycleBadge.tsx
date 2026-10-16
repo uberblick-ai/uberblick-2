@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import type { DocumentKind, DocumentStatus } from "@uberblick/schema";
+import type { DocumentKind } from "@uberblick/schema";
 
 const KIND_LABELS: Record<DocumentKind, string> = {
   decision: "Decision",
@@ -8,16 +8,14 @@ const KIND_LABELS: Record<DocumentKind, string> = {
 /** The shared human-facing reading of lifecycle metadata. */
 export function LifecycleBadge({
   kind,
-  status,
 }: {
   kind: DocumentKind | undefined;
-  status: DocumentStatus | undefined;
 }): ReactElement | null {
   if (kind === undefined) return null;
   const label = KIND_LABELS[kind];
   return (
     <span className="ub-badge ub-lifecycle-badge">
-      {status === undefined ? label : `${label} · ${status}`}
+      {label}
     </span>
   );
 }

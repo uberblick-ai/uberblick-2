@@ -10,20 +10,24 @@ import { getDocDataEntries } from "./data.js";
 import { blockRev } from "./rev.js";
 
 /**
- * Hash title, stored legacy summary, ordered block text and raw data with JSON boundaries.
+ * Hash a frozen compatibility title, stored legacy summary, ordered block text
+ * and raw data with JSON boundaries. The current question is not approved.
  * Identities, layout attributes, marks, comments, link targets and approval
  * bookkeeping are excluded.
  * The browser-safe revision hash detects changes; it does not prove attribution.
  */
 export function decisionApprovalFingerprint(doc: Y.Doc): string {
   const meta = getMeta(doc);
+  // Untouched records keep their historical hash without a migration.
+  const approvalTitle = getMetaMap(doc).get("approvalTitle");
+  const title = typeof approvalTitle === "string" ? approvalTitle : meta.title;
   // Preserve historical approvals even though decision reads hide this value.
   const storedTldr = getMetaMap(doc).get("tldr");
   const tldr = typeof storedTldr === "string" && storedTldr !== "" ? storedTldr : null;
   // Approval includes invalid merged records and unsupported schemas.
   const data = getDocDataEntries(doc);
   // Use plain table text so formatting alone cannot invalidate approval.
-  const content: unknown[] = [meta.title, tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButtons }) =>
+  const content: unknown[] = [title, tldr, getBlocksWithInline(doc).map(({ block, table, card, cardButtons }) =>
     card !== undefined
       ? cardApprovalText(card, cardButtons?.map((button) => button.text) ?? [])
       : table !== undefined && table.length > 0
