@@ -165,7 +165,7 @@ test("a document on this device alone has Edited and revision without a sync dot
       await page.goto(new URL(`/${local.secondWorkspace}`, local.appUrl).href);
       const showList = page.getByRole("button", { name: "Show document list", exact: true });
       if ((viewport?.width ?? 1280) < 1280) await activateControl(showList);
-      await expect(page.locator(".ub-list-head")).toBeVisible();
+      await expect(page.locator(".ub-document-sidebar")).toBeVisible();
       await createDoc(page, "On this device");
       await expect(page.locator(".ub-last-updated")).toContainText("Edited ");
       await expect(page.locator(".ub-status .ub-doc-rev")).toBeVisible();

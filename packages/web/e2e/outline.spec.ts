@@ -19,7 +19,7 @@ async function openDocument(page: Page): Promise<void> {
   if (await page.evaluate(() => matchMedia("(width < 80rem)").matches)) {
     await page.getByRole("button", { name: "Show document list", exact: true }).click();
   }
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
   await createDoc(page, "Outline interactions");
   await placeCaret(page);
 }

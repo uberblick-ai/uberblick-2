@@ -358,7 +358,6 @@ body {
   filter: grayscale(1);
 }
 
-.ub-list-head,
 .ub-doc-meta,
 .ub-waiting-meta,
 .ub-tldr-form-meta,
@@ -368,24 +367,12 @@ body {
   gap: 0.5rem;
 }
 
-.ub-list-head {
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
-}
-
 /*
  * Keep sidebar small text at its AA floor before the equal-specificity header
  * rule, which owns its label tint.
  */
 .ub-list .ub-muted {
   color: var(--sidebar-muted-foreground);
-}
-
-/* Sync detail shares the group labels' size and tint. */
-.ub-list-head .ub-muted {
-  font-size: var(--type-caption-size);
-  line-height: var(--type-caption-leading);
-  color: var(--sidebar-group-label);
 }
 
 /* Keep font resets scoped to product selectors: unlayered rules outrank
@@ -428,7 +415,7 @@ body {
   margin-bottom: 0.5rem;
 }
 
-/* Navigation and group labels share an inset and small-caps voice. */
+/* Settings navigation labels retain their small-caps voice. */
 .ub-nav-label {
   margin: 0;
   padding: 0.25rem 0.4rem;
@@ -587,13 +574,16 @@ body {
   transform: rotate(90deg);
 }
 
-/* The rule fills the header space left by the label without shrinking
-   below its minimum visible length. */
-.ub-group-rule {
-  flex: 1;
-  min-width: 0.5rem;
-  margin: 0 0.25rem;
-  border-top: 1px solid var(--sidebar-border);
+.ub-group-rename {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
+}
+
+@media (any-pointer: coarse) {
+  .ub-group-rename {
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-leading);
+  }
 }
 
 .ub-comment-buttons .ub-tool:disabled,

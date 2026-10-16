@@ -55,7 +55,7 @@ async function activate(control: Locator, touch: boolean): Promise<void> {
 async function showSidebar(page: Page, touch: boolean): Promise<void> {
   const show = page.getByRole("button", { name: "Show document list", exact: true });
   if (await show.isVisible()) await activate(show, touch);
-  await expect(page.locator(".ub-list-head")).toBeVisible();
+  await expect(page.locator(".ub-document-sidebar")).toBeVisible();
 }
 
 async function syncDetails(page: Page, touch: boolean): Promise<void> {
@@ -121,7 +121,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
   expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
 
   await showSidebar(page, touch);
-  await activate(page.getByRole("button", { name: "All docs", exact: true }), touch);
+  await activate(page.getByRole("button", { name: "All documents", exact: true }), touch);
   await page.getByRole("searchbox", { name: "Search", exact: true }).fill(touch ? "ipad" : "desktop");
   await expect(page.locator(".ub-docs-title")).toHaveCount(2);
   const rowHeights = await page.locator(".ub-docs-row").evaluateAll((rows) =>
@@ -154,7 +154,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
     await expect(page).toHaveURL(new URL(`/${harness().workspace}/${document.uuid}`, harness().appUrl).href);
     await expect(page.locator(".ub-title")).toHaveValue(document.title);
     await showSidebar(page, touch);
-    await activate(page.getByRole("button", { name: "All docs", exact: true }), touch);
+    await activate(page.getByRole("button", { name: "All documents", exact: true }), touch);
   }
 }
 

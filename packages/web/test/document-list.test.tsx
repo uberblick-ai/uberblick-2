@@ -943,7 +943,7 @@ describe("decision topics in the list", () => {
     expect(pin().getAttribute("aria-pressed")).toBe("true");
   });
 
-  it.each(["All docs", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
+  it.each(["All documents", "Back to workspace"])("restores a list visit on Back/Forward but opens defaults through %s", async (entry) => {
     localSearch({ Current: [TWO] });
     const peer = peerOf(directoryDoc());
     for (const [uuid, title, supersedes] of [
@@ -981,9 +981,9 @@ describe("decision topics in the list", () => {
     if (entry === "Back to workspace") {
       await act(async () => within(host).getByRole("button", { name: "Workspace settings" }).click());
     }
-    await act(async () => within(host).getByRole("button", { name: entry === "All docs" ? entry : /^Back to / }).click());
+    await act(async () => within(host).getByRole("button", { name: entry === "All documents" ? entry : /^Back to / }).click());
     const assertDefaults = (): void => {
-      expect(window.location.pathname).toBe(entry === "All docs" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
+      expect(window.location.pathname).toBe(entry === "All documents" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
       expect(within(within(host).getByRole("group", { name: "Document type" }))
         .getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
       expect(filter(host).value).toBe("");
@@ -1241,8 +1241,8 @@ describe("an empty list", () => {
 });
 
 /**
- * The sidebar's "All docs" entry is present, says "All docs", and opens the
- * listing. Its placement in Navigation is asserted in `sidebar.test.tsx`.
+ * The sidebar's "All documents" entry opens the listing. Its placement above
+ * pinned groups is asserted in `sidebar.test.tsx`.
  */
 describe("the sidebar entry", () => {
   it("is there whether anything is pinned or not, and opens the listing", async () => {
@@ -1254,8 +1254,8 @@ describe("the sidebar entry", () => {
     const sidebar = within(host).getByRole("complementary", { name: "Sidebar" });
     const groups = (): HTMLElement[] => within(sidebar).queryAllByRole("button", { name: /^Rename group / });
     expect(groups()).toHaveLength(0);
-    const open = within(sidebar).getByRole<HTMLButtonElement>("button", { name: "All docs" });
-    expect(open?.textContent).toContain("All docs");
+    const open = within(sidebar).getByRole<HTMLButtonElement>("button", { name: "All documents" });
+    expect(open?.textContent).toContain("All documents");
     // Both workspace addresses render the same listing, so the entry is the
     // current page at either one — not only at the address it navigates to.
     expect(open?.getAttribute("aria-current")).toBe("page");
@@ -1264,7 +1264,7 @@ describe("the sidebar entry", () => {
     expect(window.location.pathname).toBe(`/${WORKSPACE}/all`);
     expect(rowTitles(host)).toEqual(["Overview"]);
     expect(
-      within(sidebar).getByRole("button", { name: "All docs" }).getAttribute("aria-current"),
+      within(sidebar).getByRole("button", { name: "All documents" }).getAttribute("aria-current"),
     ).toBe("page");
 
     // And with a pin in the sidebar it is exactly where it was: the entry is
@@ -1272,8 +1272,8 @@ describe("the sidebar entry", () => {
     const pin = within(documentTable(host)).getByRole<HTMLButtonElement>("button", { name: "Pin Overview to the sidebar" });
     await act(async () => pin?.click());
     expect(groups()).toHaveLength(1);
-    expect(within(sidebar).getByRole("button", { name: "All docs" }).textContent).toContain(
-      "All docs",
+    expect(within(sidebar).getByRole("button", { name: "All documents" }).textContent).toContain(
+      "All documents",
     );
     expect(rowTitles(host)).toEqual(["Overview"]);
   });

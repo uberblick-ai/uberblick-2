@@ -240,7 +240,7 @@ export async function openUpstreamApp(
     const page = await context.newPage();
     await options.beforeNavigate?.(page);
     await page.goto(new URL(path, running.appUrl).href);
-    const readySelector = options.readySelector === undefined ? ".ub-list-head" : options.readySelector;
+    const readySelector = options.readySelector === undefined ? ".ub-document-sidebar" : options.readySelector;
     if (readySelector !== null) await expect(page.locator(readySelector)).toBeVisible();
     return { context, page };
   } catch (error) {

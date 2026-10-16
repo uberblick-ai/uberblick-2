@@ -15,11 +15,11 @@ async function showSidebar(page: Page, settings = false): Promise<void> {
   if ((page.viewportSize()?.width ?? 1280) < 1280 && await drawer(page).count() === 0) {
     await page.getByRole("button", { name: settings ? "Show sidebar" : "Show document list", exact: true }).click();
   }
-  await expect(page.locator(settings ? ".ub-settings-nav" : ".ub-list-head")).toBeVisible();
+  await expect(page.locator(settings ? ".ub-settings-nav" : ".ub-document-sidebar")).toBeVisible();
 }
 
 async function addGroup(page: Page, name: string): Promise<void> {
-  await page.getByRole("button", { name: "+ group", exact: true }).click();
+  await page.getByRole("button", { name: "+ New group", exact: true }).click();
   const field = page.getByRole("textbox", { name: "Group name" });
   await field.fill(name);
   await field.press("Enter");
@@ -88,6 +88,9 @@ for (const { coarse, width } of [
         readySelector: ".ub-pane",
       });
       expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(coarse);
+      await showSidebar(page);
+      await expect(page.locator(".ub-empty")).toContainText("Nothing pinned yet.");
+      await expect(page.locator(".ub-document-sidebar .ub-nav-label, .ub-sidebar-unwritable")).toHaveCount(0);
       const title = "Pinned reference with a title long enough to truncate within its sidebar row ".repeat(3);
       const name = "Reading group with a name long enough to truncate within its heading ".repeat(3);
       await seed(page, title, name);
@@ -97,15 +100,67 @@ for (const { coarse, width } of [
         if (coarse) await control.tap();
         else await control.press("Enter");
       };
-      const create = page.getByRole("button", { name: "+ new doc", exact: true });
-      const allDocs = page.getByRole("button", { name: "All docs", exact: true });
+      const create = page.getByRole("button", { name: "+ New page", exact: true });
+      const allDocs = page.getByRole("button", { name: "All documents", exact: true });
       const settings = page.getByRole("button", { name: "Workspace settings", exact: true });
-      const add = page.getByRole("button", { name: "+ group", exact: true });
+      const add = page.getByRole("button", { name: "+ New group", exact: true });
+      const dashboard = page.getByRole("button", { name: "Dashboard", exact: true });
       const headings = page.locator(".ub-group-toggle");
       const pinned = page.locator(".ub-pin-row > button");
       await expect(headings).toHaveCount(2);
       await expect(pinned).toHaveCount(1);
-      await expectNavigationGeometry(page, [create, allDocs, settings, add, ...await headings.all(), ...await pinned.all()], coarse);
+      await expectNavigationGeometry(page, [dashboard, create, allDocs, settings, add, ...await headings.all(), ...await pinned.all()], coarse);
+      await expect(page.locator(".ub-sidebar-create > button")).toHaveText(["+ New page", "+ New group"]);
+      const layout = await page.locator(".ub-document-sidebar").evaluate((sidebar) => {
+        const dashboard = sidebar.querySelector(".ub-nav-soon");
+        const all = sidebar.querySelector(".ub-all-open-entry");
+        const groups = [...sidebar.querySelectorAll(".ub-group")];
+        const create = sidebar.querySelector(".ub-sidebar-create");
+        const buttons = create?.querySelectorAll("button");
+        if (!dashboard || !all || !create || !buttons || buttons.length !== 2 || groups.length === 0) {
+          throw new Error("e2e: sidebar rows are incomplete");
+        }
+        const order = [dashboard, all, ...groups, create];
+        const first = buttons[0]?.getBoundingClientRect();
+        const second = buttons[1]?.getBoundingClientRect();
+        const lastGroup = groups.at(-1)?.getBoundingClientRect();
+        if (!first || !second || !lastGroup) throw new Error("e2e: create row has no geometry");
+        return {
+          order: order.slice(1).every((row, index) => {
+            const previous = order[index];
+            return previous !== undefined && Boolean(previous.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING);
+          }),
+          firstTop: first.top, secondTop: second.top, firstRight: first.right, secondLeft: second.left,
+          createTop: create.getBoundingClientRect().top, lastGroupBottom: lastGroup.bottom,
+        };
+      });
+      expect(layout.order).toBe(true);
+      expect(layout.firstTop).toBe(layout.secondTop);
+      expect(layout.firstRight).toBeLessThanOrEqual(layout.secondLeft);
+      expect(layout.createTop).toBeGreaterThanOrEqual(layout.lastGroupBottom);
+
+      await expect(dashboard).toHaveText("Dashboard");
+      await expect(dashboard).toHaveAttribute("title", "Coming soon");
+      await expect(dashboard).toHaveAttribute("aria-disabled", "true");
+      await dashboard.focus();
+      await expect(dashboard).toBeFocused();
+      const address = page.url();
+      await dashboard.press("Enter");
+      if (coarse) await dashboard.tap({ force: true });
+      expect(page.url()).toBe(address);
+      const label = group(page, name).locator(".ub-group-label");
+      await expect(label).toHaveText(name);
+      await expect(label).toHaveCSS("font-size", "12px");
+      await expect(label).toHaveCSS("line-height", "16px");
+      await expect(label).toHaveCSS("text-transform", "none");
+      await expect(label).toHaveCSS("letter-spacing", "normal");
+      await expect(page.locator(".ub-group-rule")).toHaveCount(0);
+      await group(page, name).getByRole("button", { name: `Rename group ${name}`, exact: true }).click();
+      const rename = page.getByRole("textbox", { name: "Group name" });
+      await expect(rename).toHaveValue(name);
+      await expect(rename).toHaveCSS("text-transform", "none");
+      await expect(rename).toHaveCSS("letter-spacing", "normal");
+      await rename.press("Escape");
 
       // A quick activation still belongs to each enlarged drag handle.
       const heading = group(page, "Pinned").getByRole("button", { name: "Pinned", exact: true });
@@ -118,6 +173,10 @@ for (const { coarse, width } of [
       await expect(page.locator(".ub-title")).toHaveValue(title);
       await showSidebar(page);
       await expect(pinned).toHaveAttribute("aria-current", "page");
+      await activate(allDocs);
+      await showSidebar(page);
+      await expect(allDocs).toHaveAttribute("aria-current", "page");
+      await expect(page.locator(".ub-directory-status")).toHaveCount(0);
       await expect(page.locator("[data-dnd-dragging], [data-dnd-dropping]")).toHaveCount(0);
 
       await activate(settings);
@@ -138,16 +197,30 @@ for (const { coarse, width } of [
       // The unavailable create row shares the same floor without losing its
       // native disabled state or explanation when the direct hub disconnects.
       await harness().stopHub();
-      const unavailable = page.getByRole("button", { name: "new doc unavailable", exact: true });
+      const unavailable = page.getByRole("button", { name: "+ New page", exact: true });
       await expect(unavailable).toBeDisabled();
       await expect(unavailable).toHaveAttribute("title", "New document unavailable while the directory is read-only");
-      await expectNavigationGeometry(page, [unavailable], coarse);
+      await expect(add).toBeDisabled();
+      await expectNavigationGeometry(page, [unavailable, add], coarse);
+      const offline = page.locator(".ub-directory-status");
+      await expect(offline).toHaveText("Offline");
+      await expect(offline).toHaveAttribute("title", "Changes are saved on this device and sync when the hub is back.");
+      const dot = offline.locator(".ub-sync-dot");
+      await expect(dot).toHaveAttribute("data-state", "offline");
+      const dotBox = await dot.boundingBox();
+      expect(dotBox?.width).toBeGreaterThan(0);
+      expect(dotBox?.height).toBeGreaterThan(0);
+      const footerOrder = await offline.evaluate((row) => {
+        const settings = row.parentElement?.querySelector(".ub-settings-entry");
+        return settings !== null && settings !== undefined && row.nextElementSibling === settings;
+      });
+      expect(footerOrder).toBe(true);
     });
 }
 
 async function rest(page: Page): Promise<void> {
   await page.mouse.move(0, 0);
-  await page.getByRole("button", { name: "All docs", exact: true }).focus();
+  await page.getByRole("button", { name: "All documents", exact: true }).focus();
 }
 
 async function ownTreatment(control: Locator) {
@@ -257,7 +330,7 @@ test("pointer rows retain their rest, hover and focus reveal, and deletion resto
   await heading.getByRole("button", { name: "Reading", exact: true }).focus();
   for (const action of await actions.all()) await expect(action).toHaveCSS("opacity", "1");
 
-  await page.getByRole("button", { name: "All docs", exact: true }).click();
+  await page.getByRole("button", { name: "All documents", exact: true }).click();
   const pinned = pin(page, "Pinned reference");
   const unpinned = pin(page, "Loose note");
   await rest(page);
@@ -303,7 +376,7 @@ test("pointer rows retain their rest, hover and focus reveal, and deletion resto
   await confirmation.getByRole("button", { name: "Delete group", exact: true }).click();
   await expect(confirmation).toHaveCount(0);
   await expect(group(page, "Reading")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "+ group", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "+ New group", exact: true })).toBeFocused();
 });
 
 test("touch rows expose their actions without sticky hover, and Cancel and Delete keep the drawer open", { tag: "@webkit-touch" }, async ({ browser }, info) => {
@@ -351,9 +424,9 @@ test("touch rows expose their actions without sticky hover, and Cancel and Delet
   await expect(confirmation).toHaveCount(0);
   await expect(group(page, "Reading")).toHaveCount(0);
   await expect(drawer(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "+ group", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "+ New group", exact: true })).toBeFocused();
 
-  await page.getByRole("button", { name: "All docs", exact: true }).tap();
+  await page.getByRole("button", { name: "All documents", exact: true }).tap();
   const pins = page.locator(".ub-docs-pin");
   await expect(pins).toHaveCount(2);
   await expectTargetGeometry(page, true, "pin");
@@ -377,7 +450,7 @@ test("coarse-pointer tablet targets fit beside long group names and inside docum
   await seed(page);
   await addGroup(page, "A long reading group name that truncates beside the actions");
   await expectTargetGeometry(page, true, "group");
-  await page.getByRole("button", { name: "All docs", exact: true }).tap();
+  await page.getByRole("button", { name: "All documents", exact: true }).tap();
   await expectTargetGeometry(page, true, "pin");
 });
 
