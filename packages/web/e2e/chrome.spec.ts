@@ -40,6 +40,7 @@ import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberbl
 import { wrapToken } from "@uberblick/schema/protocol";
 import {
   EXAMPLE_TAGS,
+  applyDocData,
   appendBlock,
   assignDocumentTags,
   createAnnotation,
@@ -60,6 +61,7 @@ import {
   seedTagCatalog,
   setAnnotationResolved,
   setKind,
+  setStatus,
   settingsRoom,
   sidebarRoom,
   upsertDirectoryEntry,
@@ -2173,7 +2175,7 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
 async function contrastDocument(
   page: Page,
   scheme: "light" | "dark",
-  prove: () => Promise<void>,
+  prove: (doc: Y.Doc) => Promise<void>,
   preserveViewport = false,
 ): Promise<void> {
   if (!preserveViewport) await page.setViewportSize({ width: 1400, height: 1000 });
@@ -2234,7 +2236,7 @@ async function contrastDocument(
     }
     await expect(page.locator(".ub-peer-more")).toBeVisible();
     await page.mouse.move(1399, 999);
-    await prove();
+    await prove(doc);
   } finally {
     for (const { provider, doc } of peers) {
       provider.destroy();
@@ -2275,6 +2277,133 @@ function activeHoverRules(control: Locator): Promise<string[]> {
     };
     for (const sheet of document.styleSheets) inspect(sheet.cssRules);
     return found;
+  });
+}
+
+for (const scheme of ["light", "dark"] as const) {
+  test(`links, kind badges and reversible document actions use neutral ink — ${scheme}`, { tag: "@webkit" }, async ({ browser }, info) => {
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, "/", {
+      upstream: true, contextOptions: { colorScheme: scheme, hasTouch: touch }, readySelector: ".ub-pane",
+    });
+    await contrastDocument(page, scheme, async (doc) => {
+      await page.addStyleTag({ content: "* { transition: none !important; }" });
+      const uuid = new URL(page.url()).pathname.split("/")[2];
+      if (uuid === undefined) throw new Error("e2e: no current document UUID");
+      const target = "https://example.invalid/neutral-link";
+      const annotated = appendBlock(doc, { type: "paragraph", inline: [
+        { text: "External", marks: { link: target } }, { text: " and ", marks: {} },
+        { text: "reference", marks: { docLink: uuid } }, { text: " with ", marks: {} },
+        { text: "code link", marks: { link: target, inlineCode: true } },
+      ] });
+      createAnnotation(doc, annotated, 0, 37, "Reader", "Linked text stays readable.");
+      appendBlock(doc, { type: "paragraph", inline: [
+        { text: "External on the page", marks: { link: target } },
+        { text: " and a code reference", marks: { docLink: uuid, inlineCode: true } },
+      ] });
+      appendBlock(doc, { type: "card", text: `title: Linked card\n\n[External](${target}) and [reference](${uuid}) with [\`code link\`](${target}).` });
+      const directory = new Y.Doc();
+      try {
+        applyDocData(doc, directory, [{ collection: "evidence", schema: { version: 1, schema: { type: "object" } },
+          replaceRecords: [{ id: "one", value: { url: target } }],
+        }]);
+      } finally { directory.destroy(); }
+      appendBlock(doc, { type: "chart", text: JSON.stringify({ version: 1, type: "table", collection: "evidence",
+        columns: [{ field: "url", format: "link" }],
+      }) });
+      const ink = await painted(page, ".ub-title", "color");
+      const neutralText = async (root: string) => {
+        let readings: Awaited<ReturnType<typeof renderedText>> = [];
+        await expect.poll(async () => {
+          await page.locator(root).scrollIntoViewIfNeeded();
+          readings = await renderedText(page, root);
+          return readings.length;
+        }, { message: `Rendered text must be inside the viewport: ${root}` }).toBeGreaterThan(0);
+        for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+      };
+      await expect(page.locator(".ub-data-link")).toBeVisible();
+      for (const selector of [
+        '.ub-editor a.ub-link[href="https://example.invalid/neutral-link"]',
+        `.ub-editor a.ub-doclink[data-doc-id="${uuid}"]`, ".ub-data-link",
+      ]) {
+        const links = page.locator(selector);
+        expect(await links.count()).toBeGreaterThan(0);
+        for (const link of await links.all()) {
+          await link.scrollIntoViewIfNeeded();
+          await expect(link).toHaveCSS("color", ink);
+          await expect(link).toHaveCSS("text-decoration-line", "underline");
+          await expect(link).toHaveCSS("text-decoration-style", selector.includes("ub-doclink") ? "dotted" : "solid");
+          await link.evaluate((element) => element.setAttribute("data-neutral-link-proof", ""));
+          await neutralText("[data-neutral-link-proof]");
+          await link.evaluate((element) => element.removeAttribute("data-neutral-link-proof"));
+        }
+      }
+      const unresolved = page.locator('.ub-doclink[data-doc-link-state="unresolved"]');
+      await expect(unresolved).toHaveCSS("text-decoration-style", "wavy");
+      expect(await paintedIn(unresolved, "color")).not.toBe(ink);
+
+      setKind(doc, "decision");
+      setStatus(doc, "open");
+      const badge = page.locator(".ub-doc-meta .ub-lifecycle-badge");
+      await expect(badge).toHaveText("Decision · open");
+      await badge.scrollIntoViewIfNeeded();
+      expect(oklab(await paintedIn(badge, "color")).chroma).toBeLessThan(accentChroma);
+      expect(oklab(await paintedIn(badge, "border-top-color")).chroma).toBeLessThan(accentChroma);
+      await neutralText(".ub-doc-meta .ub-lifecycle-badge");
+      const trigger = page.getByRole("button", { name: "Document actions" });
+      await trigger.click();
+      await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
+      await trigger.click();
+      const copy = page.getByRole("menuitem", { name: "Copy link", exact: true });
+      const unpin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
+      const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
+      const restingInk = await paintedIn(copy, "color");
+      const highlightedInk = await page.evaluate(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--accent-foreground)";
+        document.body.append(probe);
+        const colour = getComputedStyle(probe).color;
+        probe.remove();
+        return colour;
+      });
+      const checkActions = async () => {
+        for (const item of [unpin, archive]) {
+          expect(await paintedIn(item, "color")).toBe(await item.getAttribute("data-highlighted") === null ? restingInk : highlightedInk);
+          expect(oklab(await paintedIn(item, "color")).chroma).toBeLessThan(accentChroma);
+        }
+        await neutralText("[data-slot=dropdown-menu-content]");
+      };
+      await checkActions();
+      if (!touch) for (const item of [unpin, archive]) {
+        await item.hover();
+        await expect(item).toHaveAttribute("data-highlighted", "");
+        await checkActions();
+      }
+      await page.keyboard.press("Escape");
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("End");
+      await expect(archive).toBeFocused();
+      await checkActions();
+      await page.keyboard.press("ArrowUp");
+      await expect(unpin).toBeFocused();
+      await checkActions();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      const confirmation = page.getByRole("alertdialog");
+      await expect(confirmation).toContainText("read-only");
+      await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(trigger).toBeFocused();
+      if (touch) await trigger.tap();
+      else await trigger.click();
+      if (touch) await archive.tap();
+      else await archive.click();
+      await expect(confirmation).toBeVisible();
+      await confirmation.getByRole("button", { name: "Archive document", exact: true }).click();
+      const banner = page.locator(".ub-archived-banner");
+      await expect(banner).toBeVisible();
+      expect(oklab(await paintedIn(banner, "border-left-color")).chroma).toBeGreaterThan(accentChroma);
+    }, true);
   });
 }
 
@@ -2594,10 +2723,8 @@ for (const scheme of ["light"] as const) {
         await item.hover();
         await check(actions);
       }
-      const danger = await painted(page, ".ub-action-danger", "color");
-      const red = oklab(danger);
-      expect(red.a).toBeGreaterThan(0.05);
-      expect(red.b).toBeGreaterThan(0);
+      const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
+      expect(oklab(await paintedIn(archive, "color")).chroma).toBeLessThan(accentChroma);
       await page.keyboard.press("Escape");
       await page.locator(".ub-tags").click();
       const picker = ".ub-tag-picker-panel";

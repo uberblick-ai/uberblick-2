@@ -121,10 +121,14 @@ const pairs: Pair[] = [
   text("resting orphaned chip ink", "--foreground", "--status-warning-subtle", "--card"),
   text("focused orphaned chip ink", "--brand-foreground", "--status-warning", "--brand-subtle"),
   { name: "focused orphaned chip step", ink: "--status-warning", ground: "--brand-subtle", measure: "separation", floor: focusedOrphanedChipFloor },
-  // Functional brand ink: flat chrome, the page gradient, annotated
-  // ranges and inline-code grounds. Dark --brand-ink aliases --brand.
+  // Links retain AA on page, card, annotated-range and inline-code grounds.
   ...["--background", "--card", "--card-accent", "--sidebar", "--sidebar-accent", "--brand-subtle", "--muted", "--page-ground[0]", "--page-ground[1]"]
-    .map((ground) => text("functional brand ink", "--brand-ink", ground)),
+    .map((ground) => text("neutral link ink", "--foreground", ground)),
+  ...["--background", "--card", "--accent", "--page-ground[0]", "--page-ground[1]"]
+    .map((ground) => text("neutral kind badge ink", "--muted-foreground", ground)),
+  // Selected list switches and the current workspace entry still use amber.
+  ...["--brand-subtle", "--sidebar", "--sidebar-accent"]
+    .map((ground) => text("retained functional brand ink", "--brand-ink", ground)),
   // Global muted ink is not the sidebar's muted ink. These are its actual
   // light grounds, including code/source chrome, focused threads and stops.
   ...["--background", "--card", "--card-accent", "--muted", "--secondary", "--brand-subtle", "--status-warning-subtle", "--destructive-subtle", "--page-ground[0]", "--page-ground[1]"]
