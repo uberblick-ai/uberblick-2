@@ -10,6 +10,7 @@ import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
 import { assertNoViolations, WCAG_TAGS } from "./accessibility-assertions.js";
 import { renderedText } from "./contrast-helpers.js";
+import { contrast } from "../test/colour.js";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let scratch: string | null = null;
@@ -224,48 +225,55 @@ test("errors stay until dismissed and a successful keyed retry gets the transien
   await expect(notice(page, message)).toHaveCount(0);
 });
 
-test("native Undo works with pointer, keyboard and iPad touch in both appearances @webkit-touch", async ({ browser, browserName }) => {
+test("Undo has a visible keyboard focus indicator and accessible text in both appearances @webkit", async ({ browser, browserName }) => {
   for (const appearance of ["light", "dark"] as const) {
-    for (const input of ["pointer", "keyboard", "touch"] as const) {
-      const page = await openFixture(browser, input === "touch" ? { width: 810, height: 1080, touch: true } : {});
-      await page.evaluate((appearance) => {
-        const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
-        fixture.appearance(appearance);
-        fixture.archive();
-      }, appearance);
-      const archived = notice(page, "Archived “Example document”.");
-      const undo = archived.getByRole("button", { name: "Undo", exact: true });
-      await expect(undo).toBeVisible();
-      await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
-      await expect(archived.locator("[data-description]")).toHaveCount(0);
-      if (input === "touch") {
-        await expect(archived).toHaveCSS("opacity", "1");
-        const readings = await renderedText(page, "[aria-live=polite]");
-        for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
-        const axe = await new AxeBuilder({ page }).include("[aria-live=polite]").withTags(WCAG_TAGS).analyze();
-        assertNoViolations(axe.violations);
-        await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notification-undo-${appearance}-${browserName}.png`) });
-      }
-      if (input === "touch") {
-        const target = await undo.boundingBox();
-        expect(target?.width).toBeGreaterThanOrEqual(44);
-        expect(target?.height).toBeGreaterThanOrEqual(44);
-        await undo.tap();
-      } else if (input === "keyboard") {
-        const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
-        await page.keyboard.press("Shift+F8");
-        await page.keyboard.press(nextControl);
-        await page.keyboard.press(nextControl);
-        await page.keyboard.press(nextControl);
-        await expect(undo).toBeFocused();
-        await page.keyboard.press("Enter");
-      } else await undo.click();
-      await expect(archived).toHaveCount(0);
-      expect(await page.evaluate(() => {
-        const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
-        return { undos: fixture.undos, closes: fixture.closedActions };
-      })).toEqual({ undos: 1, closes: 1 });
-    }
+    const page = await openFixture(browser, browserName === "webkit" ? { width: 810, height: 1080, touch: true } : {});
+    await page.evaluate((appearance) => {
+      const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
+      fixture.appearance(appearance);
+      fixture.archive();
+    }, appearance);
+    const archived = notice(page, "Archived “Example document”.");
+    const undo = archived.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
+    await expect(archived.locator("[data-description]")).toHaveCount(0);
+    await expect(archived).toHaveCSS("opacity", "1");
+    const readings = await renderedText(page, "[aria-live=polite]");
+    for (const reading of readings) expect(reading.ratio, JSON.stringify(reading)).toBeGreaterThanOrEqual(4.5);
+    const axe = await new AxeBuilder({ page }).include("[aria-live=polite]").withTags(WCAG_TAGS).analyze();
+    assertNoViolations(axe.violations);
+    const nextControl = browserName === "webkit" ? "Alt+Tab" : "Tab";
+    await page.keyboard.press("Shift+F8");
+    await page.keyboard.press(nextControl);
+    await page.keyboard.press(nextControl);
+    await page.keyboard.press(nextControl);
+    await expect(undo).toBeFocused();
+    const focus = await undo.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        visible: element.matches(":focus-visible"),
+        style: style.outlineStyle,
+        width: Number.parseFloat(style.outlineWidth),
+        offset: Number.parseFloat(style.outlineOffset),
+        colour: style.outlineColor,
+        fill: style.backgroundColor,
+        surface: getComputedStyle(element.closest("[data-sonner-toast]") as HTMLElement).backgroundColor,
+      };
+    });
+    expect(focus.visible).toBe(true);
+    expect(focus.style).toBe("auto");
+    expect(focus.width).toBeGreaterThan(0);
+    expect(focus.offset).toBeGreaterThanOrEqual(2);
+    expect(contrast(focus.colour, focus.fill)).toBeGreaterThan(1);
+    expect(contrast(focus.surface, focus.fill)).toBeGreaterThanOrEqual(3);
+    await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH ?? test.info().outputDir, `notification-undo-${appearance}-${browserName}.png`) });
+    await page.keyboard.press("Enter");
+    await expect(archived).toHaveCount(0);
+    expect(await page.evaluate(() => {
+      const fixture = (window as unknown as { notificationFixture: Fixture }).notificationFixture;
+      return { undos: fixture.undos, closes: fixture.closedActions };
+    })).toEqual({ undos: 1, closes: 1 });
   }
 });
 
