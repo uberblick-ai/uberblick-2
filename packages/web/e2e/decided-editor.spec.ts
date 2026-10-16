@@ -212,7 +212,7 @@ test("an open decision keeps prose and tables read-only through later states whi
   expect(await originalView.evaluate((element) => element === document.querySelector(".ub-editor .ProseMirror"))).toBe(true);
   expect(await pane.evaluate((element) => element.scrollTop)).toBe(scroll);
   await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue("Decided editor");
-  await expect(page.locator("input.ub-title")).toBeEditable();
+  await expect(page.getByRole("textbox", { name: "Document title" })).toBeEditable();
   await expect(page.getByRole("button", { name: "Edit TL;DR", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Document actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Edit TL;DR", exact: true })).toHaveCount(0);

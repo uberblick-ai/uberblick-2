@@ -3082,7 +3082,7 @@ test("decision archive and restore follow the whole topic and its first record",
     map.set(first, { ...(map.get(first) as object), deleted: true });
     await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-    await expect(page.locator("input.ub-title")).not.toBeEditable();
+    await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     expect(getDirectoryEntry(directory, successor)?.deleted).toBeUndefined();
     await page.getByRole("button", { name: "Restore", exact: true }).click();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");

@@ -1045,7 +1045,7 @@ describe("decision topics in the list", () => {
     await act(async () => within(documentTable(host)).getByRole("button", { name: "Title" }).click());
     await act(async () => openButtons(host)[0]?.click());
     expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
-    expect(within(host).getByRole<HTMLInputElement>("textbox", { name: "Document title" }).value).toBe("Current answer");
+    expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current answer");
     const assertRestored = (): void => {
       expect(window.location.pathname).toBe(allPath(WORKSPACE));
       expect(within(within(host).getByRole("group", { name: "Document type" }))
@@ -1432,7 +1432,7 @@ describe("opening a document", () => {
     unmount();
     const again = await openApp(`/${WORKSPACE}/${ONE}`);
     expect(within(again).queryByRole("table", { hidden: true })).toBeNull();
-    expect(within(again).getByPlaceholderText<HTMLInputElement>("Untitled").value).toBe(
+    expect(within(again).getByPlaceholderText<HTMLTextAreaElement>("Untitled").value).toBe(
       "Overview",
     );
   });

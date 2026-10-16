@@ -175,9 +175,9 @@ describe("read-only decision records", () => {
     expect(binding.mock.calls[0]?.[0].editable).toBe(false);
     const prose = editorElement(host);
     expect(prose.getAttribute("contenteditable")).toBe("false");
-    expect(host.querySelector<HTMLInputElement>(".ub-title")?.readOnly).toBe(true);
+    expect(host.querySelector<HTMLTextAreaElement>(".ub-title")?.readOnly).toBe(true);
     expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
-    act(() => typeInto(host.querySelector<HTMLInputElement>(".ub-title")!, "Changed"));
+    act(() => typeInto(host.querySelector<HTMLTextAreaElement>(".ub-title")!, "Changed"));
     expect(getMeta(connection.ydoc).title).toBe("Known topic");
     await act(async () => setKind(connection.ydoc, "decision"));
     expect(binding).toHaveBeenCalledOnce();
@@ -256,7 +256,7 @@ describe("read-only decision records", () => {
     const initialTitles: boolean[] = [];
     const binding = vi.spyOn(guardedBinding, "bindGuardedEditor").mockImplementation((options) => {
       const title = document.querySelector<HTMLElement>(".ub-title");
-      initialTitles.push(title?.tagName === "H1" || (title instanceof HTMLInputElement && title.readOnly));
+      initialTitles.push(title instanceof HTMLTextAreaElement && title.readOnly);
       return originalBind(options);
     });
     const host = await openApp();
@@ -267,7 +267,7 @@ describe("read-only decision records", () => {
     expect(editorElement(host).getAttribute("contenteditable")).toBe("false");
     expect(editorElement(host).getAttribute("aria-readonly")).toBe("true");
     expect(host.querySelector('[aria-label="Insert block below"]')).toBeNull();
-    const title = host.querySelector<HTMLInputElement>(".ub-title")!;
+    const title = host.querySelector<HTMLTextAreaElement>(".ub-title")!;
     expect(title.readOnly).toBe(false);
     act(() => typeInto(title, "A wording fix"));
     expect(getMeta(ydoc).title).toBe("A wording fix");
@@ -426,7 +426,7 @@ describe("read-only decision records", () => {
     act(() => button(dialog, "Archive").click());
     const item = card(host, thread.id);
     expect(item.querySelector(".ub-thread-actions")).toBeNull();
-    const archivedTitle = host.querySelector<HTMLInputElement>(".ub-title")!;
+    const archivedTitle = host.querySelector<HTMLTextAreaElement>(".ub-title")!;
     expect(archivedTitle.readOnly).toBe(true);
     act(() => typeInto(archivedTitle, "Archived rename"));
     expect(getMeta(ydoc).title).toBe("Chosen protocol");
@@ -439,7 +439,7 @@ describe("read-only decision records", () => {
     expect(binding).toHaveBeenCalledOnce();
     expect(editorElement(host)).toBe(prose);
     expect(prose.getAttribute("contenteditable")).toBe("false");
-    const title = host.querySelector<HTMLInputElement>(".ub-title");
+    const title = host.querySelector<HTMLTextAreaElement>(".ub-title");
     expect(title?.readOnly).toBe(false);
     expect(button(item, "Reply")).toBeDefined();
     expect(host.querySelector('[aria-label="Edit tags"]')).not.toBeNull();

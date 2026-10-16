@@ -258,29 +258,89 @@ async function headerLayout(page: Page, wrapped: boolean | null): Promise<void> 
   expect(layout.pageScroll).toBeLessThanOrEqual(layout.pageWidth + 1);
 }
 
+async function wrappedTitle(page: Page): Promise<void> {
+  await page.evaluate(() => document.fonts.ready.then(() => {}));
+  const layout = await page.getByRole("textbox", { name: "Document title" }).evaluate((element) => ({
+    width: element.clientWidth, scrollWidth: element.scrollWidth,
+    height: element.clientHeight, scrollHeight: element.scrollHeight,
+    lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+    titleBottom: element.getBoundingClientRect().bottom,
+    answerTop: document.querySelector(".ub-decision-answer-header")?.getBoundingClientRect().top ?? 0,
+  }));
+  expect(layout.height).toBeGreaterThanOrEqual(2 * layout.lineHeight);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1);
+  expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height + 1);
+  expect(layout.answerTop).toBeGreaterThan(layout.titleBottom);
+}
+
+test("decision title renames sync without approving answer changes", async ({ browser }) => {
+  const writer = session();
+  const owner = await create(writer, "Rename owner", "The related page's prose.");
+  const first = await create(writer, "Original rename question", "Earlier answer.", { kind: "decision", status: "decided" });
+  const current = await create(writer, "Current rename question", "Approved answer.", {
+    kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer(),
+  });
+  const pending = await create(writer, "Pending rename question", "Pending proposal.", { kind: "decision", supersedes: current.uuid });
+  const topicPath = `/${harness().workspace}/${first.uuid}`;
+  const page = await openApp(browser, topicPath, { upstream: true });
+  const reader = await openApp(browser, topicPath, { upstream: true });
+  const title = page.getByRole("textbox", { name: "Document title" });
+  await expect(title).toHaveValue(current.title);
+  await expect(title).toBeEditable();
+  await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
+  await expect(page.locator(".ub-decision-notice")).toContainText("Under review.");
+  const renamed = `Clearer question ${current.uuid}`;
+  await title.fill(renamed);
+  await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
+  expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: renamed, approvalChanged: false });
+  expect((await writer.call<StoredDoc>("get_doc", { uuid: pending.uuid })).title).toBe(pending.title);
+  await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+  await expect(editor(page)).toHaveText(answerText(current));
+
+  await reader.goto(new URL(`/${harness().workspace}/${owner.uuid}`, harness().appUrl).href);
+  await expect(reader.getByRole("region", { name: "Decisions" }).getByRole("link", { name: `Under review: ${renamed}`, exact: true })).toBeVisible();
+  await reader.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href);
+  await reader.getByRole("button", { name: "Decisions", exact: true }).click();
+  const row = reader.locator(".ub-docs-row").filter({ hasText: renamed });
+  await expect(row).toHaveCount(1);
+  await expect(row).not.toContainText("Changed after approval");
+
+  const mcpTitle = `MCP question ${current.uuid}`;
+  await writer.call("set_metadata", { uuid: current.uuid, title: mcpTitle });
+  await expect(title).toHaveValue(mcpTitle);
+  expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ approvalChanged: false });
+
+  const peer = await legacyDecisionPeer(harness(), current.uuid);
+  try {
+    appendBlock(peer.doc, { type: "paragraph", text: "Changed answer from an older client." });
+    peer.decide("decided");
+    await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).approvalChanged).toBe(true);
+    const changedTitle = `Changed answer question ${current.uuid}`;
+    await title.fill(changedTitle);
+    await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toContainText("Changed after approval");
+    expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: changedTitle, approvalChanged: true });
+  } finally { peer.close(); }
+});
+
 for (const { touch, appearance } of [
   { touch: false, appearance: "light" }, { touch: false, appearance: "dark" },
   { touch: true, appearance: "light" }, { touch: true, appearance: "dark" },
 ] as const) {
-  test(`decision title renames sync without approving answer changes on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+  test(`decision title control stays editable only on the current record on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
-    const owner = await create(writer, "Rename owner", "The related page's prose.");
-    const first = await create(writer, "Original rename question", "Earlier answer.", { kind: "decision", status: "decided" });
-    const current = await create(writer, "Current rename question", "Approved answer.", {
-      kind: "decision", status: "decided", supersedes: first.uuid, related: owner.uuid, answer: answer(),
+    const first = await create(writer, "Original title control question", "Earlier answer.", { kind: "decision", status: "decided" });
+    const current = await create(writer, "May technical pull requests be integrated without a linked issue?", "Approved answer.", {
+      kind: "decision", status: "decided", supersedes: first.uuid, answer: answer(),
     });
-    const pending = await create(writer, "Pending rename question", "Pending proposal.", { kind: "decision", supersedes: current.uuid });
-    const topicPath = `/${harness().workspace}/${first.uuid}`;
-    const page = await openApp(browser, topicPath, {
+    const page = await openApp(browser, `/${harness().workspace}/${first.uuid}`, {
       upstream: true,
       contextOptions: { ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
     });
-    const reader = await openApp(browser, topicPath, { upstream: true });
     const title = page.getByRole("textbox", { name: "Document title" });
     await expect(title).toHaveValue(current.title);
     await expect(title).toBeEditable();
+    await wrappedTitle(page);
     await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
-    await expect(page.locator(".ub-decision-notice")).toContainText("Under review.");
     if (touch) await title.tap();
     else {
       await title.focus();
@@ -288,50 +348,31 @@ for (const { touch, appearance } of [
       await page.keyboard.press("Shift+Tab");
       await expect(title).toBeFocused();
     }
-    const renamed = `Clearer question ${current.uuid}`;
+    await title.fill("Clearer question");
+    const shortHeight = await title.evaluate((element) => element.getBoundingClientRect().height);
+    const renamed = "May technical pull requests be integrated without a linked issue and without losing the recorded answer approval?";
     await title.fill(renamed);
-    await expect(reader.getByRole("textbox", { name: "Document title" })).toHaveValue(renamed);
-    expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: renamed, approvalChanged: false });
-    expect((await writer.call<StoredDoc>("get_doc", { uuid: pending.uuid })).title).toBe(pending.title);
-    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
-    await expect(editor(page)).toHaveText(answerText(current));
-
+    await expect(title).toHaveValue(renamed);
+    await wrappedTitle(page);
+    expect(await title.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(shortHeight);
+    await title.press("Enter");
+    await title.press("Shift+Enter");
+    await expect(title).toHaveValue(renamed);
+    await title.fill("May technical pull requests be integrated\n without a linked issue and without losing the recorded answer approval?");
+    await expect(title).toHaveValue(renamed);
     await activateControl(entry(page, first.uuid).locator(".ub-decision-record"), { touch });
     await expect(title).toHaveValue(renamed);
     await expect(title).not.toBeEditable();
+    await wrappedTitle(page);
     await expect(page.locator(".ub-lifecycle-badge")).toHaveText("Decision");
     await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });
     await expect(title).toBeEditable();
-
-    await reader.goto(new URL(`/${harness().workspace}/${owner.uuid}`, harness().appUrl).href);
-    await expect(reader.getByRole("region", { name: "Decisions" }).getByRole("link", { name: `Under review: ${renamed}`, exact: true })).toBeVisible();
-    await reader.goto(new URL(`/${harness().workspace}/all`, harness().appUrl).href);
-    await reader.getByRole("button", { name: "Decisions", exact: true }).click();
-    const row = reader.locator(".ub-docs-row").filter({ hasText: renamed });
-    await expect(row).toHaveCount(1);
-    await expect(row).not.toContainText("Changed after approval");
-
-    const mcpTitle = `MCP question ${current.uuid}`;
-    await writer.call("set_metadata", { uuid: current.uuid, title: mcpTitle });
-    await expect(title).toHaveValue(mcpTitle);
-    expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ approvalChanged: false });
-
-    const peer = await legacyDecisionPeer(harness(), current.uuid);
-    try {
-      appendBlock(peer.doc, { type: "paragraph", text: "Changed answer from an older client." });
-      peer.decide("decided");
-      await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).approvalChanged).toBe(true);
-      const changedTitle = `Changed answer question ${current.uuid}`;
-      await title.fill(changedTitle);
-      await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toContainText("Changed after approval");
-      expect(await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).toMatchObject({ title: changedTitle, approvalChanged: true });
-    } finally { peer.close(); }
-
     await writer.call("archive_doc", { uuid: first.uuid });
     await expect(title).not.toBeEditable();
+    await wrappedTitle(page);
     await activateControl(title, { touch });
-    await title.evaluate((element) => (element as HTMLInputElement).select());
-    expect(await title.evaluate((element) => (element as HTMLInputElement).selectionEnd)).toBe((await title.inputValue()).length);
+    await title.evaluate((element) => (element as HTMLTextAreaElement).select());
+    expect(await title.evaluate((element) => (element as HTMLTextAreaElement).selectionEnd)).toBe((await title.inputValue()).length);
   });
 
   test(`decision topic history, links and comments on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
@@ -552,7 +593,7 @@ for (const { touch, appearance } of [
       selection?.addRange(range);
     });
     await expect(page.locator('[data-slot="selection-composer"]')).toHaveCount(0);
-    await expect(page.locator("input.ub-title")).not.toBeEditable();
+    await expect(page.getByRole("textbox", { name: "Document title" })).not.toBeEditable();
     await expect(page.getByRole("button", { name: "Insert block below", includeHidden: true })).toHaveCount(0);
     const exact = await writer.call<StoredDoc>("get_doc", { uuid: first.uuid });
     expect(exact.uuid).toBe(first.uuid);
