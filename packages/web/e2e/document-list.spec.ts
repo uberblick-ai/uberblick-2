@@ -248,10 +248,12 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     // Search, tag and state share one row and one height.
     const field = page.locator(".ub-docs-search-label");
     const fieldBox = await field.boundingBox();
+    expect(fieldBox?.height).toBe(touch ? 44 : 32);
     expect(Math.abs((tagBox?.y ?? 0) - (fieldBox?.y ?? 0))).toBeLessThan(1);
     expect(Math.abs((tagBox?.height ?? 0) - (fieldBox?.height ?? 0))).toBeLessThan(1);
     const stateControl = await page.locator(".ub-docs-state-filter").boundingBox();
     expect(Math.abs((stateControl?.height ?? 0) - (fieldBox?.height ?? 0))).toBeLessThan(1);
+    expect(stateBox?.height).toBe(stateControl?.height);
     expect(stateBox?.x).toBeGreaterThan(tagBox?.x ?? 0);
     await expect(titleFilter).toHaveAttribute("placeholder", "Search decisions");
     await expect(field).toHaveCSS("border-top-width", "1px");
