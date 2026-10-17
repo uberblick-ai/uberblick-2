@@ -280,6 +280,8 @@ describe("the document tag picker", () => {
     documentFixture();
     const host = await openApp();
     expect(picker(host)?.textContent).toContain("Add tags");
+    expect(picker(host)?.querySelector(".ub-tag-placeholder svg")?.getAttribute("aria-hidden")).toBe("true");
+    expect(host.querySelector(".ub-tag-chevron")).toBeNull();
     click(picker(host));
     expect(screen.getByText("No tags available.").textContent).toBe(
       "No tags available.",

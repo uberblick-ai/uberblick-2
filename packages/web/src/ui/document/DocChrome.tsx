@@ -83,6 +83,14 @@ function TagSearchIcon(): ReactElement {
   );
 }
 
+function TagPlusIcon(): ReactElement {
+  return (
+    <svg className="block size-4 shrink-0 opacity-55 group-hover/tags:opacity-100" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** The catalog-backed multi-select in the document header, as inline pills. */
 function TagStrip({
   ydoc,
@@ -216,18 +224,25 @@ function TagStrip({
         <button
           ref={trigger}
           type="button"
-          className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-auto cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+          className="ub-tags ub-tag-picker-trigger group/tags flex min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11 flex-initial cursor-pointer flex-wrap items-center gap-[0.3rem] border-0 bg-transparent p-0 text-left [font:inherit] text-inherit focus-visible:rounded-(--radius-sm) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
           aria-label="Edit tags"
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-controls={open ? listId : undefined}
         >
           <span className="ub-tag-selected">
-            {labels.length > 0 ? labels : <span className="ub-tag-placeholder">Add tags</span>}
+            {labels.length > 0 ? labels : (
+              <span className="ub-tag ub-tag-placeholder gap-[0.3rem]">
+                <TagPlusIcon />
+                Add tags
+              </span>
+            )}
           </span>
-          <span className="ub-tag-chevron flex-none ub-type-caption opacity-55 group-hover/tags:opacity-100" aria-hidden="true">
-            ▾
-          </span>
+          {labels.length > 0 && (
+            <span className="ub-tag-chevron flex-none ub-type-caption opacity-55 group-hover/tags:opacity-100" aria-hidden="true">
+              ▾
+            </span>
+          )}
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -329,8 +344,8 @@ export function CopyLink({
 
 /**
  * Reserve the identity row above the title before metadata arrives,
- * preventing navigation jumps. Selected tags scroll within one fixed-height
- * control; document actions stay at the end.
+ * preventing navigation jumps. Selected tags wrap within their control;
+ * document actions stay at the end.
  */
 export function DocMetaLine({
   connection,

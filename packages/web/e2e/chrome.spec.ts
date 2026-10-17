@@ -2008,6 +2008,112 @@ for (const scheme of ["light"] as const) {
     await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
   });
 }
+for (const scheme of ["light", "dark"] as const) {
+  test(`document tags occupy only their control, leaving blank header space inert — ${scheme} @webkit`, async ({ browser }, info) => {
+    const touch = info.project.name === "webkit-ipad";
+    const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
+      upstream: true,
+      contextOptions: {
+        colorScheme: scheme,
+        ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1400, height: 1000 }, isMobile: false, hasTouch: false }),
+      },
+      readySelector: "[data-settings-page]",
+    });
+    expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+    await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+    await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
+    await expect(page.locator(".ub-docs")).toBeVisible();
+    if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).click();
+    await page.getByRole("button", { name: "+ New page" }).click();
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const trigger = page.getByRole("button", { name: "Edit tags", exact: true });
+    const empty = trigger.locator(".ub-tag-placeholder");
+    await expect(empty).toHaveText("Add tags");
+    await expect(empty).toHaveCSS("border-top-style", "dotted");
+    expect(Number.parseFloat(await paintedIn(empty, "border-top-width"))).toBeGreaterThan(0);
+    await expect(empty.locator("svg")).toHaveAttribute("aria-hidden", "true");
+    await expect(trigger.locator(".ub-tag-chevron")).toHaveCount(0);
+    const pillProperties = ["border-radius", "padding-top", "padding-right", "padding-bottom", "padding-left"];
+    const emptyShape = await Promise.all(pillProperties.map((property) => paintedIn(empty, property)));
+    const titleBefore = await page.locator(".ub-title").boundingBox();
+    const rowBefore = await page.locator(".ub-doc-meta").boundingBox();
+    const activate = async (control: Locator): Promise<void> => {
+      if (touch) await control.tap();
+      else await control.click();
+    };
+    const blankSpace = async (): Promise<{ x: number; y: number }> => {
+      const geometry = await trigger.evaluate((control) => {
+        const row = control.closest(".ub-doc-meta");
+        const actions = row?.querySelector(".ub-document-actions");
+        const chevron = control.querySelector(".ub-tag-chevron");
+        const visible = chevron ?? control.querySelector(".ub-tag-placeholder");
+        if (row === null || actions == null || visible === null) throw new Error("e2e: incomplete tag header");
+        const box = control.getBoundingClientRect();
+        const actionBox = actions.getBoundingClientRect();
+        const rowBox = row.getBoundingClientRect();
+        const visibleBox = visible.getBoundingClientRect();
+        const x = (box.right + actionBox.left) / 2;
+        const y = box.top + box.height / 2;
+        const minimum = matchMedia("(any-pointer: coarse)").matches ? 44 : 24;
+        return {
+          x, y, width: box.width, height: box.height, minimum,
+          trailing: box.right - visibleBox.right,
+          chevronGap: chevron === null ? 0 : visibleBox.left - (control.querySelector(".ub-tag")?.getBoundingClientRect().right ?? 0),
+          gap: actionBox.left - box.right,
+          actionInset: rowBox.right - actionBox.right,
+          takesBlank: control.contains(document.elementFromPoint(x, y)),
+          takesTop: control.contains(document.elementFromPoint(box.left + box.width / 2, box.top + 1)),
+          takesBottom: control.contains(document.elementFromPoint(box.left + box.width / 2, box.bottom - 1)),
+        };
+      });
+      expect(geometry.width).toBeGreaterThanOrEqual(geometry.minimum);
+      expect(geometry.height).toBeGreaterThanOrEqual(geometry.minimum);
+      expect(geometry.takesTop).toBe(true);
+      expect(geometry.takesBottom).toBe(true);
+      expect(geometry.trailing).toBeLessThanOrEqual(8);
+      expect(geometry.chevronGap).toBeLessThanOrEqual(8);
+      expect(geometry.gap).toBeGreaterThan(24);
+      expect(geometry.actionInset).toBeCloseTo(0, 1);
+      expect(geometry.takesBlank).toBe(false);
+      if (touch) await page.touchscreen.tap(geometry.x, geometry.y);
+      else await page.mouse.click(geometry.x, geometry.y);
+      await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
+      return { x: geometry.x, y: geometry.y };
+    };
+    await blankSpace();
+    // Both native activation keys keep the same focus entry and Escape return.
+    for (const key of ["Enter", "Space"]) {
+      await page.keyboard.press("Tab");
+      await trigger.focus();
+      await expectFocusIndicator(trigger);
+      await trigger.press(key);
+      await expect(page.getByRole("option").first()).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(trigger).toBeFocused();
+    }
+    await activate(trigger);
+    await activate(page.getByRole("option", { name: EXAMPLE_TAGS[0].name, exact: true }));
+    await page.keyboard.press("Escape");
+    await expect(trigger).toBeFocused();
+    const assigned = trigger.locator(".ub-tag");
+    await expect(assigned).toHaveCount(1);
+    await expect(assigned).toHaveCSS("border-top-style", "solid");
+    expect(await Promise.all(pillProperties.map((property) => paintedIn(assigned, property)))).toEqual(emptyShape);
+    await expect(trigger.locator(".ub-tag-chevron")).toHaveCount(1);
+    await expect(trigger.locator(".ub-tag-chevron")).toHaveAttribute("aria-hidden", "true");
+    expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
+    expect((await page.locator(".ub-doc-meta").boundingBox())?.height).toBe(rowBefore?.height);
+    const blank = await blankSpace();
+    await activate(trigger);
+    await expect(page.locator(".ub-tag-picker-panel")).toBeVisible();
+    await expect(page.getByRole("option").first()).toBeFocused();
+    if (touch) await page.touchscreen.tap(blank.x, blank.y);
+    else await page.mouse.click(blank.x, blank.y);
+    await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
+  });
+}
+
 /**
  * The document's tags read as tags rather than as a form field.
  *
@@ -2030,10 +2136,11 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
   const documentUrl = page.url();
   const trigger = page.getByRole("button", { name: "Edit tags" });
 
-  // Nothing assigned: the fallback stands where the pills will, before the same
-  // chevron, and the control itself draws no box around them.
+  // Nothing assigned: the fallback is a dotted pill without a chevron, and
+  // the control itself draws no box around it.
   await expect(trigger).toContainText("Add tags");
-  await expect(page.locator(".ub-tag-chevron")).toHaveCount(1);
+  await expect(page.locator(".ub-tag-placeholder")).toHaveCSS("border-top-style", "dotted");
+  await expect(page.locator(".ub-tag-chevron")).toHaveCount(0);
   expect(alphaOf(await paintedIn(trigger, "background-color"))).toBe(0);
   for (const edge of ["top", "right", "bottom", "left"]) {
     expect(Number.parseFloat(await paintedIn(trigger, `border-${edge}-width`))).toBe(0);

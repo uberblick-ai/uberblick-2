@@ -777,10 +777,11 @@ textarea.ub-title {
   flex-wrap: wrap;
   gap: 0.3rem;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
 }
 
 .ub-tags:not(.ub-tag-picker-trigger) {
+  flex: 1 1 auto;
   color: inherit;
 }
 
@@ -792,6 +793,7 @@ textarea.ub-title {
 }
 
 .ub-tag-placeholder {
+  border-style: dotted;
   white-space: nowrap;
 }
 
@@ -814,6 +816,7 @@ textarea.ub-title {
 .ub-document-actions {
   flex: none;
   display: inline-flex;
+  margin-left: auto;
 }
 
 .ub-tool {
