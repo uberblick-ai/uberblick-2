@@ -1,0 +1,26 @@
+name: Dependency review
+
+# Blocks a pull request that adds or upgrades to a dependency with a known
+# advisory at high or above. It compares the pull request's lockfile with its
+# base, so advisories already on main never fail an unrelated change; fixing
+# those is Dependabot's job (`.github/dependabot.yml`). Not a required check.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # Development tools run in CI and on contributors' machines too.
+          fail-on-scopes: runtime, development
+          license-check: false
+          # A summary comment needs a write token, which this workflow does not get.
+          comment-summary-in-pr: never

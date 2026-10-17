@@ -1,0 +1,40 @@
+version: 2
+updates:
+  # One pnpm workspace: the root lockfile covers every package.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Version updates wait a week after a release, so a compromised publish has
+    # time to be caught. Security updates never wait.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+        patterns: ["*"]
+    # Exact pins `pnpm-workspace.yaml` explains: the CRDT single-instance
+    # contract, Hocuspocus internals the hub's auth boundary reads, and the MCP
+    # SDK that defines the tools/list golden. Bumping one is a reviewed change.
+    ignore:
+      - dependency-name: yjs
+      - dependency-name: y-protocols
+      - dependency-name: y-prosemirror
+      - dependency-name: "@hocuspocus/*"
+      - dependency-name: "@modelcontextprotocol/sdk"
+
+  # Workflows pin actions by commit SHA; Dependabot moves the SHA and its
+  # version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
