@@ -54,9 +54,9 @@ footprint, with contract and invariant tests rather than tests of trivia. Run
 focused checks while editing. Before handoff, wait for the pull request's
 required checks at the final head (`gh pr checks <n> --required --watch`) and
 treat each failure as the [integrator's CI gate](../protocols/integration.md#gate-mechanics)
-does, re-running once where it allows: fix a branch failure, and record one
-that main's `CI` run shows the same way as a real environmental limitation
-rather than replacing a failed check with a claim.
+does, re-running where it allows: fix a branch failure, and record one that
+main's `CI` run or an open flake issue shows the same way as a real
+environmental limitation rather than replacing a failed check with a claim.
 
 Where the contract conflicts with the code, is unsafe, forces unnecessary
 complexity, or needs a person's decision, do not deviate. On an issue, finish
