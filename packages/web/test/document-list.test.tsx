@@ -277,7 +277,7 @@ describe("the All documents tab counts", () => {
     await act(async () => typeInto(filter(host), "overview"));
     expect(rowTitles(host)).toEqual(["Overview"]);
     expect(countLine(host)).toBe("Documents 2 · Decisions 1");
-    await act(async () => within(host).getByRole("tab", { name: /^Decisions/ }).click());
+    await act(async () => fireEvent.keyDown(within(host).getByRole("tab", { name: /^Decisions/ }), { key: "Enter" }));
     expect(rowTitles(host)).toEqual(["Cache choice"]);
     expect(countLine(host)).toBe("Documents 2 · Decisions 1");
     await act(async () => mounted?.rerender(<DocumentList {...props} state={{
@@ -313,24 +313,22 @@ describe("the All documents tab counts", () => {
 });
 
 describe("the document type tabs", () => {
-  it("moves selection and focus with the arrow keys and keeps the search text", async () => {
+  it("switches the panel's type while keeping the search text", async () => {
     const host = await mount(<DocumentList
       connection={room(directoryRoom(WORKSPACE))}
       entries={[entry({ uuid: ONE, title: "Overview" }), entry({ uuid: TWO, title: "Cache choice", kind: "decision", status: "open" })]}
       groups={[]} searchClient={{ search: async () => [ONE, TWO] }} onSelect={() => {}} onTogglePin={null}
     />);
     const tab = (name: string): HTMLElement => within(host).getByRole("tab", { name: new RegExp(`^${name}`) });
-    expect(tab("Documents").tabIndex).toBe(0);
-    expect(tab("Decisions").tabIndex).toBe(-1);
     expect(tab("Documents").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
     await act(async () => typeInto(filter(host), "c"));
-    await act(async () => { tab("Documents").focus(); fireEvent.keyDown(tab("Documents"), { key: "ArrowRight" }); });
+    await act(async () => fireEvent.keyDown(tab("Decisions"), { key: "Enter" }));
     expect(tab("Decisions").getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(tab("Decisions"));
+    expect(tab("Decisions").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
     expect(filter(host).value).toBe("c");
     expect(filter(host).placeholder).toBe("Search decisions");
     expect(within(host).getByRole("combobox", { name: "Decision state" })).toBeDefined();
-    await act(async () => fireEvent.keyDown(tab("Decisions"), { key: "Home" }));
+    await act(async () => fireEvent.keyDown(tab("Documents"), { key: "Enter" }));
     expect(tab("Documents").getAttribute("aria-selected")).toBe("true");
     expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
   });
@@ -813,8 +811,8 @@ describe("decision topics in the list", () => {
 
   async function chooseDecisions(host: HTMLElement): Promise<void> {
     await act(async () => {
-      within(within(host).getByRole("tablist", { name: "Document type" }))
-        .getByRole<HTMLButtonElement>("tab", { name: /^Decisions/ }).click();
+      fireEvent.keyDown(within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("tab", { name: /^Decisions/ }), { key: "Enter" });
     });
   }
 
@@ -1194,7 +1192,7 @@ describe("the filter", () => {
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
 
-    await act(async () => mode("Decisions")?.click());
+    await act(async () => fireEvent.keyDown(mode("Decisions"), { key: "Enter" }));
     expect(rowTitles(host)).toEqual(["Cache choice"]);
     expect(lifecycleBadges(host)).toHaveLength(0);
     expect(documentTable(host).textContent).not.toContain("Not yet decided");
@@ -1257,7 +1255,7 @@ describe("the filter", () => {
     // The decision matches the text too, and still does not appear here.
     expect(rowTitles(host)).toEqual(["Search plan"]);
 
-    await act(async () => mode("Decisions")?.click());
+    await act(async () => fireEvent.keyDown(mode("Decisions"), { key: "Enter" }));
     expect(filter(host).value).toBe("search");
     expect(rowTitles(host)).toEqual(["Search decision"]);
   });

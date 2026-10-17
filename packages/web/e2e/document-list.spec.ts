@@ -190,7 +190,7 @@ async function decision(
 }
 
 for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
-  test(`decision list filters and returns to topics on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+  test(`decision list filters and returns to topics on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser, browserName }) => {
     const writer = agent().open({ name: "decision-list-e2e" });
     const prefix = docTitle("decisionlist").replaceAll("-", "");
     const approval = { who: "A workspace member", when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };
@@ -300,14 +300,33 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(tagFilter).toContainText("Tag Any");
     await pickTags(page, ["auth"], touch);
 
+    if (!touch) {
+      await type.focus();
+      for (const [key, name] of [["ArrowLeft", /^Documents/], ["ArrowRight", /^Decisions/], ["Home", /^Documents/], ["End", /^Decisions/]] as const) {
+        await page.keyboard.press(key);
+        const selected = page.getByRole("tab", { name });
+        await expect(selected).toBeFocused();
+        await expect(selected).toHaveAttribute("aria-selected", "true");
+        await expect(titleFilter).toHaveValue(prefix);
+        await expect(tagFilter).toContainText("auth");
+      }
+    }
+
     // Native select input and row activation are real on each supported device;
     // the full cached state matrix and room-join invariant belong to unit tests.
+    const chevron = await page.locator(".ub-docs-state-filter svg").boundingBox();
+    if (chevron === null) throw new Error("e2e: the State chevron is missing");
+    const pickerPoint = { x: chevron.x + chevron.width / 2, y: chevron.y + chevron.height / 2 };
+    expect(await state.evaluate((select, point) => document.elementFromPoint(point.x, point.y) === select, pickerPoint)).toBe(true);
+    if (touch) await page.touchscreen.tap(pickerPoint.x, pickerPoint.y);
+    else await page.mouse.click(pickerPoint.x, pickerPoint.y);
+    await expect(state).toBeFocused();
+    // WebKit does not expose its native select picker through :open.
+    if (browserName === "chromium") await expect.poll(() => state.evaluate((select) => select.matches(":open"))).toBe(true);
     if (touch) {
-      await state.tap();
       await state.selectOption("under-review");
+      await page.keyboard.press("Escape");
     } else {
-      await state.focus();
-      await page.keyboard.press("Space");
       await page.keyboard.press("u");
       await page.keyboard.press("Enter");
     }

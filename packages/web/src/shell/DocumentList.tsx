@@ -12,6 +12,7 @@ import { formatTimestamp, useTimestampClock } from "../ui/timestamps.js";
 import { PickerList } from "../ui/PickerList.js";
 import { useTagCatalog } from "../ui/tags.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/shadcn/popover.js";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/shadcn/tabs.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/shadcn/tooltip.js";
 import type { DocumentSearchClient } from "./document-search.js";
 
@@ -302,45 +303,23 @@ function noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced, ha
 }
 
 /** Each tab counts its whole type, so filtering never moves the numbers. */
-function DocumentTypeTabs({ entries, received, mode, idPrefix, onSelect }: { entries: readonly DirectoryEntry[]; received: boolean; mode: Mode; idPrefix: string; onSelect: (mode: Mode) => void }): ReactElement {
-  const tabs = useRef<HTMLDivElement | null>(null);
+function DocumentTypeTabs({ entries, received }: { entries: readonly DirectoryEntry[]; received: boolean }): ReactElement {
   const counts: Record<Mode, number> = useMemo(() => ({
     working: entries.filter((entry) => !entry.deleted && inMode(entry, "working")).length,
     decision: resolveDecisionTopics(entries).filter((topic) => !topic.archived && decisionCurrentRecord(topic) !== null).length,
   }), [entries]);
-  const move = (from: Mode, step: number): void => {
-    const next = MODES[(MODES.indexOf(from) + step + MODES.length) % MODES.length] ?? from;
-    onSelect(next);
-    tabs.current?.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus();
-  };
-  return <div ref={tabs} role="tablist" aria-label="Document type" className="ub-docs-tabs">
+  return <TabsList aria-label="Document type" className="ub-docs-tabs">
     {MODES.map((option) => (
-      <button
+      <TabsTrigger
         key={option}
-        id={`${idPrefix}-${option}`}
-        type="button"
-        role="tab"
-        data-mode={option}
+        value={option}
         className="ub-docs-tab"
-        aria-selected={option === mode}
-        aria-controls={`${idPrefix}-panel`}
-        tabIndex={option === mode ? 0 : -1}
-        onClick={() => onSelect(option)}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-            event.preventDefault();
-            move(option, event.key === "ArrowRight" ? 1 : -1);
-          } else if (event.key === "Home" || event.key === "End") {
-            event.preventDefault();
-            move(event.key === "Home" ? MODES[0] : MODES[MODES.length - 1] ?? option, 0);
-          }
-        }}
       >
         {MODE_LABELS[option]}
         {received && <span className="ub-docs-tab-count">{counts[option]}</span>}
-      </button>
+      </TabsTrigger>
     ))}
-  </div>;
+  </TabsList>;
 }
 
 export function DocumentList({
@@ -370,7 +349,6 @@ export function DocumentList({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const pinUnavailableId = useId();
-  const tabsId = useId();
   const [localState, setLocalState] = useState(INITIAL_DOCUMENT_LIST_STATE);
   const listState = state ?? localState;
   const { query, stateFilter, sort } = listState;
@@ -446,12 +424,15 @@ export function DocumentList({
 
   return (
     <section className="ub-pane ub-page-pane">
-      <div className="ub-column ub-docs">
+      <Tabs className="ub-column ub-docs" value={mode} onValueChange={(value) => {
+        const option = MODES.find((candidate) => candidate === value);
+        if (option !== undefined) updateState({ mode: option });
+      }}>
         <header className="ub-page-header">
           <h1 className="ub-title ub-docs-heading">All documents</h1>
-          <DocumentTypeTabs entries={entries} received={status.hasReceivedServerState} mode={mode} idPrefix={tabsId} onSelect={(option) => updateState({ mode: option })} />
+          <DocumentTypeTabs entries={entries} received={status.hasReceivedServerState} />
         </header>
-        <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${mode}`} className="ub-docs-panel">
+        <TabsContent value={mode} tabIndex={-1} className="ub-docs-panel">
         <div className="ub-docs-filters">
           <label className="ub-docs-search-label">
             <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-docs-search-icon"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
@@ -466,7 +447,8 @@ export function DocumentList({
           </label>
           <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
           {mode === "decision" && <label className="ub-docs-state-filter ub-docs-filter-control">
-            State
+            <span aria-hidden="true">State</span>
+            <span aria-hidden="true" className="ub-docs-filter-value">{STATE_LABELS[stateFilter]}</span>
             <select
               aria-label="Decision state"
               className="ub-docs-state-select"
@@ -611,8 +593,8 @@ export function DocumentList({
             )}
           </tbody>
         </table>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }
