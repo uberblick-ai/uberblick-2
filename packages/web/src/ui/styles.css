@@ -2935,9 +2935,12 @@ button.ub-docs-tag-chip:hover {
     min-height: 2.75rem;
   }
 
-  /* The bordered list filters own the touch height; the bare fields inside
-     them must not add this minimum on top. */
-  .ub-docs-filters .ub-docs-search,
+  /* Keep the native search target at 44 px while its transparent field spans
+     the wrapper's border, rather than making the bordered row taller. */
+  .ub-docs-search-label {
+    height: 2.75rem;
+  }
+
   .ub-docs-filters .ub-docs-state-select {
     min-height: 0;
   }

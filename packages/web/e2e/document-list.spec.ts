@@ -249,6 +249,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     const field = page.locator(".ub-docs-search-label");
     const fieldBox = await field.boundingBox();
     expect(fieldBox?.height).toBe(touch ? 44 : 32);
+    if (touch) expect(searchBox?.height).toBe(44);
     expect(Math.abs((tagBox?.y ?? 0) - (fieldBox?.y ?? 0))).toBeLessThan(1);
     expect(Math.abs((tagBox?.height ?? 0) - (fieldBox?.height ?? 0))).toBeLessThan(1);
     const stateControl = await page.locator(".ub-docs-state-filter").boundingBox();
