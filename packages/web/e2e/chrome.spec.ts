@@ -1702,8 +1702,9 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   await page.keyboard.type("a line of prose\n".repeat(24));
 
   const editTags = page.getByRole("button", { name: "Edit tags" });
-  const actions = page.getByRole("button", { name: "Document actions", exact: true });
+  const actions = page.locator(".ub-actions-trigger");
   const face = actions.locator(".ub-actions-face");
+  await expect(actions).toHaveAccessibleName("Document actions");
   await expect(actions).toHaveAttribute("title", "Document actions");
 
   /**
@@ -1858,6 +1859,11 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       if (touch) await actions.tap();
       else await actions.click();
       await expect(actions).toHaveAttribute("data-state", "open");
+      const menu = await page.getByRole("menu").boundingBox();
+      const anchor = await actions.boundingBox();
+      if (menu === null || anchor === null) throw new Error("e2e: no document actions menu placement");
+      expect(menu.x + menu.width).toBeCloseTo(anchor.x + anchor.width, 1);
+      expect(menu.y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
       await expectCompactPaint();
       expect(alphaOf(await paintedIn(face, "background-color"))).toBeGreaterThan(0);
       if (!tagged && width === 1280) await attachHeader("open");

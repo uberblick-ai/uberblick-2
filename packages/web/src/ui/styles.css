@@ -819,11 +819,11 @@ textarea.ub-title {
   margin-left: auto;
 }
 
-/* Keep the compact paint at the column edge while touch space grows inward. */
+/* Keep compact paint at the column edge; retain the menu's vertical anchor. */
 .ub-actions-trigger {
   display: flex;
   width: 24px;
-  height: 24px;
+  height: 44px;
   align-items: center;
   justify-content: flex-end;
   padding: 0;
@@ -860,7 +860,7 @@ textarea.ub-title {
   }
 }
 @media (any-pointer: coarse) {
-  .ub-actions-trigger { width: 44px; height: 44px; }
+  .ub-actions-trigger { width: 44px; }
 }
 
 .ub-tool {
