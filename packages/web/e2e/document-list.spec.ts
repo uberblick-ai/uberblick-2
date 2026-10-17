@@ -190,6 +190,64 @@ async function decision(
 }
 
 for (const touch of [false, true]) for (const appearance of ["light", "dark"] as const) {
+  test(`decision filters wrap below full-width Search on ${touch ? "iPad touch" : "desktop"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser }) => {
+    const page = await openApp(browser, `/${harness().workspace}/all`, {
+      readySelector: ".ub-docs-heading",
+      contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
+    });
+    await activateControl(page.getByRole("tab", { name: /^Decisions/ }), { touch });
+    const state = page.getByRole("combobox", { name: "Decision state" });
+    await page.evaluate(() => document.fonts.ready);
+    for (const [width, value, rows] of [
+      [1440, "all", "one"],
+      [1440, "changed-after-approval", "one"],
+      [600, "changed-after-approval", "two"],
+      [520, "all", "two"],
+      [375, "changed-after-approval", "three"],
+    ] as const) {
+      await test.step(`${width}px with ${value}`, async () => {
+        await page.setViewportSize({ width, height: 1000 });
+        await state.selectOption(value);
+        // Measure one frame while the pane's responsive padding settles.
+        await expect(async () => {
+          const { row, search, tag, picker } = await page.locator(".ub-docs-filters").evaluate((filters) => {
+            const bounds = (element: Element | null) => {
+              if (element === null) throw new Error("e2e: a list filter is missing");
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return { x, y, width, height };
+            };
+            return {
+              row: bounds(filters),
+              search: bounds(filters.querySelector(".ub-docs-search-label")),
+              tag: bounds(filters.querySelector(".ub-docs-tag-filter")),
+              picker: bounds(filters.querySelector(".ub-docs-state-filter")),
+            };
+          });
+          expect(search.x).toBeCloseTo(row.x, 0);
+          for (const control of [search, tag, picker]) {
+            expect(control.x + control.width).toBeLessThanOrEqual(row.x + row.width + 1);
+          }
+          if (rows === "one") {
+            expect(tag.y).toBeCloseTo(search.y, 0);
+            expect(picker.y).toBeCloseTo(search.y, 0);
+            expect(picker.x + picker.width).toBeCloseTo(row.x + row.width, 0);
+          } else {
+            expect(search.width).toBeCloseTo(row.width, 0);
+            expect(tag.x).toBeCloseTo(row.x, 0);
+            expect(tag.y).toBeGreaterThanOrEqual(search.y + search.height);
+            if (rows === "two") {
+              expect(picker.y).toBeCloseTo(tag.y, 0);
+              expect(picker.x).toBeGreaterThanOrEqual(tag.x + tag.width);
+            } else {
+              expect(picker.x).toBeCloseTo(row.x, 0);
+              expect(picker.y).toBeGreaterThanOrEqual(tag.y + tag.height);
+            }
+          }
+        }).toPass({ timeout: 20_000 });
+      });
+    }
+  });
+
   test(`decision list filters and returns to topics on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}${touch ? " @webkit-touch" : ""}`, async ({ browser, browserName }) => {
     const writer = agent().open({ name: "decision-list-e2e" });
     const prefix = docTitle("decisionlist").replaceAll("-", "");

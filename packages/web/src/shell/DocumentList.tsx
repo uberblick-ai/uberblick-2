@@ -445,23 +445,25 @@ export function DocumentList({
               onChange={(event) => updateState({ query: event.currentTarget.value, relevance: true })}
             />
           </label>
-          <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
-          {mode === "decision" && <label className="ub-docs-state-filter ub-docs-filter-control">
-            <span aria-hidden="true">State</span>
-            <span aria-hidden="true" className="ub-docs-filter-value">{STATE_LABELS[stateFilter]}</span>
-            <select
-              aria-label="Decision state"
-              className="ub-docs-state-select"
-              value={stateFilter}
-              onChange={(event) => {
-                const value = STATE_FILTERS.find((option) => option === event.currentTarget.value);
-                if (value !== undefined) updateState({ stateFilter: value });
-              }}
-            >
-              {STATE_FILTERS.map((option) => <option key={option} value={option}>{STATE_LABELS[option]}</option>)}
-            </select>
-            <FilterChevron />
-          </label>}
+          <div className="ub-docs-filter-group">
+            <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
+            {mode === "decision" && <label className="ub-docs-state-filter ub-docs-filter-control">
+              <span aria-hidden="true">State</span>
+              <span aria-hidden="true" className="ub-docs-filter-value">{STATE_LABELS[stateFilter]}</span>
+              <select
+                aria-label="Decision state"
+                className="ub-docs-state-select"
+                value={stateFilter}
+                onChange={(event) => {
+                  const value = STATE_FILTERS.find((option) => option === event.currentTarget.value);
+                  if (value !== undefined) updateState({ stateFilter: value });
+                }}
+              >
+                {STATE_FILTERS.map((option) => <option key={option} value={option}>{STATE_LABELS[option]}</option>)}
+              </select>
+              <FilterChevron />
+            </label>}
+          </div>
         </div>
         {searchClient === null && searchText === "" && <p className="ub-docs-search-status ub-muted">Search is unavailable. Open this workspace with ub open to use local search.</p>}
         {onTogglePin === null && rows.length > 0 && (

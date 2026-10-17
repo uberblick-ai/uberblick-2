@@ -2569,6 +2569,22 @@ h6.ub-heading {
   margin-bottom: 0.5rem;
 }
 
+/* Keep Tag and State together when they move below Search. They can wrap
+   within their own row if the column cannot hold both controls. */
+.ub-docs-filter-group {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.ub-docs-filter-control {
+  flex: none;
+  max-width: 100%;
+}
+
 /* Search and both filters share one height, stroke and radius, with no fill. */
 .ub-docs-search-label,
 .ub-docs-filter-control {
