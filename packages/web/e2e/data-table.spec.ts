@@ -100,6 +100,12 @@ async function expectHeaderOrder(table: Locator, label: string, direction: "asce
   await expect(header).toHaveAttribute("aria-sort", direction);
   await expect(header.locator("[aria-hidden='true']")).toHaveText(direction === "ascending" ? "↑" : "↓");
   await expect(header.locator("[aria-hidden='true']")).toBeVisible();
+  const buttonInk = await header.locator("button").evaluate(element => getComputedStyle(element).color);
+  await expect(header.locator("[aria-hidden='true']")).toHaveCSS("color", buttonInk);
+  await expect(header.locator("[aria-hidden='true']")).toHaveCSS("opacity", "1");
+  const readings = await renderedText(table.page(), ".ub-data-table th[aria-sort] button");
+  expect(readings.length).toBeGreaterThan(0);
+  for (const reading of readings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
   await expect(table.locator("th[aria-sort]")).toHaveCount(1);
   await expect(table.locator("th [aria-hidden='true']:visible")).toHaveCount(1);
 }
@@ -125,6 +131,15 @@ async function cellStyle(cell: Locator): Promise<Record<string, string>> {
 }
 
 async function expectTableRules(table: Locator, mutedInk: string, proseInk: string): Promise<void> {
+  const headerInk = await table.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--table-header-foreground)";
+    element.append(probe);
+    const ink = getComputedStyle(probe).color;
+    probe.remove();
+    return ink;
+  });
+  expect(headerInk).not.toBe(mutedInk);
   const cells = await table.locator("th, td").evaluateAll((elements) => elements.map((element) => {
     const style = getComputedStyle(element);
     return {
@@ -142,12 +157,19 @@ async function expectTableRules(table: Locator, mutedInk: string, proseInk: stri
     expect(cell).toMatchObject({ left: "0px", right: "0px", bottom: "1px", rule: "solid",
       paddingLeft: "8.8px", paddingRight: "8.8px", ground: "rgba(0, 0, 0, 0)" });
     if (cell.header) {
-      expect(cell).toMatchObject({ size: "14px", leading: "20px", weight: "500", ink: mutedInk, textInk: mutedInk });
+      expect(cell).toMatchObject({ size: "14px", leading: "20px", weight: "500", ink: headerInk, textInk: headerInk });
     } else {
       const marker = cell.state !== null && cell.state !== "valid";
       expect(cell).toMatchObject({ size: "16px", leading: "27px", weight: "400",
         ink: marker ? mutedInk : proseInk, textInk: marker ? mutedInk : proseInk });
     }
+  }
+  const selector = await table.evaluate(element => element.matches(".ub-table") ? ".ub-table tr:first-child" : ".ub-data-table thead");
+  const readings = await renderedText(table.page(), selector);
+  expect(readings.length).toBeGreaterThan(0);
+  for (const reading of readings) {
+    expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
+    expect(reading.opacity, reading.where).toBe(1);
   }
 }
 
@@ -459,6 +481,17 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await page.keyboard.press("ArrowRight");
     await page.screenshot({ path: screenshot, fullPage: true });
     await info.attach(`data-table-${appearance}`, { path: screenshot, contentType: "image/png" });
+    const comparison = await session.call<DocPayload>("get_doc", { uuid });
+    const ordinaryBlock = comparison.blocks.find(block => block.type === "table");
+    if (ordinaryBlock === undefined) throw new Error("e2e: ordinary comparison table is missing");
+    await session.call("annotate", { uuid, block_id: ordinaryBlock.id, row: 0, column: 0,
+      start: 0, end: 4, text: "Header highlight contrast." });
+    const highlightedHeader = ordinary.locator("th .ub-comment");
+    await expect(highlightedHeader).toHaveText("Name");
+    await expect(highlightedHeader).toHaveCSS("color", await ordinary.locator("th").first().evaluate(element => getComputedStyle(element).color));
+    const highlightedReadings = await renderedText(page, ".ub-table th .ub-comment");
+    expect(highlightedReadings.length).toBeGreaterThan(0);
+    for (const reading of highlightedReadings) expect(reading.ratio, reading.where).toBeGreaterThanOrEqual(4.5);
     await proveMcpArrival(page, session, uuid, { path: "upstream" });
     await expectMcp(async () => {
       expect(await session.call("get_data", { uuid })).toEqual(before);

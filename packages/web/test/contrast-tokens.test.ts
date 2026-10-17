@@ -93,7 +93,10 @@ const text = (name: string, ink: string, ground: string, under?: string): Pair =
   name, ink, ground, floor: 4.5, ...(under === undefined ? {} : { under }),
 });
 
+const tableHeaderGrounds = ["--background", "--card", "--brand-subtle", "--page-ground[0]", "--page-ground[1]"];
+
 const pairs: Pair[] = [
+  ...tableHeaderGrounds.map((ground) => text("table header ink", "--table-header-foreground", ground)),
   // Sidebar column and its anchored menus. Alpha belongs to the ink,
   // so ratios composite it over each ground rather than discarding the alpha.
   ...["--sidebar-foreground", "--sidebar-row-icon", "--sidebar-muted-foreground"]
@@ -177,6 +180,21 @@ describe.each(["light", "dark"] as const)("source-token contrast — %s", (schem
       expect(value, name).toBeGreaterThanOrEqual(floor);
     });
   }
+
+  it("table headers are slightly quieter than muted text on every header ground", () => {
+    const header = resolve(tokens, "--table-header-foreground", scheme);
+    const muted = resolve(tokens, "--muted-foreground", scheme);
+    const step = separation(header, muted);
+    expect(step).toBeGreaterThan(0);
+    expect(step).toBeLessThanOrEqual(0.02);
+    const other = scheme === "light" ? "dark" : "light";
+    const otherStep = separation(resolve(tokens, "--table-header-foreground", other), resolve(tokens, "--muted-foreground", other));
+    expect(Math.abs(step - otherStep)).toBeLessThanOrEqual(0.002);
+    for (const ground of tableHeaderGrounds) {
+      const backing = resolve(tokens, ground, scheme);
+      expect(contrast(header, backing), ground).toBeLessThan(contrast(muted, backing));
+    }
+  });
 
   it("focused orphaned chips separate no less than resting chips", () => {
     const focused = separation(resolve(tokens, "--status-warning", scheme), resolve(tokens, "--brand-subtle", scheme));
