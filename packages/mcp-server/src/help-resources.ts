@@ -56,7 +56,7 @@ export function registerHelpResources(server: McpServer, help: HelpCatalog, work
       work.assertOpen();
       const found = typeof topic === "string" ? help.get(topic) : undefined;
       if (found === undefined) {
-        // MCP 2025-11-25 specifies resource-not-found; SDK 1.31 has no named constant.
+        // MCP 2025-11-25 specifies resource-not-found; SDK 1.32.1 has no named constant.
         throw new ClientSafeResourceError(-32002, `Resource not found: ${uri.href}`, { uri: uri.href });
       }
       return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: found.text }] };
