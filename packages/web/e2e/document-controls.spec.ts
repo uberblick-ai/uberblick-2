@@ -92,6 +92,7 @@ async function exerciseDocumentControls(browser: Browser, touch: boolean, info: 
 
   const picker = page.getByRole("button", { name: "Edit tags", exact: true });
   await expectFloor(picker, floor);
+  await expectFloor(page.getByRole("button", { name: "Document actions", exact: true }), floor);
   const chrome = await page.evaluate(() => ({
     statusRow: document.querySelector(".ub-status > div")?.getBoundingClientRect().height,
     metadataRow: document.querySelector(".ub-doc-meta")?.getBoundingClientRect().height,

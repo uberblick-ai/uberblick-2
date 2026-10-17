@@ -812,11 +812,55 @@ textarea.ub-title {
   font-family: var(--font-mono);
 }
 
-/* Keep the actions target at 44px even when tags give up width. */
+/* Tags give up width before the actions target. */
 .ub-document-actions {
   flex: none;
   display: inline-flex;
   margin-left: auto;
+}
+
+/* Keep the compact paint at the column edge while touch space grows inward. */
+.ub-actions-trigger {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.ub-actions-face {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.ub-actions-trigger[data-state="open"] {
+  color: var(--foreground);
+}
+.ub-actions-trigger[data-state="open"] .ub-actions-face {
+  border-color: var(--border);
+  background: var(--secondary);
+}
+@media (hover: hover) {
+  .ub-actions-trigger:hover { color: var(--foreground); }
+  .ub-actions-trigger:hover .ub-actions-face {
+    border-color: var(--border);
+    background: var(--secondary);
+  }
+}
+@media (any-pointer: coarse) {
+  .ub-actions-trigger { width: 44px; height: 44px; }
 }
 
 .ub-tool {
