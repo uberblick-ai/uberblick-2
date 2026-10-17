@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
+  type onCloseParameters,
 } from "@hocuspocus/provider";
 import { Server, type Connection, type Hocuspocus, type ServerConfiguration } from "@hocuspocus/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -616,6 +617,7 @@ describe("credential admission on a composed server", () => {
 
     it.each([
       ["revocation", "authentication"], ["revocation", "document loading"],
+      ["membership removal", "authentication"], ["membership removal", "document loading"],
       ["suspension", "authentication"], ["suspension", "document loading"],
     ] as const)("refuses queued writes when %s happens during %s", async (accessEnd, phase) => {
       const held = gate();
@@ -636,6 +638,14 @@ describe("credential admission on a composed server", () => {
       const offline = new Y.Doc();
       offline.getText(TEXT_KEY).insert(0, "offline write must not land");
       const sender = connect({ port: rig.port, room, token: await credentialToken(laptop), document: offline });
+      const events: string[] = [];
+      sender.provider.on("authenticated", () => events.push("authenticated"));
+      sender.provider.on("close", ({ event }: onCloseParameters) => {
+        events.push(`close:${event.reason}`);
+      });
+      sender.provider.on("authenticationFailed", ({ reason }: { reason: string }) => {
+        events.push(`authenticationFailed:${reason}`);
+      });
       try {
         await waitFor(`the credential to pause during ${phase}`, entered.opened);
         const queueArrival = frameBarrier(await waitFor("the authenticating socket", clientConnection), 12);
@@ -643,7 +653,12 @@ describe("credential admission on a composed server", () => {
         await waitFor("the burst to arrive during authentication", queueArrival);
         await endAccess(rig, accessEnd, laptop);
         held.open();
-        await waitFor("the suspended admission to be refused", sender.denied);
+        expect(await waitFor("the pending admission to be refused", sender.denied)).toBe("device-credential-refused");
+        expect(events).toEqual([
+          "authenticated",
+          "close:device-credential-refused",
+          "authenticationFailed:device-credential-refused",
+        ]);
         if (accessEnd === "suspension") rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
         const observer = connect({ port: rig.port, room, token: await credentialToken(phone) });
         await waitFor("the unaffected device to open the refused room", observer.synced);

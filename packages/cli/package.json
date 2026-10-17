@@ -19,7 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hocuspocus/server": "4.6.0",
+    "@hocuspocus/server": "4.7.1",
     "@uberblick/hub": "workspace:*",
     "@uberblick/mcp-server": "workspace:*",
     "@uberblick/schema": "workspace:*",
@@ -28,7 +28,7 @@
     "yjs": "catalog:"
   },
   "devDependencies": {
-    "@hocuspocus/provider": "4.6.0",
+    "@hocuspocus/provider": "4.7.1",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@types/node": "^26.2.0",
     "esbuild": "0.28.2",

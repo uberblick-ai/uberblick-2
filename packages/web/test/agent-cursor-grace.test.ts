@@ -86,6 +86,17 @@ function agentLeaves(): void {
   removeAwarenessStates(viewer, [agent.clientID], "test");
 }
 
+const DEPARTURE_SOURCES = ["connection close", "client awareness removal"] as const;
+
+function depart(peer: Awareness, source: (typeof DEPARTURE_SOURCES)[number]): void {
+  if (source === "connection close") {
+    removeAwarenessStates(viewer, [peer.clientID], "test");
+  } else {
+    peer.setLocalState(null);
+    applyAwarenessUpdate(viewer, encodeAwarenessUpdate(peer, [peer.clientID]), "test");
+  }
+}
+
 function caretIn(awareness: Awareness): unknown {
   return awareness.getStates().get(agent.clientID)?.cursor;
 }
@@ -176,7 +187,7 @@ it("lets a returning session replace its own retained caret at once", () => {
   expect(view.isDeparted(agent.clientID)).toBe(false);
 });
 
-it("shares one departure and expiry between the title roster and editor cursors", () => {
+it.each(DEPARTURE_SOURCES)("shares one %s and expiry between the title roster and editor cursors", (source) => {
   const cursorView = agentCursorAwareness(viewer);
   const titleView = agentCursorAwareness(viewer);
   expect(titleView).toBe(cursorView);
@@ -188,7 +199,7 @@ it("shares one departure and expiry between the title roster and editor cursors"
 
   publishAgentCursor(3);
   expect(title()).toHaveLength(1);
-  agentLeaves();
+  depart(agent, source);
   expect(title()).toMatchObject([
     { clientId: agent.clientID, name: AGENT_NAME, departed: true },
   ]);
@@ -330,13 +341,14 @@ it("replaces a session's departed caret with its reconnected live caret and rest
   expect(changes.at(-1)?.removed).toEqual([reconnected.clientID]);
 });
 
-it("keeps the previous caret through a cursorless reconnect and runs grace from its last departure", () => {
+it.each(DEPARTURE_SOURCES)("keeps the previous caret through a cursorless reconnect and runs grace from its last %s", (source) => {
   const view = agentCursorAwareness(viewer);
   const changes: { removed: number[] }[] = [];
   const listener = (change: { removed: number[] }) => changes.push(change);
   view.on("change", listener);
+  const title = () => readPresence(viewer.doc, view, view.isDeparted);
   publishAgentCursor(3, "run-1");
-  agentLeaves();
+  depart(agent, source);
   vi.advanceTimersByTime(10_000);
 
   const reconnected = newPeer();
@@ -345,14 +357,18 @@ it("keeps the previous caret through a cursorless reconnect and runs grace from 
   expect(view.isDeparted(agent.clientID)).toBe(true);
   expect(view.isDeparted(reconnected.clientID)).toBe(false);
   vi.advanceTimersByTime(10_000);
-  removeAwarenessStates(viewer, [reconnected.clientID], "test");
+  depart(reconnected, source);
   const departureChanges = changes.length;
 
   vi.advanceTimersByTime(AGENT_CURSOR_GRACE_MS - 1);
   expect(caretIn(view)).toEqual({ anchor: 3, head: 3 });
+  expect(title()).toMatchObject([
+    { clientId: agent.clientID, name: AGENT_NAME, session: "run-1", departed: true },
+  ]);
   expect(changes).toHaveLength(departureChanges);
   vi.advanceTimersByTime(1);
   expect(view.getStates().has(agent.clientID)).toBe(false);
+  expect(title()).toEqual([]);
   expect(changes.at(-1)?.removed).toEqual([agent.clientID]);
   view.off("change", listener);
 });

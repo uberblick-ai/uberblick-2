@@ -2,10 +2,10 @@ packages:
   - "packages/*"
 
 # Patch the pinned server without changing its resolution. The counter removes
-# a quadratic scan from full-corpus attachment; its invariant is pinned beside
-# the dependency's other characterized seams.
+# a quadratic scan from full-corpus attachment. Auth-first admission and the
+# close-then-refuse reply are pinned beside the dependency's other seams.
 patchedDependencies:
-  "@hocuspocus/server@4.6.0": patches/@hocuspocus__server@4.6.0.patch
+  "@hocuspocus/server@4.7.1": patches/@hocuspocus__server@4.7.1.patch
 
 # Postinstall builds we explicitly trust (pnpm 10 blocks these by default).
 # Nothing here compiles a native addon any more: SQLite comes from `node:sqlite`
@@ -37,10 +37,10 @@ overrides:
 
   # Not a CRDT instance concern: `@hocuspocus/common` is the one Hocuspocus
   # package of the three no manifest here names, and `@hocuspocus/server` and
-  # `@hocuspocus/provider` both ask for it as `^4.6.0` — a range the workspace
-  # cannot pin anywhere else. The decision to keep Hocuspocus (#394) is a
-  # decision to keep exactly 4.6.0: the hub's auth boundary reads library
-  # internals, so a patch bump has to be a reviewed act rather than a resolution.
+  # `@hocuspocus/provider` both ask for it as `^4.7.1` — a range the workspace
+  # cannot pin anywhere else. Keep all three at exactly 4.7.1: the hub's auth
+  # boundary reads library internals, so a patch bump has to be a reviewed act
+  # rather than a resolution.
   # `packages/hub/test/hocuspocus-pins.test.ts` fails if any of the three
   # regains a range; the seams the pin protects are characterized next to it.
-  "@hocuspocus/common": 4.6.0
+  "@hocuspocus/common": 4.7.1

@@ -324,12 +324,12 @@ export class Replicas {
       this.presenceTimers.delete(replica.room);
       const state = replica.awareness.getLocalState();
       if (state === null) return;
-      // The hub's MessageReceiver relays live clients after re-encoding inbound
-      // awareness, so setLocalState(null) would not reach peers for 30 seconds.
-      // Delete all presence keys together; the caret expires no later than this.
+      // Delete presence keys without clearing awareness: caret expiry must not
+      // report the still-connected agent as departed. The caret expires no
+      // later than this identity withdrawal.
       // A touched room retains heartbeated state across reconnects: readers must
-      // count user/marker fields, never raw awareness entries. Hub-generated
-      // connection-close removals still reach the web's departed-agent grace.
+      // count user/marker fields, never raw awareness entries. Actual awareness
+      // removals reach the web's departed-agent grace.
       const { user: _user, client: _client, session: _session, ...rest } = state;
       replica.awareness.setLocalState(rest);
     }, this.config.cursorTtlMs);

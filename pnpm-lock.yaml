@@ -9,12 +9,12 @@ overrides:
   y-protocols: 1.0.7
   y-prosemirror: 1.3.7
   '@modelcontextprotocol/sdk': 1.32.1
-  '@hocuspocus/common': 4.6.0
+  '@hocuspocus/common': 4.7.1
 
 patchedDependencies:
-  '@hocuspocus/server@4.6.0':
-    hash: dc22e08a34146c988996917f96b130e3a4ad785c126f874c846e07005181029d
-    path: patches/@hocuspocus__server@4.6.0.patch
+  '@hocuspocus/server@4.7.1':
+    hash: 369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d
+    path: patches/@hocuspocus__server@4.7.1.patch
 
 importers:
 
@@ -33,8 +33,8 @@ importers:
   packages/cli:
     dependencies:
       '@hocuspocus/server':
-        specifier: 4.6.0
-        version: 4.6.0(patch_hash=dc22e08a34146c988996917f96b130e3a4ad785c126f874c846e07005181029d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -55,8 +55,8 @@ importers:
         version: 13.6.32
     devDependencies:
       '@hocuspocus/provider':
-        specifier: 4.6.0
-        version: 4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.4.3)
@@ -79,8 +79,8 @@ importers:
   packages/hub:
     dependencies:
       '@hocuspocus/server':
-        specifier: 4.6.0
-        version: 4.6.0(patch_hash=dc22e08a34146c988996917f96b130e3a4ad785c126f874c846e07005181029d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@uberblick/schema':
         specifier: workspace:*
         version: link:../schema
@@ -92,8 +92,8 @@ importers:
         version: 13.6.32
     devDependencies:
       '@hocuspocus/provider':
-        specifier: 4.6.0
-        version: 4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
@@ -110,8 +110,8 @@ importers:
   packages/mcp-server:
     dependencies:
       '@hocuspocus/provider':
-        specifier: 4.6.0
-        version: 4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
         version: 1.32.1(zod@4.4.3)
@@ -181,8 +181,8 @@ importers:
         specifier: 1.8.0
         version: 1.8.0
       '@hocuspocus/provider':
-        specifier: 4.6.0
-        version: 4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        specifier: 4.7.1
+        version: 4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@radix-ui/react-alert-dialog':
         specifier: 1.1.23
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -630,17 +630,17 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hocuspocus/common@4.6.0':
-    resolution: {integrity: sha512-OotSE6HHmQzA9KH5xElZTaps4KY96CPnOJ15Pph6EpFzbZV86vkwghZP/u7zxibPr5NVK+h9hXQ+OVeN9Pl/LQ==}
+  '@hocuspocus/common@4.7.1':
+    resolution: {integrity: sha512-+N4t8AdBIWBUK+yHsuBvCcBm96eV2E3quIewma9+TYomqVMXhrovAf3dA6XFbYHRM7ggtXklHt2mFqTcpiMdAQ==}
 
-  '@hocuspocus/provider@4.6.0':
-    resolution: {integrity: sha512-twKgZb1PbDSapfdghvLWR1zQEvSiQLCH7DjKL4QmSoG2P1a0D7p5MUrm/RzXKscPpzVjHyGzHPlIWAXEEcvfxQ==}
+  '@hocuspocus/provider@4.7.1':
+    resolution: {integrity: sha512-znulqyCwwuhq86aFmTF6izOomwRWlZGReCAf+SZpLgpvdfvBQJzjoj9HdtuXXfL9wkBM2Ydt86kaMs2rjaicRA==}
     peerDependencies:
       y-protocols: 1.0.7
       yjs: 13.6.32
 
-  '@hocuspocus/server@4.6.0':
-    resolution: {integrity: sha512-Ex4tka1vsm9NycHU1vPwxj3weQj+L2+736U8uentRyykAefUcYkHEh7Gfxiy9PHBholWcw1H+oYgZ3LP0ShTWQ==}
+  '@hocuspocus/server@4.7.1':
+    resolution: {integrity: sha512-f2TWNi5rFnju1ttOesxkR1kPIukFmMClHY4pAx0RlIBMzjAoUVlEgilETIAQlrwmw1UMxsy31fse0tmBzYEpwQ==}
     engines: {node: '>=22'}
     peerDependencies:
       y-protocols: 1.0.7
@@ -1840,6 +1840,11 @@ packages:
     engines: {node: '>=16'}
     hasBin: true
 
+  lib0@0.2.119:
+    resolution: {integrity: sha512-vh+TiejVy8Xm+hCdnRfn9BthGNvNUZdEXltNjVZL3TzRIKP3s1lnQh8pWd/Q0wCgY0FPAGVVjFF4ZiHUV3LFgA==}
+    engines: {node: '>=16'}
+    hasBin: true
+
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
     engines: {node: '>= 12.0.0'}
@@ -2788,25 +2793,25 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hocuspocus/common@4.6.0':
+  '@hocuspocus/common@4.7.1':
     dependencies:
-      lib0: 0.2.117
+      lib0: 0.2.119
 
-  '@hocuspocus/provider@4.6.0(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
+  '@hocuspocus/provider@4.7.1(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
     dependencies:
-      '@hocuspocus/common': 4.6.0
+      '@hocuspocus/common': 4.7.1
       '@lifeomic/attempt': 3.1.0
-      lib0: 0.2.117
+      lib0: 0.2.119
       y-protocols: 1.0.7(yjs@13.6.32)
       yjs: 13.6.32
 
-  '@hocuspocus/server@4.6.0(patch_hash=dc22e08a34146c988996917f96b130e3a4ad785c126f874c846e07005181029d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
+  '@hocuspocus/server@4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
     dependencies:
-      '@hocuspocus/common': 4.6.0
+      '@hocuspocus/common': 4.7.1
       async-mutex: 0.5.0
       crossws: 0.4.10
       kleur: 4.1.5
-      lib0: 0.2.117
+      lib0: 0.2.119
       y-protocols: 1.0.7(yjs@13.6.32)
       yjs: 13.6.32
     transitivePeerDependencies:
@@ -3952,6 +3957,10 @@ snapshots:
   kleur@4.1.5: {}
 
   lib0@0.2.117:
+    dependencies:
+      isomorphic.js: 0.2.5
+
+  lib0@0.2.119:
     dependencies:
       isomorphic.js: 0.2.5
 

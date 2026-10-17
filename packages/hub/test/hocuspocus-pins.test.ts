@@ -1,5 +1,5 @@
 /**
- * Hocuspocus is pinned to exactly 4.6.0, and this is the check that keeps it
+ * Hocuspocus is pinned to exactly 4.7.1, and this is the check that keeps it
  * there.
  *
  * The hub's auth and shutdown paths read library internals characterized in
@@ -12,7 +12,7 @@
  *   manifests, so they are pinned there — and in the lockfile's `specifier:`
  *   for each, which is what `--frozen-lockfile` compares against.
  * - `@hocuspocus/common` is named by no manifest of ours: both of the others
- *   depend on it as `^4.6.0`. A workspace override in `pnpm-workspace.yaml` is
+ *   depend on it as `^4.7.1`. A workspace override in `pnpm-workspace.yaml` is
  *   the only place that range can be pinned.
  *
  * The pin assertions read files rather than resolving modules on purpose: what
@@ -33,12 +33,12 @@ import { readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
 /** The exact version the auth/shutdown seam probes characterize. */
-const PINNED = "4.6.0";
+const PINNED = "4.7.1";
 const SERVER_PATCH = `patches/@hocuspocus__server@${PINNED}.patch`;
 
 /** Server, provider and their shared transitive dependency must agree. */
@@ -116,7 +116,7 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
 
     expect(
       ranged,
-      `@hocuspocus/* is pinned to exactly ${PINNED} by decision (#394): the ` +
+      `@hocuspocus/* is pinned to exactly ${PINNED}: the ` +
         "hub reads library internals, so a bump is a reviewed act. Pin the " +
         "specifier and re-characterize the seams before changing the version.",
     ).toEqual([]);
@@ -184,17 +184,16 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
  * esbuild bundle `/app/hub.mjs`), so the CJS copy is shipped, never exercised,
  * and a defect in it is invisible to the suites, to CI and to the Docker review.
  *
- * These probes close that gap for the one rule the patch adds: a document is
- * opened by its Auth message, and any other first frame for a document is
- * dropped without taking a pending slot (`src/ClientConnection.ts:605-624`).
+ * These probes execute pending-slot admission and cleanup in both builds. A
+ * document is opened by its Auth message; another first frame is dropped
+ * without taking a pending slot (`src/ClientConnection.ts:635-637`).
  * Each build is loaded by path — `require` for the CJS bundle, `import()` for
  * the ESM one — and driven through `handleMessage`, the library's own entry
  * point for an incoming frame, so what is asserted is the guard's *effect* in
  * the bytes that ship.
  *
  * Loading both bundles in one file loads Yjs twice, and Yjs says so on stderr.
- * It is inert here: these probes never reach a `Y.Doc`, because they stop the
- * connection at the guard.
+ * Each probe keeps its documents inside one build; none cross that boundary.
  */
 describe("the patched admission rule is live in both runtime builds", () => {
   /** Resolved through the `require` condition: `dist/hocuspocus-server.cjs`. */
@@ -210,6 +209,14 @@ describe("the patched admission rule is live in both runtime builds", () => {
     writeVarString: (encoder: object, value: string) => void;
     toUint8Array: (encoder: object) => Uint8Array;
   };
+  const decoding = createRequire(CJS_BUILD)("lib0/decoding") as {
+    createDecoder: (data: Uint8Array) => object;
+    readVarUint: (decoder: object) => number;
+    readVarString: (decoder: object) => string;
+  };
+  const { AuthMessageType } = createRequire(CJS_BUILD)("@hocuspocus/common") as {
+    AuthMessageType: { Authenticated: number; PermissionDenied: number };
+  };
 
   /**
    * What either build exports, as far as a probe needs it. `handleConnection`
@@ -217,17 +224,29 @@ describe("the patched admission rule is live in both runtime builds", () => {
    * number the ceiling is enforced from — the same handle
    * `hocuspocus-seams.test.ts` reads.
    */
+  type ClientConnection = {
+    handleMessage: (data: Uint8Array) => void;
+    handleQueueingMessage: (
+      data: Uint8Array,
+      rawKey: string,
+      documentName: string,
+    ) => Promise<void>;
+    handleClose: () => void;
+    getPendingDocumentCount: () => number;
+    hookPayloads: Record<
+      string,
+      { connectionConfig: { isAuthenticated: boolean } }
+    >;
+  };
   type ServerBuild = {
-    MessageType: { Auth: number; Sync: number };
+    MessageType: { Auth: number; Sync: number; CLOSE: number };
     Hocuspocus: new (configuration: Record<string, unknown>) => {
+      documents: Map<string, object>;
+      unloadDocument: (document: object) => Promise<void>;
       handleConnection: (
         websocket: unknown,
         request: unknown,
-      ) => {
-        handleMessage: (data: Uint8Array) => void;
-        handleClose: () => void;
-        getPendingDocumentCount: () => number;
-      };
+      ) => ClientConnection;
     };
   };
 
@@ -251,11 +270,39 @@ describe("the patched admission rule is live in both runtime builds", () => {
     return encoding.toUint8Array(encoder);
   }
 
+  function gate() {
+    let resolve = () => {};
+    const promise = new Promise<void>((done) => {
+      resolve = done;
+    });
+    return { promise, resolve: () => resolve() };
+  }
+
+  function handshakeMessages(build: ServerBuild, frames: Uint8Array[]) {
+    return frames.flatMap((data) => {
+      const decoder = decoding.createDecoder(data);
+      const room = decoding.readVarString(decoder);
+      const type = decoding.readVarUint(decoder);
+      if (type === build.MessageType.CLOSE) {
+        return [{ room, type: "close", value: decoding.readVarString(decoder) }];
+      }
+      if (type !== build.MessageType.Auth) return [];
+      const authType = decoding.readVarUint(decoder);
+      if (authType === AuthMessageType.Authenticated) {
+        return [{ room, type: "authenticated", value: decoding.readVarString(decoder) }];
+      }
+      if (authType === AuthMessageType.PermissionDenied) {
+        return [{ room, type: "authenticationFailed", value: decoding.readVarString(decoder) }];
+      }
+      return [];
+    });
+  }
+
   /**
    * Deliver one first frame to a fresh connection of `build` and report what
    * the guard did with it: the pending slots it took, and any socket close.
    *
-   * `onAuthenticate` never settles on purpose. Everything the guard decides is
+   * `onAuthenticate` is held until cleanup. Everything the guard decides is
    * synchronous — the count is incremented before the frame is handed on, and
    * a refusal closes the socket from the same `try` — so the connection is read
    * while it is still frozen at exactly the state the frame produced, with no
@@ -263,44 +310,260 @@ describe("the patched admission rule is live in both runtime builds", () => {
    */
   async function deliverFirstFrame(buildPath: string, type: "auth" | "sync") {
     const build = await load(buildPath);
-    const closes: { code: number | undefined; reason: string | undefined }[] =
-      [];
-    const websocket = {
-      readyState: 1,
-      send() {},
-      close(code?: number, reason?: string) {
-        closes.push({ code, reason });
-        this.readyState = 3;
-      },
-    };
-
-    const server = new build.Hocuspocus({
-      quiet: true,
-      onAuthenticate: () => new Promise(() => {}),
-    });
-    const connection = server.handleConnection(websocket, {
-      url: "/",
-      headers: {},
-    });
+    const held = gate();
+    const client = await probe(buildPath, { onAuthenticate: () => held.promise });
 
     try {
-      connection.handleMessage(
+      client.connection.handleMessage(
         frame(
           build,
           "patched-build-probe",
           type === "auth" ? build.MessageType.Auth : build.MessageType.Sync,
         ),
       );
-      return { pending: connection.getPendingDocumentCount(), closes };
+      return {
+        pending: client.connection.getPendingDocumentCount(),
+        closes: client.closes,
+      };
     } finally {
-      connection.handleClose();
+      client.connection.handleClose();
+      held.resolve();
+      await client.dispose();
     }
+  }
+
+  async function probe(
+    buildPath: string,
+    configuration: Record<string, unknown> = {},
+  ) {
+    const build = await load(buildPath);
+    const closes: number[] = [];
+    const sent: Uint8Array[] = [];
+    const websocket = {
+      readyState: 1,
+      send(data: Uint8Array) {
+        sent.push(data);
+      },
+      close(code: number) {
+        closes.push(code);
+        this.readyState = 3;
+      },
+    };
+    const server = new build.Hocuspocus({
+      quiet: true,
+      maxPendingDocuments: 1,
+      ...configuration,
+    });
+    const connection = server.handleConnection(websocket, { url: "/", headers: {} });
+    // Observe completion of the real async handler; handleMessage itself is void.
+    const tasks: Promise<void>[] = [];
+    const original = connection.handleQueueingMessage.bind(connection);
+    connection.handleQueueingMessage = (...args) => {
+      const task = original(...args);
+      tasks.push(task);
+      return task;
+    };
+    return {
+      connection,
+      closes,
+      sent,
+      handshakeMessages: () => handshakeMessages(build, sent),
+      closeSocket() {
+        websocket.readyState = 3;
+        connection.handleClose();
+      },
+      auth(room: string) {
+        const before = tasks.length;
+        connection.handleMessage(frame(build, room, build.MessageType.Auth));
+        return tasks[before] ?? Promise.resolve();
+      },
+      async dispose() {
+        websocket.readyState = 3;
+        connection.handleClose();
+        await Promise.all(tasks);
+        for (const document of server.documents.values()) {
+          await server.unloadDocument(document);
+        }
+      },
+    };
   }
 
   for (const [label, buildPath] of [
     ["esm", ESM_BUILD],
     ["cjs", CJS_BUILD],
   ] as const) {
+    it(`enforces the pending ceiling while authentication is running (${label} build)`, async () => {
+      const entered = gate();
+      const held = gate();
+      const client = await probe(buildPath, {
+        onAuthenticate: async () => {
+          entered.resolve();
+          await held.promise;
+        },
+      });
+      const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const finished = client.auth("held");
+        await entered.promise;
+        expect(client.connection.getPendingDocumentCount()).toBe(1);
+        await client.auth("over-ceiling");
+        expect(client.closes).toEqual([4205]);
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        held.resolve();
+        await finished;
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+      } finally {
+        held.resolve();
+        await client.dispose();
+        logged.mockRestore();
+      }
+    });
+
+    it(`releases refused and authenticated slots without scanning other documents (${label} build)`, async () => {
+      const client = await probe(buildPath, {
+        onAuthenticate: ({ documentName }: { documentName: string }) => {
+          if (documentName === "refused") throw { reason: "refused" };
+        },
+        onLoadDocument: ({ documentName }: { documentName: string }) => {
+          if (documentName === "load-failed") throw { reason: "load-failed" };
+        },
+      });
+      try {
+        await client.auth("refused");
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        await client.auth("load-failed");
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        // These stay authenticated on the same socket, beyond its pending ceiling.
+        for (const room of ["accepted-a", "accepted-b", "accepted-c"]) {
+          await client.auth(room);
+          expect(client.connection.getPendingDocumentCount()).toBe(0);
+          expect(
+            client.connection.hookPayloads[room]?.connectionConfig.isAuthenticated,
+          ).toBe(true);
+        }
+        const payloads = client.connection.hookPayloads;
+        let scans = 0;
+        let siblingReads = 0;
+        client.connection.hookPayloads = new Proxy(payloads, {
+          ownKeys(target) {
+            scans += 1;
+            return Reflect.ownKeys(target);
+          },
+          get(target, key, receiver) {
+            if (typeof key === "string" && key.startsWith("accepted-")) {
+              siblingReads += 1;
+            }
+            return Reflect.get(target, key, receiver);
+          },
+        });
+        try {
+          await client.auth("next");
+          expect(client.connection.getPendingDocumentCount()).toBe(0);
+          expect({ scans, siblingReads, closes: client.closes }).toEqual({
+            scans: 0,
+            siblingReads: 0,
+            closes: [],
+          });
+        } finally {
+          client.connection.hookPayloads = payloads;
+        }
+      } finally {
+        await client.dispose();
+      }
+    });
+
+    it(`sends a late room refusal after its close and keeps sibling admission live (${label} build)`, async () => {
+      const room = "late-refused";
+      const reason = "access-ended-during-load";
+      const client = await probe(buildPath, {
+        connected: ({ documentName, connection }: {
+          documentName: string;
+          connection: { close: (event: { code: number; reason: string }) => void };
+        }) => {
+          if (documentName !== room) return;
+          connection.close({ code: 4403, reason });
+          throw { reason };
+        },
+      });
+      try {
+        await client.auth(room);
+        expect(client.handshakeMessages()).toEqual([
+          { room, type: "authenticated", value: "read-write" },
+          { room, type: "close", value: reason },
+          { room, type: "authenticationFailed", value: reason },
+        ]);
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.connection.hookPayloads[room]).toBeUndefined();
+        expect(client.closes).toEqual([]);
+
+        await client.auth("healthy-sibling");
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.connection.hookPayloads["healthy-sibling"]?.connectionConfig.isAuthenticated).toBe(true);
+        expect(client.handshakeMessages().at(-1)).toEqual({
+          room: "healthy-sibling", type: "authenticated", value: "read-write",
+        });
+        expect(client.closes).toEqual([]);
+      } finally {
+        await client.dispose();
+      }
+    });
+
+    it(`sends no late refusal after the socket closes during document loading (${label} build)`, async () => {
+      const entered = gate();
+      const held = gate();
+      const client = await probe(buildPath, {
+        onLoadDocument: async () => {
+          entered.resolve();
+          await held.promise;
+          throw { reason: "load refused after socket close" };
+        },
+      });
+      try {
+        const finished = client.auth("loading");
+        await entered.promise;
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        client.closeSocket();
+        held.resolve();
+        await finished;
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.handshakeMessages()).toEqual([
+          { room: "loading", type: "authenticated", value: "read-write" },
+        ]);
+      } finally {
+        held.resolve();
+        await client.dispose();
+      }
+    });
+
+    for (const rejects of [false, true]) {
+      it(`releases a slot once when the socket closes during ${rejects ? "refused" : "successful"} authentication (${label} build)`, async () => {
+        const entered = gate();
+        const held = gate();
+        const client = await probe(buildPath, {
+          onAuthenticate: async () => {
+            entered.resolve();
+            await held.promise;
+            if (rejects) throw { reason: "refused after close" };
+          },
+        });
+        try {
+          const finished = client.auth("held");
+          await entered.promise;
+          expect(client.connection.getPendingDocumentCount()).toBe(1);
+          client.closeSocket();
+          expect(client.connection.getPendingDocumentCount()).toBe(0);
+          held.resolve();
+          await finished;
+          expect(client.connection.getPendingDocumentCount()).toBe(0);
+          expect(client.closes).toEqual([]);
+          expect(client.sent).toEqual([]);
+        } finally {
+          held.resolve();
+          await client.dispose();
+        }
+      });
+    }
+
     it(`opens a pending document for an Auth first frame (${label} build)`, async () => {
       expect(
         await deliverFirstFrame(buildPath, "auth"),
