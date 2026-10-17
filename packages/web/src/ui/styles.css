@@ -1977,7 +1977,8 @@ h6.ub-heading {
 
 .ub-decision-timeline > li {
   --rail-top: calc(0.5rem + 15px);
-  --rail-center: calc(7.625rem + 1.5px);
+  /* The dot column centre in the padding box, which positions the rail. */
+  --rail-center: 7.625rem;
   --rail-width: 2px;
   position: relative;
   display: grid;
@@ -2196,7 +2197,7 @@ h6.ub-heading {
 
 @container decision-history (max-width: 34rem) {
   .ub-decision-timeline > li {
-    --rail-center: calc(1rem + 1.5px);
+    --rail-center: 1rem;
     --rail-top: calc(0.5rem + var(--type-small-leading) + 0.25rem + 15px);
     grid-template-columns: 1rem minmax(0, 1fr) auto;
   }
