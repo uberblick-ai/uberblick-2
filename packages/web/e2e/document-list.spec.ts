@@ -249,7 +249,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(titleFilter).toHaveCSS("line-height", touch ? "27px" : "20px");
     await expect(titleFilter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.getByRole("tablist")).toHaveCount(0);
-    await expect(page.getByRole("columnheader")).toHaveText(["Title", "Group", "Tags", "Changed", "Actions"]);
+    await expect(page.getByRole("columnheader")).toHaveText(["Title", "Stage", "Tags", "Changed", "Actions"]);
     if (!touch) {
       await titleFilter.focus();
       await page.keyboard.press("Tab");
@@ -321,6 +321,9 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(row).not.toContainText("comments");
     await expect(row.locator(".ub-docs-title-cell > *")).toHaveCount(1);
     await expect(row.locator(".ub-docs-title")).toHaveCSS("white-space", "nowrap");
+    await expect(page.getByRole("columnheader", { name: "Stage", exact: true })).toBeVisible();
+    await expect(row.locator(".ub-docs-stage")).toHaveText("Under discussion");
+    await expect(row.locator(".ub-docs-stage")).toHaveCSS("border-top-style", "dashed");
     await expect(row.locator("time")).toBeVisible();
     await expect(row.locator("time")).toHaveCSS("font-variant-numeric", "tabular-nums");
     await expect(row.locator(".ub-docs-age-cell")).toHaveCSS("text-align", "right");

@@ -935,6 +935,11 @@ describe("decision topics in the list", () => {
     expect(topicRow(host, THREE).textContent).not.toContain("Agent stance");
     expect(topicRow(host, GONE).textContent).not.toContain("Nothing is in force");
     expect(topicRow(host, TWO).textContent).not.toContain("Changed after approval");
+    expect(within(documentTable(host)).getAllByRole("columnheader").map((cell) => cell.textContent)).toContain("Stage");
+    expect(within(documentTable(host)).queryByRole("columnheader", { name: "Group" })).toBeNull();
+    expect([ONE, TWO, THREE, FOUR, GONE].map((uuid) => topicRow(host, uuid).querySelector(".ub-docs-stage")?.textContent)).toEqual([
+      "Under discussion", "In effect", "In effect", "Under discussion", "Under discussion",
+    ]);
 
     for (const [state, topics] of [
       ["not-yet-decided", [ONE]], ["under-review", [FOUR]],
