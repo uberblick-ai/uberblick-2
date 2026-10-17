@@ -102,8 +102,12 @@ test("an unsupported Figma shape still names the block and makes the document re
     })),
   });
   try {
-    await new Promise<void>((resolve) => provider.on("synced", resolve));
-    const block = findBlockElement(doc, created.blocks[0]?.id ?? "");
+    const blockId = created.blocks[0]?.id ?? "";
+    await expect.poll(() => findBlockElement(doc, blockId), {
+      message: `e2e: unsupported Figma fixture block ${blockId} is missing`,
+      timeout: 20_000,
+    }).not.toBeNull();
+    const block = findBlockElement(doc, blockId);
     if (block === null) throw new Error("e2e: unsupported Figma fixture is missing");
     block.setAttribute("future", "unrecognized");
     const page = await openApp(browser, `/${harness().workspace}/${created.uuid}`, { upstream: true });
