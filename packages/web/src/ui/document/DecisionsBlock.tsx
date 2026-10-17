@@ -73,15 +73,13 @@ export function DecisionsBlock({ topics, segment, navigate, id }: {
               event.preventDefault();
               navigate(event.currentTarget.pathname);
             }}>
-            <span className="ub-decisions-row-line">
-              <span className="ub-decisions-mark" aria-hidden="true" />
-              <span className="ub-decisions-question">{question}</span>
-              <span className="ub-decisions-row-meta">
-                {state === "in-force" && current !== null ? <Attribution record={current} now={now} />
-                  : <span className="ub-decisions-state-label">{TOPIC_STATES[state]}</span>}
-              </span>
+            <span className="ub-decisions-mark" aria-hidden="true" />
+            <span className="ub-decisions-question" title={question}>{question}</span>
+            {preview != null && <span className="ub-decisions-row-preview" title={preview}>{preview}</span>}
+            <span className="ub-decisions-row-meta">
+              {state === "in-force" && current !== null ? <Attribution record={current} now={now} />
+                : <span className="ub-decisions-state-label">{TOPIC_STATES[state]}</span>}
             </span>
-            {preview != null && <span className="ub-decisions-row-preview">{preview}</span>}
           </a>
         </li>;
       })}

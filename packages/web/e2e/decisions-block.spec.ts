@@ -192,7 +192,7 @@ async function expectHeaderContained(page: Page): Promise<void> {
 
 for (const touch of [false, true]) {
   const appearance = touch ? "dark" : "light";
-  test(`related Decisions links and layout on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+  test(`related Decisions links and layout on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const related = await create(writer, "Supporting page", "Supporting guidance.");
     const owner = await create(writer, "Page with its own decisions", "Regular page guidance.", {
@@ -266,6 +266,10 @@ for (const touch of [false, true]) {
     await expect(block(page)).toHaveAttribute("id", `decisions-${owner.uuid}`);
     const rows = block(page).locator(".ub-decisions-row");
     await expect(rows).toHaveCount(6);
+    expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+    const rowHeights = await rows.evaluateAll((links) => links.map((link) => link.getBoundingClientRect().height));
+    if (touch) expect(Math.min(...rowHeights)).toBeGreaterThanOrEqual(44);
+    else expect(Math.max(...rowHeights)).toBeLessThan(44);
     await expect.poll(() => rows.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))).toEqual([
       "Conflict: Conflict question",
       "Under review: Review question",
@@ -293,6 +297,23 @@ for (const touch of [false, true]) {
     await expect(row(page, "Agent stance", "Agent question").locator(".ub-decisions-state-label")).toHaveText("Agent stance");
     await expectChromeStyles(page);
     await expectHeaderContained(page);
+    const line = await alphaRow.evaluate((link) => {
+      const box = (selector: string) => {
+        const node = link.querySelector(selector);
+        if (node === null) throw new Error(`e2e: missing ${selector}`);
+        return node.getBoundingClientRect();
+      };
+      const [question, preview, meta] = [box(".ub-decisions-question"), box(".ub-decisions-row-preview"), box(".ub-decisions-row-meta")];
+      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      const node = link.querySelector<HTMLElement>(".ub-decisions-question");
+      return {
+        oneLine: Math.abs(middle(question) - middle(preview)) < 2 && Math.abs(middle(question) - middle(meta)) < 2,
+        order: question.right <= preview.left && preview.right <= meta.left,
+        questionClipped: node !== null && node.scrollWidth > node.clientWidth,
+        questionTitle: node?.title,
+      };
+    });
+    expect(line).toEqual({ oneLine: true, order: true, questionClipped: true, questionTitle: alphaQuestion });
 
     const placement = await geometry(page);
     expect(placement.inEditor).toBe(false);
