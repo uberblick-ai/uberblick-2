@@ -22,7 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { within } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { act, renderSettled, type RenderResult } from "./react-render.js";
 import type { ReactNode } from "react";
 import * as Y from "yjs";
@@ -229,34 +229,39 @@ function entry(over: Partial<DirectoryEntry> & { uuid: string }): DirectoryEntry
   return { title: "", tags: [], ...over };
 }
 
-describe("the All documents count", () => {
-  function countLine(host: HTMLElement): string | null | undefined {
-    return within(host).getByRole("heading", { name: "All documents" }).nextElementSibling?.textContent;
+describe("the All documents tab counts", () => {
+  /** "Documents 2 · Decisions 1", with an empty number until the directory answers. */
+  function countLine(host: HTMLElement): string {
+    return within(within(host).getByRole("tablist", { name: "Document type" })).getAllByRole("tab")
+      .map((tab) => `${tab.firstChild?.textContent ?? ""} ${tab.querySelector(".ub-docs-tab-count")?.textContent ?? ""}`.trim())
+      .join(" · ");
   }
 
-  it("counts live regular documents and follows create, archive and restore", async () => {
+  it("counts live regular documents and decision topics and follows create, archive and restore", async () => {
     const peer = peerOf(directoryDoc());
     upsertDirectoryEntry(peer, { uuid: ONE, title: "Overview" });
     upsertDirectoryEntry(peer, { uuid: TWO, title: "Cache choice", kind: "decision", status: "open" });
     upsertDirectoryEntry(peer, { uuid: GONE, title: "Archived" });
     tombstoneDirectoryEntry(peer, GONE);
     const host = await openApp(allPath(WORKSPACE));
-    expect(countLine(host)).toBe("1 document");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1");
 
     await act(async () => upsertDirectoryEntry(peer, { uuid: THREE, title: "New document" }));
-    expect(countLine(host)).toBe("2 documents");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
     await act(async () => tombstoneDirectoryEntry(peer, ONE));
-    expect(countLine(host)).toBe("1 document");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 1");
     await act(async () => restoreDirectoryEntry(peer, ONE));
-    expect(countLine(host)).toBe("2 documents");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
     await act(async () => {
       tombstoneDirectoryEntry(peer, ONE);
       tombstoneDirectoryEntry(peer, THREE);
     });
-    expect(countLine(host)).toBe("0 documents");
+    expect(countLine(host)).toBe("Documents 0 · Decisions 1");
+    await act(async () => tombstoneDirectoryEntry(peer, TWO));
+    expect(countLine(host)).toBe("Documents 0 · Decisions 0");
   });
 
-  it("keeps the workspace count when search, type, tag and state filters change", async () => {
+  it("keeps the workspace counts when search, type, tag and state filters change", async () => {
     const entries = [
       entry({ uuid: ONE, title: "Overview" }),
       entry({ uuid: TWO, title: "Editing" }),
@@ -268,18 +273,18 @@ describe("the All documents count", () => {
       onSelect: () => {}, onTogglePin: null,
     };
     const host = await mount(<DocumentList {...props} />);
-    expect(countLine(host)).toBe("2 documents");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
     await act(async () => typeInto(filter(host), "overview"));
     expect(rowTitles(host)).toEqual(["Overview"]);
-    expect(countLine(host)).toBe("2 documents");
-    await act(async () => within(host).getByRole("button", { name: "Decisions" }).click());
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
+    await act(async () => fireEvent.keyDown(within(host).getByRole("tab", { name: /^Decisions/ }), { key: "Enter" }));
     expect(rowTitles(host)).toEqual(["Cache choice"]);
-    expect(countLine(host)).toBe("2 documents");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
     await act(async () => mounted?.rerender(<DocumentList {...props} state={{
       ...INITIAL_DOCUMENT_LIST_STATE, mode: "decision", stateFilter: "conflict", selectedTags: ["missing-tag"],
     }} />));
     expect(rowTitles(host)).toEqual([]);
-    expect(countLine(host)).toBe("2 documents");
+    expect(countLine(host)).toBe("Documents 2 · Decisions 1");
   });
 
   it("shows no number until directory state arrives and keeps it after disconnect", async () => {
@@ -297,13 +302,35 @@ describe("the All documents count", () => {
       connection={connection} entries={[entry({ uuid: ONE, title: "Overview" })]} groups={[]}
       searchClient={{ search: async () => [] }} onSelect={() => {}} onTogglePin={null}
     />);
-    expect(countLine(host)).toBe("");
+    expect(countLine(host)).toBe("Documents · Decisions");
     await act(async () => publishStatus({ ...waiting, hasAnswered: true, storeRefused: true }));
-    expect(countLine(host)).toBe("");
+    expect(countLine(host)).toBe("Documents · Decisions");
     await act(async () => publishStatus(LIVE));
-    expect(countLine(host)).toBe("1 document");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 0");
     await act(async () => publishStatus({ ...LIVE, connected: false, synced: false }));
-    expect(countLine(host)).toBe("1 document");
+    expect(countLine(host)).toBe("Documents 1 · Decisions 0");
+  });
+});
+
+describe("the document type tabs", () => {
+  it("switches the panel's type while keeping the search text", async () => {
+    const host = await mount(<DocumentList
+      connection={room(directoryRoom(WORKSPACE))}
+      entries={[entry({ uuid: ONE, title: "Overview" }), entry({ uuid: TWO, title: "Cache choice", kind: "decision", status: "open" })]}
+      groups={[]} searchClient={{ search: async () => [ONE, TWO] }} onSelect={() => {}} onTogglePin={null}
+    />);
+    const tab = (name: string): HTMLElement => within(host).getByRole("tab", { name: new RegExp(`^${name}`) });
+    expect(tab("Documents").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
+    await act(async () => typeInto(filter(host), "c"));
+    await act(async () => fireEvent.keyDown(tab("Decisions"), { key: "Enter" }));
+    expect(tab("Decisions").getAttribute("aria-selected")).toBe("true");
+    expect(tab("Decisions").getAttribute("aria-controls")).toBe(within(host).getByRole("tabpanel").id);
+    expect(filter(host).value).toBe("c");
+    expect(filter(host).placeholder).toBe("Search decisions");
+    expect(within(host).getByRole("combobox", { name: "Decision state" })).toBeDefined();
+    await act(async () => fireEvent.keyDown(tab("Documents"), { key: "Enter" }));
+    expect(tab("Documents").getAttribute("aria-selected")).toBe("true");
+    expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
   });
 });
 
@@ -784,8 +811,8 @@ describe("decision topics in the list", () => {
 
   async function chooseDecisions(host: HTMLElement): Promise<void> {
     await act(async () => {
-      within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole<HTMLButtonElement>("button", { name: "Decisions" }).click();
+      fireEvent.keyDown(within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("tab", { name: /^Decisions/ }), { key: "Enter" });
     });
   }
 
@@ -1047,8 +1074,8 @@ describe("decision topics in the list", () => {
     expect(within(host).getByRole<HTMLTextAreaElement>("textbox", { name: "Document title" }).value).toBe("Current answer");
     const assertRestored = (): void => {
       expect(window.location.pathname).toBe(allPath(WORKSPACE));
-      expect(within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole("button", { name: "Decisions" }).getAttribute("aria-pressed")).toBe("true");
+      expect(within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole("tab", { name: /^Decisions/ }).getAttribute("aria-selected")).toBe("true");
       expect(stateFilter(host).value).toBe("changed-after-approval");
       expect(filter(host).value).toBe("Current");
       expect(within(documentTable(host)).getByRole("columnheader", { name: /^Title/ }).getAttribute("aria-sort")).toBe("ascending");
@@ -1062,8 +1089,8 @@ describe("decision topics in the list", () => {
     await act(async () => within(host).getByRole("button", { name: entry === "All documents" ? entry : "Unnamed workspace" }).click());
     const assertDefaults = (): void => {
       expect(window.location.pathname).toBe(entry === "All documents" ? allPath(WORKSPACE) : `/${WORKSPACE}`);
-      expect(within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
+      expect(within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole("tab", { name: /^Documents/ }).getAttribute("aria-selected")).toBe("true");
       expect(filter(host).value).toBe("");
       expect(within(host).queryByRole("combobox", { name: "Decision state" })).toBeNull();
       expect(within(documentTable(host)).getByRole("columnheader", { name: /^Changed/ }).getAttribute("aria-sort")).toBe("descending");
@@ -1099,8 +1126,8 @@ describe("the filter", () => {
     }, "", allPath(WORKSPACE));
     const host = await mount(<App />);
     const assertRestored = (): void => {
-      expect(within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole("button", { name: "Documents" }).getAttribute("aria-pressed")).toBe("true");
+      expect(within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole("tab", { name: /^Documents/ }).getAttribute("aria-selected")).toBe("true");
       expect(filter(host).value).toBe("Roadmap");
       expect(rowTitles(host)).toEqual(["Roadmap"]);
       expect(within(documentTable(host)).getAllByRole("columnheader").some((header) => header.hasAttribute("aria-sort"))).toBe(false);
@@ -1154,9 +1181,9 @@ describe("the filter", () => {
 
     const host = await openApp(`/${WORKSPACE}`);
     const mode = (name: string): HTMLButtonElement =>
-      within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole<HTMLButtonElement>("button", { name });
-    expect(mode("Documents")?.getAttribute("aria-pressed")).toBe("true");
+      within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("tab", { name: new RegExp(`^${name}`) });
+    expect(mode("Documents")?.getAttribute("aria-selected")).toBe("true");
     expect(rowTitles(host)).toEqual(["Foreign shape", "Legacy without state", "Roadmap", "Status drift", "Working note"]);
     expect(lifecycleBadges(host)).toHaveLength(0);
     expect(within(host).queryByRole("button", { name: "Product" })).toBeNull();
@@ -1165,7 +1192,7 @@ describe("the filter", () => {
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
     );
 
-    await act(async () => mode("Decisions")?.click());
+    await act(async () => fireEvent.keyDown(mode("Decisions"), { key: "Enter" }));
     expect(rowTitles(host)).toEqual(["Cache choice"]);
     expect(lifecycleBadges(host)).toHaveLength(0);
     expect(documentTable(host).textContent).not.toContain("Not yet decided");
@@ -1221,14 +1248,14 @@ describe("the filter", () => {
       />,
     );
     const mode = (name: string): HTMLButtonElement =>
-      within(within(host).getByRole("group", { name: "Document type" }))
-        .getByRole<HTMLButtonElement>("button", { name });
+      within(within(host).getByRole("tablist", { name: "Document type" }))
+        .getByRole<HTMLButtonElement>("tab", { name: new RegExp(`^${name}`) });
 
     await act(async () => typeInto(filter(host), "search"));
     // The decision matches the text too, and still does not appear here.
     expect(rowTitles(host)).toEqual(["Search plan"]);
 
-    await act(async () => mode("Decisions")?.click());
+    await act(async () => fireEvent.keyDown(mode("Decisions"), { key: "Enter" }));
     expect(filter(host).value).toBe("search");
     expect(rowTitles(host)).toEqual(["Search decision"]);
   });
@@ -1246,7 +1273,7 @@ describe("the filter", () => {
     const field = filter(host);
     expect(field.disabled).toBe(false);
     expect(field.labels?.[0]?.textContent).toBe("Search");
-    expect(field.placeholder).toBe("Search");
+    expect(field.placeholder).toBe("Search documents");
     expect(host.textContent).toContain("Search is unavailable.");
 
     await act(async () => typeInto(field, "overview"));

@@ -202,7 +202,7 @@ it("combines type, state, query and OR tags; a chip replaces tags and clears no 
   await act(async () => within(within(document.body).getByRole("listbox", { name: "Tags" })).getByRole("option", { name: "cli" }).click());
   expect(titles(container)).toEqual(["CLI note", "Release note"]);
   await act(async () => fireEvent.keyDown(document.body, { key: "Escape" }));
-  await click(container, "Decisions");
+  await act(async () => fireEvent.keyDown(within(container).getByRole("tab", { name: /^Decisions/ }), { key: "Enter" }));
   await act(async () => fireEvent.change(within(container).getByRole("combobox", { name: "Decision state" }), { target: { value: "not-yet-decided" } }));
   expect(titles(container)).toEqual(["Release decision"]);
   await click(container, "release");

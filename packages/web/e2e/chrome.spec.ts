@@ -2474,9 +2474,11 @@ for (const scheme of ["light"] as const) {
         // Keep this stylesheet proof independent of navigation, copy feedback,
         // pressed modes and open-menu paint. The input remains a real touch tap.
         await tap.evaluate((element) => {
-          // DropdownMenu activates on pointerdown; leave the native default
-          // intact while isolating both primitive and product activation.
-          element.addEventListener("pointerdown", (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+          // DropdownMenu activates on pointerdown, Tabs on mousedown or focus.
+          // Leave native defaults intact while isolating primitive activation.
+          for (const type of ["pointerdown", "mousedown", "focusin"]) {
+            element.addEventListener(type, (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+          }
           element.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();
@@ -2510,9 +2512,9 @@ for (const scheme of ["light"] as const) {
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
       }
       await page.getByRole("button", { name: "All documents", exact: true }).click();
-      for (const selector of [".ub-docs-mode", ".ub-docs-sort"]) {
-        for (const control of await page.locator(selector).all()) await check(control);
-      }
+      for (const control of await page.locator(".ub-docs-tab").all()) await check(control);
+      await page.getByRole("tab", { name: /^Documents/ }).click();
+      for (const control of await page.locator(".ub-docs-sort").all()) await check(control);
       const row = page.locator(".ub-docs-row").first();
       // The pin's hover/reveal treatment is outside this sample.
       await check(row.locator(".ub-docs-open"), row);
@@ -2576,12 +2578,12 @@ for (const scheme of ["light"] as const) {
         expect(await controlPaint(copy)).toEqual(revealed);
       }
       await page.getByRole("button", { name: "All documents", exact: true }).click();
-      const selected = page.locator(".ub-docs-mode[aria-pressed=true]");
+      const selected = page.locator(".ub-docs-tab[aria-selected=true]");
       await page.mouse.move(1399, 999);
       const selectedPaint = await controlPaint(selected);
       await selected.hover();
       expect(await controlPaint(selected)).toEqual(selectedPaint);
-      for (const selector of [".ub-docs-mode[aria-pressed=false]", ".ub-docs-sort", ".ub-docs-row"]) {
+      for (const selector of [".ub-docs-tab[aria-selected=false]", ".ub-docs-sort", ".ub-docs-row"]) {
         const control = page.locator(selector).first();
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);

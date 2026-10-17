@@ -310,7 +310,7 @@ test("decision title renames sync without approving answer changes", async ({ br
   await reader.goto(new URL(`/${harness().workspace}/${owner.uuid}`, reader.url()).href);
   await expect(reader.getByRole("region", { name: "Decisions" }).getByRole("link", { name: `Under review: ${renamed}`, exact: true })).toBeVisible();
   await reader.goto(new URL(`/${harness().workspace}/all`, reader.url()).href);
-  await reader.getByRole("button", { name: "Decisions", exact: true }).click();
+  await reader.getByRole("tab", { name: /^Decisions/ }).click();
   const row = reader.locator(".ub-docs-row").filter({ hasText: renamed });
   await expect(row).toHaveCount(1);
   await expect(row).not.toContainText("Changed after approval");
