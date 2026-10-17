@@ -2600,6 +2600,10 @@ h6.ub-heading {
   width: 7rem;
 }
 
+.ub-docs-stage-column {
+  width: 9.5rem;
+}
+
 .ub-docs-tags-column {
   width: 10rem;
 }
@@ -2659,23 +2663,41 @@ h6.ub-heading {
   min-width: 0;
 }
 
-.ub-docs-open--topic {
-  flex-wrap: wrap;
-}
-
-.ub-docs-open--topic .ub-docs-title {
-  flex-basis: 100%;
-}
-
-.ub-docs-topic-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0 0.4rem 0.5rem;
+/* A topic's latest stage: a filled mark when an answer is in effect, a
+   dashed outline while it is still under discussion. */
+.ub-docs-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   color: var(--muted-foreground);
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
-  overflow-wrap: anywhere;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  white-space: nowrap;
+}
+
+.ub-docs-stage::before {
+  content: "";
+  flex: none;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 50%;
+}
+
+.ub-docs-stage[data-stage="in-effect"] {
+  color: var(--foreground);
+}
+
+.ub-docs-stage[data-stage="in-effect"]::before {
+  border-color: var(--status-success);
+  background: var(--status-success);
+}
+
+.ub-docs-stage[data-stage="under-discussion"] {
+  border-style: dashed;
 }
 
 .ub-docs-group,

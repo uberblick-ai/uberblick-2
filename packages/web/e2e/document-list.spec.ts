@@ -167,9 +167,8 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   await page.getByRole("button", { name: "All documents" }).click();
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(0);
   await page.getByRole("button", { name: "Decisions", exact: true }).click();
-  await expect(
-    page.locator(".ub-docs-row", { hasText: title }),
-  ).toContainText("Not yet decided");
+  await page.getByRole("combobox", { name: "Decision state" }).selectOption("not-yet-decided");
+  await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(1);
 });
 
 interface DecisionFixture {
@@ -250,7 +249,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(titleFilter).toHaveCSS("line-height", touch ? "27px" : "20px");
     await expect(titleFilter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.getByRole("tablist")).toHaveCount(0);
-    await expect(page.getByRole("columnheader")).toHaveText(["Title", "Group", "Tags", "Changed", "Actions"]);
+    await expect(page.getByRole("columnheader")).toHaveText(["Title", "Stage", "Tags", "Changed", "Actions"]);
     if (!touch) {
       await titleFilter.focus();
       await page.keyboard.press("Tab");
@@ -315,10 +314,16 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await activateControl(page.getByRole("button", { name: "Title", exact: true }), { touch });
     await expect(page.getByRole("columnheader", { name: /^Title/ })).toHaveAttribute("aria-sort", "ascending");
     const row = page.locator(".ub-docs-row");
-    await expect(row).toContainText("Under review");
-    await expect(row).toContainText(currentAnswer);
-    await expect(row).not.toContainText("Pending proposal must not become the list answer.");
-    await expect(row).toContainText("3 comments");
+    // Topic rows are one line: the title, nothing of the answer, state or comments.
+    await expect(row.locator(".ub-docs-open")).toHaveText(currentTitle);
+    await expect(row).not.toContainText("Under review");
+    await expect(row).not.toContainText(currentAnswer);
+    await expect(row).not.toContainText("comments");
+    await expect(row.locator(".ub-docs-title-cell > *")).toHaveCount(1);
+    await expect(row.locator(".ub-docs-title")).toHaveCSS("white-space", "nowrap");
+    await expect(page.getByRole("columnheader", { name: "Stage", exact: true })).toBeVisible();
+    await expect(row.locator(".ub-docs-stage")).toHaveText("Under discussion");
+    await expect(row.locator(".ub-docs-stage")).toHaveCSS("border-top-style", "dashed");
     await expect(row.locator("time")).toBeVisible();
     await expect(row.locator("time")).toHaveCSS("font-variant-numeric", "tabular-nums");
     await expect(row.locator(".ub-docs-age-cell")).toHaveCSS("text-align", "right");
@@ -377,8 +382,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await activateControl(state, { touch });
     await state.selectOption("agent-stance");
     await expect(listedTitles(page)).toHaveText([stanceTitle]);
-    await expect(page.locator(".ub-docs-row")).toContainText("Agent stance");
-    await expect(page.locator(".ub-docs-row")).not.toContainText("In force");
+    await expect(page.locator(".ub-docs-row")).not.toContainText("Agent stance");
     await titleFilter.fill(`absent${prefix}`);
     await expect(page.locator(".ub-docs-empty")).toContainText("Agent stance");
     await expect(page.locator(".ub-docs-empty")).not.toContainText("No decision records in this workspace");

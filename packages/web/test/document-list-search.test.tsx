@@ -180,7 +180,7 @@ it("ranks a decision topic by its best record, keeps one current row and maps th
     state: { ...INITIAL_DOCUMENT_LIST_STATE, mode: "decision", query: "history", relevance: true },
   }));
   expect(titles(container)).toEqual(["Current", "Another topic"]);
-  expect(within(container).getByText("Current answer")).toBeDefined();
+  expect(container.textContent).not.toContain("Current answer");
 });
 
 it("combines type, state, query and OR tags; a chip replaces tags and clears no other filter", async () => {
