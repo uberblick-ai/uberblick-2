@@ -437,8 +437,10 @@ export function DocumentList({
   return (
     <section className="ub-pane ub-page-pane">
       <div className="ub-column ub-docs">
-        <h1 className="ub-title ub-docs-heading">All documents</h1>
-        <DocumentTypeTabs entries={entries} received={status.hasReceivedServerState} mode={mode} idPrefix={tabsId} onSelect={(option) => updateState({ mode: option })} />
+        <header className="ub-page-header">
+          <h1 className="ub-title ub-docs-heading">All documents</h1>
+          <DocumentTypeTabs entries={entries} received={status.hasReceivedServerState} mode={mode} idPrefix={tabsId} onSelect={(option) => updateState({ mode: option })} />
+        </header>
         <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${mode}`} className="ub-docs-panel">
         <div className="ub-docs-filters">
           <label className="ub-docs-search-label">

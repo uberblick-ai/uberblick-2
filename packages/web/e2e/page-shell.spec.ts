@@ -119,9 +119,9 @@ test.describe("one page shell", () => {
             await page.screenshot({ path: image });
             await info.attach(`${title} ${layout}`, { path: image, contentType: "image/png" });
             if (suffix === "all") {
-              await expect(page.locator(".ub-docs-count")).toHaveCSS("font-size", "13px");
-              await expect(page.locator(".ub-docs-count")).toHaveCSS("line-height", "18px");
-              await expect(page.locator(".ub-docs-count")).toHaveText("1 document");
+              const count = page.getByRole("tab", { name: /^Documents/ }).locator(".ub-docs-tab-count");
+              await expect(count).toHaveCSS("font-size", "13px");
+              await expect(count).toHaveText("1");
               const search = page.getByRole("searchbox");
               await search.focus();
               await expect(search).toBeFocused();
@@ -180,15 +180,15 @@ test.describe("one page shell", () => {
       });
       let searchTop: number | undefined;
       if (suffix === "all") {
-        await expect(waiting.locator(".ub-docs-count")).toHaveText("");
-        expect((await waiting.locator(".ub-docs-count").boundingBox())?.height).toBe(18);
+        await expect(waiting.getByRole("tab", { name: /^Documents/ })).toBeVisible();
+        await expect(waiting.locator(".ub-docs-tab-count")).toHaveCount(0);
         searchTop = (await waiting.getByRole("searchbox").boundingBox())?.y;
       } else await expect(waiting.getByText("Waiting for the tag catalog…", { exact: true })).toBeVisible();
       await expectShell(waiting, reference);
       hold = false;
       for (const send of replies.splice(0)) send();
       if (suffix === "all") {
-        await expect(waiting.locator(".ub-docs-count")).toHaveText("1 document");
+        await expect(waiting.getByRole("tab", { name: /^Documents/ }).locator(".ub-docs-tab-count")).toHaveText("1");
         expect((await waiting.getByRole("searchbox").boundingBox())?.y).toBe(searchTop);
       } else await expect(waiting.locator("#ub-new-tag")).toBeEnabled();
       await expectShell(waiting, reference);

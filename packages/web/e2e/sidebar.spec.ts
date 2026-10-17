@@ -93,7 +93,7 @@ test("workspace header controls work with keyboard, pointer and touch @webkit-to
 test("narrowing hands sidebar focus to the opener and preserves pane focus", async ({ browser }) => {
   const page = await openApp(browser);
   await expect(page.getByRole("button", { name: "+ New page" })).toBeEnabled();
-  const paneControl = page.locator(".ub-pane").getByRole("button", { name: "Documents", exact: true });
+  const paneControl = page.locator(".ub-pane").getByRole("tab", { name: /^Documents/ });
   await page.setViewportSize({ width: 1400, height: 832 });
   await paneControl.focus();
   await page.setViewportSize({ width: 820, height: 832 });
