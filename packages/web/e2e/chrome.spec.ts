@@ -1099,8 +1099,10 @@ for (const scheme of ["light"] as const) {
 for (const scheme of ["light", "dark"] as const) {
   test(`collaborator overflow shares the document tag popover's surface — ${scheme} @webkit`, async ({ browser }, info) => {
     const touch = info.project.use.hasTouch === true;
-    const page = await openAppearanceApp(browser, scheme, "", touch, {
-      ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 900 } }),
+    const page = await openApp(browser, "/", {
+      upstream: true,
+      contextOptions: { colorScheme: scheme, ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 900 } }) },
+      readySelector: ".ub-docs",
     });
     const activate = async (control: Locator): Promise<void> => {
       if (touch) await control.tap();
