@@ -1779,10 +1779,70 @@ h6.ub-heading {
   }
 }
 
-.ub-decision-notice {
-  padding: 0.6rem 0.75rem;
+:is(.ub-decision-notice, .ub-decision-return) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.625rem;
+  margin-block: 1rem 0;
+  padding: 0.45rem 0.5rem 0.45rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+}
+
+.ub-decision-return {
+  background: var(--muted);
+}
+
+:is(.ub-decision-notice, .ub-decision-return) + .ub-decision-return {
+  margin-block-start: 0.5rem;
+}
+
+:is(.ub-decision-notice, .ub-decision-return) > span {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+}
+
+:is(.ub-decision-notice, .ub-decision-return) strong {
+  font-weight: 600;
+}
+
+.ub-decision-notice[data-state="conflict"] {
+  border-color: var(--destructive);
+  background: var(--destructive-subtle);
+}
+
+/* The proposal link reads as the banner's one action. */
+.ub-decision-notice-action {
+  flex: none;
+  padding: 0.2rem 0.625rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-leading);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ub-decision-notice-action:hover {
+  background: var(--accent);
+}
+
+:is(.ub-decision-notice, .ub-decision-return) > span + .ub-decision-notice-action {
+  margin-inline-start: auto;
+}
+
+.ub-decision-notice-action[data-primary="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.ub-decision-notice-action[data-primary="true"]:hover {
+  background: color-mix(in oklch, var(--primary) 88%, var(--background));
 }
 
 .ub-decision-answer-header {
@@ -1809,32 +1869,42 @@ h6.ub-heading {
   letter-spacing: 0.035em;
 }
 
+/* State pills are tinted grounds without brand amber; marks match the Decisions block. */
 .ub-decision-answer-state {
+  --pill-ground: light-dark(oklch(0.92 0 0), oklch(1 0 0 / 10%));
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.2rem 0.5rem;
-  border: 1px solid var(--border);
+  padding: 0.1rem 0.55rem;
+  border: 1px solid transparent;
   border-radius: 999px;
+  background: var(--pill-ground);
   color: var(--muted-foreground);
   font-size: var(--type-caption-size);
   line-height: var(--type-caption-leading);
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.ub-decision-answer-state[data-state="in-force"] {
+  --pill-ground: light-dark(oklch(0.94 0.05 145), oklch(0.3 0.06 145));
+  color: light-dark(oklch(0.4 0.11 145), oklch(0.86 0.13 145));
+}
+
+.ub-decision-answer-state:is([data-state="rejected"], [data-state="conflict"]) {
+  --pill-ground: var(--destructive-subtle);
+  color: light-dark(oklch(0.5 0.17 27), var(--destructive));
+}
+
+.ub-decision-answer-state:is([data-state="not-yet-decided"], [data-state="open-proposal"]) {
+  --pill-ground: transparent;
+  border: 1px dashed var(--muted-foreground);
 }
 
 .ub-decision-answer-state .ub-decisions-mark {
   flex: none;
   align-self: center;
   margin-block-start: 0;
-}
-
-.ub-decision-answer-state[data-state="not-yet-decided"],
-.ub-decision-answer-state[data-state="open-proposal"] {
-  border-style: dashed;
-}
-
-.ub-decision-answer-state[data-state="rejected"] {
-  color: var(--destructive);
 }
 
 .ub-decision-answer-state[data-state="rejected"] .ub-decisions-mark {
@@ -1857,17 +1927,6 @@ h6.ub-heading {
     flex-basis: 100%;
     margin-inline-start: 0;
   }
-}
-
-.ub-decision-earlier-answer,
-.ub-decision-current-answer {
-  font-size: var(--type-small-size);
-  line-height: var(--type-small-leading);
-  margin-block: 0.5rem;
-}
-
-.ub-decision-current-answer a {
-  text-decoration: underline;
 }
 
 .ub-decision-answer-history {
@@ -1918,7 +1977,8 @@ h6.ub-heading {
 
 .ub-decision-timeline > li {
   --rail-top: calc(0.5rem + 15px);
-  --rail-left: calc(7.625rem + 1px);
+  --rail-center: calc(7.625rem + 1.5px);
+  --rail-width: 2px;
   position: relative;
   display: grid;
   grid-template-columns: 6rem 1rem minmax(0, 1fr) auto;
@@ -1933,8 +1993,8 @@ h6.ub-heading {
 .ub-decision-timeline > li::after {
   content: "";
   position: absolute;
-  inset-inline-start: var(--rail-left);
-  inline-size: 1px;
+  inset-inline-start: calc(var(--rail-center) - var(--rail-width) / 2);
+  inline-size: var(--rail-width);
   background: var(--muted-foreground);
   pointer-events: none;
 }
@@ -1949,6 +2009,7 @@ h6.ub-heading {
 
 .ub-decision-timeline > li[data-rail-green="true"]::before,
 .ub-decision-timeline > li[data-rail-green="true"]:not([data-in-force="true"])::after {
+  --rail-width: 3px;
   background: var(--status-success);
 }
 
@@ -2001,9 +2062,9 @@ h6.ub-heading {
   position: relative;
   z-index: 1;
   box-sizing: border-box;
-  inline-size: 0.625rem;
-  block-size: 0.625rem;
-  border: 1px solid var(--muted-foreground);
+  inline-size: 0.75rem;
+  block-size: 0.75rem;
+  border: 2px solid var(--muted-foreground);
   border-radius: 50%;
   background: var(--background);
 }
@@ -2018,8 +2079,9 @@ h6.ub-heading {
 }
 
 .ub-decision-timeline > li:is([data-state="superseded"], [data-state="withdrawn"]) .ub-decision-rail-dot {
-  inline-size: 0.375rem;
-  block-size: 0.375rem;
+  inline-size: 0.5rem;
+  block-size: 0.5rem;
+  border: 0;
   background: var(--muted-foreground);
 }
 
@@ -2030,11 +2092,11 @@ h6.ub-heading {
 }
 
 .ub-decision-timeline > li[data-in-force="true"] .ub-decision-rail-dot {
-  inline-size: 0.75rem;
-  block-size: 0.75rem;
-  border-color: var(--status-success);
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
+  border-color: var(--background);
   background: var(--status-success);
-  box-shadow: 0 0 0 2px var(--background), 0 0 0 3px var(--status-success);
+  box-shadow: 0 0 0 2px var(--status-success);
 }
 
 .ub-decision-record-line {
@@ -2134,7 +2196,7 @@ h6.ub-heading {
 
 @container decision-history (max-width: 34rem) {
   .ub-decision-timeline > li {
-    --rail-left: calc(1rem + 1px);
+    --rail-center: calc(1rem + 1.5px);
     --rail-top: calc(0.5rem + var(--type-small-leading) + 0.25rem + 15px);
     grid-template-columns: 1rem minmax(0, 1fr) auto;
   }
