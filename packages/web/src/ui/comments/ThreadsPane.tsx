@@ -86,7 +86,7 @@ function ThreadCard({
         type="button"
         // Resolved and orphaned cards keep their labels and collapse state;
         // opacity would also dim their enabled text below its contrast floor.
-        className={`ub-thread flex w-full cursor-pointer flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-2 border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
+        className={`ub-thread flex w-full cursor-pointer flex-col gap-[0.35rem] rounded-(--radius-sm) border border-l-(length:--border-width-emphasis) border-(--border) px-[0.6rem] py-2 text-left [font:inherit] hover:border-l-brand ${focused ? "ub-thread-focused border-l-brand bg-(--brand-subtle)" : "bg-card"} text-card-foreground${thread.orphaned ? " ub-thread-orphaned" : ""}${thread.resolved ? " ub-thread-resolved" : ""}`}
         aria-current={focused ? "true" : undefined}
         aria-expanded={thread.resolved ? !collapsed : undefined}
         onClick={onSelect}
@@ -110,7 +110,7 @@ function ThreadCard({
           </span>
         ) : (
           // Quote marks are chrome; the excerpt itself stays verbatim.
-          <span className="ub-thread-excerpt border-l-2 border-(--border) pl-[0.4rem] text-foreground italic before:content-['“'] after:content-['”']">{thread.excerpt}</span>
+          <span className="ub-thread-excerpt border-l-(length:--border-width-emphasis) border-(--border) pl-[0.4rem] text-foreground italic before:content-['“'] after:content-['”']">{thread.excerpt}</span>
         )}
         {collapsed ? (
           <span className="ub-thread-replies ub-type-caption text-(--muted-foreground)">

@@ -125,8 +125,15 @@
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) - 4px);
 
-  /* Floating menus and the comment composer share this lift in both themes. */
+  /* Emphasis and selection edges; hairline surface borders stay 1px. */
+  --border-width-emphasis: 2px;
+  /* Accent bars identify framed blocks and their editable sources. */
+  --border-width-accent: 3px;
+
+  /* Menus, popovers, dialogs, toasts, composers and sheets share this lift. */
   --shadow-float: 0 8px 24px oklch(0 0 0 / 25%);
+  /* Small, passive tooltips use a lighter lift than interactive overlays. */
+  --shadow-tooltip: 0 4px 12px rgb(0 0 0 / 0.16);
 
   /* Cap the reading measure and keep its inset, rail gap and trailing space
      independent of surplus viewport width. */
@@ -478,7 +485,7 @@ body {
 .ub-swatch {
   height: 1.2rem;
   padding: 0;
-  border: 2px solid transparent;
+  border: var(--border-width-emphasis) solid transparent;
   border-radius: var(--radius-sm);
 }
 
@@ -738,7 +745,6 @@ textarea.ub-title {
   border-radius: var(--radius);
   background: var(--card);
   color: var(--card-foreground);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
   font: var(--type-small-size)/var(--type-small-leading) var(--font-sans);
 }
 
@@ -935,9 +941,8 @@ h6.ub-heading {
   margin: 12px 0;
   padding: 20px 24px;
   border: 1px solid var(--border);
-  border-radius: calc(var(--radius) + 4px);
+  border-radius: var(--radius);
   background: var(--card);
-  box-shadow: 0 1px 1px color-mix(in srgb, var(--foreground) 4%, transparent);
 }
 
 .ub-card + .ub-card { margin-top: 12px; }
@@ -1089,7 +1094,7 @@ h6.ub-heading {
   margin: 0.7em 0;
   padding: 0.6rem 0.75rem;
   border: 0;
-  border-left: 3px solid var(--block-bar);
+  border-left: var(--border-width-accent) solid var(--block-bar);
   border-radius: 0 var(--radius) var(--radius) 0;
   background: var(--block-tint);
   color: var(--prose-text);
@@ -1229,7 +1234,7 @@ h6.ub-heading {
 .ub-chart[data-view="table"] > .ub-chart-source {
   background: var(--muted);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--muted-foreground);
+  border-left: var(--border-width-accent) solid var(--muted-foreground);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
 }
@@ -1543,7 +1548,7 @@ h6.ub-heading {
    per thread by resolvedHighlightCss in ui/comments/threads.ts. */
 .ub-comment {
   background: var(--brand-subtle);
-  border-bottom: 2px solid var(--brand);
+  border-bottom: var(--border-width-emphasis) solid var(--brand);
   border-radius: 2px;
   cursor: pointer;
 }
@@ -1786,7 +1791,7 @@ h6.ub-heading {
 }
 
 :is(.ub-decisions-row, .ub-decision-answer-state)[data-state="agent-stance"] .ub-decisions-mark {
-  border-width: 2px;
+  border-width: var(--border-width-emphasis);
 }
 
 :is(.ub-decisions-row, .ub-decision-answer-state)[data-state="conflict"] .ub-decisions-mark {
@@ -1988,7 +1993,7 @@ h6.ub-heading {
   --prose-text: var(--muted-foreground);
   --foreground: var(--muted-foreground);
   color: var(--muted-foreground);
-  border-inline-start: 2px solid var(--border);
+  border-inline-start: var(--border-width-emphasis) solid var(--border);
   padding-inline-start: 0.75rem;
 }
 
@@ -2283,7 +2288,7 @@ h6.ub-heading {
 .ub-foreign-banner {
   background: var(--destructive-subtle);
   color: var(--foreground);
-  border: 2px solid var(--destructive);
+  border: var(--border-width-emphasis) solid var(--destructive);
   border-radius: var(--radius);
   padding: 0.6rem 0.75rem;
 }
@@ -2663,7 +2668,7 @@ h6.ub-heading {
   margin-bottom: -1px;
   padding: 0.4375rem 0.125rem;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--border-width-emphasis) solid transparent;
   background: transparent;
   color: var(--muted-foreground);
   font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);

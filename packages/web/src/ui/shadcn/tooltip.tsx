@@ -36,7 +36,7 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 w-max max-w-[min(18rem,80vw)] rounded-(--radius-sm) border border-(--border) bg-card px-[0.4rem] py-1 ub-type-small text-card-foreground shadow-[0_4px_12px_rgb(0_0_0/0.16)] [font-family:var(--font-sans)] [overflow-wrap:anywhere]",
+          "z-50 w-max max-w-[min(18rem,80vw)] rounded-(--radius-sm) border border-(--border) bg-card px-[0.4rem] py-1 ub-type-small text-card-foreground shadow-(--shadow-tooltip) [font-family:var(--font-sans)] [overflow-wrap:anywhere]",
           className,
         )}
         {...props}

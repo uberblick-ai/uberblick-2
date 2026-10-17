@@ -47,7 +47,7 @@ const SIDEBAR_PANE_CLASSES = "ub-sidebar-pane [grid-area:1/1] min-w-0 min-h-0 fl
 
 // Native buttons have no preflight reset. Keep their inherited type and focus
 // ring while Tailwind gates hover by the primary input's capability.
-const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-solid border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
+const SIDEBAR_ROW_CLASSES = "flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-(--radius-sm) border border-solid border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer enabled:not-aria-disabled:hover:bg-(--sidebar-accent) enabled:not-aria-disabled:hover:text-sidebar-foreground";
 const SIDEBAR_NAV_CLASSES = `${SIDEBAR_ROW_CLASSES} w-full aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium`;
 
 /** Per-group collapse preference, persisted per browser like the sidebar's own. */
@@ -414,7 +414,7 @@ function SettingsNavigation({
       <SidebarHeader className="pr-12 [@media(any-pointer:coarse)]:pr-15">
         <button
           type="button"
-          className="ub-settings-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
+          className="ub-settings-back flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left ub-type-ui font-[inherit] text-(--sidebar-row-foreground) cursor-pointer hover:bg-(--sidebar-accent) hover:text-sidebar-foreground"
           data-swap-focus
           onClick={onBack}
         >
@@ -536,7 +536,7 @@ function Soon({
     <li>
       <button
         type="button"
-        className="ub-nav-soon flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full cursor-default items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
+        className="ub-nav-soon flex min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 w-full cursor-default items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-muted-foreground)"
         aria-disabled="true"
         title="Coming soon"
       >
@@ -893,7 +893,7 @@ function PinnedRow({ uuid, index, group, entry, selected, onSelect, disabled }: 
     <li className="ub-pin-row flex items-center data-[drop-target=true]:bg-(--sidebar-accent)" ref={sortable.ref} data-drop-target={sortable.isDropTarget && !sortable.isDragSource}>
       <button type="button" aria-current={uuid === selected ? "page" : undefined}
         {...rowClickGuard}
-        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-[0.42rem] border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
+        className="flex flex-1 min-w-0 w-full min-h-8.5 [@media(any-pointer:coarse)]:min-h-11 items-center gap-2 rounded-(--radius-sm) border border-transparent bg-transparent px-2 py-1.5 text-left font-[inherit] ub-type-ui text-(--sidebar-row-foreground) cursor-pointer select-none [-webkit-touch-callout:none] hover:bg-(--sidebar-accent) hover:text-sidebar-foreground aria-[current=page]:bg-(--sidebar-accent) aria-[current=page]:border-(--sidebar-selected-border) aria-[current=page]:text-sidebar-foreground aria-[current=page]:font-medium"
         ref={sortable.handleRef} aria-describedby={disabled ? undefined : instructions}
         onClick={() => onSelect(uuid)} title={pinTitle(uuid, entry)}>
         <DocumentIcon />
