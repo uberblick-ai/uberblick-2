@@ -39,8 +39,6 @@ import type { ForeignBlock, LinkConflict } from "../editor/palette.js";
 import { blockText, plainText } from "../editor/ytext.js";
 import { groupAgentPresence, observeDocRev, presenceKey, readPresence, samePresence } from "./status/doc-chrome.js";
 import type { RemotePresence } from "./status/doc-chrome.js";
-import { observeOutline } from "./document/outline.js";
-import type { OutlineEntry } from "./document/outline.js";
 import { observeThreads } from "./comments/threads.js";
 import type { ThreadView } from "./comments/threads.js";
 
@@ -517,18 +515,6 @@ function observeRawBlocks(
   read();
   fragment.observeDeep(read);
   return () => fragment.unobserveDeep(read);
-}
-
-/** Observe heading blocks so remote renames update the outline. */
-export function useOutline(connection: RoomConnection | null): OutlineEntry[] {
-  return useConnectionReading(connection, EMPTY_ARRAY, observeConnectionOutline)[0];
-}
-
-function observeConnectionOutline(
-  connection: RoomConnection,
-  emit: (value: OutlineEntry[]) => void,
-): () => void {
-  return observeOutline(connection.ydoc, emit);
 }
 
 /**

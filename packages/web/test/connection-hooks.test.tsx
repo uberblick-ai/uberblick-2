@@ -34,7 +34,6 @@ import {
   useDocRev,
   useForeignBlocks,
   useLinkConflicts,
-  useOutline,
   usePeers,
   usePresence,
   useRawBlocks,
@@ -159,7 +158,6 @@ function useReading(connection: RoomConnection | null) {
     titlePresence: useTitlePresence(connection),
     rev: useDocRev(connection),
     blocks: useRawBlocks(connection),
-    outline: useOutline(connection),
     threads: useThreads(connection),
   };
 }
@@ -176,7 +174,6 @@ const EMPTY = {
   titlePresence: [],
   rev: null,
   blocks: [],
-  outline: [],
   threads: [],
 };
 
@@ -211,7 +208,6 @@ describe("connection-scoped readings", () => {
       expect(populated.titlePresence).toHaveLength(1);
       expect(populated.rev).toMatch(/^[0-9a-f]{16}$/);
       expect(populated.blocks).toHaveLength(3);
-      expect(populated.outline).toHaveLength(1);
       expect(populated.threads).toHaveLength(1);
     }
     const before = seen.length;

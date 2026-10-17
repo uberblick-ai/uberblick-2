@@ -54,7 +54,6 @@ function row(page: Page, state: string, question: string): Locator {
 async function absent(page: Page): Promise<void> {
   await expect(block(page)).toHaveCount(0);
   await expect(page.locator(".ub-decisions-link")).toHaveCount(0);
-  await expect(page.getByRole("navigation", { name: "On this page" }).getByRole("button", { name: "Decisions", exact: true })).toHaveCount(0);
 }
 
 // Decode with the provider's own dependency, as the other protocol probes do.
@@ -300,15 +299,6 @@ for (const touch of [false, true]) {
     expect(placement.afterEditor).toBe(true);
     expect(placement.blockTop).toBeGreaterThanOrEqual(placement.editorBottom);
     await jumpFromHeader(page, touch);
-    const contents = page.getByRole("button", { name: /^On this page/ });
-    await page.locator(".ub-document-pane").evaluate((pane) => { pane.scrollTop = 0; });
-    await activateControl(contents, { touch });
-    const menu = page.getByRole("navigation", { name: "On this page" });
-    await expect(menu.getByRole("button")).toHaveText(["Overview", "Related", "Decisions"]);
-    await activateControl(menu.getByRole("button", { name: "Decisions", exact: true }), { touch });
-    await expect(menu).toBeHidden();
-    await expectBlockInView(page);
-    await expect(contents).toContainText("Decisions");
     await proveMcpArrival(page, writer, owner.uuid, { path: "upstream", restore: true });
     await expectMcp(async () => {
       const displayed = await writer.call<StoredDoc>("get_doc", { uuid: owner.uuid });
@@ -363,13 +353,12 @@ for (const touch of [false, true]) {
   });
 }
 
-test("a page without headings gains and loses its live Decisions chrome", async ({ browser }) => {
+test("a page without headings gains and loses its live Decisions block", async ({ browser }) => {
   const writer = session();
-  const owner = await create(writer, "Live Decisions page", "A page with no outline headings.");
+  const owner = await create(writer, "Live Decisions page", "A page with no headings.");
   const page = await openApp(browser, `/${harness().workspace}/${owner.uuid}`, { upstream: true });
   await expect(editor(page)).toHaveText(owner.blocks[0]?.text ?? "");
   await absent(page);
-  await expect(page.locator(".ub-outline-trigger")).toHaveCount(0);
   const linked = await create(writer, "A link alone", "", {
     kind: "decision", status: "decided", answer: answer(),
     blocks: [{ type: "paragraph", inline: [
@@ -383,16 +372,6 @@ test("a page without headings gains and loses its live Decisions chrome", async 
   const proposal = await create(writer, "Live question", "The first answer becomes guidance when accepted.", { kind: "decision", related: owner.uuid });
   await expect(row(page, "Not yet decided", "Live question")).toBeVisible();
   await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision · 1 not yet decided ↓");
-  const contents = page.getByRole("button", { name: /^On this page/ });
-  await expect(contents).toBeVisible();
-  await contents.focus();
-  await page.keyboard.press("Enter");
-  const menu = page.getByRole("navigation", { name: "On this page" });
-  await expect(menu.getByRole("button")).toHaveText(["Decisions"]);
-  await menu.getByRole("button", { name: "Decisions", exact: true }).press("Enter");
-  await expect(menu).toBeHidden();
-  await expectBlockInView(page);
-  await expect(contents).toContainText("Decisions");
   await writer.call("set_status", { uuid: proposal.uuid, status: "decided", answer: answer() });
   await expect(row(page, "In force", "Live question")).toBeVisible();
   await expect(page.locator(".ub-decisions-link")).toHaveText("1 decision in force ↓");
@@ -404,5 +383,4 @@ test("a page without headings gains and loses its live Decisions chrome", async 
   await expect(row(page, "In force", "Live question")).toBeVisible();
   await writer.call("archive_doc", { uuid: proposal.uuid });
   await absent(page);
-  await expect(page.locator(".ub-outline-trigger")).toHaveCount(0);
 });

@@ -6,7 +6,7 @@
  * effect: on the render right after a caller switches rooms, the state still
  * holds the previous connection. Returning it is not a cosmetic slip — every
  * consumer in the app reads the *document* off that connection, so for that
- * render the editor, the outline and the threads rail would all draw the
+ * render the editor and the threads rail would both draw the
  * document the reader just navigated away from, under the new document's URL,
  * and a keystroke landing in that window would be written into the wrong Y.Doc.
  *

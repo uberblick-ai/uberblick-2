@@ -130,7 +130,7 @@
      independent of surplus viewport width. */
   --measure: 72ch;
   --sidebar-width: 18rem;
-  --outline-width: 15rem;
+  --document-rail-width: 15rem;
   --pane-document-inset: 2rem;
   --document-rail-gap: 2rem;
   --pane-trailing-space: 1rem;
@@ -567,17 +567,6 @@ body {
   transition-property: padding-inline-start, flex-basis;
 }
 
-@media (width < 80rem) {
-  .ub-document-rail .ub-outline {
-    width: calc(var(--outline-pane-width) - 3rem - 0.75rem);
-    pointer-events: auto;
-  }
-
-  .ub-document-rail[data-has-threads="true"] .ub-outline {
-    width: calc(var(--outline-pane-width) - 3rem - 7rem);
-  }
-}
-
 /* Left padding reserves the document block gutter on every main page. */
 .ub-column {
   width: 100%;
@@ -871,7 +860,7 @@ textarea.ub-title {
   white-space: pre-wrap;
 }
 
-/* Heading space belongs to what follows, at every outline level. */
+/* Heading space belongs to what follows, at every heading level. */
 .ub-heading {
   font-family: var(--font-sans);
   font-weight: 600;

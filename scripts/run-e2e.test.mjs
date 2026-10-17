@@ -111,14 +111,14 @@ test("Playwright arguments keep their boundaries and order", (t) => {
 	t.after(() => current.remove());
 
 	const result = current.run({
-		args: ["--project=chromium", "--repeat-each=3", "outline.spec.ts", "--grep", "focused name"],
+		args: ["--project=chromium", "--repeat-each=3", "sidebar.spec.ts", "--grep", "focused name"],
 	});
 	assert.equal(result.status, 0, result.stderr);
 	const [, suite] = readFileSync(current.log, "utf8").trim().split("\n");
 	assert.deepEqual(suite.split("\t").slice(-5), [
 		"--project=chromium",
 		"--repeat-each=3",
-		"outline.spec.ts",
+		"sidebar.spec.ts",
 		"--grep",
 		"focused name",
 	]);
