@@ -2182,17 +2182,20 @@ h6.ub-heading {
   color: inherit;
 }
 
-.ub-decision-record-rfc .ub-doclink[data-doc-link-state="archived"]::after {
+.ub-doclink[data-archived-chip="true"][data-doc-link-state="archived"]::after {
   content: none;
 }
 
+/* The shared badge pill; inline-block keeps the link's underline off it. */
 .ub-decision-archived {
+  display: inline-block;
   flex: none;
   margin-inline-start: 0.375rem;
-  padding-inline: 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding-block: 0;
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-leading);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 @container decision-history (max-width: 34rem) {

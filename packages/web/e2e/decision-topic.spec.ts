@@ -78,7 +78,8 @@ async function selectedRfc(page: Page, rfc: StoredDoc | null, title = ""): Promi
   }
   await expect(line).toHaveCount(1);
   await expect(line.getByText("RFC", { exact: true })).toBeVisible();
-  await expect(line.getByRole("link")).toHaveText(title);
+  // An archived RFC adds its badge pill after the title.
+  await expect(line.getByRole("link")).toHaveText(new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(archived)?$`));
   await expect(line.getByRole("link")).toHaveAttribute("href", new RegExp(`/${rfc.uuid}$`));
   await expect(page.locator(".ub-decision-answer + .ub-decision-rfc + .ub-decision-history")).toHaveCount(1);
 }
@@ -569,7 +570,7 @@ for (const { touch, appearance } of [
     await writer.call("set_metadata", { uuid: currentRfc.uuid, title: currentRfcTitle });
     await selectedRfc(page, currentRfc, currentRfcTitle);
     await writer.call("archive_doc", { uuid: currentRfc.uuid });
-    await archivedLink(page.locator(".ub-decision-rfc a"));
+    await archivedLink(page.locator(".ub-decision-rfc a"), true);
     await selectedTopicPin(page, touch);
     const topicRecords = [first.uuid, current.uuid, rejected.uuid, withdrawn.uuid, pending.uuid];
     const actions = page.getByRole("button", { name: "Document actions", exact: true });
@@ -746,7 +747,7 @@ for (const { touch, appearance } of [
     await expect(page).toHaveURL(new RegExp(`${currentPath}$`));
     await selected(page, current.uuid, answerText(current));
     await selectedRfc(page, currentRfc, currentRfcTitle);
-    await archivedLink(page.locator(".ub-decision-rfc a"));
+    await archivedLink(page.locator(".ub-decision-rfc a"), true);
     await rfcLayout(page);
     const archivedRail = await readThread(page, "Conversation about the current answer.", touch);
     await expect(archivedRail.getByRole("button", { name: /^(Reply|Resolve|Reopen)$/ })).toHaveCount(0);

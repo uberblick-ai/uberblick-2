@@ -884,12 +884,13 @@ describe("decision topic navigation and history", () => {
     await act(async () => regular(RFC, "Current RFC title"));
     expect(link()?.textContent).toBe("Current RFC title");
     await act(async () => tombstoneDirectoryEntry(directory(), RFC));
-    expect(link()?.textContent).toBe("Current RFC title");
+    expect(link()?.textContent).toBe("Current RFC titlearchived");
+    expect(link()?.querySelector(".ub-badge.ub-decision-archived")?.textContent).toBe("archived");
     expect(link()?.getAttribute("data-doc-link-state")).toBe("archived");
     expect(within(item(host, FIRST)).getByRole("link", { name: /^Current RFC title/ }).getAttribute("data-doc-link-state"))
       .toBe("archived");
     await act(async () => regular(RFC, "Renamed archived RFC"));
-    expect(link()?.textContent).toBe("Renamed archived RFC");
+    expect(link()?.textContent).toBe("Renamed archived RFCarchived");
     expect(link()?.getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
   });
 

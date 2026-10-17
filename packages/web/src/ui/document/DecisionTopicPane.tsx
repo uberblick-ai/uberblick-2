@@ -17,21 +17,23 @@ function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate):
   navigate(event.currentTarget.pathname);
 }
 
-function DocumentReference({ uuid, label, context, compact = false, className }: {
-  uuid: string; label?: string | undefined; context: DocLinkContext | null; compact?: boolean; className?: string;
+/** `chip` marks an archived target with the shared badge pill instead of the inline suffix. */
+function DocumentReference({ uuid, label, context, compact = false, chip = compact, className }: {
+  uuid: string; label?: string | undefined; context: DocLinkContext | null; compact?: boolean; chip?: boolean; className?: string;
 }): ReactElement | null {
   if (context === null) return null;
   const link = context.lookup(uuid);
+  const text = label ?? link.title ?? uuid;
   return <a className={className === undefined ? "ub-doclink" : `ub-doclink ${className}`} href={context.href(uuid)}
-    data-doc-link-state={link.state}
+    data-doc-link-state={link.state} data-archived-chip={chip || undefined}
     onClick={(event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       context.open(uuid);
-    }}>{compact ? <>
-      <span className="ub-decision-rfc-title">{label ?? link.title ?? uuid}</span>
-      {link.state === "archived" && <span className="ub-decision-archived">archived</span>}
-    </> : label ?? link.title ?? uuid}</a>;
+    }}>{chip ? <>
+      {compact ? <span className="ub-decision-rfc-title">{text}</span> : text}
+      {link.state === "archived" && <span className="ub-badge ub-decision-archived">archived</span>}
+    </> : text}</a>;
 }
 
 const ANSWER_STATES = {
@@ -269,7 +271,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     afterAnswer={<>
       {record.discussion && docLinks !== null && <p className="ub-decision-rfc">
         <span>RFC</span>{" "}
-        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} />
+        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} chip />
       </p>}
       <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} directoryConnection={directoryConnection} />
     </>}
