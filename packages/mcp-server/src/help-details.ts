@@ -8,6 +8,7 @@ export const toolHelpDetails = {
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
+    "Before creating a decision topic, consult [When to create a decision record](uberblick://help/lifecycle). " +
     "For decision answer guidance, see [Decision answers and topics](uberblick://help/lifecycle). " +
     "Decision records accept paragraph, code, " +
     "table or a maximal run of adjacent list-item blocks. Other types refuse with decision_block_unsupported; " +
@@ -47,7 +48,6 @@ export const toolHelpDetails = {
     "related and discussion; it has no answer until one is recorded. For reconsideration, create an open " +
     "successor with supersedes and discussion; the current answer stays in force. In both flows, the title " +
     "names the stable topic or question, never the answer; successors keep it. " +
-    'Example: "Exact behavior of milestone setting `gate`", not "Milestone gate skips milestones with nothing to start". ' +
     "Decision answer guidance is in [Decision answers and topics](uberblick://help/lifecycle). " +
     "These answer blocks are distinct from " +
     "recorded `answer: {who, when, where}` attribution. A record created decided " +

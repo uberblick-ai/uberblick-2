@@ -80,11 +80,12 @@ so the corpus never describes unmerged code. Keep it current with every revision
 
 ## Decision records
 
-Apply [`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records):
-its three-condition when-to-record test, overkill cases and initial stance rule
-own whether to record and whether a first record is `decided` as an agent
-stance or `open` with a recommendation on a topic reserved to a human. Read its
-live corpus sources rather than treating a pointer as the record.
+Consult bundled `get_help({topic: "lifecycle"})` for the initial-record
+threshold and short answer guidance. Apply
+[`delivery-policy.md`'s Decision records](../protocols/delivery-policy.md#decision-records)
+for repository authority and whether a first record is `decided` as an agent
+stance or `open` with a recommendation. Read relevant live corpus sources
+rather than treating a pointer as the record.
 
 When code need not cite it, write a new `decided` implementation stance as a
 draft in this same PR's `Corpus update`: name its topic, intended creation status

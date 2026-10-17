@@ -63,16 +63,11 @@ Ordinary documents omit \`kind\` and \`status\`. Decision records have kind \`de
 
 ## Decision answers and topics
 
-A decision title names the stable topic or question, never the answer; successors keep the title. For example, use "Exact behavior of milestone setting \`gate\`", not "Milestone gate skips milestones with nothing to start". Lead the answer with the choice in one plain sentence naming the chosen option, without hedging such as "should consider" or "where possible". Give the reason in one clause or sentence. Keep the whole answer, across all its blocks, to 60 words or fewer. This is editorial guidance, not a validated word limit. Short never means vague: keep the concrete terms a reader needs to apply the decision, such as what is stored, what wins and what is refused. Leave mechanics (transactions, merge or conflict handling, function and key names, step-by-step write order) to the related regular page or the code; discussion belongs in the RFC. Do not restate the topic as a "Topic:" line or write a specification. A superseding record carries the new answer.
+A decision topic is the enduring question being decided; it stays the same when its answer changes. A record's title names that question, never the answer. A settled record states the settled answer concisely and readably, with only the context needed to understand its meaning and scope. An open record may instead hold a proposal or recommendation; it is not a settled answer.
+
+Lead the answer with the choice in one plain sentence naming the chosen option, without hedging such as "should consider" or "where possible". Give the reason in one clause or sentence. Keep the whole answer, across all its blocks, to 60 words or fewer. This is editorial guidance, not a validated word limit. Short never means vague: retain the concrete terms needed to apply the decision. Put extended rationale, alternatives and process in a linked RFC when needed; do not repeat that discussion in the record. An RFC may later be archived and remain readable as historical context. Put product guidance and implementation mechanics on the owning regular page or in code. Do not restate the topic as a "Topic:" line or write a specification. A successor in the same topic states the changed outcome and reason concisely.
 
 A decision record holds its answer in one to three answer blocks: paragraphs, code blocks, tables or lists. A list is a maximal run of adjacent \`list-item\` blocks, regardless of style or indent, and counts as one answer block. Headings, quotes, terminal, chart, card and figma blocks refuse with \`decision_block_unsupported\`; creation or insertion that would exceed three answer blocks refuses with \`decision_answer_too_long\`, without writing anything.
-
-For "How is deliberate TL;DR absence stored compatibly?":
-
-| Example | Answer |
-| --- | --- |
-| Good — in-force answer | Keep the TL;DR as text or null, and store deliberate absence in a separate yes/no flag next to it. Text always wins: the flag only counts on a regular document with no TL;DR text. Older clients keep working, and nothing needs migrating. |
-| Bad — superseded stance, abbreviated | Keep the stored TL;DR as a string or null and store deliberate absence in a separate boolean metadata key. … Remove writes null and true in one transaction; opt-in writes false, and a new summary writes its text and false together. An ordinary clear preserves the mark. Use ordinary Y.Map whole-value conflict resolution without read-time repair or migration. |
 
 Open records may be empty. Every move from another state to \`decided\`, including creation and kind adoption, requires at least one answer block with non-blank text, a valid answer shape, no visible TL;DR and no structured data. Decisions have no TL;DR: stored values are ignored without changing them. A regular page adopting the decision kind directly as decided still refuses a visible TL;DR. Refusals use \`decision_answer_empty\`, \`decision_tldr_unsupported\`, \`decision_data_unsupported\` or the matching shape code and write nothing. Decision content writes carry no TL;DR review reminder. An already decided record is not re-checked when its stance is confirmed or rejected.
 
@@ -96,22 +91,16 @@ Decision directory entries cache \`discussion\` and a derived \`answerPreview\` 
 
 ### When to create a decision record
 
-A decision record preserves a deliberate architectural, product or UX choice and its enduring reason. Put the guidance future work should follow on its related regular page. The record adds something that reading the code or configuration alone cannot tell you.
+Create an initial decision record only when **all four** conditions hold:
 
-**Do** propose a record when the choice will guide multiple tasks, prevent a consequential accidental reversal, or settle a topic repeatedly debated or reconsidered. A rarely consulted record can still be valuable if it protects an important compatibility, security or product commitment. Issues, reviews and Git history can reveal repeated uncertainty; they do not prove historical intent.
+1. **Significance:** it establishes a central product principle, an architectural direction, a substantial system-wide commitment or a major change to user-facing behavior. Judge significance by consequences, not implementation size.
+2. **Meaningful alternatives:** credible approaches have materially different consequences, and current guidance does not already settle the choice.
+3. **Lasting consequences:** the choice constrains future work beyond the current feature or task.
+4. **Useful rationale:** understanding the tradeoff matters to future work; preserving the outcome and rationale where needed helps future maintainers understand or reconsider the choice. Extended explanation belongs in a linked RFC, not in the record.
 
-**Do not** create a record just to describe existing code, configuration, a routine fix, a temporary workaround or implementation mechanics. Do not turn every changed detail into policy. Keep the meaningful choice precise while leaving its implementation flexible.
+Significance, persistence or reversal cost alone is insufficient. Even an important initial choice does not automatically warrant a record. Routine feature details, formatting, refactors and bug fixes normally belong in the owning regular document and issue or PR, unless they independently satisfy all four conditions. When in doubt, do not create a new topic.
 
-| Useful decision | Description that does not justify a record |
-| --- | --- |
-| Support these iOS versions because of our users’ devices and maintenance budget; reconsider when those conditions change. Specify whether this means minimum support, an explicit set or tested versions. | The deployment target is set to this version. |
-| Users can read and edit previously opened documents offline, so interrupted connectivity does not interrupt their work. | This function reads from the local database. |
-| Use shadcn/ui as the sole component library and prefer its standard components to custom implementations, to keep the UI consistent and reduce maintenance. Custom alternatives require clear justification and human approval. | This screen imports a Button component from shadcn/ui. |
-| Clients synchronize through a shared service rather than directly with each other, for stated operational and connectivity reasons. | A list of endpoints, classes or dependencies. |
-
-Before proposing a record, ask: **What concrete future choice would it guide, or what consequential mistake would it prevent?** If neither has a credible answer, keep the explanation in ordinary documentation, code comments, an issue or a PR.
-
-Check existing decision topics first. Reuse the current topic; when changing its answer, follow the successor lifecycle. A useful candidate is not automatically authorized for creation: follow the project’s approval rules. These examples illustrate how to judge a candidate; they do not establish policies for your project.
+Check existing topics first. When revising a previously recorded answer, use a successor in the same topic and explain the changed outcome and reason concisely, linking an RFC for extended rationale when needed. This does not mean every change to ordinary documentation needs a record. Agents may create qualifying records within their existing authority; follow the project's authority rules and the successor approval lifecycle above. These are editorial judgments, not runtime validation.
 
 ## Content locks
 

@@ -30,18 +30,20 @@ Priority or decision record on its own.
 
 When the human wants a decision topic for a shaped choice, apply
 [shaping's recorded-choice rules](issue-shaping.md#record-durable-choices) and
-read live decision-lifecycle guidance. Create or reuse the RFC deliberately
-first; connecting a topic never creates an RFC or tags or edits the related page.
+read bundled `get_help({topic: "lifecycle"})` for the initial-record threshold,
+topic/answer definitions and short answer guidance. Create or reuse the RFC
+deliberately first; connecting a topic never creates an RFC or tags or edits the related page.
 
 Through MCP, create an `open` first record with `related` naming its regular
 owning page and `discussion` naming the confirmed RFC. To reconsider an answer,
 create an `open` successor with `supersedes` naming its predecessor and
 `discussion` naming this proposal's RFC; successors do not inherit discussion.
-Use one to three short answer blocks with a brief reason when there is a
-confirmed answer or recommendation; an unsettled first record may be empty.
-Put guidance on the related page and detailed options, evidence and debate in
-the connected RFC or linked GitHub item, not in a TL;DR, heading or Links section
-on the record.
+Keep a confirmed answer or recommendation terse under that help, distinguishing
+an open recommendation from a settled answer; an unsettled first record may be
+empty. A successor answers the same enduring question and briefly states the
+changed outcome and reason. Put guidance on the related page and elaborate
+rationale, options and debate in the connected RFC without repeating them in
+the record.
 
 Use `set_status` to settle, reject or withdraw under the existing recorded-answer
 rules below and the installed schemas. All decision content and lifecycle
