@@ -656,7 +656,7 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).textContent).toContain("Use the current answer.");
     await choose(host, NEXT);
     expectAnswerState(host, "Under review");
-    expect(host.querySelector(".ub-decision-notice")?.textContent).toBe("2 pending proposals.");
+    expect(host.querySelector(".ub-decision-notice")).toBeNull();
   });
 
   it.each([
@@ -669,14 +669,8 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
     const returnLink = within(host).getByRole("link", { name: "Go to the current answer" });
     expect(returnLink.getAttribute("href")).toBe(docPath(WORKSPACE, FIRST));
-    if (uuid === OPEN) {
-      expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("The current answer stays in force.");
-      expect(host.querySelector(".ub-decision-notice")?.textContent).not.toContain("Under review");
-      expect(within(host).getByRole("link", { name: "Open proposal" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
-      expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Under review");
-    } else {
-      expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Under review.");
-    }
+    expect(host.querySelector(".ub-decision-notice")).toBeNull();
+    if (uuid === OPEN) expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Under review");
     await act(async () => returnLink.click());
     expectAnswerState(host, "In force");
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(false);
@@ -887,12 +881,13 @@ describe("decision topic navigation and history", () => {
     await act(async () => regular(RFC, "Current RFC title"));
     expect(link()?.textContent).toBe("Current RFC title");
     await act(async () => tombstoneDirectoryEntry(directory(), RFC));
-    expect(link()?.textContent).toBe("Current RFC title");
+    expect(link()?.textContent).toBe("Current RFC titlearchived");
+    expect(link()?.querySelector(".ub-badge.ub-decision-archived")?.textContent).toBe("archived");
     expect(link()?.getAttribute("data-doc-link-state")).toBe("archived");
     expect(within(item(host, FIRST)).getByRole("link", { name: /^Current RFC title/ }).getAttribute("data-doc-link-state"))
       .toBe("archived");
     await act(async () => regular(RFC, "Renamed archived RFC"));
-    expect(link()?.textContent).toBe("Renamed archived RFC");
+    expect(link()?.textContent).toBe("Renamed archived RFCarchived");
     expect(link()?.getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
   });
 
