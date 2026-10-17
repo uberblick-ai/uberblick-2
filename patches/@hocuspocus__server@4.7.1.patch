@@ -1,8 +1,7 @@
 diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
-index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296afdcaaf651 100644
 --- a/dist/hocuspocus-server.cjs
 +++ b/dist/hocuspocus-server.cjs
-@@ -853,6 +853,7 @@ var ClientConnection = class {
+@@ -866,6 +866,7 @@
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -10,27 +9,23 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296af
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(_hocuspocus_common.ConnectionTimeout);
-@@ -959,7 +960,10 @@ var ClientConnection = class {
- 							...contextAdditions
- 						};
+@@ -973,6 +974,7 @@
  					});
--					hookPayload.connectionConfig.isAuthenticated = true;
-+					if (this.hookPayloads[rawKey] === hookPayload) {
-+						hookPayload.connectionConfig.isAuthenticated = true;
-+						this.pendingDocumentCount -= 1;
-+					}
+ 					if (this.hookPayloads[rawKey] !== hookPayload) return;
+ 					hookPayload.connectionConfig.isAuthenticated = true;
++					this.pendingDocumentCount -= 1;
  					this.hasAuthenticated = true;
  					const message = new OutgoingMessage(responseAddress).writeAuthenticated(hookPayload.connectionConfig.readOnly);
  					this.websocket.send(message.toUint8Array());
-@@ -968,6 +972,7 @@ var ClientConnection = class {
+@@ -982,6 +984,7 @@
  					const error = err || _hocuspocus_common.Forbidden;
  					const message = new OutgoingMessage(responseAddress).writePermissionDenied(error.reason ?? "permission-denied");
  					this.websocket.send(message.toUint8Array());
-+					if (this.hookPayloads[rawKey]?.connectionConfig.isAuthenticated === false) this.pendingDocumentCount -= 1;
++					if (!hookPayload.connectionConfig.isAuthenticated) this.pendingDocumentCount -= 1;
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -992,6 +997,7 @@ var ClientConnection = class {
+@@ -1006,6 +1009,7 @@
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
@@ -38,7 +33,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296af
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
  						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(_hocuspocus_common.ResetConnection);
-@@ -1012,6 +1018,7 @@ var ClientConnection = class {
+@@ -1026,6 +1030,7 @@
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -46,7 +41,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296af
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1040,6 +1047,7 @@ var ClientConnection = class {
+@@ -1054,6 +1059,7 @@
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -54,7 +49,7 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296af
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1066,9 +1074,7 @@ var ClientConnection = class {
+@@ -1080,9 +1086,7 @@
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -66,10 +61,9 @@ index 39719e3862b1ff097c49f2673dafc445f90bd218..4d538b449e41b1edf0d8049ee98296af
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
-index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420a9722406 100644
 --- a/dist/hocuspocus-server.esm.js
 +++ b/dist/hocuspocus-server.esm.js
-@@ -823,6 +823,7 @@ var ClientConnection = class {
+@@ -836,6 +836,7 @@
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -77,27 +71,23 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(ConnectionTimeout);
-@@ -929,7 +930,10 @@ var ClientConnection = class {
- 							...contextAdditions
- 						};
+@@ -943,6 +944,7 @@
  					});
--					hookPayload.connectionConfig.isAuthenticated = true;
-+					if (this.hookPayloads[rawKey] === hookPayload) {
-+						hookPayload.connectionConfig.isAuthenticated = true;
-+						this.pendingDocumentCount -= 1;
-+					}
+ 					if (this.hookPayloads[rawKey] !== hookPayload) return;
+ 					hookPayload.connectionConfig.isAuthenticated = true;
++					this.pendingDocumentCount -= 1;
  					this.hasAuthenticated = true;
  					const message = new OutgoingMessage(responseAddress).writeAuthenticated(hookPayload.connectionConfig.readOnly);
  					this.websocket.send(message.toUint8Array());
-@@ -938,6 +942,7 @@ var ClientConnection = class {
+@@ -952,6 +954,7 @@
  					const error = err || Forbidden;
  					const message = new OutgoingMessage(responseAddress).writePermissionDenied(error.reason ?? "permission-denied");
  					this.websocket.send(message.toUint8Array());
-+					if (this.hookPayloads[rawKey]?.connectionConfig.isAuthenticated === false) this.pendingDocumentCount -= 1;
++					if (!hookPayload.connectionConfig.isAuthenticated) this.pendingDocumentCount -= 1;
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -962,6 +967,7 @@ var ClientConnection = class {
+@@ -976,6 +979,7 @@
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
@@ -105,7 +95,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
  						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(ResetConnection);
-@@ -982,6 +988,7 @@ var ClientConnection = class {
+@@ -996,6 +1000,7 @@
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -113,7 +103,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1010,6 +1017,7 @@ var ClientConnection = class {
+@@ -1024,6 +1029,7 @@
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -121,7 +111,7 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1036,9 +1044,7 @@ var ClientConnection = class {
+@@ -1050,9 +1056,7 @@
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -133,10 +123,9 @@ index 0fce8e277d9cb44197070c7e52c43586b65b306d..7f762f46fbb5f8d953a5f6737043a420
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
-index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cda14d2b0e 100644
 --- a/src/ClientConnection.ts
 +++ b/src/ClientConnection.ts
-@@ -76,6 +76,8 @@ export class ClientConnection<Context = any> {
+@@ -75,6 +75,8 @@
  
  	private readonly maxPendingDocuments: number;
  
@@ -145,7 +134,7 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cd
  	pingInterval: NodeJS.Timeout;
  
  	lastMessageReceivedAt = Date.now();
-@@ -154,6 +156,7 @@ export class ClientConnection<Context = any> {
+@@ -163,6 +165,7 @@
  		for (const rawKey of Object.keys(this.hookPayloads)) {
  			delete this.hookPayloads[rawKey];
  		}
@@ -153,12 +142,11 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cd
  		this.documentConnectionsEstablished.clear();
  	}
  
-@@ -231,14 +234,10 @@ export class ClientConnection<Context = any> {
+@@ -240,14 +243,9 @@
  	// Auth frame has been seen) so that sending an Auth frame first — which marks
  	// the document as "establishing" but keeps its hook payload alive while a slow
  	// `onAuthenticate` runs — cannot be used to bypass the limit.
-+	// Kept incrementally so admitting one document remains O(1)
-+	// no matter how many authenticated documents the socket already holds.
++	// Maintain the count incrementally so admission never scans authenticated rooms.
  	private getPendingDocumentCount(): number {
 -		let total = 0;
 -		for (const rawKey of Object.keys(this.hookPayloads)) {
@@ -171,49 +159,30 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cd
  	}
  
  	/**
-@@ -528,8 +527,12 @@ export class ClientConnection<Context = any> {
- 						};
- 					},
- 				);
--				// All `onAuthenticate` hooks passed.
--				hookPayload.connectionConfig.isAuthenticated = true;
-+				// All `onAuthenticate` hooks passed. A socket close can clear the
-+				// registered payload while an asynchronous hook is still running.
-+				if (this.hookPayloads[rawKey] === hookPayload) {
-+					hookPayload.connectionConfig.isAuthenticated = true;
-+					this.pendingDocumentCount -= 1;
-+				}
+@@ -550,6 +548,7 @@
+ 
+ 				// All `onAuthenticate` hooks passed.
+ 				hookPayload.connectionConfig.isAuthenticated = true;
++				this.pendingDocumentCount -= 1;
  				this.hasAuthenticated = true;
  
  				// Let the client know that authentication was successful.
-@@ -551,6 +554,11 @@ export class ClientConnection<Context = any> {
+@@ -577,6 +576,9 @@
  
  				// Clean up all state for this document so a retry is treated
  				// as a fresh first connection attempt.
-+				if (
-+					this.hookPayloads[rawKey]?.connectionConfig.isAuthenticated === false
-+				) {
++				if (!hookPayload.connectionConfig.isAuthenticated) {
 +					this.pendingDocumentCount -= 1;
 +				}
  				this.documentConnectionsEstablished.delete(rawKey);
  				delete this.hookPayloads[rawKey];
  				delete this.incomingMessageQueue[rawKey];
-@@ -597,6 +605,22 @@ export class ClientConnection<Context = any> {
+@@ -623,6 +625,12 @@
  
  			const isFirst = this.incomingMessageQueue[rawKey] === undefined;
  			if (isFirst) {
-+				// A document is opened by its Auth message. A provider sends its token
-+				// before anything else for a document (`HocuspocusProvider.ts:537-543`)
-+				// and one socket delivers frames in order, so a first frame that is not
-+				// an Auth message belongs to a document this connection has already torn
-+				// down — refused by `onAuthenticate`, or thrown out of
-+				// `setUpNewConnection` after authenticating — whose client has not heard
-+				// the refusal yet. Opening a pending document for it would take a slot
-+				// nothing can give back: that client sends no further token, so the slot
-+				// is held for the life of the socket, and enough of them terminate a
-+				// socket whose other rooms are healthy. Such a frame is also never
-+				// delivered anywhere: a queue that no authentication ever drains is
-+				// discarded when the socket closes.
++				// The provider sends Auth first. Late frames after refusal must not
++				// allocate a pending slot that no further token will release.
 +				if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) {
 +					return;
 +				}
@@ -221,7 +190,7 @@ index 9ac688ae4c7038639cfd0ce6044e56cf926d2d7a..3d8315686404b2885f08749bc682f4cd
  				// Cap the number of documents a single connection can open before
  				// authenticating any of them. Each pending document allocates its own
  				// queue and hook payload, so this prevents memory amplification by
-@@ -629,6 +653,7 @@ export class ClientConnection<Context = any> {
+@@ -655,6 +663,7 @@
  					},
  					providerVersion: null as string | null,
  				};

@@ -1,6 +1,6 @@
 /**
  * The Hocuspocus seams the hub relies on, characterized against the installed
- * 4.6.0.
+ * 4.7.1.
  *
  * The hub's auth boundary and its connection lifecycle depend on behaviour the
  * library's types do not state and its changelog would not call a breaking
@@ -17,9 +17,9 @@
  * is still queued — it wraps the library's own `handleMessage` entry point as a
  * pass-through counter (`frameBarrier` below); the real handler still handles
  * every frame. Each names the library file and line it pins;
- * those line numbers are from the TypeScript sources shipped inside
- * `@hocuspocus/server@4.6.0` (`node_modules/@hocuspocus/server/src/…`), so a
- * bump is also an invitation to re-read them.
+ * those line numbers are from the installed `@hocuspocus/server@4.7.1`
+ * TypeScript sources (`node_modules/@hocuspocus/server/src/…`), after the
+ * workspace's admission patch, so a bump is also an invitation to re-read them.
  *
  * The rig is deliberately not the hub: these are properties of the library, and
  * proving them through `createHub` would leave a reader unable to tell which
@@ -95,7 +95,7 @@ function connect(options: {
   awareness?: null;
   /**
    * The provider's reconnect delay. Its default is a second
-   * (`HocuspocusProviderWebsocket.ts:125-133`); a test whose subject is a
+   * (`HocuspocusProviderWebsocket.ts:127-135`); a test whose subject is a
    * *closed* connection pushes it out of reach, so nothing it observes can be
    * explained by the client having come back.
    */
@@ -248,8 +248,8 @@ type FrameSink = { handleMessage: (data: Uint8Array) => void };
  * Resolve once `count` frames have reached the server on this connection.
  *
  * `handleMessage` is the library's own entry point for an incoming frame —
- * `ClientConnection.ts:579` before a connection is established,
- * `Connection.ts:245` after — and both queue the frame synchronously, so a
+ * `ClientConnection.ts:599` before a connection is established,
+ * `Connection.ts:244` after — and both queue the frame synchronously, so a
  * wrapper that delegates first and counts second reports arrival exactly. That
  * arrival is the only observable a test holding the server mid-flight has: a
  * frame sitting in a queue has fired no hook yet, which is the whole point of
@@ -271,7 +271,7 @@ function frameBarrier(target: FrameSink, count: number): Promise<void> {
  * read the server's own state instead of inferring it from a symptom.
  * `handleConnection` returns the `ClientConnection`, and the shipped build
  * carries `getPendingDocumentCount()` on it — the number
- * `ClientConnection.ts:612` enforces the ceiling from — whatever the published
+ * `ClientConnection.ts:638` enforces the ceiling from — whatever the published
  * declaration says about it being private.
  */
 type ServerConnection = FrameSink & { getPendingDocumentCount: () => number };
@@ -332,13 +332,13 @@ async function waitFor<T>(
   }
 }
 
-describe("ClientConnection.ts:426 — the pre-auth queue drains before `connected`", () => {
+describe("ClientConnection.ts:438-444 — the pre-auth queue drains before `connected`", () => {
   /**
    * A provider sends its token and then its first sync message without waiting
-   * to be told it was authenticated (`HocuspocusProvider.ts:537-543`), so those
+   * to be told it was authenticated (`HocuspocusProvider.ts:541-546`), so those
    * frames sit in `incomingMessageQueue` while `onAuthenticate` runs. They are
-   * handed to the `Connection` at `ClientConnection.ts:426-428` — *before* the
-   * `connected` hook at `:432`.
+   * handed to the `Connection` at `ClientConnection.ts:438-440` — *before* the
+   * `connected` hook at `:444`.
    *
    * The hub registers its per-room close logger inside `connected`
    * (`packages/hub/src/server.ts`), so anything that queued frame does — up to
@@ -392,13 +392,13 @@ describe("ClientConnection.ts:426 — the pre-auth queue drains before `connecte
   });
 });
 
-describe("ClientConnection.ts:516-546 — a refused token sets up no connection", () => {
+describe("ClientConnection.ts:529-585 — a refused token sets up no connection", () => {
   /**
    * `onAuthenticate` throwing takes the branch that answers `writePermissionDenied`
-   * and closes (`:516-566`); `setUpNewConnection` at `:546` never runs, so the
-   * frames the provider queued behind its token — the sync step it sent without
-   * waiting to be authenticated — are dropped with the connection rather than
-   * handed to a `Connection` afterwards.
+   * and clears document state (`:563-585`); `setUpNewConnection` at `:562` never
+   * runs. The frames the provider queued behind its token — the sync step it
+   * sent without waiting to be authenticated — are dropped with the refused
+   * document's state rather than handed to a `Connection` afterwards.
    *
    * The hub's protocol refusal rides entirely on that: it is the reason a
    * client the hub has decided not to talk to receives no document state at
@@ -448,7 +448,7 @@ describe("ClientConnection.ts:516-546 — a refused token sets up no connection"
   });
 });
 
-describe("ClientConnection pending-document counter", () => {
+describe("ClientConnection.ts:630-666 — pending-document admission", () => {
   /**
    * The hub states this ceiling itself (`MAX_PENDING_DOCUMENTS`, 100, in
    * `packages/hub/src/config.ts`) and the MCP client's attach budget is
@@ -678,10 +678,10 @@ describe("ClientConnection pending-document counter", () => {
   });
 });
 
-describe("MessageReceiver.ts:157 — the token dispatch is fire-and-forget", () => {
+describe("MessageReceiver.ts:174-179 — the token dispatch is fire-and-forget", () => {
   /**
    * An auth message on an established connection reaches
-   * `connection.callbacks.onTokenSyncCallback` at `MessageReceiver.ts:160`
+   * `connection.callbacks.onTokenSyncCallback` at `MessageReceiver.ts:177`
    * without an `await`, so the message loop moves on while the `onTokenSync`
    * hook is still running.
    *
@@ -734,7 +734,7 @@ describe("MessageReceiver.ts:157 — the token dispatch is fire-and-forget", () 
   });
 });
 
-describe("MessageReceiver.ts:189-280 — beforeSync gates apply and acknowledgement", () => {
+describe("MessageReceiver.ts:206-297 — beforeSync gates apply and acknowledgement", () => {
   /**
    * `beforeSync` runs after the sync subtype and payload have been decoded, but
    * before either mutating branch. Both branches send their positive sync
@@ -870,7 +870,7 @@ describe("MessageReceiver.ts:189-280 — beforeSync gates apply and acknowledgem
   });
 });
 
-describe("Server.ts:87-105 — onUpgrade refusal distinguishes empty rejection from an error", () => {
+describe("Server.ts:99-120 — onUpgrade refusal distinguishes empty rejection from an error", () => {
   /**
    * The HTTP server's async upgrade listener rethrows a truthy hook error. An
    * uncaught throw from that listener terminates Node, so a refusal cannot use
@@ -960,12 +960,13 @@ describe("Connection.ts:208 — close() clears neither the queue nor the in-flig
   });
 });
 
-describe("ClientConnection.ts:505-546 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
+describe("ClientConnection.ts:518-562 — onAuthenticate runs once, refreshes go to onTokenSync", () => {
   /**
-   * `onConnect` then `onAuthenticate` (`:505` and `:516`) run on the first auth
-   * message for a document, and only then is the connection set up (`:546`).
-   * A later auth message finds the connection established (`:448-453`,
-   * `:481`) and is routed to `onTokenSync` instead — the wiring at `:385-408`.
+   * `onConnect` then `onAuthenticate` (`:518` and `:529`) run on the first auth
+   * message for a document, and only then is the connection set up (`:562`).
+   * A later auth message finds the connection established (`:619-623`) and
+   * reaches `MessageReceiver.ts:174-179`, which dispatches to `onTokenSync`
+   * instead — the wiring at `ClientConnection.ts:397-420`.
    *
    * The hub's whole auth boundary is that shape: `onAuthenticate` is the one
    * place a token is checked before a room opens, and it never runs again on a
@@ -1014,10 +1015,10 @@ describe("ClientConnection.ts:505-546 — onAuthenticate runs once, refreshes go
   });
 });
 
-describe("MessageReceiver.ts:72-110 — awareness has no readOnly check", () => {
+describe("MessageReceiver.ts:72-124 — awareness has no readOnly check", () => {
   /**
    * The sync branches ask `connection.readOnly` before applying anything
-   * (`:217` and `:259`); the awareness branch does not. A read-only connection
+   * (`:234` and `:276`); the awareness branch does not. A read-only connection
    * therefore cannot write a character but can publish any awareness state it
    * likes, and the server fans it out to every other client.
    *
@@ -1063,27 +1064,23 @@ describe("MessageReceiver.ts:72-110 — awareness has no readOnly check", () => 
   });
 });
 
-describe("MessageReceiver.ts:88-107 — scratch re-encoding drops inbound awareness removals", () => {
+describe("MessageReceiver.ts:88-124 — scratch re-encoding relays inbound awareness removals", () => {
   /**
    * The inbound update is decoded into a throwaway Awareness and then encoded
-   * again from only the client ids that remain in it. A removal leaves no id to
-   * encode, so the document and its peers retain the client's last state. An
-   * ordinary update that keeps the client while dropping one field is relayed.
+   * again from the client ids that remain plus the removed ids from its metadata.
+   * Its synthetic empty local state is excluded. Both removing a single field
+   * and clearing the client's entire awareness state reach the document and peers.
    *
    * This is only the inbound MessageReceiver boundary. When a connection
    * closes, `Document.removeConnection` calls `removeAwarenessStates` on the
-   * document itself, and that hub-generated removal is broadcast — the event
-   * the web's departed-agent grace observes.
+   * document itself, and that hub-generated removal is also broadcast. Both
+   * departure paths reach the web's existing departed-agent grace.
    */
-  it("relays a key removal but not the client's awareness removal", async () => {
+  it("relays both a key removal and the client's own awareness removal", async () => {
     const room = randomUUID();
-    let tokenRefreshed = false;
 
-    const { port } = await startServer({
+    const { port, hocuspocus } = await startServer({
       onAuthenticate: async ({ token }) => ({ name: token }),
-      onTokenSync: async () => {
-        tokenRefreshed = true;
-      },
     });
 
     const sender = connect({ port, room, token: "sender" });
@@ -1111,17 +1108,15 @@ describe("MessageReceiver.ts:88-107 — scratch re-encoding drops inbound awaren
       return state?.name === "sender" && !("cursor" in state);
     });
 
-    // The token frame leaves after the removal on the same connection. The
-    // server drains that queue in order, so entering onTokenSync proves the
-    // removal has already passed through MessageReceiver without a timer.
     senderAwareness.setLocalState(null);
-    sender.provider.sendToken();
-    await waitUntil("the later token frame to reach the server", () =>
-      tokenRefreshed,
+    await waitUntil("the client's own removal to reach its peer", () =>
+      !observerAwareness.getStates().has(senderId),
     );
 
-    expect(observerAwareness.getStates().get(senderId)).toEqual({
-      name: "sender",
-    });
+    const document = hocuspocus.documents.get(room);
+    expect(document?.awareness.getStates().has(senderId)).toBe(false);
+    // A connected client withdrew its awareness: connection-close cleanup
+    // cannot explain the removal the observer just received.
+    expect(document?.getConnectionsCount()).toBe(2);
   });
 });
