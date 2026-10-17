@@ -2670,25 +2670,6 @@ h6.ub-heading {
   min-width: 0;
 }
 
-.ub-docs-open--topic {
-  flex-wrap: wrap;
-}
-
-.ub-docs-open--topic .ub-docs-title {
-  flex-basis: 100%;
-}
-
-.ub-docs-topic-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0 0.4rem 0.5rem;
-  color: var(--muted-foreground);
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
-  overflow-wrap: anywhere;
-}
-
 .ub-docs-group,
 .ub-docs-age {
   font-size: var(--type-small-size);
