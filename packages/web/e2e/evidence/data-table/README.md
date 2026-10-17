@@ -9,7 +9,8 @@ Revealed actions clear both table and footnote text, including at a 390px touch
 viewport. The ten-column timing workload and a thirty-column table scroll
 horizontally within their blocks.
 
-Both tables use horizontal rules, unshaded muted headers and compact body rows.
+Both tables use horizontal rules, unshaded headers slightly quieter than other
+muted text, and compact body rows.
 The touch proof covers [iPad light](ipad-light.png), [iPad dark](ipad-dark.png),
 [narrow iPad light](ipad-narrow-light.png) and [narrow iPad dark](ipad-narrow-dark.png)
 at 820px and 600px widths. It checks 44px Markdown cells and sort targets and
