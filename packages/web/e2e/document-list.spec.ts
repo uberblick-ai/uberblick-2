@@ -523,6 +523,10 @@ for (const touch of [false, true]) test(`tag measurement does not widen the docu
   }
   const title = docTitle("tagmeasurement");
   const writer = agent().open({ name: "tag-measurement-e2e" });
+  await expect.poll(async () => {
+    const catalog = await writer.call<{ complete: boolean; tags: Array<{ name: string }> }>("list_tags", {});
+    return catalog.complete && tags.every((name) => catalog.tags.some((tag) => tag.name === name));
+  }, { message: "The MCP writer receives all fixture tags" }).toBe(true);
   const created = await writer.call<{ tags: Array<{ name: string }> }>("create_doc", {
     title, description: "A row with more tags than its pane can fit.",
     blocks: [{ type: "paragraph", text: "All tags remain available through overflow." }], tags,

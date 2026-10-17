@@ -2474,9 +2474,11 @@ for (const scheme of ["light"] as const) {
         // Keep this stylesheet proof independent of navigation, copy feedback,
         // pressed modes and open-menu paint. The input remains a real touch tap.
         await tap.evaluate((element) => {
-          // DropdownMenu activates on pointerdown; leave the native default
-          // intact while isolating both primitive and product activation.
-          element.addEventListener("pointerdown", (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+          // DropdownMenu activates on pointerdown, Tabs on mousedown or focus.
+          // Leave native defaults intact while isolating primitive activation.
+          for (const type of ["pointerdown", "mousedown", "focusin"]) {
+            element.addEventListener(type, (event) => event.stopImmediatePropagation(), { capture: true, once: true });
+          }
           element.addEventListener("click", (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();
