@@ -110,7 +110,8 @@ A finding keeps its id across heads. Reopen a settled one only when changed
 code or new evidence invalidates how it was settled.
 
 When a PR settles a choice that passes
-[`delivery-policy.md`'s when-to-record test](delivery-policy.md#decision-records)
+the bundled MCP lifecycle help's initial-record threshold, under
+[delivery policy's authority route](delivery-policy.md#decision-records)
 but has no record, raise a finding; the reviewer does not draft it. The
 implementer supplies the complete record in the same PR under
 [`implementer.md`'s Decision records](../roles/implementer.md#decision-records),

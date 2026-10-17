@@ -208,18 +208,12 @@ it("routes decision answer guidance to lifecycle while keeping page context and 
     "Give the reason in one clause or sentence",
     "Keep the whole answer, across all its blocks, to 60 words or fewer",
     "editorial guidance, not a validated word limit",
-    "what is stored, what wins and what is refused",
-    "transactions, merge or conflict handling, function and key names, step-by-step write order",
-    "to the related regular page or the code",
+    "enduring question being decided", "only the context needed",
+    "An open record may instead hold a proposal or recommendation",
+    "extended rationale, alternatives and process in a linked RFC",
+    "archived and remain readable as historical context",
     "one to three answer blocks",
-    'For "How is deliberate TL;DR absence stored compatibly?"',
-    "Good — in-force answer", "Bad — superseded stance, abbreviated",
-    "Remove writes null and true in one transaction", "Y.Map whole-value conflict resolution",
   ]) expect(answers, rule).toContain(rule);
-  const good = "Keep the TL;DR as text or null, and store deliberate absence in a separate yes/no flag next to it. " +
-    "Text always wins: the flag only counts on a regular document with no TL;DR text. " +
-    "Older clients keep working, and nothing needs migrating.";
-  expect(answers).toContain(good);
   const outsideAnswers = lifecycle.replace(answers, "");
   expect(outsideAnswers).not.toMatch(/60 words|yes\/no flag|Y.Map whole-value conflict resolution/);
   expect(answers).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/);
@@ -492,4 +486,29 @@ it("documents opt-in line panels through data and insert_block help", async () =
     expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
       .toMatchObject({ text });
   }
+});
+
+it("makes the portable creation threshold discoverable through tools and identical help resources", async () => {
+  const rig = await local();
+  const { tools } = await rig.client.listTools();
+  const createDoc = tools.find(tool => tool.name === "create_doc")!;
+  expect(createDoc.description).toContain('get_help({topic: "lifecycle"})');
+  expect(createDoc.description).toContain("when to create");
+
+  const { text } = await rig.ok("get_help", { topic: "lifecycle" });
+  expect((await rig.client.readResource({ uri: "uberblick://help/lifecycle" })).contents[0])
+    .toMatchObject({ text });
+  const guidance = text.split("### When to create a decision record\n")[1]?.split("\n## ")[0];
+  expect(guidance).toContain("**all four**");
+  expect(guidance?.match(/^\d\. \*\*[^*]+\*\*/gm)).toEqual([
+    "1. **Significance:**", "2. **Meaningful alternatives:**",
+    "3. **Lasting consequences:**", "4. **Useful rationale:**",
+  ]);
+  expect(guidance).toContain("When in doubt, do not create a new topic");
+  expect(guidance).toContain("successor in the same topic");
+  expect(guidance).not.toMatch(/\n\|/);
+
+  const creationHelp = (await rig.ok("get_help", { topic: "create_doc" })).text;
+  expect(creationHelp).toContain("When to create a decision record");
+  expect(creationHelp).toContain("uberblick://help/lifecycle");
 });

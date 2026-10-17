@@ -16,7 +16,6 @@ import { discussionTarget } from "./discussion.js";
 
 const DECISION_GUIDANCE =
   "A decision title names the stable topic or question, never the answer; successors keep the title. " +
-  'Example: "Exact behavior of milestone setting `gate`", not "Milestone gate skips milestones with nothing to start". ' +
   "For decision answers, see lifecycle's Decision answers and topics section. " +
   "Answer blocks are distinct from recorded answer: {who, when, where}.";
 

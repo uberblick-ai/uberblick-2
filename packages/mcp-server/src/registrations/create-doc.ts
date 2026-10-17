@@ -11,7 +11,7 @@ export function registerCreateDoc(server: ToolRegistrar, context: ToolContext): 
     description:
       "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. " +
       "Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. " +
-      "Decision title names stable topic, never answer; successors keep it. Example: \"Exact behavior of milestone setting `gate`\", not \"Milestone gate skips milestones with nothing to start\". " +
+      "Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. " +
       "For decision answers, see lifecycle's Decision answers and topics section. " +
       "Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. " +
       "related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. " +
