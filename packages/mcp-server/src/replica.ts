@@ -43,6 +43,7 @@ import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
+import { WorkspaceRemovedError } from "./store.js";
 import { HubSync, type SyncWaitResult } from "./sync.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
@@ -240,6 +241,14 @@ export class Replicas {
 
   /** Refuse workspace reads and writes from state the log cannot restore. */
   assertHealthy(): void {
+    if (this.store.isRemoved()) {
+      this.persistenceFailure ??= {
+        room: directoryRoom(this.config.workspaceId),
+        error: new WorkspaceRemovedError(),
+      };
+      this.sync.quarantine();
+      throw new WorkspaceRemovedError();
+    }
     const failure = this.persistenceFailure;
     if (failure === null) {
       return;
@@ -875,6 +884,10 @@ export class Replicas {
    */
   async settle(options: { requireHealthy?: boolean } = {}): Promise<void> {
     const requireHealthy = options.requireHealthy !== false;
+    if (!requireHealthy && this.store.isRemoved()) {
+      this.sync.quarantine();
+      return;
+    }
     if (requireHealthy) {
       this.assertHealthy();
     }
@@ -972,6 +985,10 @@ export class Replicas {
 
   /** Await only durable local changes, leaving unrelated hydration out of shutdown. */
   async waitForPendingChanges(deadline: number): Promise<number> {
+    if (this.store.isRemoved()) {
+      this.sync.quarantine();
+      return 0;
+    }
     if (!this.sync.enabled || this.persistenceFailure !== null) {
       return this.store.pendingRooms().length;
     }

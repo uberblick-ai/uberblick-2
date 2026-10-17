@@ -1,10 +1,13 @@
 /** Project selection never borrows a workspace's hub from another binding. */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
+import { acquireServingReplicaRole } from "../../mcp-server/src/serving-role.js";
+import { startServer, testConfig } from "../../mcp-server/test/helpers.js";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
@@ -357,6 +360,287 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     const run = await runInProcess(["workspace", "list"], box);
     expect(run.status).not.toBe(0);
     expect(run.stderr).toContain(join(box.dataHome, "uberblick"));
+  });
+});
+
+describe("ub workspace remove", () => {
+  function databasePath(box: Sandbox, uuid = OTHER): string {
+    return join(box.dataHome, "uberblick", `${uuid}.sqlite`);
+  }
+
+  function replicaFiles(box: Sandbox, uuid = OTHER): string[] {
+    return ["", "-wal", "-shm", ".serving-lock"].map(suffix => `${databasePath(box, uuid)}${suffix}`);
+  }
+
+  function terminal(box: Sandbox, operand: string, answer: string): ReturnType<typeof runUbAsync> {
+    const preload = join(box.cwd, "remove-terminal.mjs");
+    writeFileSync(preload, `
+import { createRequire, syncBuiltinESMExports } from "node:module";
+const require = createRequire(import.meta.url);
+const readline = require("node:readline/promises");
+Object.defineProperty(process.stdin, "isTTY", { value: true });
+readline.createInterface = () => ({
+  question: async (prompt) => { process.stderr.write(prompt); return ${JSON.stringify(answer)}; },
+  close: () => {},
+});
+syncBuiltinESMExports();
+`, "utf8");
+    return runUbAsync(["workspace", "remove", operand], box, {
+      NODE_OPTIONS: `${box.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(preload).href}`.trim(),
+    });
+  }
+
+  it.each([OTHER, `notes-${OTHER}`, OTHER.slice(0, 8)])("removes %s and its sidecars without changing other state", async operand => {
+    const box = sandbox({
+      userConfig: { displayName: "Synthetic operator", hubAdmissions: { [HUB]: "device" } },
+      credentials: { hubLogins: { "https://hub.example.test": fixture([OTHER]) } },
+    });
+    bind(box);
+    record(box, WORKSPACE, HUB);
+    record(box, OTHER, HUB);
+    record(box, UNRELATED, null);
+    withDatabase(box, OTHER);
+    withDatabase(box, UNRELATED);
+    for (const path of replicaFiles(box).slice(1)) writeFileSync(path, "");
+    const otherProject = join(box.cwd, "other-project", ".uberblick.json");
+    mkdirSync(dirname(otherProject), { recursive: true });
+    writeFileSync(otherProject, JSON.stringify({ workspaceId: OTHER, hubUrl: HUB }));
+    const protectedPaths = [
+      join(box.cwd, ".uberblick.json"), otherProject,
+      join(box.configHome, "uberblick", "config.json"),
+      join(box.configHome, "uberblick", "credentials.json"), databasePath(box, UNRELATED),
+    ];
+    const before = protectedPaths.map(path => readFileSync(path));
+    const run = await runInProcess(["workspace", "remove", operand, "--yes"], box);
+    expect(run.status, run.output).toBe(0);
+    expect(replicaFiles(box).map(path => existsSync(path))).toEqual([false, false, false, false]);
+    expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
+    expect(readWorkspaceHub(UNRELATED, box.env)).toBeNull();
+    expect(protectedPaths.map(path => readFileSync(path))).toEqual(before);
+    const listed = await runInProcess(["workspace", "list", "--json"], box);
+    expect(listed.status, listed.output).toBe(0);
+    expect(JSON.parse(listed.stdout).map((entry: { uuid: string }) => entry.uuid)).not.toContain(OTHER);
+    const selected = await runInProcess(["workspace", "use", OTHER], box);
+    expect(selected.status, selected.output).toBe(1);
+    expect(selected.stderr).toContain("ub workspace use <link>");
+    expect(protectedPaths.map(path => readFileSync(path))).toEqual(before);
+  });
+
+  it.each(["database only", "record only"])("resolves a unique prefix from a %s workspace", async source => {
+    const box = sandbox();
+    if (source === "database only") withDatabase(box, OTHER);
+    else record(box, OTHER, null);
+    const run = await runInProcess(["workspace", "remove", OTHER.slice(0, 8), "--yes"], box);
+    expect(run.status, run.output).toBe(0);
+    expect(existsSync(databasePath(box))).toBe(false);
+    expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
+  });
+
+  it("refuses invalid, unknown and ambiguous operands using the complete inventory", async () => {
+    const box = sandbox();
+    withDatabase(box, WORKSPACE);
+    record(box, OTHER, null);
+    const files = [databasePath(box, WORKSPACE), workspaceRegistryPath(box.env), join(box.cwd, ".uberblick.json")];
+    const before = files.map(path => readFileSync(path));
+    for (const [operand, status, message] of [
+      ["my-notes", 2, "not a workspace id"],
+      ["ffff", 2, "ub workspace use <link>"],
+      [UNRELATED, 1, "ub workspace use <link>"],
+      ["4d8e", 2, "matches 2"],
+    ] as const) {
+      const run = await runInProcess(["workspace", "remove", operand, "--yes"], box);
+      expect(run.status, run.output).toBe(status);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain(message);
+      if (operand === "4d8e") {
+        expect(run.stderr).toContain(WORKSPACE);
+        expect(run.stderr).toContain(OTHER);
+      }
+      expect(files.map(path => readFileSync(path))).toEqual(before);
+    }
+  });
+
+  it.each(["project", "environment"])("refuses the workspace selected by %s even with --yes", async selection => {
+    const box = sandbox();
+    bind(box, `notes-${WORKSPACE}`);
+    const target = selection === "project" ? WORKSPACE : OTHER;
+    withDatabase(box, target);
+    record(box, target, null);
+    const files = [databasePath(box, target), workspaceRegistryPath(box.env), join(box.cwd, ".uberblick.json")];
+    const env = selection === "environment" ? { UB_WORKSPACE_ID: `notes-${OTHER}`, UB_HUB_URL: "local" } : {};
+    const status = await runInProcess(["workspace", "status"], box, env);
+    expect(status.stdout).toContain(target);
+    const before = files.map(path => readFileSync(path));
+    const run = await runInProcess(["workspace", "remove", target, "--yes"], box, env);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain("ub workspace use");
+    expect(run.stderr).toMatch(/another workspace|different workspace/);
+    expect(files.map(path => readFileSync(path))).toEqual(before);
+  });
+
+  it("allows removing a project binding's workspace when the environment selects another one", async () => {
+    const box = sandbox();
+    bind(box, WORKSPACE);
+    withDatabase(box, WORKSPACE);
+    record(box, WORKSPACE, HUB);
+    record(box, OTHER, null);
+    const before = readFileSync(join(box.cwd, ".uberblick.json"));
+    const run = await runInProcess(["workspace", "remove", WORKSPACE, "--yes"], box, {
+      UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local",
+    });
+    expect(run.status, run.output).toBe(0);
+    expect(existsSync(databasePath(box, WORKSPACE))).toBe(false);
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+    expect(readWorkspaceHub(OTHER, box.env)).toBeNull();
+    expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(before);
+  });
+
+  it("does not delete a replica when malformed records make the inventory incomplete", async () => {
+    const box = sandbox();
+    withDatabase(box, OTHER);
+    const registry = workspaceRegistryPath(box.env);
+    mkdirSync(dirname(registry), { recursive: true });
+    writeFileSync(registry, "{broken");
+    const run = await runInProcess(["workspace", "remove", OTHER.slice(0, 8), "--yes"], box);
+    expect(run.status, run.output).toBe(1);
+    expect(existsSync(databasePath(box))).toBe(true);
+    expect(readFileSync(registry, "utf8")).toBe("{broken");
+  });
+
+  it("keeps the running serving replica and its lock intact until it closes", async () => {
+    const box = sandbox();
+    record(box, OTHER, null);
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: OTHER }), "Served notes");
+    const path = databasePath(box);
+    const role = acquireServingReplicaRole(path, { pid: process.pid, sessionId: "remove-test-serving-session" });
+    const registry = readFileSync(workspaceRegistryPath(box.env));
+    // Closing a separate file descriptor in the holder would release its POSIX lock.
+    const lockFile = statSync(`${path}.serving-lock`);
+    try {
+      const run = await runUbAsync(["workspace", "remove", OTHER, "--yes"], box);
+      expect(run.status, run.output).toBe(1);
+      expect(run.stderr).toMatch(/serving|ub open/);
+      expect(existsSync(path)).toBe(true);
+      expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(registry);
+      expect(statSync(`${path}.serving-lock`).ino).toBe(lockFile.ino);
+      expect(() => acquireServingReplicaRole(path, { pid: process.pid, sessionId: "contender" })).toThrow(/already held/);
+    } finally {
+      role.close();
+    }
+    const removed = await runInProcess(["workspace", "remove", OTHER, "--yes"], box);
+    expect(removed.status, removed.output).toBe(0);
+    expect(replicaFiles(box).some(path => existsSync(path))).toBe(false);
+  });
+
+  it("removes a copy with live MCP sessions and refuses all their later writes without recreating it", async () => {
+    const box = sandbox();
+    record(box, OTHER, null);
+    const config = testConfig({ workspaceId: OTHER, databasePath: databasePath(box) });
+    const first = await startServer(config);
+    const sessions = [first];
+    try {
+      await first.ok("create_doc", { title: "Before removal", description: "A document saved before this computer removes its workspace." });
+      sessions.push(await startServer(config));
+      const removed = await runUbAsync(["workspace", "remove", OTHER, "--yes"], box);
+      expect(removed.status, removed.output).toBe(0);
+      expect(replicaFiles(box).some(path => existsSync(path))).toBe(false);
+      expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
+      for (const session of sessions) {
+        for (const title of ["Next write", "Later write"]) {
+          const refused = await session.call("create_doc", { title, description: "An attempted write after this computer removed its workspace." });
+          expect(refused.isError).toBe(true);
+          expect(refused.payload).toMatchObject({ applied: false, error: "workspace_removed" });
+          expect(refused.payload.message).toMatch(/workspace.*removed from this computer/i);
+        }
+      }
+    } finally {
+      for (const session of sessions) await session.close();
+    }
+    expect(replicaFiles(box).some(path => existsSync(path))).toBe(false);
+    expect(readWorkspaceHub(OTHER, box.env)).toBeUndefined();
+  });
+
+  it("requires --yes without a terminal and asks nothing", async () => {
+    const box = sandbox();
+    withDatabase(box, OTHER);
+    record(box, OTHER, null);
+    const before = readFileSync(workspaceRegistryPath(box.env));
+    const run = await runInProcess(["workspace", "remove", OTHER], box);
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain("--yes");
+    expect(run.output).not.toContain("[y/N]");
+    expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
+    expect(existsSync(databasePath(box))).toBe(true);
+  });
+
+  it.each(["", "n", "no", "sure", "y", "YeS"])("only y or yes authorizes terminal deletion: %j", async answer => {
+    const box = sandbox();
+    withDatabase(box, OTHER);
+    record(box, OTHER, null);
+    const run = await terminal(box, OTHER, answer);
+    expect(run.stderr).toContain("[y/N]");
+    const approved = /^(y|yes)$/i.test(answer);
+    expect(existsSync(databasePath(box))).toBe(!approved);
+    expect(readWorkspaceHub(OTHER, box.env)).toBe(approved ? undefined : null);
+    if (approved) expect(run.status, run.output).toBe(0);
+  });
+
+  it.each(["shared", "shared pending", "local", "unknown"])("explains the %s copy's loss before asking", async kind => {
+    const box = sandbox();
+    bind(box, WORKSPACE, "wss://override.example.test/ws");
+    if (kind !== "unknown") record(box, OTHER, kind === "local" ? null : HUB);
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: OTHER }), "Disposable notes");
+    if (kind !== "shared pending") {
+      const database = new DatabaseSync(databasePath(box));
+      try { database.exec("DELETE FROM pending_rooms"); }
+      finally { database.close(); }
+    }
+    const registry = workspaceRegistryPath(box.env);
+    const before = existsSync(registry) ? readFileSync(registry) : null;
+    const run = await terminal(box, OTHER, "no");
+    expect(run.stderr).toContain("[y/N]");
+    expect(run.stderr).toContain(OTHER);
+    if (kind.startsWith("shared")) {
+      expect(run.stderr).toContain("hub keeps");
+      expect(run.stderr).toContain("ub workspace use");
+      expect(run.stderr).toContain(`https://hub.example.test/${OTHER}`);
+      expect(run.stderr).not.toContain("override.example.test");
+      if (kind === "shared pending") {
+        expect(run.stderr).toMatch(/local changes.*not acknowledged/is);
+        expect(run.stderr).toContain("lost");
+      }
+    } else if (kind === "local") {
+      expect(run.stderr).toContain("only copy");
+    } else {
+      expect(run.stderr).toContain("cannot tell");
+      expect(run.stderr).toContain("may be the only copy");
+    }
+    expect(existsSync(databasePath(box))).toBe(true);
+    expect(existsSync(registry) ? readFileSync(registry) : null).toEqual(before);
+  });
+
+  it("prints missing-operand help on stderr and lets help bypass malformed state", async () => {
+    const box = sandbox({ raw: { projectBinding: "{broken" } });
+    const registry = workspaceRegistryPath(box.env);
+    mkdirSync(dirname(registry), { recursive: true });
+    writeFileSync(registry, "{broken");
+    const bare = await runInProcess(["workspace", "remove"], box);
+    expect(bare.status, bare.output).toBe(2);
+    expect(bare.stdout).toBe("");
+    expect(bare.stderr).toContain("usage: ub workspace remove");
+    expect(bare.stderr).toContain("--yes");
+    for (const args of [["--help"], [OTHER, "--yes", "--help"]]) {
+      const run = await runInProcess(["workspace", "remove", ...args], box);
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toContain("usage: ub workspace remove");
+      expect(run.stderr).toBe("");
+    }
+    const group = await runInProcess(["workspace"], box);
+    expect(group.stdout).toMatch(/^\s+remove\b/m);
+    expect(readFileSync(registry, "utf8")).toBe("{broken");
+    expect(readFileSync(join(box.cwd, ".uberblick.json"), "utf8")).toBe("{broken");
+    expect(existsSync(box.dataHome)).toBe(false);
   });
 });
 

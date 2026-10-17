@@ -4,7 +4,8 @@
  * Removing or replacing a live sidecar invalidates this file-based lock.
  */
 
-import { chmodSync, existsSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, openSync } from "node:fs";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const COORDINATION_TIMEOUT_MS = 5_000;
@@ -44,6 +45,55 @@ function isBusy(error: unknown): boolean {
   return typeof errcode === "number" && (errcode & 0xff) === 5;
 }
 
+function openServingLock(lockPath: string): {
+  lock: DatabaseSync;
+  assertCurrent(): void;
+} {
+  try {
+    // Close before SQLite locks the inode: closing a raw descriptor afterward
+    // would release this process's advisory locks held by another connection.
+    closeSync(openSync(lockPath, "wx", 0o600));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const identity = lstatSync(lockPath, { bigint: true });
+  const lock = new DatabaseSync(lockPath);
+  return {
+    lock,
+    assertCurrent() {
+      const current = lstatSync(lockPath, { bigint: true, throwIfNoEntry: false });
+      if (current === undefined || current.dev !== identity.dev || current.ino !== identity.ino) {
+        throw new Error("The workspace's serving lock changed; retry the command.");
+      }
+    },
+  };
+}
+
+/** Hold the same exclusion as ub open until synchronous removal finishes. */
+export function acquireWorkspaceRemovalRole(databasePath: string): { close(): void } {
+  const lockPath = `${databasePath}.serving-lock`;
+  mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
+  const { lock, assertCurrent } = openServingLock(lockPath);
+  try {
+    lock.exec("PRAGMA busy_timeout = 0");
+    lock.exec("BEGIN EXCLUSIVE");
+    assertCurrent();
+  } catch (error) {
+    lock.close();
+    if (isBusy(error)) {
+      throw new Error("a running `ub open` is serving this workspace; stop that run before removing it");
+    }
+    throw error;
+  }
+  return {
+    close() {
+      if (!lock.isOpen) return;
+      if (lock.isTransaction) lock.exec("ROLLBACK");
+      lock.close();
+    },
+  };
+}
+
 function parseHolder(value: unknown): ServingReplicaHolder | null {
   if (typeof value !== "string") return null;
   try {
@@ -76,7 +126,6 @@ export function acquireServingReplicaRole(
 
   const coordination = new DatabaseSync(databasePath);
   const lockPath = `${databasePath}.serving-lock`;
-  const freshLock = !existsSync(lockPath);
   let lock: DatabaseSync | null = null;
   let coordinating = false;
   let lockHeld = false;
@@ -93,8 +142,8 @@ export function acquireServingReplicaRole(
     }
     coordinating = true;
 
-    lock = new DatabaseSync(lockPath);
-    if (freshLock) chmodSync(lockPath, 0o600);
+    const opened = openServingLock(lockPath);
+    lock = opened.lock;
     lock.exec("PRAGMA busy_timeout = 0");
 
     try {
@@ -125,6 +174,10 @@ export function acquireServingReplicaRole(
         throw new ServingReplicaHeldError(databasePath, current);
       }
     }
+
+    // A remover can finish after this contender opened the old sidecar but
+    // before its transaction acquired it. Never serve under an unlinked lock.
+    opened.assertCurrent();
 
     coordination
       .prepare(

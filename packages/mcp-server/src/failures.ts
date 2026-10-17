@@ -18,6 +18,7 @@ import {
 import { log } from "./log.js";
 import { PersistenceError } from "./replica.js";
 import { ServerShuttingDownError } from "./server-work.js";
+import { WorkspaceRemovedError } from "./store.js";
 
 /** Keep unclassified exception text out of caller-visible failures. */
 export const INTERNAL_ERROR_MESSAGE =
@@ -237,6 +238,10 @@ const RECOVERIES: Record<string, Recovery> = {
       "The update log refused a write, so this server is fail-stopped: ordinary workspace tools refuse until the process is " +
       "restarted, and repeating this call now cannot succeed. Restart the MCP server, then re-read before writing " +
       "again — a refused write never became durable anywhere.",
+  },
+  workspace_removed: {
+    recoveryClass: "manual",
+    guidance: "Restart the MCP server to open a new copy of the workspace before writing again.",
   },
   stale_block: {
     recoveryClass: "reread",
@@ -550,6 +555,10 @@ function stamped(
 }
 
 export function toFailure(tool: string, error: unknown): ToolFailure {
+  if (error instanceof WorkspaceRemovedError ||
+    (error instanceof PersistenceError && error.cause instanceof WorkspaceRemovedError)) {
+    return stamped(tool, { error: "workspace_removed", message: new WorkspaceRemovedError().message });
+  }
   if (error instanceof ServerShuttingDownError) {
     return stamped(tool, { error: "server_shutting_down", message: error.message });
   }

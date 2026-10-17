@@ -23,6 +23,7 @@ const osSensitive = [
   "stdin-eof",
   "store",
   "store-open",
+  "workspace-removal",
 ];
 
 const osOnly = process.env.UB_TEST_SCOPE === "os";

@@ -114,7 +114,7 @@ export function createMcpServer(
         // handlers. Their local writes still need the live replica and log.
         await work.drain();
         const pending = await replicas.waitForPendingChanges(deadline - SHUTDOWN_CLOSE_RESERVE_MS);
-        if (replicas.sync.enabled && pending > 0) {
+        if (!store.isRemoved() && replicas.sync.enabled && pending > 0) {
           log.warn(`${pending} changes are still only local; they sync the next time Uberblick on this machine reaches the hub.`);
         }
         await workspace.close();

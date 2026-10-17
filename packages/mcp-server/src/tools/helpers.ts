@@ -53,6 +53,7 @@ export function roomStages(
     write: () => void,
   ): void => {
     write();
+    replicas.store.assertWorkspacePresent();
     const failure = replicas.persistenceError();
     if (failure === null) {
       completed.push({ purpose, room: target.room });

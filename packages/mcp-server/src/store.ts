@@ -1,4 +1,4 @@
-import { chmodSync, existsSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fstatSync, openSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createDataDirectory } from "@uberblick/mcp-server/storage";
@@ -309,6 +309,13 @@ export function readWorkspaceName(databasePath: string, workspaceId: string): st
   }
 }
 
+export class WorkspaceRemovedError extends Error {
+  constructor() {
+    super("The workspace was removed from this computer. Restart the MCP server to open a new copy.");
+    this.name = "WorkspaceRemovedError";
+  }
+}
+
 /**
  * Check an existing replica without opening the write-capable store. Replaying
  * into bare Y.Docs validates its authoritative state without replica repairs,
@@ -372,6 +379,13 @@ export class MirrorStore {
   readonly databasePath: string;
 
   private readonly db: DatabaseSync;
+
+  /** Hold the original inode so a replacement at the same path cannot reuse it. */
+  private identityFd: number | null = null;
+
+  private readonly fileIdentity: { dev: bigint; ino: bigint } | null;
+
+  private removed = false;
 
   /**
    * Wake after same-process commits: data_version detects only other connections,
@@ -450,7 +464,27 @@ export class MirrorStore {
       createDataDirectory(dirname(databasePath));
     }
 
-    this.db = new DatabaseSync(databasePath);
+    this.fileIdentity = null;
+    let opened: DatabaseSync | undefined;
+    try {
+      if (durable) {
+        this.identityFd = openSync(databasePath, "a+", 0o600);
+        this.fileIdentity = fstatSync(this.identityFd, { bigint: true });
+      }
+      opened = new DatabaseSync(databasePath);
+      this.db = opened;
+      // Bind the SQLite open to the identity held before it; replacement during
+      // startup must fail before any schema, WAL or workspace-claim writes.
+      this.assertWorkspacePresent();
+    } catch (error) {
+      try {
+        opened?.close();
+      } finally {
+        if (this.identityFd !== null) closeSync(this.identityFd);
+        this.identityFd = null;
+      }
+      throw error;
+    }
     // Only a file this constructor created, and before the WAL exists, so the
     // -wal and -shm files SQLite creates beside it inherit the same mode.
     if (fresh) {
@@ -726,6 +760,7 @@ export class MirrorStore {
     payload: Uint8Array,
     origin: UpdateOrigin,
   ): number {
+    this.assertWorkspacePresent();
     const seq = this.appendTx(room, payload, origin);
     for (const listener of [...this.appendListeners]) {
       try {
@@ -781,6 +816,7 @@ export class MirrorStore {
    * the caller, rather than preventing the replica from opening.
    */
   recordLastSync(timestamp: number): void {
+    this.assertWorkspacePresent();
     this.db
       .prepare(
         "INSERT INTO meta (key, value) VALUES ('last_sync_at', ?) " +
@@ -837,6 +873,7 @@ export class MirrorStore {
    * state but still pruning the prefix it covers.
    */
   compact(room: string, state: Uint8Array, throughSeq: number): boolean {
+    this.assertWorkspacePresent();
     return this.compactTx(room, state, throughSeq);
   }
 
@@ -850,6 +887,7 @@ export class MirrorStore {
 
   /** Clear only acknowledged throughSeq; leave newer peer updates pending. */
   clearPending(room: string, throughSeq: number): void {
+    this.assertWorkspacePresent();
     this.statements.clearPending.run(room, throughSeq);
   }
 
@@ -882,6 +920,7 @@ export class MirrorStore {
     throughSeq: number,
     catalogThroughSeq = 0,
   ): void {
+    this.assertWorkspacePresent();
     this.indexTx(doc, throughSeq, catalogThroughSeq);
   }
 
@@ -892,11 +931,13 @@ export class MirrorStore {
 
   /** Archived docs must leave search, but retain their authoritative room log. */
   unindexDoc(uuid: string): void {
+    this.assertWorkspacePresent();
     this.unindexTx(uuid);
   }
 
   /** Only positive directory deletion evidence authorizes removing authoritative rows. */
   purgeDoc(room: string, uuid: string): void {
+    this.assertWorkspacePresent();
     const tables = [
       ["updates", "room", room], ["snapshots", "room", room],
       ["pending_rooms", "room", room], ["doc_index", "uuid", uuid],
@@ -924,6 +965,7 @@ export class MirrorStore {
 
   /** All index rows are disposable caches; rebuild from log-hydrated replicas. */
   clearDerived(): void {
+    this.assertWorkspacePresent();
     transactional(this.db, () => {
       this.db.exec(
         "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
@@ -1152,11 +1194,28 @@ export class MirrorStore {
     }, "immediate")();
   }
 
+  /** Removal remains sticky even after a fresh copy appears at the same path. */
+  isRemoved(): boolean {
+    if (!this.removed && this.fileIdentity !== null) {
+      const current = statSync(this.databasePath, { bigint: true, throwIfNoEntry: false });
+      this.removed = current === undefined || current.dev !== this.fileIdentity.dev ||
+        current.ino !== this.fileIdentity.ino;
+    }
+    return this.removed;
+  }
+
+  assertWorkspacePresent(): void {
+    if (this.isRemoved()) throw new WorkspaceRemovedError();
+  }
+
   /** Both server shutdown and the supplying owner may close; keep it idempotent. */
   close(): void {
     this.appendListeners.clear();
-    if (this.db.isOpen) {
-      this.db.close();
+    try {
+      if (this.db.isOpen) this.db.close();
+    } finally {
+      if (this.identityFd !== null) closeSync(this.identityFd);
+      this.identityFd = null;
     }
   }
 }

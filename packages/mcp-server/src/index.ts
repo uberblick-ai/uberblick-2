@@ -20,7 +20,7 @@ export type {
   McpEngineOptions,
   UberblickMcpEngine,
 } from "./engine.js";
-export { ServingReplicaHeldError } from "./serving-role.js";
+export { acquireWorkspaceRemovalRole, ServingReplicaHeldError } from "./serving-role.js";
 export type {
   ServingReplicaHolder,
   ServingReplicaRole,

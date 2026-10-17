@@ -37,6 +37,7 @@ const osSensitive = [
   "storage",
   "storage-layout",
   "update",
+  "workspace",
   "workspace-create",
   "workspace-main-repository",
   "workspace-promotion",
