@@ -1675,6 +1675,10 @@ h6.ub-heading {
   background: var(--accent);
 }
 
+@media (any-pointer: coarse) {
+  .ub-decisions-row { min-block-size: 44px; }
+}
+
 .ub-decisions-question {
   grid-column: 2;
   min-inline-size: 0;

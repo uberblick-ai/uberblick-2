@@ -192,7 +192,7 @@ async function expectHeaderContained(page: Page): Promise<void> {
 
 for (const touch of [false, true]) {
   const appearance = touch ? "dark" : "light";
-  test(`related Decisions links and layout on ${touch ? "iPad touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
+  test(`related Decisions links and layout on ${touch ? "iPad touch @webkit-touch" : "desktop keyboard and pointer"} in ${appearance}`, async ({ browser }) => {
     const writer = session();
     const related = await create(writer, "Supporting page", "Supporting guidance.");
     const owner = await create(writer, "Page with its own decisions", "Regular page guidance.", {
@@ -266,6 +266,10 @@ for (const touch of [false, true]) {
     await expect(block(page)).toHaveAttribute("id", `decisions-${owner.uuid}`);
     const rows = block(page).locator(".ub-decisions-row");
     await expect(rows).toHaveCount(6);
+    expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+    const rowHeights = await rows.evaluateAll((links) => links.map((link) => link.getBoundingClientRect().height));
+    if (touch) expect(Math.min(...rowHeights)).toBeGreaterThanOrEqual(44);
+    else expect(Math.max(...rowHeights)).toBeLessThan(44);
     await expect.poll(() => rows.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))).toEqual([
       "Conflict: Conflict question",
       "Under review: Review question",
