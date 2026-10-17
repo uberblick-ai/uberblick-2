@@ -2512,9 +2512,9 @@ for (const scheme of ["light"] as const) {
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
       }
       await page.getByRole("button", { name: "All documents", exact: true }).click();
-      for (const selector of [".ub-docs-tab", ".ub-docs-sort"]) {
-        for (const control of await page.locator(selector).all()) await check(control);
-      }
+      for (const control of await page.locator(".ub-docs-tab").all()) await check(control);
+      await page.getByRole("tab", { name: /^Documents/ }).click();
+      for (const control of await page.locator(".ub-docs-sort").all()) await check(control);
       const row = page.locator(".ub-docs-row").first();
       // The pin's hover/reveal treatment is outside this sample.
       await check(row.locator(".ub-docs-open"), row);
