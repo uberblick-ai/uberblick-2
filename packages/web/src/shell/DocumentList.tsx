@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import { decisionCurrentRecord, decisionTopicState, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
+import { decisionCurrentRecord, readDirectoryTags, resolveDecisionTopics } from "@uberblick/schema";
 import type { DecisionTopicState, DirectoryEntry, SidebarGroup, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import type { RoomConnection } from "../collab/rooms.js";
 import { useRoomStatus } from "../ui/hooks.js";
@@ -14,13 +14,8 @@ import { useTagCatalog } from "../ui/tags.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/shadcn/popover.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/shadcn/tabs.js";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/shadcn/tooltip.js";
-import type { DocumentSearchClient } from "./document-search.js";
-
-/** Invalid Date ranges read as absent: a dash, last by changed, ordinary title order. */
-function usableStamp(at: number | undefined): number | undefined {
-  if (at === undefined) return undefined;
-  return Number.isFinite(new Date(at).getTime()) ? at : undefined;
-}
+import { documentSearchRows, rankDocumentSearchRows, usableDocumentStamp, useDocumentSearch } from "./document-search-results.js";
+import type { DocumentSearchSource } from "./document-search-results.js";
 
 /** Use code-unit title/UUID order so the list and list_docs agree across replicas. */
 function byTitle(a: DirectoryEntry, b: DirectoryEntry): number {
@@ -99,8 +94,6 @@ function topicStage(state: DecisionTopicState): Stage {
   return state === "in-force" || state === "agent-stance" ? "in-effect" : "under-discussion";
 }
 
-type ListRow = DirectoryEntry & { topicState?: DecisionTopicState; pinned: boolean; groupName: string | undefined; recordIds: readonly string[] };
-
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
   return mode === "working" ? entry.kind === undefined : entry.kind === mode;
 }
@@ -121,8 +114,8 @@ export function sortDirectory<T extends DirectoryEntry>(
     );
   }
   return [...entries].sort((a, b) => {
-    const left = usableStamp(a.updatedAt);
-    const right = usableStamp(b.updatedAt);
+    const left = usableDocumentStamp(a.updatedAt);
+    const right = usableDocumentStamp(b.updatedAt);
     if (left === undefined || right === undefined) {
       if (left === right) return byTitle(a, b);
       return left === undefined ? 1 : -1;
@@ -278,24 +271,6 @@ function RowTags({ tags, title, onPick }: { tags: readonly TagCatalogEntry[]; ti
   );
 }
 
-type ListSearchClient = Pick<DocumentSearchClient, "search"> | null;
-
-function useListSearch(query: string, client: ListSearchClient, entries: readonly DirectoryEntry[]): { hits: readonly string[]; unavailable: boolean; pending: boolean } {
-  const [result, setResult] = useState<{ query: string; client: ListSearchClient; entries: readonly DirectoryEntry[]; hits: string[]; unavailable: boolean } | null>(null);
-  useEffect(() => {
-    if (query === "" || client === null) return;
-    const request = new AbortController();
-    void client.search(query, request.signal).then(
-      (hits) => { if (!request.signal.aborted) setResult({ query, client, entries, hits, unavailable: false }); },
-      () => { if (!request.signal.aborted) setResult({ query, client, entries, hits: [], unavailable: true }); },
-    );
-    return () => request.abort();
-  }, [query, client, entries]);
-  const current = result?.query === query && result.client === client ? result : null;
-  const unavailable = query !== "" && (client === null || current?.unavailable === true);
-  return { hits: current?.hits ?? [], unavailable, pending: query !== "" && !unavailable && current === null };
-}
-
 function noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced, hasFilters, hasDocuments }: { mode: Mode; stateFilter: StateFilter; selectedLabels: readonly string[]; query: string; synced: boolean; hasFilters: boolean; hasDocuments: boolean }): string {
   if (hasFilters) return `No ${MODE_EMPTY_LABELS[mode]}${synced ? "" : " synced so far"}${mode === "decision" && stateFilter !== "all" ? ` with state "${STATE_LABELS[stateFilter]}"` : ""}${selectedLabels.length === 0 ? "" : ` tagged ${selectedLabels.map((label) => `"${label}"`).join(" or ")}`}${query.trim() === "" ? "." : ` match "${query}".`}`;
   if (hasDocuments) return synced ? "No documents in this workspace." : "No documents among the documents synced so far.";
@@ -340,7 +315,7 @@ export function DocumentList({
   /** The sidebar as it stands: which group, if any, a row is pinned in. */
   groups: readonly SidebarGroup[];
   catalog?: RoomConnection | null;
-  searchClient?: ListSearchClient;
+  searchClient?: DocumentSearchSource;
   onSelect: (uuid: string) => void;
   /** Pin or unpin a row, or null until the sidebar is writable and synced. */
   onTogglePin: ((uuid: string) => void) | null;
@@ -361,7 +336,7 @@ export function DocumentList({
   const selectedIds = selectedAssignments.map((tag) => tag.id);
   const selectedLabels = selectedAssignments.map((tag) => tag.name ?? "Unknown tag");
   const searchText = query.trim();
-  const { hits, unavailable: searchUnavailable, pending: searchPending } = useListSearch(searchText, searchClient, entries);
+  const { hits, unavailable: searchUnavailable, pending: searchPending } = useDocumentSearch(searchText, searchClient, entries);
   // Browser history may contain a type removed by a newer client.
   const mode: Mode = listState.mode === "decision" ? "decision" : "working";
   const updateState = (patch: Partial<DocumentListState>): void => {
@@ -370,54 +345,18 @@ export function DocumentList({
     onStateChange?.(next);
   };
   const now = useTimestampClock();
-  /** Read actual sidebar groups; first group wins if a UUID appears twice. */
-  const groupOf = useMemo(() => {
-    const named = new Map<string, string>();
-    for (const group of groups) {
-      for (const uuid of group.docs) if (!named.has(uuid)) named.set(uuid, group.name);
-    }
-    return named;
-  }, [groups]);
-  const modeRows = useMemo<ListRow[]>(() => {
-    if (mode !== "decision") return entries.filter((entry) => !entry.deleted && inMode(entry, mode))
-      .map((entry) => ({ ...entry, pinned: groupOf.has(entry.uuid), groupName: groupOf.get(entry.uuid), recordIds: [entry.uuid] }));
-    return resolveDecisionTopics(entries).filter((topic) => !topic.archived).flatMap((topic) => {
-      const current = decisionCurrentRecord(topic);
-      if (current === null) return [];
-      const stamps = topic.records.flatMap((record) => {
-        const stamp = usableStamp(record.updatedAt);
-        return stamp === undefined ? [] : [stamp];
-      });
-      const pinnedRecord = topic.records.find((record) => groupOf.has(record.uuid));
-      return [{
-        uuid: topic.topic,
-        title: current.title,
-        tags: current.tags,
-        kind: "decision" as const,
-        topicState: decisionTopicState(topic),
-        approvalChanged: [topic.inForce, ...topic.conflicts].some((record) => record?.approvalChanged === true),
-        ...(stamps.length === 0 ? {} : { updatedAt: Math.max(...stamps) }),
-        pinned: pinnedRecord !== undefined,
-        groupName: pinnedRecord === undefined ? undefined : groupOf.get(pinnedRecord.uuid),
-        recordIds: topic.records.map((record) => record.uuid),
-      }];
-    });
-  }, [entries, mode, groupOf]);
+  const modeRows = useMemo(() => documentSearchRows(entries, groups).filter((entry) => inMode(entry, mode)), [entries, groups, mode]);
   const rowTags = useMemo(() => new Map(modeRows.map((entry) => [entry.uuid, catalog === null ? [] : readDirectoryTags(entry, catalog.connection.ydoc)])), [modeRows, catalog]);
-  const ranks = useMemo(() => new Map(hits.map((uuid, rank) => [uuid, rank])), [hits]);
   const rows = useMemo(
     () => {
       const filtered = modeRows.filter((entry) => (selectedIds.length === 0 || (rowTags.get(entry.uuid) ?? []).some((tag) => selectedIds.includes(tag.id))) && (mode !== "decision" || stateFilter === "all"
         || (stateFilter === "changed-after-approval" ? entry.approvalChanged : entry.topicState === stateFilter)));
       if (searchText === "") return sortDirectory(filtered, sort.order, sort.direction);
       if (searchUnavailable || searchPending) return [];
-      const ranked = filtered.flatMap((entry) => {
-        const recordRanks = entry.recordIds.flatMap((uuid) => { const rank = ranks.get(uuid); return rank === undefined ? [] : [rank]; });
-        return recordRanks.length === 0 ? [] : [{ entry, rank: Math.min(...recordRanks) }];
-      }).sort((left, right) => left.rank - right.rank).map(({ entry }) => entry);
+      const ranked = rankDocumentSearchRows(filtered, hits);
       return relevance ? ranked : sortDirectory(ranked, sort.order, sort.direction);
     },
-    [modeRows, mode, searchText, searchUnavailable, searchPending, ranks, selectedIds, rowTags, stateFilter, sort, relevance],
+    [modeRows, mode, searchText, searchUnavailable, searchPending, hits, selectedIds, rowTags, stateFilter, sort, relevance],
   );
   const hasFilters = searchText !== "" || mode === "decision" || selectedTags.length > 0 || stateFilter !== "all";
   const emptyMessage = noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced: status.synced, hasFilters, hasDocuments: entries.some((entry) => !entry.deleted) });

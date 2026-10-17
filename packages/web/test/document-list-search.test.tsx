@@ -6,6 +6,7 @@ import type { DirectoryEntry } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../src/shell/DocumentList.js";
 import type { DocumentListState } from "../src/shell/DocumentList.js";
+import { documentSearchRows, rankDocumentSearchRows } from "../src/shell/document-search-results.js";
 import { act, renderSettled } from "./react-render.js";
 
 const ONE = "00000000-0000-4000-8000-000000000001";
@@ -181,6 +182,24 @@ it("ranks a decision topic by its best record, keeps one current row and maps th
   }));
   expect(titles(container)).toEqual(["Current", "Another topic"]);
   expect(container.textContent).not.toContain("Current answer");
+});
+
+it("merges documents and current decision topics in shared relevance order while excluding archives", () => {
+  const archivedTopic = "00000000-0000-4000-8000-000000000005";
+  const archivedSuccessor = "00000000-0000-4000-8000-000000000006";
+  const rows = documentSearchRows([
+    entry(ONE, "Historical answer", { kind: "decision", status: "decided", createdAt: 1 }),
+    entry(TWO, "Current answer", { kind: "decision", status: "decided", topic: ONE, supersedes: ONE, createdAt: 2 }),
+    entry(THREE, "Document"),
+    entry(FOUR, "Archived document", { deleted: true }),
+    entry(archivedTopic, "Archived topic", { kind: "decision", status: "decided", deleted: true }),
+    entry(archivedSuccessor, "Archived successor", { kind: "decision", status: "decided", topic: archivedTopic, supersedes: archivedTopic }),
+  ]);
+  const ranked = rankDocumentSearchRows(rows, [FOUR, archivedSuccessor, ONE, THREE, TWO]);
+  expect(ranked.map(({ uuid, title, kind }) => ({ uuid, title, kind }))).toEqual([
+    { uuid: ONE, title: "Current answer", kind: "decision" },
+    { uuid: THREE, title: "Document", kind: undefined },
+  ]);
 });
 
 it("combines type, state, query and OR tags; a chip replaces tags and clears no other filter", async () => {

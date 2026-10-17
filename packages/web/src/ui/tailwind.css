@@ -21,6 +21,7 @@
 @source "./comments/CommentComposer.tsx";
 @source "./sidebar/Sidebar.tsx";
 @source "./App.tsx";
+@source "./CommandPalette.tsx";
 @source "./document/RemoteHubGuide.tsx";
 @source "./comments/ThreadsPane.tsx";
 @source "./editor-controls/BlockMenu.tsx";

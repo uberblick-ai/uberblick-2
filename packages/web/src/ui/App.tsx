@@ -77,6 +77,7 @@ import { DevicesSettings } from "./settings/DevicesSettings.js";
 import { createAccountClient } from "../shell/account.js";
 import { DocumentList, INITIAL_DOCUMENT_LIST_STATE } from "../shell/DocumentList.js";
 import type { DocumentListState } from "../shell/DocumentList.js";
+import { CommandPalette } from "./CommandPalette.js";
 import { createDocumentSearchClient } from "../shell/document-search.js";
 import {
   allPath,
@@ -1018,6 +1019,8 @@ export function App(): ReactElement {
 
   return (
     <main className="ub-app flex h-dvh flex-col">
+      {workspace !== null && <CommandPalette key={workspace.uuid} entries={allEntries} searchClient={documentSearch ?? null}
+        writable={directoryStatus.writable} onSelect={onSelect} onCreate={onCreate} />}
       <ReboundNotice serving={startupServing} />
       {servingStatus?.replicaUnavailable && (
         <p className="ub-replica-unavailable" role="status">
