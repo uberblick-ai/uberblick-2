@@ -1,13 +1,15 @@
 /**
  * What a tool accepts — and what it refuses before it has done anything.
  *
- * Four claims are defended here, all of them about the boundary rather than
+ * Five claims are defended here, all of them about the boundary rather than
  * about any handler:
  *
  * - **A field nobody declared is refused, not dropped.** A stripped key is an
  *   input the caller believes it sent; ignoring `pinned: true` or a misspelled
  *   mutation field would claim success without performing the requested write.
  *   A refusal must leave the durable update log unchanged.
+ * - **Omitted arguments mean an empty object.** Optional fields may be absent;
+ *   required fields are still refused before the handler runs.
  * - **`create_doc` lifecycle shapes select exactly one branch.** An omitted
  *   kind is ordinary; an explicit kind selects only its matching record shape.
  * - **`annotate` is two shapes, never a mixture.** Opening a thread names a
@@ -22,7 +24,7 @@
  * `sidebar.test.ts` and the schema package, and is not retested here.
  */
 
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { removeTempDirs, startServer, testConfig } from "./helpers.js";
 import type { Rig } from "./helpers.js";
 
@@ -66,6 +68,38 @@ afterEach(async () => {
 
 afterAll(() => {
   removeTempDirs();
+});
+
+describe("omitted arguments", () => {
+  it.each(["sync_status", "get_help"])("calls %s like an explicit empty object", async (name) => {
+    const rig = await localRig();
+    // Use the client directly: rig.call supplies an empty object by default.
+    const omitted = await rig.client.callTool({ name });
+    const explicit = await rig.client.callTool({ name, arguments: {} });
+
+    expect(omitted.isError).not.toBe(true);
+    expect(omitted).toEqual(explicit);
+  });
+
+  it("still refuses required arguments before the handler runs", async () => {
+    const rig = await localRig();
+    const logged = rig.instance.store.logSize();
+    // A workspace operation starts by settling; schema refusal never gets there.
+    const settle = vi.spyOn(rig.instance.replicas, "settle");
+    try {
+      const omitted = await rig.client.callTool({ name: "create_doc" });
+      const explicit = await rig.client.callTool({ name: "create_doc", arguments: {} });
+
+      expect(omitted).toEqual(explicit);
+      expect(omitted.isError).toBe(true);
+      expect(omitted.structuredContent).toBeUndefined();
+      expect(omitted.content).toEqual([{ type: "text", text: expect.stringContaining("Invalid arguments") }]);
+      expect(settle).not.toHaveBeenCalled();
+      expect(rig.instance.store.logSize()).toBe(logged);
+    } finally {
+      settle.mockRestore();
+    }
+  });
 });
 
 describe("unknown fields", () => {
