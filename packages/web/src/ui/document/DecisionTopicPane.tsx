@@ -85,8 +85,8 @@ function RecordedAttribution({ record, state, now }: {
   </span>;
 }
 
-function TopicNotice({ topic, state: selectedState, docLinks }: {
-  topic: DecisionTopicResolution; state: AnswerState; docLinks: DocLinkContext | null;
+function TopicNotice({ topic, state: selectedState, selectedInForce, docLinks }: {
+  topic: DecisionTopicResolution; state: AnswerState; selectedInForce: boolean; docLinks: DocLinkContext | null;
 }): ReactElement | null {
   const state = decisionTopicState(topic);
   if (state === "conflict") return <p className="ub-decision-notice" data-state={state}>
@@ -99,7 +99,8 @@ function TopicNotice({ topic, state: selectedState, docLinks }: {
       {latestOpen?.discussion && <> <DocumentReference uuid={latestOpen.discussion} label="Open proposal" context={docLinks} className="ub-decision-notice-action" /></>}
     </p>;
   }
-  if (state !== "under-review") return null;
+  // Other selections carry their own state in the pill and the return banner.
+  if (state !== "under-review" || !selectedInForce) return null;
   const single = topic.pending.length === 1 ? topic.pending[0] : undefined;
   return <p className="ub-decision-notice" data-state={state}>
     <span>{selectedState !== state && <><strong>Under review.</strong>{" "}</>}
@@ -133,7 +134,7 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
   const replacement = state === "superseded" ? replacementRecord(topic, record.uuid) : undefined;
   const replacedAt = replacement?.decidedAt === undefined ? null : formatTimestamp(replacement.decidedAt, now, true);
   return <>
-    <TopicNotice topic={topic} state={state} docLinks={docLinks} />
+    <TopicNotice topic={topic} state={state} selectedInForce={topic.inForce?.uuid === record.uuid} docLinks={docLinks} />
     {(state === "superseded" || (topic.inForce !== null && topic.inForce.uuid !== record.uuid)) &&
       <div className="ub-decision-return" role="status">
         {state === "superseded" && <span className="ub-decision-earlier-answer">

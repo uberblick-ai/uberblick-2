@@ -714,7 +714,7 @@ for (const { touch, appearance } of [
     await selected(page, pending.uuid, answerText(pending));
     await selectedRfc(page, rfc, "Replacement RFC");
     await answerHeader(page, "Under review", "under-review");
-    await expect(page.locator(".ub-decision-notice")).toHaveText("The current answer stays in force. Open proposal");
+    await expect(page.locator(".ub-decision-notice")).toHaveCount(0);
     await expect(page.locator(".ub-decision-attribution")).toHaveText(/^Opened (just now|\d+ (minute|hour|day|week|month|year)s? ago)$/);
     await expect(page.locator(".ub-decision-answer-history")).toBeVisible();
     await activateControl(page.getByRole("link", { name: "Go to the current answer", exact: true }), { touch });

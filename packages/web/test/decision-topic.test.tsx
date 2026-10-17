@@ -659,7 +659,7 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).textContent).toContain("Use the current answer.");
     await choose(host, NEXT);
     expectAnswerState(host, "Under review");
-    expect(host.querySelector(".ub-decision-notice")?.textContent).toBe("2 pending proposals.");
+    expect(host.querySelector(".ub-decision-notice")).toBeNull();
   });
 
   it.each([
@@ -672,14 +672,8 @@ describe("decision topic navigation and history", () => {
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(true);
     const returnLink = within(host).getByRole("link", { name: "Go to the current answer" });
     expect(returnLink.getAttribute("href")).toBe(docPath(WORKSPACE, FIRST));
-    if (uuid === OPEN) {
-      expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("The current answer stays in force.");
-      expect(host.querySelector(".ub-decision-notice")?.textContent).not.toContain("Under review");
-      expect(within(host).getByRole("link", { name: "Open proposal" }).getAttribute("href")).toBe(docPath(WORKSPACE, RFC));
-      expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Under review");
-    } else {
-      expect(host.querySelector(".ub-decision-notice")?.textContent).toContain("Under review.");
-    }
+    expect(host.querySelector(".ub-decision-notice")).toBeNull();
+    if (uuid === OPEN) expect(item(host, OPEN).querySelector(".ub-decision-answer-state")?.textContent).toBe("Under review");
     await act(async () => returnLink.click());
     expectAnswerState(host, "In force");
     expect(answer(host).classList.contains("ub-decision-answer-history")).toBe(false);
