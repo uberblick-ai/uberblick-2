@@ -101,13 +101,13 @@ test("the workspace address is the list, and it holds what another browser creat
   await reader.keyboard.press("Space");
   await expect(listedTitles(reader)).toHaveText([second, first]);
 
-  const filterField = reader.getByRole("searchbox", {
-    name: "Search",
-  });
-  // The width of the table it narrows, resolved by the browser's own layout.
-  const box = await filterField.boundingBox();
+  // Search and the tag filter span the table they narrow: search starts at
+  // the table's left edge and the last filter ends at its right edge.
+  const box = await reader.locator(".ub-docs-search-label").boundingBox();
+  const lastFilter = await reader.getByRole("button", { name: "Filter by tags", exact: true }).boundingBox();
   const tableBox = await table.boundingBox();
-  expect(box?.width).toBeCloseTo(tableBox?.width ?? 0, 0);
+  expect(box?.x).toBeCloseTo(tableBox?.x ?? 0, 0);
+  expect((lastFilter?.x ?? 0) + (lastFilter?.width ?? 0)).toBeCloseTo((tableBox?.x ?? 0) + (tableBox?.width ?? 0), 0);
 
   // The sidebar's fixed entry is the same list at its own address.
   const entry = reader.getByRole("button", { name: "All documents" });
@@ -128,13 +128,13 @@ test("the workspace address is the list, and it holds what another browser creat
     sort: { order: "title", direction: "descending" },
   }, ""), first);
   await linked.reload();
-  await expect(linked.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(linked.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
   await expect(linked.getByRole("button", { name: "Product", exact: true })).toHaveCount(0);
   await expect(listedTitles(linked)).toHaveText([first]);
   await linked.locator(".ub-docs-open").click();
   await expect(linked.locator(".ub-editor .ProseMirror")).toBeVisible();
   await linked.goBack();
-  await expect(linked.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(linked.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
   await expect(linked.getByRole("searchbox", { name: "Search" })).toHaveValue(first);
   await expect(listedTitles(linked)).toHaveText([first]);
 });
@@ -166,7 +166,7 @@ test("MCP decision adoption reaches an open regular page and the directory", asy
   );
   await page.getByRole("button", { name: "All documents" }).click();
   await expect(page.locator(".ub-docs-row", { hasText: title })).toHaveCount(0);
-  await page.getByRole("button", { name: "Decisions", exact: true }).click();
+  await page.getByRole("tab", { name: /^Decisions/ }).click();
   await expect(
     page.locator(".ub-docs-row", { hasText: title }),
   ).toContainText("Not yet decided");
@@ -227,7 +227,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       readySelector: ".ub-docs-heading",
       contextOptions: { ...(touch ? devices["iPad (gen 7) landscape"] : { viewport: { width: 1440, height: 1000 } }), colorScheme: appearance },
     });
-    const type = page.getByRole("button", { name: "Decisions", exact: true });
+    const type = page.getByRole("tab", { name: /^Decisions/ });
     await activateControl(type, { touch });
     const titleFilter = page.getByRole("searchbox", { name: "Search" });
     await titleFilter.fill(prefix);
@@ -240,23 +240,31 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
       .toEqual([currentTitle, undecidedTitle, stanceTitle].sort());
     await expect(page.locator("thead [aria-sort]")).toHaveCount(0);
     const tagFilter = page.getByRole("button", { name: "Filter by tags", exact: true });
-    await expect(tagFilter).toContainText("Any tag");
+    await expect(tagFilter).toContainText("Tag Any");
     const searchBox = await titleFilter.boundingBox();
     const typeBox = await type.boundingBox();
-    expect(searchBox?.y).toBeLessThan(typeBox?.y ?? 0);
-    await expect(titleFilter).toHaveAttribute("placeholder", "Search");
-    await expect(titleFilter).toHaveCSS("border-top-width", "1px");
+    const tagBox = await tagFilter.boundingBox();
+    const stateBox = await state.boundingBox();
+    expect(typeBox?.y).toBeLessThan(searchBox?.y ?? 0);
+    // Search, tag and state share one row and one height.
+    const field = page.locator(".ub-docs-search-label");
+    const fieldBox = await field.boundingBox();
+    expect(Math.abs((tagBox?.y ?? 0) - (fieldBox?.y ?? 0))).toBeLessThan(1);
+    expect(Math.abs((tagBox?.height ?? 0) - (fieldBox?.height ?? 0))).toBeLessThan(1);
+    const stateControl = await page.locator(".ub-docs-state-filter").boundingBox();
+    expect(Math.abs((stateControl?.height ?? 0) - (fieldBox?.height ?? 0))).toBeLessThan(1);
+    expect(stateBox?.x).toBeGreaterThan(tagBox?.x ?? 0);
+    await expect(titleFilter).toHaveAttribute("placeholder", "Search decisions");
+    await expect(field).toHaveCSS("border-top-width", "1px");
     await expect(titleFilter).toHaveCSS("font-size", touch ? "16px" : "14px");
     await expect(titleFilter).toHaveCSS("line-height", touch ? "27px" : "20px");
     await expect(titleFilter).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await expect(page.getByRole("tablist")).toHaveCount(0);
+    await expect(page.getByRole("tablist", { name: "Document type" })).toHaveCount(1);
     await expect(page.getByRole("columnheader")).toHaveText(["Title", "Group", "Tags", "Changed", "Actions"]);
     if (!touch) {
-      await titleFilter.focus();
+      await type.focus();
       await page.keyboard.press("Tab");
-      await expect(page.getByRole("button", { name: "Documents", exact: true })).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(type).toBeFocused();
+      await expect(titleFilter).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(tagFilter).toBeFocused();
       await page.keyboard.press("Tab");
@@ -290,7 +298,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await activateControl(tagFilter, { touch });
     await activateControl(page.getByRole("button", { name: "Clear tags", exact: true }), { touch });
     await page.keyboard.press("Escape");
-    await expect(tagFilter).toContainText("Any tag");
+    await expect(tagFilter).toContainText("Tag Any");
     await pickTags(page, ["auth"], touch);
 
     // Native select input and row activation are real on each supported device;
@@ -306,7 +314,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     }
     await expect(state).toHaveValue("under-review");
     await expect(listedTitles(page)).toHaveText([currentTitle]);
-    await activateControl(page.getByRole("button", { name: "Documents", exact: true }), { touch });
+    await activateControl(page.getByRole("tab", { name: /^Documents/ }), { touch });
     await expect(titleFilter).toHaveValue(prefix);
     await expect(tagFilter).toContainText("auth");
     await activateControl(type, { touch });
@@ -341,7 +349,7 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
 
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`/${harness().workspace}/all$`));
-    await expect(type).toHaveAttribute("aria-pressed", "true");
+    await expect(type).toHaveAttribute("aria-selected", "true");
     await expect(state).toHaveValue("under-review");
     await expect(titleFilter).toHaveValue(prefix);
     await expect(tagFilter).toContainText("auth");
@@ -352,20 +360,20 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.getByRole("textbox", { name: "Document title" })).toHaveValue(currentTitle);
     if (touch) await page.getByRole("button", { name: "Show document list", exact: true }).tap();
     await activateControl(page.getByRole("button", { name: "All documents", exact: true }), { touch });
-    await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
     await expect(titleFilter).toHaveValue("");
     await expect(state).toHaveCount(0);
     await expect(page.getByRole("columnheader", { name: /^Changed/ })).toHaveAttribute("aria-sort", "descending");
     await page.goBack();
     await page.goBack();
-    await expect(type).toHaveAttribute("aria-pressed", "true");
+    await expect(type).toHaveAttribute("aria-selected", "true");
     await expect(state).toHaveValue("under-review");
     await expect(titleFilter).toHaveValue(prefix);
     await expect(tagFilter).toContainText("auth");
     await expect(listedTitles(page)).toHaveText([currentTitle]);
     await page.goForward();
     await page.goForward();
-    await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
     await expect(titleFilter).toHaveValue("");
     await page.goBack();
     await page.goBack();
@@ -391,8 +399,8 @@ for (const touch of [false, true]) for (const appearance of ["light", "dark"] as
     await expect(page.locator(".ub-docs-empty")).toContainText(prefix);
     await activateControl(page.getByRole("button", { name: "Clear filters", exact: true }), { touch });
     await expect(titleFilter).toHaveValue("");
-    await expect(tagFilter).toContainText("Any tag");
-    await expect(page.getByRole("button", { name: "Documents", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(tagFilter).toContainText("Tag Any");
+    await expect(page.getByRole("tab", { name: /^Documents/ })).toHaveAttribute("aria-selected", "true");
     await activateControl(type, { touch });
     await expect(state).toHaveValue("all");
   });

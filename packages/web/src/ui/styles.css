@@ -464,14 +464,6 @@ body {
   text-align: left;
 }
 
-/* Remove the fieldset's UA box and minimum inline size. */
-.ub-docs-mode-fieldset {
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-inline-size: 0;
-}
-
 /* Keep the eight presence choices in one equal-width row. */
 .ub-swatches {
   display: grid;
@@ -492,8 +484,7 @@ body {
   border-color: var(--foreground);
 }
 
-.ub-appearance,
-.ub-docs-modes {
+.ub-appearance {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
 }
@@ -850,8 +841,7 @@ textarea.ub-title {
   color: var(--foreground);
 }
 
-.ub-tldr-form textarea,
-.ub-docs-search {
+.ub-tldr-form textarea {
   border-radius: var(--radius-sm);
   background: var(--background);
   color: var(--foreground);
@@ -2525,40 +2515,164 @@ h6.ub-heading {
   }
 }
 
-.ub-docs-mode-fieldset {
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
-  border: 0;
+/* The type tabs replace the count line; one hairline spans the column and
+   the selected tab's underline sits on it. */
+.ub-docs-tabs {
+  display: flex;
+  gap: 1.25rem;
+  border-bottom: 1px solid var(--border);
 }
 
+.ub-docs-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  min-height: 2.125rem;
+  margin-bottom: -1px;
+  padding: 0.4375rem 0.125rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .ub-docs-tab:hover {
+    color: var(--foreground);
+  }
+}
+
+.ub-docs-tab[aria-selected="true"] {
+  border-bottom-color: var(--brand);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.ub-docs-tab-count {
+  font-size: var(--type-small-size);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.ub-docs-tab[aria-selected="true"] .ub-docs-tab-count {
+  color: var(--brand-ink);
+}
+
+.ub-docs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  padding-top: 0.5rem;
+}
+
+/* Search grows and the filters keep their width; on a narrow column search
+   takes the whole row and the filters wrap under it. */
+.ub-docs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Search and both filters share one height, stroke and radius, with no fill. */
+.ub-docs-search-label,
 .ub-docs-filter-control {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
   min-height: 2rem;
-  padding: 0.3rem 0.55rem;
+  padding: 0 0.625rem;
+  border: 1px solid var(--input);
   border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+}
+
+.ub-docs-search-label {
+  flex: 1 1 16rem;
+  min-width: 0;
+  cursor: text;
+}
+
+.ub-docs-search-label:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.ub-docs-search-icon,
+.ub-docs-filter-chevron {
+  display: block;
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ub-docs-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
   font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
 }
 
 .ub-docs-tag-filter {
   max-width: 100%;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted-foreground);
   cursor: pointer;
 }
 
-/* The search-label wrapper keeps a full-width box for its input. */
-.ub-docs-search-label {
-  display: grid;
+.ub-docs-filter-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
 }
 
-/* Fill the same column width as the table this search filters. */
-.ub-docs-search {
-  width: 100%;
-  padding: 0.4rem 0.55rem;
-  border: 1px solid var(--border);
+@media (hover: hover) {
+  .ub-docs-tag-filter:hover,
+  .ub-docs-state-filter:hover {
+    border-color: var(--ring);
+  }
+}
+
+/* The native select keeps keyboard and touch pickers; it drops its own box so
+   the label reads "State <value>" like the tag button. */
+.ub-docs-state-filter {
+  position: relative;
+  cursor: pointer;
+}
+
+.ub-docs-state-select {
+  /* Size to the chosen state, not the longest option. */
+  field-sizing: content;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
   background: transparent;
-  font: 400 var(--type-ui-size)/var(--type-ui-leading) var(--font-sans);
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ub-docs-state-filter:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }
 
 .ub-docs-search-status {
@@ -2750,6 +2864,8 @@ button.ub-docs-tag-chip:hover {
 }
 
 @media (any-pointer: coarse) {
+  .ub-docs-tab,
+  .ub-docs-search-label,
   .ub-docs-filter-control,
   .ub-docs-clear-tags,
   .ub-docs-clear-filters,
@@ -2801,5 +2917,17 @@ button.ub-docs-tag-chip:hover {
   input:not(.ub-title, [type="checkbox"], [type="radio"]),
   select {
     min-height: 2.75rem;
+  }
+
+  /* The bordered list filters own the touch height; the bare fields inside
+     them must not add this minimum on top. */
+  .ub-docs-filters .ub-docs-search,
+  .ub-docs-filters .ub-docs-state-select {
+    min-height: 0;
+  }
+
+  .ub-docs-filters .ub-docs-state-select {
+    font-size: var(--type-body-size);
+    line-height: var(--type-body-leading);
   }
 }

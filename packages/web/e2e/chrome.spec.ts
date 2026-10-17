@@ -2510,7 +2510,7 @@ for (const scheme of ["light"] as const) {
         await page.getByRole("button", { name: "Show document list", exact: true }).click();
       }
       await page.getByRole("button", { name: "All documents", exact: true }).click();
-      for (const selector of [".ub-docs-mode", ".ub-docs-sort"]) {
+      for (const selector of [".ub-docs-tab", ".ub-docs-sort"]) {
         for (const control of await page.locator(selector).all()) await check(control);
       }
       const row = page.locator(".ub-docs-row").first();
@@ -2576,12 +2576,12 @@ for (const scheme of ["light"] as const) {
         expect(await controlPaint(copy)).toEqual(revealed);
       }
       await page.getByRole("button", { name: "All documents", exact: true }).click();
-      const selected = page.locator(".ub-docs-mode[aria-pressed=true]");
+      const selected = page.locator(".ub-docs-tab[aria-selected=true]");
       await page.mouse.move(1399, 999);
       const selectedPaint = await controlPaint(selected);
       await selected.hover();
       expect(await controlPaint(selected)).toEqual(selectedPaint);
-      for (const selector of [".ub-docs-mode[aria-pressed=false]", ".ub-docs-sort", ".ub-docs-row"]) {
+      for (const selector of [".ub-docs-tab[aria-selected=false]", ".ub-docs-sort", ".ub-docs-row"]) {
         const control = page.locator(selector).first();
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);

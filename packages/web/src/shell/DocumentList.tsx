@@ -168,6 +168,10 @@ function tagLabel(tag: TagCatalogEntry): string {
   return tag.state === "retired" ? `${tag.name} (retired)` : tag.name;
 }
 
+function FilterChevron(): ReactElement {
+  return <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-docs-filter-chevron"><path d="m6 9 6 6 6-6" /></svg>;
+}
+
 function TagFilter({
   options,
   selected,
@@ -188,7 +192,7 @@ function TagFilter({
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery(""); }}>
       <PopoverTrigger asChild>
         <button type="button" className="ub-docs-tag-filter ub-docs-filter-control" aria-label="Filter by tags" aria-haspopup="listbox" aria-controls={open ? listId : undefined}>
-          {labels.length === 0 ? "Any tag" : labels.join(", ")} <span aria-hidden="true">▾</span>
+          Tag <span className="ub-docs-filter-value">{labels.length === 0 ? "Any" : labels.join(", ")}</span><FilterChevron />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="ub-docs-tag-picker p-0">
@@ -284,12 +288,46 @@ function noMatchesMessage({ mode, stateFilter, selectedLabels, query, synced, ha
   return synced ? "No documents in this workspace yet." : "Nothing here yet — the directory has not synced on this client.";
 }
 
-function DocumentListHeader({ entries, received }: { entries: readonly DirectoryEntry[]; received: boolean }): ReactElement {
-  const count = entries.filter((entry) => !entry.deleted && inMode(entry, "working")).length;
-  return <header className="ub-page-header">
-    <h1 className="ub-title ub-docs-heading">All documents</h1>
-    <p className="ub-page-subtitle ub-docs-count">{received ? `${count} ${count === 1 ? "document" : "documents"}` : null}</p>
-  </header>;
+/** Each tab counts its whole type, so filtering never moves the numbers. */
+function DocumentTypeTabs({ entries, received, mode, idPrefix, onSelect }: { entries: readonly DirectoryEntry[]; received: boolean; mode: Mode; idPrefix: string; onSelect: (mode: Mode) => void }): ReactElement {
+  const tabs = useRef<HTMLDivElement | null>(null);
+  const counts: Record<Mode, number> = useMemo(() => ({
+    working: entries.filter((entry) => !entry.deleted && inMode(entry, "working")).length,
+    decision: resolveDecisionTopics(entries).filter((topic) => !topic.archived && decisionCurrentRecord(topic) !== null).length,
+  }), [entries]);
+  const move = (from: Mode, step: number): void => {
+    const next = MODES[(MODES.indexOf(from) + step + MODES.length) % MODES.length] ?? from;
+    onSelect(next);
+    tabs.current?.querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)?.focus();
+  };
+  return <div ref={tabs} role="tablist" aria-label="Document type" className="ub-docs-tabs">
+    {MODES.map((option) => (
+      <button
+        key={option}
+        id={`${idPrefix}-${option}`}
+        type="button"
+        role="tab"
+        data-mode={option}
+        className="ub-docs-tab"
+        aria-selected={option === mode}
+        aria-controls={`${idPrefix}-panel`}
+        tabIndex={option === mode ? 0 : -1}
+        onClick={() => onSelect(option)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            move(option, event.key === "ArrowRight" ? 1 : -1);
+          } else if (event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            move(event.key === "Home" ? MODES[0] : MODES[MODES.length - 1] ?? option, 0);
+          }
+        }}
+      >
+        {MODE_LABELS[option]}
+        {received && <span className="ub-docs-tab-count">{counts[option]}</span>}
+      </button>
+    ))}
+  </div>;
 }
 
 export function DocumentList({
@@ -319,6 +357,7 @@ export function DocumentList({
 }): ReactElement {
   const status = useRoomStatus(connection);
   const pinUnavailableId = useId();
+  const tabsId = useId();
   const [localState, setLocalState] = useState(INITIAL_DOCUMENT_LIST_STATE);
   const listState = state ?? localState;
   const { query, stateFilter, sort } = listState;
@@ -398,49 +437,37 @@ export function DocumentList({
   return (
     <section className="ub-pane ub-page-pane">
       <div className="ub-column ub-docs">
-        <DocumentListHeader entries={entries} received={status.hasReceivedServerState} />
-        <label className="ub-docs-search-label">
-          <span className="ub-sr-only">Search</span>
-          <input
-            type="search"
-            className="ub-docs-search"
-            placeholder="Search"
-            value={query}
-            onChange={(event) => updateState({ query: event.currentTarget.value, relevance: true })}
-          />
-        </label>
-        <div className="ub-docs-filters flex flex-wrap items-center gap-2">
-        <fieldset className="ub-docs-mode-fieldset">
-          <legend className="ub-sr-only">Document type</legend>
-          <div className="ub-docs-modes">
-            {MODES.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className="ub-docs-mode ub-docs-filter-control cursor-pointer border-0 bg-transparent text-(--muted-foreground) hover:bg-(--accent) hover:text-(--accent-foreground) aria-pressed:bg-(--brand-subtle) aria-pressed:text-(--brand-ink)"
-                aria-pressed={option === mode}
-                onClick={() => updateState({ mode: option })}
-              >
-                {MODE_LABELS[option]}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-        <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
-        {mode === "decision" && <label className="flex items-center gap-2 ub-type-ui text-(--muted-foreground)">
-          State
-          <select
-            aria-label="Decision state"
-            className="min-h-8 [@media(any-pointer:coarse)]:min-h-11 rounded-(--radius-sm) border border-(--border) bg-(--background) px-2 py-1 [font:inherit] text-(--foreground)"
-            value={stateFilter}
-            onChange={(event) => {
-              const value = STATE_FILTERS.find((option) => option === event.currentTarget.value);
-              if (value !== undefined) updateState({ stateFilter: value });
-            }}
-          >
-            {STATE_FILTERS.map((option) => <option key={option} value={option}>{STATE_LABELS[option]}</option>)}
-          </select>
-        </label>}
+        <h1 className="ub-title ub-docs-heading">All documents</h1>
+        <DocumentTypeTabs entries={entries} received={status.hasReceivedServerState} mode={mode} idPrefix={tabsId} onSelect={(option) => updateState({ mode: option })} />
+        <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-${mode}`} className="ub-docs-panel">
+        <div className="ub-docs-filters">
+          <label className="ub-docs-search-label">
+            <svg aria-hidden="true" viewBox="0 0 24 24" className="ub-docs-search-icon"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <span className="ub-sr-only">Search</span>
+            <input
+              type="search"
+              className="ub-docs-search"
+              placeholder={`Search ${MODE_EMPTY_LABELS[mode]}`}
+              value={query}
+              onChange={(event) => updateState({ query: event.currentTarget.value, relevance: true })}
+            />
+          </label>
+          <TagFilter options={(catalog?.entries ?? []).filter((tag) => tag.state === "active")} selected={selectedIds} labels={selectedLabels} onChange={(tags) => updateState({ selectedTags: tags })} />
+          {mode === "decision" && <label className="ub-docs-state-filter ub-docs-filter-control">
+            State
+            <select
+              aria-label="Decision state"
+              className="ub-docs-state-select"
+              value={stateFilter}
+              onChange={(event) => {
+                const value = STATE_FILTERS.find((option) => option === event.currentTarget.value);
+                if (value !== undefined) updateState({ stateFilter: value });
+              }}
+            >
+              {STATE_FILTERS.map((option) => <option key={option} value={option}>{STATE_LABELS[option]}</option>)}
+            </select>
+            <FilterChevron />
+          </label>}
         </div>
         {searchClient === null && searchText === "" && <p className="ub-docs-search-status ub-muted">Search is unavailable. Open this workspace with ub open to use local search.</p>}
         {onTogglePin === null && rows.length > 0 && (
@@ -573,6 +600,7 @@ export function DocumentList({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </section>
   );
