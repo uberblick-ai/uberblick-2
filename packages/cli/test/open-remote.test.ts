@@ -535,7 +535,7 @@ describe("ub open: sharing through the upstream hub", () => {
     }
   });
 
-  it("relays presence across reconnect and lets a served tab expire upstream", async () => {
+  it("relays presence across reconnect and removes a departed served tab upstream", async () => {
     const { box, env } = configured();
     const hub = await startHub(box);
     const hubUrl = `ws://127.0.0.1:${hub.port}`;
@@ -638,8 +638,9 @@ describe("ub open: sharing through the upstream hub", () => {
       });
 
       browser.destroy();
-      await sleep(1_000);
-      expect(agent.awareness?.getStates().has(browserId)).toBe(true);
+      await waitUntil("the served tab's own removal to reach the upstream agent", () =>
+        agent.awareness?.getStates().has(browserId) === false,
+      );
     } finally {
       browser.destroy();
       agent.destroy();
