@@ -142,6 +142,50 @@ async function minimumTargets(controls: Locator, size: number, square = false): 
   }
 }
 
+test("the xl touch gutter fits beside the docked sidebar without moving prose", { tag: "@webkit-touch" }, async ({ browser }, info) => {
+  const page = await touchPage(browser, info);
+  await page.setViewportSize({ width: 1366, height: 1024 });
+  await openDoc(page, ["A touch target fits entirely beside this text."]);
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator(".ub-status .ub-last-updated")).toBeVisible();
+  await page.mouse.move(0, 0);
+  const first = editor(page).locator(":scope > p").first();
+  const pane = page.locator(".ub-document-pane");
+  const sidebar = page.locator(".ub-list:not([inert])");
+  await expect(sidebar).toBeVisible();
+  const proseBefore = await first.boundingBox();
+  const paneBox = await pane.boundingBox();
+  const sidebarBox = await sidebar.boundingBox();
+
+  await first.tap();
+  await expect(gutter(page)).toHaveCSS("opacity", "1");
+  await expect.poll(async () => (await gutter(page).boundingBox())?.y).toBe(proseBefore?.y);
+  const button = await gutter(page).boundingBox();
+  if (button === null || proseBefore === null || paneBox === null || sidebarBox === null) {
+    throw new Error("e2e: missing docked touch gutter geometry");
+  }
+  expect(button.width).toBe(44);
+  expect(button.height).toBe(44);
+  expect(button.x).toBeGreaterThanOrEqual(paneBox.x);
+  expect(button.x).toBeGreaterThanOrEqual(sidebarBox.x + sidebarBox.width);
+  expect(button.x + button.width).toBeLessThanOrEqual(proseBefore.x);
+  expect(await first.boundingBox()).toEqual(proseBefore);
+  expect(await gutter(page).evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const edges: Array<[number, number]> = [
+      [box.left + 1, box.top + box.height / 2],
+      [box.right - 1, box.top + box.height / 2],
+      [box.left + box.width / 2, box.top + 1],
+      [box.left + box.width / 2, box.bottom - 1],
+    ];
+    return edges.map(([x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit !== null && element.contains(hit);
+    });
+  })).toEqual([true, true, true, true]);
+  expect(await pane.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("a touch caret exposes a 44px gutter without moving prose, follows edits, and inserts by tap", { tag: "@webkit-touch" }, async ({ browser }, info) => {
   const page = await touchPage(browser, info);
   await openDoc(page, ["first block", "second block"]);
