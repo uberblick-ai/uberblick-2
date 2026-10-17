@@ -5,6 +5,7 @@ export interface PickerOption {
   id: string;
   label: string;
   selected: boolean;
+  disabled?: boolean;
   detail?: string;
 }
 
@@ -29,7 +30,7 @@ export function PickerList({
   const ownRef = useRef<HTMLDivElement | null>(null);
   const list = listRef ?? ownRef;
   const focusOption = (index: number): void => {
-    const buttons = list.current?.querySelectorAll<HTMLButtonElement>("[role='option']");
+    const buttons = list.current?.querySelectorAll<HTMLButtonElement>("[role='option']:not(:disabled)");
     if (buttons === undefined || buttons.length === 0) return;
     buttons[(index + buttons.length) % buttons.length]?.focus();
   };
@@ -43,17 +44,20 @@ export function PickerList({
       aria-multiselectable={multiple || undefined}
       aria-label={label}
     >
-      {options.map((option, index) => (
+      {options.map((option) => (
         <button
           key={option.id}
           type="button"
-          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full cursor-pointer items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none [@media(pointer:coarse)]:min-h-11`}
+          className={`${multiple ? "ub-tag-option " : ""}ub-picker-option flex w-full cursor-pointer items-center gap-[0.45rem] rounded-(--radius-sm) border-0 bg-transparent px-[0.45rem] py-[0.4rem] text-left text-popover-foreground [font:inherit] hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:min-h-11`}
           role="option"
           aria-selected={option.selected}
+          disabled={option.disabled}
           onClick={() => onPick(option.id)}
           onKeyDown={(event) => {
             const native = event.nativeEvent;
             if (native.isComposing || native.keyCode === 229) return;
+            const enabled = options.filter((candidate) => !candidate.disabled);
+            const index = enabled.findIndex((candidate) => candidate.id === option.id);
             if (event.key === "ArrowDown") {
               event.preventDefault();
               focusOption(index + 1);
@@ -65,7 +69,7 @@ export function PickerList({
               focusOption(0);
             } else if (event.key === "End") {
               event.preventDefault();
-              focusOption(options.length - 1);
+              focusOption(enabled.length - 1);
             }
           }}
         >
@@ -77,9 +81,9 @@ export function PickerList({
           >
             {option.selected ? "✓" : ""}
           </span>
-          <span>{option.label}</span>
+          <span className="min-w-0 truncate" title={option.label}>{option.label}</span>
           {option.detail !== undefined && (
-            <span className={`${multiple ? "ub-tag-retired " : ""}ub-picker-detail ml-auto text-muted-foreground`}>
+            <span className={`${multiple ? "ub-tag-retired " : ""}ub-picker-detail ml-auto shrink-0 text-muted-foreground`}>
               {option.detail}
             </span>
           )}

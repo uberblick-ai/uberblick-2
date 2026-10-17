@@ -1,7 +1,7 @@
 /** New-document creation crosses both the directory and new room admission gates. */
 
 import { act, renderSettled } from "./react-render.js";
-import { within } from "@testing-library/react";
+import { fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
@@ -74,6 +74,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 const { App } = await import("../src/ui/App.js");
 
 beforeEach(() => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux");
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
   vi.stubGlobal(
     "ResizeObserver",
@@ -92,12 +93,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("writes neither room until the new room is admitted", async () => {
+it.each(["sidebar", "palette"] as const)("writes neither room until a new room created from the %s is admitted", async (source) => {
   const { container: host } = await renderSettled(<App />);
 
-  const create = within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" });
-  expect(create?.disabled).toBe(false);
-  await act(async () => create?.click());
+  if (source === "palette") await act(async () => fireEvent.keyDown(document, { key: "k", ctrlKey: true }));
+  const create = source === "sidebar"
+    ? within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" })
+    : within(document.body).getByRole<HTMLButtonElement>("option", { name: "Create document" });
+  expect(create.disabled).toBe(false);
+  await act(async () => create.click());
 
   const pending = [...rooms.values()].find(
     ({ connection }) =>
@@ -117,6 +121,32 @@ it("writes neither room until the new room is admitted", async () => {
   });
   expect(getMeta(pending.connection.ydoc).uuid).toBe(uuid);
   expect(getDirectoryEntry(directory.ydoc, uuid)?.title).toBe("Untitled");
+});
+
+it("disables both create entry points when the directory becomes read-only", async () => {
+  const { container: host } = await renderSettled(<App />);
+  await act(async () => update(room(directoryRoom(WORKSPACE)), { writable: false }));
+  expect(within(host).getByRole<HTMLButtonElement>("button", { name: "+ New page" }).disabled).toBe(true);
+  const roomCount = rooms.size;
+
+  await act(async () => fireEvent.keyDown(document, { key: "k", ctrlKey: true }));
+  const palette = within(document.body).getByRole("dialog", { name: "Command palette" });
+  const create = within(palette).getByRole<HTMLButtonElement>("option", { name: "Create document" });
+  expect(create.disabled).toBe(true);
+  await act(async () => fireEvent.keyDown(within(palette).getByRole("combobox"), { key: "Enter" }));
+
+  expect(rooms.size).toBe(roomCount);
+  expect(window.location.pathname).toBe(`/${WORKSPACE}`);
+});
+
+it("leaves the shortcut alone when no workspace is current", async () => {
+  window.history.replaceState(null, "", "/");
+  await renderSettled(<App />);
+  const event = new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true, cancelable: true });
+  await act(async () => document.dispatchEvent(event));
+  expect(event.defaultPrevented).toBe(false);
+  expect(within(document.body).queryByRole("dialog")).toBeNull();
+  expect(window.location.pathname).toBe("/");
 });
 
 it("cancels a deferred create when the reader leaves its room", async () => {
