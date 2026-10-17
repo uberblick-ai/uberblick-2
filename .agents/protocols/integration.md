@@ -28,12 +28,17 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   to a maintainer, who alone decides whether to dismiss it; no run dismisses
   an alert.
   Wait for a pending CI check; for a failure, read
-  `gh run view <id> --log-failed`. A lint, typecheck, test or spec failure
-  that main's `CI` run does not show the same way (the base comparison below)
-  is a branch failure: finish `changes` naming it. When it does show the same
-  way, or it is a timeout in a test the diff leaves untouched, re-run the
-  failed jobs once (`gh run rerun <id> --failed`); if it is still red,
-  escalate to a maintainer, who may merge by hand. The checks run the PR's own
+  `gh run view <id> --log-failed`. Re-run the failed jobs
+  (`gh run rerun <id> --failed`) when main's `CI` run shows the failure the
+  same way (the base comparison below), when an open issue tracks the failing
+  test as flaky, or when the diff leaves untouched the test, its fixtures and
+  helpers, and the CI recipe that runs it. A head gets at most two re-runs,
+  each for a test that has not failed at that head before; name each test a
+  re-run cleared in the gate record. Any other lint, typecheck, test or spec
+  failure is a branch failure: finish `changes` naming it. So is an untouched
+  test that fails twice in a row when neither main nor an open flake issue
+  shows it. Escalate any other failure still red to a maintainer, who may
+  merge by hand. The checks run the PR's own
   recipe, so a hunk that skips or weakens what CI runs — `.github/workflows/`,
   `mise.toml` tasks, package scripts, test or lint configuration — is a
   merge-rule change for the tier check.
@@ -53,12 +58,13 @@ The mechanics of the `integrator` role, for one PR at one head SHA.
   own e2e recipe, so for a browser-observable outcome read its output rather
   than trusting the conclusion. A failure may be called environmental only
   after the same failing spec is run
-  against the base, or when it failed the same way (same test, browser project
+  against the base, when it failed the same way (same test, browser project
   and error) in the latest completed `CI` run on `main` at or before the base
   (`gh run list --workflow ci.yml --branch main --status completed`, then
-  `gh run view <id> --log-failed`): green at the base and red at the head is a
-  branch regression to fix, even when the stale code is a test fixture rather
-  than production.
+  `gh run view <id> --log-failed`), or when an open issue tracks that failure
+  as a flake. Otherwise green at the base and red at the head is a branch
+  regression to fix, even when the stale code is a test fixture rather than
+  production.
 - Record every gate outcome against the commit SHA it ran at, and the exact
   base-ref SHA the exact-head gate set began from as its base-freshness point.
   Link the check or failure evidence; do not paste full logs, test counts or
