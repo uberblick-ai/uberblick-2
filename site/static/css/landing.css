@@ -63,8 +63,6 @@ mark.sel { background: oklch(0.85 0.12 75 / 55%); color: inherit; border-radius:
 :root[data-theme="dark"] mark.sel { background: oklch(0.6 0.14 65 / 45%); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) mark.sel { background: oklch(0.6 0.14 65 / 45%); } }
 .frail { border-left: 1px solid var(--border); padding: 14px 12px; display: flex; flex-direction: column; gap: 12px; }
-.fcontents { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 0 2px 8px; border-bottom: 1px solid var(--rule); font: 400 12px/16px var(--font-sans); color: var(--muted); }
-.fcontents b { font-weight: 500; color: var(--fg); } .fcontents svg { width: 11px; height: 11px; }
 .fcomment { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); padding: 10px 10px 10px 12px; display: flex; flex-direction: column; gap: 6px; font: 400 13px/18px var(--font-sans); position: relative; }
 .fcomment.focus { box-shadow: 0 6px 18px oklch(0 0 0 / 8%); }
 .fcomment.focus::before { content: ""; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 2px; background: var(--brand); border-radius: 1px; }

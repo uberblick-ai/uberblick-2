@@ -1,5 +1,5 @@
 /**
- * Status geometry beside the outline, with the real capped collaborator cluster.
+ * Status geometry with the real capped collaborator cluster.
  *
  * Real delayed acknowledgements and hub loss prove status transitions preserve
  * the status rule and the prose, including beside the desktop threads rail.
@@ -146,7 +146,7 @@ async function statusGeometry(page: Page) {
 }
 
 for (const upstream of [true, false]) {
-  test(`the outline leaves every status reading contained and presence stable — ${upstream ? "hub direct" : "ub open"} @webkit`, async ({
+  test(`every status reading stays contained and presence stable — ${upstream ? "hub direct" : "ub open"} @webkit`, async ({
     browser, browserName, contextOptions, viewport, hasTouch, isMobile,
     deviceScaleFactor, userAgent,
   }) => {
@@ -188,7 +188,6 @@ for (const upstream of [true, false]) {
     await page.keyboard.press("Enter");
     await page.keyboard.type("Document prose stays in place.");
     await page.locator(".ub-title").focus();
-    await expect(page.getByRole("button", { name: /^On this page/ })).toBeVisible();
     await expect(editor(page).locator("h1")).toHaveText("Overview");
     await expect(page.locator(".ub-last-updated")).toHaveCount(1);
     await withPageTimers(page, () => expect(page.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /));
@@ -236,7 +235,6 @@ for (const upstream of [true, false]) {
     for (const width of widths) {
       if (browserName === "chromium") await page.setViewportSize({ width, height });
       await settlePane(page);
-      await expect(page.getByRole("button", { name: /^On this page/ })).toBeVisible();
       await expectCompactHeader(page);
       empty.set(width, await statusGeometry(page));
     }

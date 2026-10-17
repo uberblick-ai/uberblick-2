@@ -1,7 +1,7 @@
 /** Input-dependent shell controls and viewport containment in the real bundle. */
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
-import { createDoc, editor, setupHarness } from "./app-helpers.js";
+import { createDoc, setupHarness } from "./app-helpers.js";
 
 const { harness, openApp } = setupHarness({ scope: "test" });
 
@@ -482,7 +482,7 @@ test("a Delete group confirmation refuses in place after sidebar readiness is lo
   await expect(group(page, "Reading")).toBeVisible();
 });
 
-test("the shell, sidebar, document pane and long outline stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
+test("the shell, sidebar and document pane stay within the visible viewport", { tag: "@webkit" }, async ({ browser }, info) => {
   const page = await devicePage(browser, info);
   await expectInsideViewport(page.locator(".ub-app"));
   await expectInsideViewport(page.locator(".ub-pane"));
@@ -490,25 +490,4 @@ test("the shell, sidebar, document pane and long outline stay within the visible
   await expectInsideViewport(page.locator(".ub-list"));
   await createDoc(page, "Viewport document");
   await expectInsideViewport(page.locator(".ub-document-pane"));
-  await editor(page).click();
-  for (let number = 1; number <= 60; number += 1) {
-    await page.keyboard.type("## ");
-    await page.keyboard.insertText(`Section ${number}`);
-    await expect(editor(page).locator("h2")).toHaveCount(number);
-    await page.keyboard.press("Enter");
-    await expect(editor(page).locator(":scope > p")).toHaveCount(1);
-  }
-  const trigger = page.getByRole("button", { name: /^On this page/ });
-  const pane = page.locator(".ub-document-pane");
-  await pane.evaluate((element) => { element.scrollTop = 0; });
-  const narrow = await page.evaluate(() => matchMedia("(width < 80rem)").matches);
-  const inset = await trigger.boundingBox();
-  await pane.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-  await expect.poll(() => pane.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await expect(trigger).toBeInViewport({ ratio: 1 });
-  if (narrow) await expect.poll(async () => (await trigger.boundingBox())?.y).toBeCloseTo(inset?.y ?? 0, 1);
-  await trigger.click();
-  const contents = page.locator(".ub-outline-panel");
-  await expectInsideViewport(contents);
-  expect(await contents.locator("ul").evaluate((list) => list.scrollHeight > list.clientHeight)).toBe(true);
 });

@@ -60,7 +60,6 @@ import { EditorPane, PaneNotice, StatusLine } from "./document/EditorPane.js";
 import { DecisionTopicPane } from "./document/DecisionTopicPane.js";
 import { DecisionsBlock, DecisionsLink } from "./document/DecisionsBlock.js";
 import { RemoteHubGuide } from "./document/RemoteHubGuide.js";
-import { OutlinePane } from "./document/OutlinePane.js";
 import { SyncPanel } from "./status/SyncPanel.js";
 import { Popover, PopoverContent } from "./shadcn/popover.js";
 import { ThreadsPane } from "./comments/ThreadsPane.js";
@@ -98,7 +97,6 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
-  useOutline,
   usePresence,
   useTitlePresence,
   useRoom,
@@ -609,9 +607,6 @@ export function App(): ReactElement {
   const relatedTopics = route.kind === "doc" && meta !== null && docIsHydrated(route.uuid, meta)
     ? relatedDecisionTopics(topics, meta)
     : [];
-  const decisionsId = relatedTopics.length > 0 && meta !== null ? `decisions-${meta.uuid}` : null;
-  const headings = useOutline(doc);
-  const hasOutline = headings.length > 0 || decisionsId !== null;
   const archived = useArchived(directory, selected);
   const restoreFocusRoom = useRef<string | null>(null);
   const archiveConfirmationFocusRoom = useRef<string | null>(null);
@@ -1206,17 +1201,10 @@ export function App(): ReactElement {
             )}
           </Popover>
         )}
-        {(hasOutline || threads.length > 0) && (
+        {threads.length > 0 && (
           <div
-            className="ub-document-rail flex min-h-0 w-[var(--outline-width)] flex-none flex-col border-l border-border me-[var(--pane-trailing-space)] max-xl:absolute max-xl:inset-x-0 max-xl:top-0 max-xl:w-auto max-xl:border-0 max-xl:me-0 max-xl:pointer-events-none"
-            data-has-threads={threads.length > 0}
+            className="ub-document-rail flex min-h-0 w-[var(--document-rail-width)] flex-none flex-col border-l border-border me-[var(--pane-trailing-space)] max-xl:absolute max-xl:inset-x-0 max-xl:top-0 max-xl:w-auto max-xl:border-0 max-xl:me-0 max-xl:pointer-events-none"
           >
-            <OutlinePane
-              key={doc?.room ?? "no-document"}
-              connection={doc}
-              decisionsId={decisionsId}
-              obscured={narrowThreads && threadsOpen}
-            />
             {/* Draft state survives the sheet's unmount and resize. */}
             <ThreadsPane
               connection={doc}

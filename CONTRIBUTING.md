@@ -154,7 +154,7 @@ what their server sends. Other tests belong in `mise run test`. Arguments after
 `--` pass unchanged to Playwright; for example:
 
 ```sh
-mise run e2e -- --repeat-each=3 outline.spec.ts
+mise run e2e -- --repeat-each=3 sidebar.spec.ts
 ```
 
 Wait for saves and drawing through `e2e/settle.ts`. `waitForAcknowledged` names
