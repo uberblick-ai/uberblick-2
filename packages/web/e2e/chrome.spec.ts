@@ -34,7 +34,7 @@
 import { randomUUID } from "node:crypto";
 import { devices, expect, test } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
-import type { Browser, BrowserContextOptions, Locator, Page } from "@playwright/test";
+import type { Browser, BrowserContextOptions, Locator, Page, TestInfo } from "@playwright/test";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { wrapToken } from "@uberblick/schema/protocol";
@@ -1679,30 +1679,42 @@ for (const scheme of ["light", "dark"] as const) {
 /**
  * The document-actions control's target.
  *
- * The control's own 44x44 box must take clicks at rest and after scrolling.
+ * The control's own pointer-sized box must take clicks at rest and after scrolling.
  * An overhanging target could steal taps from `.ub-title` below or borrow
  * `.ub-pane` padding above that scrolls away while the control stays visible.
  * Only browser layout can prove the full target at both offsets.
  */
-test("the document-actions control is a 44px target, at rest and once the pane has scrolled", async ({
-  browser,
-}) => {
-  const page = await openAppearanceApp(browser, "light");
-  await ensureExampleCatalog(page);
+async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark", info: TestInfo): Promise<void> {
+  const touch = info.project.name === "webkit-ipad";
+  const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
+    upstream: true,
+    contextOptions: {
+      colorScheme: scheme, reducedMotion: "reduce",
+      ...(touch ? devices["iPad (gen 7)"]
+        : { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 620 } }),
+    },
+    readySelector: "[data-settings-page]",
+  });
+  expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
+  const floor = touch ? 44 : 24;
+  await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+  await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
+  await expect(page.locator(".ub-docs")).toBeVisible();
+  const showSidebar = page.getByRole("button", { name: "Show document list", exact: true });
+  if (await showSidebar.isVisible()) await showSidebar.click();
   await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
   // Enough prose to scroll: a clipped target cannot be exposed in a short page.
   await placeCaret(page);
   await page.keyboard.type("a line of prose\n".repeat(24));
+  await page.evaluate(() => document.fonts.ready);
 
-  // A long tag selection, because that is what pushes this row around.
   const editTags = page.getByRole("button", { name: "Edit tags" });
-  await editTags.click();
-  for (const { name: tag } of EXAMPLE_TAGS) {
-    await page.getByRole("option", { name: tag, exact: true }).click();
-  }
-  await editTags.click();
+  const actions = page.locator(".ub-actions-trigger");
+  const face = actions.locator(".ub-actions-face");
+  await expect(actions).toHaveAccessibleName("Document actions");
+  await expect(actions).toHaveAttribute("title", "Document actions");
 
   /**
    * The live target, hit-tested rather than computed. Reading the rule's own
@@ -1766,36 +1778,139 @@ test("the document-actions control is a 44px target, at rest and once the pane h
       };
     }, toClipEdge);
 
-  // The target holds in one docked and one narrow layout.
-  for (const width of [1280, 768]) {
-    await page.setViewportSize({ width, height: 620 });
-    // Typing left the pane scrolled to the caret; the first reading is of the
-    // header at rest.
-    await page.evaluate(() => {
-      const pane = document.querySelector(".ub-pane");
-      if (pane !== null) pane.scrollTop = 0;
+  const expectCompactPaint = async (): Promise<void> => {
+    const geometry = await actions.evaluate((control) => {
+      const row = control.closest(".ub-doc-meta");
+      const face = control.querySelector(".ub-actions-face");
+      const svg = control.querySelector("svg");
+      const dots = svg?.querySelector("g");
+      if (row === null || face === null || !(svg instanceof SVGSVGElement) ||
+        !(dots instanceof SVGGraphicsElement)) throw new Error("e2e: incomplete document actions icon");
+      const matrix = dots.getScreenCTM();
+      if (matrix === null) throw new Error("e2e: document actions icon has no screen transform");
+      const ink = dots.getBBox();
+      const inkRight = Math.max(...[
+        new DOMPoint(ink.x, ink.y), new DOMPoint(ink.x + ink.width, ink.y),
+        new DOMPoint(ink.x, ink.y + ink.height), new DOMPoint(ink.x + ink.width, ink.y + ink.height),
+      ].map((point) => point.matrixTransform(matrix).x));
+      const box = control.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
+      const faceBox = face.getBoundingClientRect();
+      const iconBox = svg.getBoundingClientRect();
+      const revision = document.querySelector(".ub-doc-rev")?.getBoundingClientRect();
+      return {
+        faceWidth: faceBox.width, faceHeight: faceBox.height,
+        iconWidth: iconBox.width, iconHeight: iconBox.height,
+        faceInset: box.right - faceBox.right,
+        triggerInset: rowBox.right - box.right,
+        dotsInset: rowBox.right - inkRight,
+        revisionInset: revision !== undefined && revision.width > 0 ? rowBox.right - revision.right : null,
+      };
     });
+    expect(geometry.iconWidth).toBe(16);
+    expect(geometry.iconHeight).toBe(16);
+    expect(geometry.faceWidth).toBeLessThanOrEqual(28);
+    expect(geometry.faceHeight).toBeLessThanOrEqual(28);
+    expect(geometry.faceInset).toBeCloseTo(0, 1);
+    expect(geometry.triggerInset).toBeCloseTo(0, 1);
+    expect(geometry.triggerInset).toBeGreaterThanOrEqual(0);
+    expect(geometry.dotsInset).toBeGreaterThanOrEqual(0);
+    expect(geometry.dotsInset).toBeLessThanOrEqual(6);
+    if (geometry.revisionInset !== null) expect(geometry.revisionInset).toBeCloseTo(0, 1);
+    expect(alphaOf(await paintedIn(actions, "background-color"))).toBe(0);
+    expect(Number.parseFloat(await paintedIn(actions, "border-top-width"))).toBe(0);
+  };
 
-    const rest = await probe(false);
-    // The target a thumb needs is really there, not merely declared…
-    expect(rest.liveHeight).toBeGreaterThanOrEqual(44);
-    expect(rest.liveWidth).toBeGreaterThanOrEqual(44);
-    // …and it is not paid for with either adjacent fact.
-    expect(rest.takesTheRevision).toBe(false);
-    expect(rest.takesTheTitle).toBe(false);
+  const attachHeader = async (state: string): Promise<void> => {
+    const row = await page.locator(".ub-doc-meta").boundingBox();
+    if (row === null) throw new Error("e2e: no document header for screenshot");
+    const name = `document-actions-${scheme}-${touch ? "touch" : "fine"}-${state}`;
+    const path = info.outputPath(`${name}.png`);
+    await page.screenshot({ path, clip: { x: row.x, y: row.y, width: row.width, height: Math.min(240, 620 - row.y) } });
+    await info.attach(name, { path, contentType: "image/png" });
+  };
 
-    // Then again with the header scrolled up against the clip edge. A
-    // measurement taken where the pane could not scroll proves nothing, so the
-    // offset it reached is asserted too.
-    const scrolled = await probe(true);
-    expect(scrolled.scrolled).toBeGreaterThan(0);
-    expect(scrolled.liveHeight).toBeGreaterThanOrEqual(44);
-    expect(scrolled.liveWidth).toBeGreaterThanOrEqual(44);
-    expect(scrolled.takesTheRevision).toBe(false);
-    expect(scrolled.takesTheTitle).toBe(false);
+  // The target and alignment hold with no tags and with tags that push the row.
+  for (const tagged of [false, true]) {
+    if (tagged) {
+      await page.evaluate(() => { document.querySelector(".ub-pane")?.scrollTo(0, 0); });
+      await editTags.click();
+      for (const { name: tag } of EXAMPLE_TAGS) {
+        await page.getByRole("option", { name: tag, exact: true }).click();
+      }
+      await editTags.click();
+    }
+    // The target holds in one docked and one narrow layout.
+    for (const width of [1280, 768, 744]) {
+      await page.setViewportSize({ width, height: 620 });
+      // Typing left the pane scrolled to the caret; the first reading is of the
+      // header at rest.
+      await page.evaluate(() => {
+        const pane = document.querySelector(".ub-pane");
+        if (pane !== null) pane.scrollTop = 0;
+      });
+
+      const rest = await probe(false);
+      // The target required by this pointer is really there, not merely declared…
+      expect(rest.liveHeight).toBeGreaterThanOrEqual(floor);
+      expect(rest.liveWidth).toBeGreaterThanOrEqual(floor);
+      // …and it is not paid for with either adjacent fact.
+      expect(rest.takesTheRevision).toBe(false);
+      expect(rest.takesTheTitle).toBe(false);
+      const titleBefore = await page.locator(".ub-title").boundingBox();
+      if (!tagged && !touch) expect((await page.locator(".ub-doc-meta").boundingBox())?.height).toBe(44);
+      await expectCompactPaint();
+      if (!tagged && width === 1280) await attachHeader("rest");
+      if (!touch) {
+        await actions.hover();
+        await expectCompactPaint();
+      }
+      if (touch) await actions.tap();
+      else await actions.click();
+      await expect(actions).toHaveAttribute("data-state", "open");
+      const menu = await page.getByRole("menu").boundingBox();
+      const anchor = await actions.boundingBox();
+      if (menu === null || anchor === null) throw new Error("e2e: no document actions menu placement");
+      expect(menu.x + menu.width).toBeCloseTo(anchor.x + anchor.width, 1);
+      expect(menu.y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
+      await expectCompactPaint();
+      expect(alphaOf(await paintedIn(face, "background-color"))).toBeGreaterThan(0);
+      if (!tagged && width === 1280) await attachHeader("open");
+      await page.keyboard.press("Escape");
+      await expect(actions).toBeFocused();
+      if (!tagged && width === 1280) {
+        for (const key of ["Enter", "Space"]) {
+          await page.keyboard.press("Tab");
+          await actions.focus();
+          await expectFocusIndicator(actions);
+          await actions.press(key);
+          await expect(page.getByRole("menu")).toBeVisible();
+          await page.keyboard.press("Escape");
+          await expect(actions).toBeFocused();
+        }
+      }
+      expect(await page.locator(".ub-title").boundingBox()).toEqual(titleBefore);
+
+      // Then again with the header scrolled up against the clip edge. A
+      // measurement taken where the pane could not scroll proves nothing, so the
+      // offset it reached is asserted too.
+      const scrolled = await probe(true);
+      expect(scrolled.scrolled).toBeGreaterThan(0);
+      expect(scrolled.liveHeight).toBeGreaterThanOrEqual(floor);
+      expect(scrolled.liveWidth).toBeGreaterThanOrEqual(floor);
+      expect(scrolled.takesTheRevision).toBe(false);
+      expect(scrolled.takesTheTitle).toBe(false);
+    }
   }
+}
 
-});
+for (const scheme of ["light", "dark"] as const) {
+  test(`document actions keep compact paint and pointer targets at rest and after scrolling — ${scheme}`, { tag: "@webkit" }, async ({
+    browser,
+  }, info) => {
+    await exerciseDocumentActions(browser, scheme, info);
+  });
+}
 
 function copyNotice(page: Page, message: string): Locator {
   return page.locator("[data-sonner-toast]:not([data-removed=true])").filter({
@@ -2604,9 +2719,11 @@ for (const scheme of ["light"] as const) {
           expect((await controlPaint(tap)).color).not.toBe(beforeFocus.color);
         }
       };
-      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger"]) {
+      for (const selector of [".ub-sync-toggle", ".ub-doc-rev"]) {
         await check(page.locator(selector));
       }
+      const actions = page.locator(".ub-actions-trigger");
+      await check(actions, actions.locator(".ub-actions-face"));
       await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
       for (const peer of await page.locator(".ub-peer-control").all()) await check(peer);
       await page.locator(".ub-peer-more").tap();
@@ -2652,12 +2769,16 @@ for (const scheme of ["light"] as const) {
         expect(await controlPaint(control)).not.toEqual(before);
       }
       const actions = page.locator(".ub-actions-trigger");
+      const face = actions.locator(".ub-actions-face");
+      await page.mouse.move(1399, 999);
+      const restingFace = await controlPaint(face);
       await actions.hover();
-      const hoveredAction = await controlPaint(actions);
+      const hoveredAction = await controlPaint(face);
+      expect(hoveredAction).not.toEqual(restingFace);
       await actions.click();
       await expect(actions).toHaveAttribute("data-state", "open");
       await page.mouse.move(1399, 999);
-      expect(await controlPaint(actions)).toEqual(hoveredAction);
+      expect(await controlPaint(face)).toEqual(hoveredAction);
       await page.keyboard.press("Escape");
       await actions.evaluate((element) => (element as HTMLElement).blur());
       const peers = page.locator(".ub-peer-control");

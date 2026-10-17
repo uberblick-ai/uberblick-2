@@ -491,11 +491,19 @@ function DocumentActions({
             <AlertDialogTrigger asChild>
               <button
                 type="button"
-                className="ub-actions-trigger size-11 cursor-pointer rounded-(--radius-sm) border border-transparent bg-transparent font-[inherit] [font-style:inherit] [font-weight:inherit] ub-type-h2 text-(--muted-foreground) hover:border-(--border) hover:bg-(--secondary) hover:text-(--foreground) data-[state=open]:border-(--border) data-[state=open]:bg-(--secondary) data-[state=open]:text-(--foreground) focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
+                className="ub-actions-trigger focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
                 aria-label="Document actions"
                 title="Document actions"
               >
-                ⋯
+                <span className="ub-actions-face">
+                  <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                    <g fill="currentColor">
+                      <circle cx="3" cy="8" r="1.25" />
+                      <circle cx="8" cy="8" r="1.25" />
+                      <circle cx="13" cy="8" r="1.25" />
+                    </g>
+                  </svg>
+                </span>
               </button>
             </AlertDialogTrigger>
           </DropdownMenuTrigger>
