@@ -19,7 +19,8 @@
  * every frame. Each names the library file and line it pins;
  * those line numbers are from the installed `@hocuspocus/server@4.7.1`
  * TypeScript sources (`node_modules/@hocuspocus/server/src/…`), after the
- * workspace's admission patch, so a bump is also an invitation to re-read them.
+ * workspace's compatibility patch, so a bump is also an invitation to re-read
+ * them.
  *
  * The rig is deliberately not the hub: these are properties of the library, and
  * proving them through `createHub` would leave a reader unable to tell which
@@ -248,7 +249,7 @@ type FrameSink = { handleMessage: (data: Uint8Array) => void };
  * Resolve once `count` frames have reached the server on this connection.
  *
  * `handleMessage` is the library's own entry point for an incoming frame —
- * `ClientConnection.ts:599` before a connection is established,
+ * `ClientConnection.ts:604` before a connection is established,
  * `Connection.ts:244` after — and both queue the frame synchronously, so a
  * wrapper that delegates first and counts second reports arrival exactly. That
  * arrival is the only observable a test holding the server mid-flight has: a
@@ -271,7 +272,7 @@ function frameBarrier(target: FrameSink, count: number): Promise<void> {
  * read the server's own state instead of inferring it from a symptom.
  * `handleConnection` returns the `ClientConnection`, and the shipped build
  * carries `getPendingDocumentCount()` on it — the number
- * `ClientConnection.ts:638` enforces the ceiling from — whatever the published
+ * `ClientConnection.ts:643` enforces the ceiling from — whatever the published
  * declaration says about it being private.
  */
 type ServerConnection = FrameSink & { getPendingDocumentCount: () => number };
@@ -392,10 +393,10 @@ describe("ClientConnection.ts:438-444 — the pre-auth queue drains before `conn
   });
 });
 
-describe("ClientConnection.ts:529-585 — a refused token sets up no connection", () => {
+describe("ClientConnection.ts:529-590 — a refused token sets up no connection", () => {
   /**
    * `onAuthenticate` throwing takes the branch that answers `writePermissionDenied`
-   * and clears document state (`:563-585`); `setUpNewConnection` at `:562` never
+   * and clears document state (`:563-590`); `setUpNewConnection` at `:562` never
    * runs. The frames the provider queued behind its token — the sync step it
    * sent without waiting to be authenticated — are dropped with the refused
    * document's state rather than handed to a `Connection` afterwards.
@@ -448,7 +449,7 @@ describe("ClientConnection.ts:529-585 — a refused token sets up no connection"
   });
 });
 
-describe("ClientConnection.ts:630-666 — pending-document admission", () => {
+describe("ClientConnection.ts:635-671 — pending-document admission", () => {
   /**
    * The hub states this ceiling itself (`MAX_PENDING_DOCUMENTS`, 100, in
    * `packages/hub/src/config.ts`) and the MCP client's attach budget is
@@ -964,7 +965,7 @@ describe("ClientConnection.ts:518-562 — onAuthenticate runs once, refreshes go
   /**
    * `onConnect` then `onAuthenticate` (`:518` and `:529`) run on the first auth
    * message for a document, and only then is the connection set up (`:562`).
-   * A later auth message finds the connection established (`:619-623`) and
+   * A later auth message finds the connection established (`:624-628`) and
    * reaches `MessageReceiver.ts:174-179`, which dispatches to `onTokenSync`
    * instead — the wiring at `ClientConnection.ts:397-420`.
    *

@@ -1,7 +1,8 @@
 diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
+index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82bca47401e 100644
 --- a/dist/hocuspocus-server.cjs
 +++ b/dist/hocuspocus-server.cjs
-@@ -866,6 +866,7 @@
+@@ -866,6 +866,7 @@ var ClientConnection = class {
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -9,7 +10,7 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(_hocuspocus_common.ConnectionTimeout);
-@@ -973,6 +974,7 @@
+@@ -973,15 +974,19 @@ var ClientConnection = class {
  					});
  					if (this.hookPayloads[rawKey] !== hookPayload) return;
  					hookPayload.connectionConfig.isAuthenticated = true;
@@ -17,15 +18,20 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  					this.hasAuthenticated = true;
  					const message = new OutgoingMessage(responseAddress).writeAuthenticated(hookPayload.connectionConfig.readOnly);
  					this.websocket.send(message.toUint8Array());
-@@ -982,6 +984,7 @@
+ 					await this.setUpNewConnection(rawKey, documentName, sessionId, hookPayload);
+ 				} catch (err) {
+-					if (this.hookPayloads[rawKey] !== hookPayload) return;
++					const ownsPayload = this.hookPayloads[rawKey] === hookPayload;
++					if (this.websocket.readyState !== _hocuspocus_common.WsReadyStates.Open || !ownsPayload && !hookPayload.connectionConfig.isAuthenticated) return;
  					const error = err || _hocuspocus_common.Forbidden;
  					const message = new OutgoingMessage(responseAddress).writePermissionDenied(error.reason ?? "permission-denied");
  					this.websocket.send(message.toUint8Array());
++					if (!ownsPayload) return;
 +					if (!hookPayload.connectionConfig.isAuthenticated) this.pendingDocumentCount -= 1;
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -1006,6 +1009,7 @@
+@@ -1006,6 +1011,7 @@ var ClientConnection = class {
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
@@ -33,7 +39,7 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
  						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(_hocuspocus_common.ResetConnection);
-@@ -1026,6 +1030,7 @@
+@@ -1026,6 +1032,7 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -41,7 +47,7 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1054,6 +1059,7 @@
+@@ -1054,6 +1061,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -49,7 +55,7 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1080,9 +1086,7 @@
+@@ -1080,9 +1088,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -61,9 +67,10 @@ diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
+index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3dde9c505d 100644
 --- a/dist/hocuspocus-server.esm.js
 +++ b/dist/hocuspocus-server.esm.js
-@@ -836,6 +836,7 @@
+@@ -836,6 +836,7 @@ var ClientConnection = class {
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -71,7 +78,7 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(ConnectionTimeout);
-@@ -943,6 +944,7 @@
+@@ -943,15 +944,19 @@ var ClientConnection = class {
  					});
  					if (this.hookPayloads[rawKey] !== hookPayload) return;
  					hookPayload.connectionConfig.isAuthenticated = true;
@@ -79,15 +86,20 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  					this.hasAuthenticated = true;
  					const message = new OutgoingMessage(responseAddress).writeAuthenticated(hookPayload.connectionConfig.readOnly);
  					this.websocket.send(message.toUint8Array());
-@@ -952,6 +954,7 @@
+ 					await this.setUpNewConnection(rawKey, documentName, sessionId, hookPayload);
+ 				} catch (err) {
+-					if (this.hookPayloads[rawKey] !== hookPayload) return;
++					const ownsPayload = this.hookPayloads[rawKey] === hookPayload;
++					if (this.websocket.readyState !== WsReadyStates.Open || !ownsPayload && !hookPayload.connectionConfig.isAuthenticated) return;
  					const error = err || Forbidden;
  					const message = new OutgoingMessage(responseAddress).writePermissionDenied(error.reason ?? "permission-denied");
  					this.websocket.send(message.toUint8Array());
++					if (!ownsPayload) return;
 +					if (!hookPayload.connectionConfig.isAuthenticated) this.pendingDocumentCount -= 1;
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -976,6 +979,7 @@
+@@ -976,6 +981,7 @@ var ClientConnection = class {
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
@@ -95,7 +107,7 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
  						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(ResetConnection);
-@@ -996,6 +1000,7 @@
+@@ -996,6 +1002,7 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -103,7 +115,7 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1024,6 +1029,7 @@
+@@ -1024,6 +1031,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -111,7 +123,7 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1050,9 +1056,7 @@
+@@ -1050,9 +1058,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -123,9 +135,10 @@ diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
  	/**
  	* Set a callback that will be triggered when the connection is closed
 diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
+index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa57ae7426 100644
 --- a/src/ClientConnection.ts
 +++ b/src/ClientConnection.ts
-@@ -75,6 +75,8 @@
+@@ -75,6 +75,8 @@ export class ClientConnection<Context = any> {
  
  	private readonly maxPendingDocuments: number;
  
@@ -134,7 +147,7 @@ diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
  	pingInterval: NodeJS.Timeout;
  
  	lastMessageReceivedAt = Date.now();
-@@ -163,6 +165,7 @@
+@@ -163,6 +165,7 @@ export class ClientConnection<Context = any> {
  		for (const rawKey of Object.keys(this.hookPayloads)) {
  			delete this.hookPayloads[rawKey];
  		}
@@ -142,7 +155,7 @@ diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
  		this.documentConnectionsEstablished.clear();
  	}
  
-@@ -240,14 +243,9 @@
+@@ -240,14 +243,9 @@ export class ClientConnection<Context = any> {
  	// Auth frame has been seen) so that sending an Auth frame first — which marks
  	// the document as "establishing" but keeps its hook payload alive while a slow
  	// `onAuthenticate` runs — cannot be used to bypass the limit.
@@ -159,7 +172,7 @@ diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
  	}
  
  	/**
-@@ -550,6 +548,7 @@
+@@ -550,6 +548,7 @@ export class ClientConnection<Context = any> {
  
  				// All `onAuthenticate` hooks passed.
  				hookPayload.connectionConfig.isAuthenticated = true;
@@ -167,17 +180,35 @@ diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
  				this.hasAuthenticated = true;
  
  				// Let the client know that authentication was successful.
-@@ -577,6 +576,9 @@
+@@ -562,9 +561,13 @@ export class ClientConnection<Context = any> {
+ 				// Time to actually establish the connection.
+ 				await this.setUpNewConnection(rawKey, documentName, sessionId, hookPayload);
+ 			} catch (err: any) {
+-				// Same as above: a closed connection has nobody to tell, and its
+-				// state is already gone.
+-				if (this.hookPayloads[rawKey] !== hookPayload) {
++				// A connected hook may close only the room before refusing it. Keep
++				// its failure reply on the live socket, after the room-close frame.
++				const ownsPayload = this.hookPayloads[rawKey] === hookPayload;
++				if (
++					this.websocket.readyState !== WsReadyStates.Open ||
++					(!ownsPayload && !hookPayload.connectionConfig.isAuthenticated)
++				) {
+ 					return;
+ 				}
+ 
+@@ -577,6 +580,10 @@ export class ClientConnection<Context = any> {
  
  				// Clean up all state for this document so a retry is treated
  				// as a fresh first connection attempt.
++				if (!ownsPayload) return;
 +				if (!hookPayload.connectionConfig.isAuthenticated) {
 +					this.pendingDocumentCount -= 1;
 +				}
  				this.documentConnectionsEstablished.delete(rawKey);
  				delete this.hookPayloads[rawKey];
  				delete this.incomingMessageQueue[rawKey];
-@@ -623,6 +625,12 @@
+@@ -623,6 +630,12 @@ export class ClientConnection<Context = any> {
  
  			const isFirst = this.incomingMessageQueue[rawKey] === undefined;
  			if (isFirst) {
@@ -190,7 +221,7 @@ diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
  				// Cap the number of documents a single connection can open before
  				// authenticating any of them. Each pending document allocates its own
  				// queue and hook payload, so this prevents memory amplification by
-@@ -655,6 +663,7 @@
+@@ -655,6 +668,7 @@ export class ClientConnection<Context = any> {
  					},
  					providerVersion: null as string | null,
  				};

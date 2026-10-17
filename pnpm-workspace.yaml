@@ -2,8 +2,8 @@ packages:
   - "packages/*"
 
 # Patch the pinned server without changing its resolution. The counter removes
-# a quadratic scan from full-corpus attachment; its invariant is pinned beside
-# the dependency's other characterized seams.
+# a quadratic scan from full-corpus attachment. Auth-first admission and the
+# close-then-refuse reply are pinned beside the dependency's other seams.
 patchedDependencies:
   "@hocuspocus/server@4.7.1": patches/@hocuspocus__server@4.7.1.patch
 

@@ -186,7 +186,7 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
  *
  * These probes execute pending-slot admission and cleanup in both builds. A
  * document is opened by its Auth message; another first frame is dropped
- * without taking a pending slot (`src/ClientConnection.ts:630-632`).
+ * without taking a pending slot (`src/ClientConnection.ts:635-637`).
  * Each build is loaded by path — `require` for the CJS bundle, `import()` for
  * the ESM one — and driven through `handleMessage`, the library's own entry
  * point for an incoming frame, so what is asserted is the guard's *effect* in
@@ -208,6 +208,14 @@ describe("the patched admission rule is live in both runtime builds", () => {
     writeVarUint: (encoder: object, value: number) => void;
     writeVarString: (encoder: object, value: string) => void;
     toUint8Array: (encoder: object) => Uint8Array;
+  };
+  const decoding = createRequire(CJS_BUILD)("lib0/decoding") as {
+    createDecoder: (data: Uint8Array) => object;
+    readVarUint: (decoder: object) => number;
+    readVarString: (decoder: object) => string;
+  };
+  const { AuthMessageType } = createRequire(CJS_BUILD)("@hocuspocus/common") as {
+    AuthMessageType: { Authenticated: number; PermissionDenied: number };
   };
 
   /**
@@ -231,7 +239,7 @@ describe("the patched admission rule is live in both runtime builds", () => {
     >;
   };
   type ServerBuild = {
-    MessageType: { Auth: number; Sync: number };
+    MessageType: { Auth: number; Sync: number; CLOSE: number };
     Hocuspocus: new (configuration: Record<string, unknown>) => {
       documents: Map<string, object>;
       unloadDocument: (document: object) => Promise<void>;
@@ -268,6 +276,26 @@ describe("the patched admission rule is live in both runtime builds", () => {
       resolve = done;
     });
     return { promise, resolve: () => resolve() };
+  }
+
+  function handshakeMessages(build: ServerBuild, frames: Uint8Array[]) {
+    return frames.flatMap((data) => {
+      const decoder = decoding.createDecoder(data);
+      const room = decoding.readVarString(decoder);
+      const type = decoding.readVarUint(decoder);
+      if (type === build.MessageType.CLOSE) {
+        return [{ room, type: "close", value: decoding.readVarString(decoder) }];
+      }
+      if (type !== build.MessageType.Auth) return [];
+      const authType = decoding.readVarUint(decoder);
+      if (authType === AuthMessageType.Authenticated) {
+        return [{ room, type: "authenticated", value: decoding.readVarString(decoder) }];
+      }
+      if (authType === AuthMessageType.PermissionDenied) {
+        return [{ room, type: "authenticationFailed", value: decoding.readVarString(decoder) }];
+      }
+      return [];
+    });
   }
 
   /**
@@ -310,9 +338,12 @@ describe("the patched admission rule is live in both runtime builds", () => {
   ) {
     const build = await load(buildPath);
     const closes: number[] = [];
+    const sent: Uint8Array[] = [];
     const websocket = {
       readyState: 1,
-      send() {},
+      send(data: Uint8Array) {
+        sent.push(data);
+      },
       close(code: number) {
         closes.push(code);
         this.readyState = 3;
@@ -335,12 +366,19 @@ describe("the patched admission rule is live in both runtime builds", () => {
     return {
       connection,
       closes,
+      sent,
+      handshakeMessages: () => handshakeMessages(build, sent),
+      closeSocket() {
+        websocket.readyState = 3;
+        connection.handleClose();
+      },
       auth(room: string) {
         const before = tasks.length;
         connection.handleMessage(frame(build, room, build.MessageType.Auth));
         return tasks[before] ?? Promise.resolve();
       },
       async dispose() {
+        websocket.readyState = 3;
         connection.handleClose();
         await Promise.all(tasks);
         for (const document of server.documents.values()) {
@@ -434,6 +472,69 @@ describe("the patched admission rule is live in both runtime builds", () => {
       }
     });
 
+    it(`sends a late room refusal after its close and keeps sibling admission live (${label} build)`, async () => {
+      const room = "late-refused";
+      const reason = "access-ended-during-load";
+      const client = await probe(buildPath, {
+        connected: ({ documentName, connection }: {
+          documentName: string;
+          connection: { close: (event: { code: number; reason: string }) => void };
+        }) => {
+          if (documentName !== room) return;
+          connection.close({ code: 4403, reason });
+          throw { reason };
+        },
+      });
+      try {
+        await client.auth(room);
+        expect(client.handshakeMessages()).toEqual([
+          { room, type: "authenticated", value: "read-write" },
+          { room, type: "close", value: reason },
+          { room, type: "authenticationFailed", value: reason },
+        ]);
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.connection.hookPayloads[room]).toBeUndefined();
+        expect(client.closes).toEqual([]);
+
+        await client.auth("healthy-sibling");
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.connection.hookPayloads["healthy-sibling"]?.connectionConfig.isAuthenticated).toBe(true);
+        expect(client.handshakeMessages().at(-1)).toEqual({
+          room: "healthy-sibling", type: "authenticated", value: "read-write",
+        });
+        expect(client.closes).toEqual([]);
+      } finally {
+        await client.dispose();
+      }
+    });
+
+    it(`sends no late refusal after the socket closes during document loading (${label} build)`, async () => {
+      const entered = gate();
+      const held = gate();
+      const client = await probe(buildPath, {
+        onLoadDocument: async () => {
+          entered.resolve();
+          await held.promise;
+          throw { reason: "load refused after socket close" };
+        },
+      });
+      try {
+        const finished = client.auth("loading");
+        await entered.promise;
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        client.closeSocket();
+        held.resolve();
+        await finished;
+        expect(client.connection.getPendingDocumentCount()).toBe(0);
+        expect(client.handshakeMessages()).toEqual([
+          { room: "loading", type: "authenticated", value: "read-write" },
+        ]);
+      } finally {
+        held.resolve();
+        await client.dispose();
+      }
+    });
+
     for (const rejects of [false, true]) {
       it(`releases a slot once when the socket closes during ${rejects ? "refused" : "successful"} authentication (${label} build)`, async () => {
         const entered = gate();
@@ -449,12 +550,13 @@ describe("the patched admission rule is live in both runtime builds", () => {
           const finished = client.auth("held");
           await entered.promise;
           expect(client.connection.getPendingDocumentCount()).toBe(1);
-          client.connection.handleClose();
+          client.closeSocket();
           expect(client.connection.getPendingDocumentCount()).toBe(0);
           held.resolve();
           await finished;
           expect(client.connection.getPendingDocumentCount()).toBe(0);
           expect(client.closes).toEqual([]);
+          expect(client.sent).toEqual([]);
         } finally {
           held.resolve();
           await client.dispose();
