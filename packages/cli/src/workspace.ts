@@ -3,15 +3,16 @@ import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
 import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
-import { readdirSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { WORKSPACE_DATABASE_FILE, resolveStorage } from "@uberblick/mcp-server/storage";
-import { defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
+import { acquireWorkspaceRemovalRole, defaultWorkspaceDatabasePath, readWorkspaceName, usesDeviceLogin } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
 import type { Origin } from "./config.js";
 import { migrateHubAdmissions, resolveConfig, writeHubAdmission } from "./config.js";
 import { type ProjectBinding, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
-import { readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
+import { forgetWorkspace, readWorkspaceHub, recordedWorkspaceIds, workspaceRegistryPath } from "./workspace-registry.js";
 import { takeHelp } from "./help.js";
 import { workspaceMemberCommand } from "./workspace-member.js";
 import type { InitLock } from "./init-lock.js";
@@ -32,6 +33,7 @@ commands:
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
   use <link|id>               fetch a shared workspace or select a recorded one
+  remove <id|prefix> [--yes]  delete this computer's copy of a workspace
 
 options:
   -h, --help             show this help; after a command, that command's help
@@ -121,6 +123,119 @@ export function listWorkspaces(
 function warn(io: Io, warnings: readonly string[]): void {
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
+  }
+}
+
+export const WORKSPACE_REMOVE_OPTIONS = {
+  yes: { type: "boolean", default: false },
+} as const;
+
+export const WORKSPACE_REMOVE_HELP = `usage: ub workspace remove <id|prefix> [--yes]
+
+Delete this computer's database files and record for one workspace. Accepts a
+workspace UUID, decorated <slug>-<uuid>, or a unique UUID prefix from this
+machine's databases and records. Switch away with \`ub workspace use\` first,
+and stop any \`ub open\` serving it. Open MCP sessions then refuse writes;
+restart them after fetching the workspace again.
+
+A recorded hub keeps the workspace; \`ub workspace use <link>\` fetches it again.
+Local changes the hub has not acknowledged are lost. A local-only workspace
+has no other copy. With no hub record, this may be the only copy.
+Project bindings, logins, hubs and other workspaces are untouched.
+
+options:
+  --yes             delete without asking; required without terminal stdin
+  -h, --help        show this help
+`;
+
+async function removeCommand(argv: string[], io: Io): Promise<number> {
+  if (takeHelp(argv, io, WORKSPACE_REMOVE_HELP)) return 0;
+  let raw: string;
+  let yes: boolean;
+  try {
+    const { positionals, values } = parseArgs({
+      args: argv,
+      options: WORKSPACE_REMOVE_OPTIONS,
+      allowPositionals: true,
+    });
+    if (positionals.length !== 1 || positionals[0] === undefined) {
+      throw new Error("expected exactly one workspace id or prefix");
+    }
+    raw = positionals[0];
+    yes = values.yes;
+  } catch (error) {
+    io.err(`ub workspace remove: ${error instanceof Error ? error.message : String(error)}\n\n${WORKSPACE_REMOVE_HELP}`);
+    return 2;
+  }
+
+  try {
+    const ids = new Set([...listWorkspaces().entries.map(entry => entry.uuid), ...recordedWorkspaceIds()]);
+    const resolved = resolveWorkspaceId(raw, [...ids].map(uuid => ({ uuid })));
+    if ("error" in resolved) {
+      io.err(`ub workspace remove: ${resolved.error}\n${WORKSPACE_REMOVE_HELP}`);
+      return 2;
+    }
+    const id = parseWorkspaceId(resolved.id).uuid;
+    if (!ids.has(id)) {
+      throw new Error("no workspace on this machine has that id; `ub workspace list` shows replicas; fetch a shared workspace with `ub workspace use <link>`");
+    }
+    const refuseSelected = (): void => {
+      if (inForce().uuid === id) {
+        throw new Error("this workspace is in use here; `ub workspace use` another workspace first");
+      }
+    };
+    refuseSelected();
+    const databasePath = defaultWorkspaceDatabasePath(id);
+    const hub = readWorkspaceHub(id);
+    if (!yes) {
+      if (!process.stdin.isTTY) {
+        throw new Error("removing a workspace requires confirmation at a terminal; pass --yes to delete without asking");
+      }
+      const loss = hub === undefined
+        ? "This computer cannot tell whether a hub keeps it, so this may be the only copy."
+        : hub === null
+          ? "This is the only copy of this local-only workspace."
+          : `The hub keeps the workspace; fetch it again with \`ub workspace use ${shellArgument(`${displayWorkspaceHub(hub).replace(/\/$/, "")}/${id}`)}\`. ` +
+            "Any local changes the hub has not acknowledged would be lost.";
+      const terminal = createInterface({ input: process.stdin, output: process.stderr });
+      let answer: string;
+      try {
+        answer = await terminal.question(`Delete this computer's copy of workspace ${id}? ${loss} [y/N] `);
+      } catch {
+        throw new Error("confirmation ended; nothing was removed");
+      } finally {
+        terminal.close();
+      }
+      if (!/^(y|yes)$/i.test(answer.trim())) {
+        io.out("cancelled; nothing was removed\n");
+        return 0;
+      }
+    }
+
+    const lock = await acquireInitLock(process.env, { command: `ub workspace remove ${id}` });
+    try {
+      refuseSelected();
+      // Confirmation must cover the current loss even if a peer changed the record.
+      if (!yes && readWorkspaceHub(id) !== hub) {
+        throw new Error("the workspace changed during confirmation; nothing was removed, run the command again");
+      }
+      const role = acquireWorkspaceRemovalRole(databasePath);
+      try {
+        for (const suffix of ["", "-wal", "-shm"]) rmSync(`${databasePath}${suffix}`, { force: true });
+        forgetWorkspace(id);
+        // Keep the role held through every unlink; a live serving lock is never removed.
+        rmSync(`${databasePath}.serving-lock`, { force: true });
+      } finally {
+        role.close();
+      }
+    } finally {
+      lock.release();
+    }
+    io.out(`removed ${id} from this computer\n`);
+    return 0;
+  } catch (error) {
+    io.err(`ub workspace remove: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
   }
 }
 
@@ -422,6 +537,7 @@ export async function workspaceCommand(
   if (sub === "use") {
     return await useCommand(rest, io);
   }
+  if (sub === "remove") return await removeCommand(rest, io);
   if (sub === undefined || sub === "help" || sub === "--help" || sub === "-h") {
     io.out(WORKSPACE_HELP);
     return 0;

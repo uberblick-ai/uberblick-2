@@ -52,6 +52,8 @@ import {
   WORKSPACE_HELP,
   WORKSPACE_LIST_HELP,
   WORKSPACE_LIST_OPTIONS,
+  WORKSPACE_REMOVE_HELP,
+  WORKSPACE_REMOVE_OPTIONS,
   WORKSPACE_USE_HELP,
   WORKSPACE_USE_OPTIONS,
 } from "../src/workspace.js";
@@ -170,11 +172,12 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["status", "create", "promote", "member", "list", "use"],
+    children: ["status", "create", "promote", "member", "list", "use", "remove"],
   },
   { argv: ["workspace", "status"], help: WORKSPACE_STATUS_HELP, options: {} },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
+  { argv: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS },
   { argv: ["workspace", "create"], help: WORKSPACE_CREATE_HELP, options: {} },
   { argv: ["workspace", "promote"], help: WORKSPACE_PROMOTE_HELP, options: {} },
   {
@@ -341,6 +344,8 @@ describe("every human-facing command path", () => {
 
   it("keeps workspace id forms in the help of the accepting command", () => {
     expect(WORKSPACE_USE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
+    expect(WORKSPACE_REMOVE_HELP).toMatch(/<slug>-<uuid>.*prefix/s);
+    expect(WORKSPACE_REMOVE_HELP).toContain("Delete this computer's database files and record for one workspace");
   });
 
   it("prints doctor's corpus Basic Usage in the house layout and gives the same purpose at the root", async () => {
@@ -526,6 +531,7 @@ describe("help before the work", () => {
     ["data", "update", "--file", "missing.json", "--dry-run", "--help"],
     ["open", "--port", "0", "-h"],
     ["workspace", "use", "ws://example.invalid:1234", "-h"],
+    ["workspace", "remove", WORKSPACE, "--yes", "-h"],
     ["auth", "login", "--help"],
     ["auth", "logout", "--all-devices", "--help"],
     ["mcp", "install", "claude", "--help"],

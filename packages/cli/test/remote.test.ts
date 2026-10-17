@@ -33,6 +33,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { writeHubLogin, removeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { startServer, testConfig } from "../../mcp-server/test/helpers.js";
 import { startDeviceSyncHub } from "@uberblick/hub/test-device-sync";
 import {
   bridgeConfig,
@@ -980,6 +981,56 @@ describe("ub workspace use <link>", () => {
     const selected = await runInProcess(["workspace", "use", WORKSPACE], box);
     expect(selected.status, selected.output).toBe(0);
     expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });
+  });
+
+  it("refetches a removed workspace while its old MCP session stays refused", async () => {
+    const hub = await startHub();
+    const uuid = await webDoc(hub, "Retained on the hub");
+    const box = sandbox({ credentials: { signingSecret: SECRET } });
+    const previous = readConfigFile(box, "config.json").workspaceId as string;
+    const target = localJoinUrl(hub, box, SECRET);
+    const joined = await runInProcess(["workspace", "use", target], box);
+    expect(joined.status, joined.output).toBe(0);
+    const databasePath = resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }).databasePath;
+    const config = testConfig({ workspaceId: WORKSPACE, databasePath });
+    const old = await startServer(config);
+    try {
+      expect((await old.ok("get_doc", { uuid })).title).toBe("Retained on the hub");
+      const switched = await runInProcess(["workspace", "use", previous], box);
+      expect(switched.status, switched.output).toBe(0);
+      const removed = await runUbAsync(["workspace", "remove", WORKSPACE, "--yes"], box);
+      expect(removed.status, removed.output).toBe(0);
+      expect(existsSync(databasePath)).toBe(false);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
+
+      const fetched = await runUbAsync(["workspace", "use", target], box);
+      expect(fetched.status, fetched.output).toBe(0);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
+      const refused = await old.call("create_doc", {
+        title: "Old session write", description: "An old session must refuse even when a new replica exists at the same path.",
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.payload).toMatchObject({ applied: false, error: "workspace_removed" });
+      expect(refused.payload.message).toContain("removed from this computer");
+      await old.close();
+
+      const restarted = await startServer(config);
+      try {
+        expect((await restarted.ok("get_doc", { uuid })).title).toBe("Retained on the hub");
+        const created = await restarted.ok("create_doc", {
+          title: "New session write", description: "The restarted session writes into the refetched replica.",
+        });
+        expect(created.applied).toBe(true);
+      } finally { await restarted.close(); }
+      expect(existsSync(databasePath)).toBe(true);
+      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
+      const directory = await openRoom(hub, directoryRoom(WORKSPACE));
+      try { expect(listDirectory(directory.doc).map(entry => entry.uuid)).toEqual([uuid]); }
+      finally { await directory.done(); }
+      const remote = await openRoom(hub, roomForDoc(WORKSPACE, uuid));
+      try { expect(getBlocks(remote.doc).map(block => block.text)).toEqual(["Retained on the hub body"]); }
+      finally { await remote.done(); }
+    } finally { await old.close(); }
   });
 
   it("rejoins a loopback hub from a remote binding using the retained file secret", async () => {

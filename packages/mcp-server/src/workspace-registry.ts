@@ -47,6 +47,15 @@ export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): stri
   return Object.keys(readRegistry(env).hubs);
 }
 
+/** Caller holds the machine init lock, including throughout replica removal. */
+export function forgetWorkspace(id: string, env: NodeJS.ProcessEnv = process.env): void {
+  const current = readRegistry(env);
+  const uuid = parseWorkspaceId(id).uuid;
+  if (!(uuid in current.hubs)) return;
+  delete current.hubs[uuid];
+  publishOwnerOnly(current.path, `${JSON.stringify(current.hubs, null, 2)}\n`);
+}
+
 /**
  * Caller holds the init lock. Publish records first; restore them if binding publication fails.
  * Keep the callback synchronous so publication and restoration cannot interleave.

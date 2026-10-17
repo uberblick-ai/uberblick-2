@@ -228,9 +228,9 @@ describe("the versioned install payload", () => {
     expect(failed.status, failed.stderr).toBe(1);
     expect(failed.stdout).toBe("");
     expect(failed.stderr).toContain("failed to start");
-    expect(failed.stderr).toContain("Error: unable to open database file");
+    expect(failed.stderr).toContain("Error: EISDIR: illegal operation on a directory, open");
     for (const [path, statement] of [
-      ["packages/mcp-server/src/store.ts", "this.db = new DatabaseSync(databasePath)"],
+      ["packages/mcp-server/src/store.ts", "this.identityFd = openSync(databasePath, \"a+\", 0o600)"],
       ["packages/mcp-server/src/workspace-replicas.ts", "options.store ?? new MirrorStore(config.databasePath, config.workspaceId);"],
       ["packages/mcp-server/src/main.ts", "const instance = createMcpServer(config)"],
       ["packages/mcp-server/src/main.ts", "main().catch("],
@@ -253,10 +253,11 @@ describe("the versioned install payload", () => {
     expect(failed.status, failed.stderr).toBe(1);
     expect(failed.stdout).toBe("");
     expect(failed.stderr).toContain("failed to start");
-    expect(failed.stderr).toContain("Error: unable to open database file");
+    expect(failed.stderr).toContain("Error: EISDIR: illegal operation on a directory, open");
     expect(failed.stderr).toMatch(/mcp\.mjs:\d+:\d+/);
     expect(failed.stderr).not.toMatch(/packages\/mcp-server\/src\/[^\s]+\.ts:\d+/);
-    expect(failed.stderr).not.toMatch(/ENOENT|EISDIR|SyntaxError/);
+    expect(failed.stderr).not.toMatch(/ENOENT|SyntaxError/);
+    expect(failed.stderr.match(/Error:/g)).toHaveLength(1);
   });
 
   it("runs workspace create, status, MCP and the packaged web app with only Node on PATH", async () => {

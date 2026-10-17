@@ -11,7 +11,7 @@ import { once } from "node:events";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMcpEngine, type UberblickMcpEngine, } from "../src/engine.js";
-import { acquireServingReplicaRole, ServingReplicaHeldError, type ServingReplicaHolder, } from "../src/serving-role.js";
+import { acquireServingReplicaRole, acquireWorkspaceRemovalRole, ServingReplicaHeldError, type ServingReplicaHolder, } from "../src/serving-role.js";
 import type { PeerClient, Rig } from "./helpers.js";
 import { cleanupTestResources, closeChild, tempDatabasePath, testConfig, trackChild } from "./helpers.js";
 
@@ -121,6 +121,24 @@ async function refusedServingBoot(
 }
 
 describe("serving MCP engine", () => {
+
+  it("keeps process exclusion after same-process contenders inspect its lock", async () => {
+    const databasePath = tempDatabasePath();
+    const config = testConfig({ databasePath });
+    const holder = await createMcpEngine(config, { serving: true });
+    engines.push(holder);
+    expect(() => acquireServingReplicaRole(databasePath, {
+      pid: process.pid,
+      sessionId: "same-process contender",
+    })).toThrow(ServingReplicaHeldError);
+    expect(() => acquireWorkspaceRemovalRole(databasePath)).toThrow(/running `ub open`/);
+
+    const contender = spawnWorker(databasePath, "separate-process contender");
+    expect(await startWorker(contender)).toMatchObject({
+      type: "refused",
+      holder: { pid: process.pid, sessionId: config.sessionId },
+    });
+  });
 
   it("refuses live contenders with the unchanged current holder, but permits non-serving engines and graceful replacement", async () => {
     const databasePath = tempDatabasePath();
