@@ -17,21 +17,23 @@ function navigateLink(event: MouseEvent<HTMLAnchorElement>, navigate: Navigate):
   navigate(event.currentTarget.pathname);
 }
 
-function DocumentReference({ uuid, label, context, compact = false }: {
-  uuid: string; label?: string | undefined; context: DocLinkContext | null; compact?: boolean;
+/** `chip` marks an archived target with the shared badge pill instead of the inline suffix. */
+function DocumentReference({ uuid, label, context, compact = false, chip = compact, className }: {
+  uuid: string; label?: string | undefined; context: DocLinkContext | null; compact?: boolean; chip?: boolean; className?: string;
 }): ReactElement | null {
   if (context === null) return null;
   const link = context.lookup(uuid);
-  return <a className="ub-doclink" href={context.href(uuid)}
-    data-doc-link-state={link.state}
+  const text = label ?? link.title ?? uuid;
+  return <a className={className === undefined ? "ub-doclink" : `ub-doclink ${className}`} href={context.href(uuid)}
+    data-doc-link-state={link.state} data-archived-chip={chip || undefined}
     onClick={(event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
       context.open(uuid);
-    }}>{compact ? <>
-      <span className="ub-decision-rfc-title">{label ?? link.title ?? uuid}</span>
-      {link.state === "archived" && <span className="ub-decision-archived">archived</span>}
-    </> : label ?? link.title ?? uuid}</a>;
+    }}>{chip ? <>
+      {compact ? <span className="ub-decision-rfc-title">{text}</span> : text}
+      {link.state === "archived" && <span className="ub-badge ub-decision-archived">archived</span>}
+    </> : text}</a>;
 }
 
 const ANSWER_STATES = {
@@ -85,23 +87,27 @@ function RecordedAttribution({ record, state, now }: {
   </span>;
 }
 
-function TopicNotice({ topic, state: selectedState, docLinks }: {
-  topic: DecisionTopicResolution; state: AnswerState; docLinks: DocLinkContext | null;
+function TopicNotice({ topic, state: selectedState, selectedInForce, docLinks }: {
+  topic: DecisionTopicResolution; state: AnswerState; selectedInForce: boolean; docLinks: DocLinkContext | null;
 }): ReactElement | null {
   const state = decisionTopicState(topic);
-  if (state === "conflict") return <p className="ub-decision-notice"><strong>Nothing is in force.</strong> Approved answers conflict. Select an answer in the timeline to read it.</p>;
+  if (state === "conflict") return <p className="ub-decision-notice" data-state={state}>
+    <span><strong>Nothing is in force.</strong> Approved answers conflict. Select an answer in the timeline to read it.</span>
+  </p>;
   if (state === "not-yet-decided") {
     const latestOpen = topic.records.findLast((record) => record.status === "open");
     if (selectedState === state && !latestOpen?.discussion) return null;
-    return <p className="ub-decision-notice">{selectedState !== state && "Not yet decided."}
-      {latestOpen?.discussion && <> <DocumentReference uuid={latestOpen.discussion} label="Open proposal" context={docLinks} /></>}
+    return <p className="ub-decision-notice" data-state={state}>{selectedState !== state && <span>Not yet decided.</span>}
+      {latestOpen?.discussion && <> <DocumentReference uuid={latestOpen.discussion} label="Open proposal" context={docLinks} className="ub-decision-notice-action" /></>}
     </p>;
   }
-  if (state !== "under-review") return null;
+  // Other selections carry their own state in the pill and the return banner.
+  if (state !== "under-review" || !selectedInForce) return null;
   const single = topic.pending.length === 1 ? topic.pending[0] : undefined;
-  return <p className="ub-decision-notice">{selectedState !== state && <><strong>Under review.</strong>{" "}</>}
-    {single === undefined ? `${topic.pending.length} pending proposals.` : "The current answer stays in force."}
-    {single?.discussion && <> <DocumentReference uuid={single.discussion} label="Open proposal" context={docLinks} /></>}
+  return <p className="ub-decision-notice" data-state={state}>
+    <span>{selectedState !== state && <><strong>Under review.</strong>{" "}</>}
+      {single === undefined ? `${topic.pending.length} pending proposals.` : "The current answer stays in force."}</span>
+    {single?.discussion && <> <DocumentReference uuid={single.discussion} label="Open proposal" context={docLinks} className="ub-decision-notice-action" /></>}
   </p>;
 }
 
@@ -130,7 +136,17 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
   const replacement = state === "superseded" ? replacementRecord(topic, record.uuid) : undefined;
   const replacedAt = replacement?.decidedAt === undefined ? null : formatTimestamp(replacement.decidedAt, now, true);
   return <>
-    <TopicNotice topic={topic} state={state} docLinks={docLinks} />
+    <TopicNotice topic={topic} state={state} selectedInForce={topic.inForce?.uuid === record.uuid} docLinks={docLinks} />
+    {(state === "superseded" || (topic.inForce !== null && topic.inForce.uuid !== record.uuid)) &&
+      <div className="ub-decision-return" role="status">
+        {state === "superseded" && <span className="ub-decision-earlier-answer">
+          <strong>Earlier answer.</strong> {replacedAt === null ? "It no longer applies." : <>Replaced <time dateTime={replacedAt.dateTime} title={replacedAt.title}>{replacedAt.label}</time>; it no longer applies.</>}
+        </span>}
+        {topic.inForce !== null && topic.inForce.uuid !== record.uuid && <>{" "}
+          <a className="ub-decision-current-answer ub-decision-notice-action" data-primary="true" href={topicPath}
+            onClick={(event) => navigateLink(event, navigate)}>Go to the current answer</a>
+        </>}
+      </div>}
     <div className="ub-decision-answer-header">
       <div className="ub-decision-answer-heading">
         <span className="ub-decision-answer-caption">ANSWER</span>
@@ -138,12 +154,6 @@ function AnswerHeader({ topic, record, topicPath, navigate, docLinks }: {
       </div>
       <RecordedAttribution record={record} state={state} now={now} />
     </div>
-    {state === "superseded" && <p className="ub-decision-earlier-answer">
-      Earlier answer. {replacedAt === null ? "It no longer applies." : <>Replaced <time dateTime={replacedAt.dateTime} title={replacedAt.title}>{replacedAt.label}</time>; it no longer applies.</>}
-    </p>}
-    {topic.inForce !== null && topic.inForce.uuid !== record.uuid && <p className="ub-decision-current-answer">
-      <a href={topicPath} onClick={(event) => navigateLink(event, navigate)}>Go to the current answer</a>
-    </p>}
   </>;
 }
 
@@ -261,7 +271,7 @@ export function DecisionTopicPane({ topic, selected, linkedRecord, navigate, exp
     afterAnswer={<>
       {record.discussion && docLinks !== null && <p className="ub-decision-rfc">
         <span>RFC</span>{" "}
-        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} />
+        <DocumentReference uuid={record.discussion} label={discussionTitle} context={docLinks} chip />
       </p>}
       <Timeline topic={topic} selected={selected} linkedRecord={linkedRecord} segment={segment} navigate={navigate} docLinks={docLinks} directoryConnection={directoryConnection} />
     </>}
