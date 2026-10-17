@@ -1686,12 +1686,20 @@ for (const scheme of ["light", "dark"] as const) {
  */
 async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark", info: TestInfo): Promise<void> {
   const touch = info.project.name === "webkit-ipad";
-  const page = await openAppearanceApp(browser, scheme, "", touch, touch
-    ? devices["iPad (gen 7)"]
-    : { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 620 } });
+  const page = await openApp(browser, `/${harness().workspace}/settings/tags`, {
+    upstream: true,
+    contextOptions: {
+      colorScheme: scheme, reducedMotion: "reduce",
+      ...(touch ? devices["iPad (gen 7)"]
+        : { hasTouch: false, isMobile: false, viewport: { width: 1280, height: 620 } }),
+    },
+    readySelector: "[data-settings-page]",
+  });
   expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(touch);
   const floor = touch ? 44 : 24;
-  await ensureExampleCatalog(page);
+  await expect(page.getByRole("region", { name: "Active" }).getByRole("listitem")).toHaveCount(EXAMPLE_TAGS.length);
+  await page.goto(new URL(`/${harness().workspace}`, page.url()).href);
+  await expect(page.locator(".ub-docs")).toBeVisible();
   const showSidebar = page.getByRole("button", { name: "Show document list", exact: true });
   if (await showSidebar.isVisible()) await showSidebar.click();
   await page.getByRole("button", { name: "+ New page" }).click();
@@ -1700,6 +1708,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   // Enough prose to scroll: a clipped target cannot be exposed in a short page.
   await placeCaret(page);
   await page.keyboard.type("a line of prose\n".repeat(24));
+  await page.evaluate(() => document.fonts.ready);
 
   const editTags = page.getByRole("button", { name: "Edit tags" });
   const actions = page.locator(".ub-actions-trigger");
@@ -1815,10 +1824,10 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   const attachHeader = async (state: string): Promise<void> => {
     const row = await page.locator(".ub-doc-meta").boundingBox();
     if (row === null) throw new Error("e2e: no document header for screenshot");
-    await info.attach(`document-actions-${scheme}-${touch ? "touch" : "fine"}-${state}`, {
-      body: await page.screenshot({ clip: { x: row.x, y: row.y, width: row.width, height: Math.min(240, 620 - row.y) } }),
-      contentType: "image/png",
-    });
+    const name = `document-actions-${scheme}-${touch ? "touch" : "fine"}-${state}`;
+    const path = info.outputPath(`${name}.png`);
+    await page.screenshot({ path, clip: { x: row.x, y: row.y, width: row.width, height: Math.min(240, 620 - row.y) } });
+    await info.attach(name, { path, contentType: "image/png" });
   };
 
   // The target and alignment hold with no tags and with tags that push the row.
@@ -1832,7 +1841,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       await editTags.click();
     }
     // The target holds in one docked and one narrow layout.
-    for (const width of [1280, 768]) {
+    for (const width of [1280, 768, 744]) {
       await page.setViewportSize({ width, height: 620 });
       // Typing left the pane scrolled to the caret; the first reading is of the
       // header at rest.
@@ -1871,6 +1880,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       await expect(actions).toBeFocused();
       if (!tagged && width === 1280) {
         for (const key of ["Enter", "Space"]) {
+          await page.keyboard.press("Tab");
           await actions.focus();
           await expectFocusIndicator(actions);
           await actions.press(key);
