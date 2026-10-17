@@ -3338,13 +3338,16 @@ test("the document and comments rail stay left-anchored as the viewport changes"
   await page.getByRole("button", { name: "+ New page" }).click();
   await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
 
+  await page.evaluate(() => document.fonts.ready);
+
   type Layout = {
     body: { left: number; right: number };
     sidebar: { right: number } | null;
     pane: { left: number; right: number; width: number };
-    column: { left: number; right: number; width: number };
+    column: { left: number; right: number; width: number; maxWidth: number };
     editor: { left: number };
     rail: { left: number; right: number } | null;
+    commentsColumn: { left: number; width: number };
     paneClientWidth: number;
     paneScrollWidth: number;
     bodyClientWidth: number;
@@ -3356,7 +3359,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
       const sidebar = document.querySelector<HTMLElement>(".ub-list:not([inert])");
       const pane = document.querySelector<HTMLElement>(".ub-document-pane");
       const rail = document.querySelector<HTMLElement>(".ub-rail");
-      if (body === null || pane === null) {
+      const commentsColumn = document.querySelector<HTMLElement>(".ub-document-rail");
+      if (body === null || pane === null || commentsColumn === null) {
         throw new Error("e2e: document composition is incomplete");
       }
       const column = pane.querySelector<HTMLElement>(":scope > .ub-column");
@@ -3368,6 +3372,7 @@ test("the document and comments rail stay left-anchored as the viewport changes"
       const paneBox = pane.getBoundingClientRect();
       const columnBox = column.getBoundingClientRect();
       const editorBox = editor.getBoundingClientRect();
+      const commentsBox = commentsColumn.getBoundingClientRect();
       const sidebarBox = sidebar?.getBoundingClientRect() ?? null;
       const railBox =
         rail === null || getComputedStyle(rail).display === "none"
@@ -3381,8 +3386,10 @@ test("the document and comments rail stay left-anchored as the viewport changes"
           left: columnBox.left,
           right: columnBox.right,
           width: columnBox.width,
+          maxWidth: Number.parseFloat(getComputedStyle(column).maxWidth),
         },
         editor: { left: editorBox.left },
+        commentsColumn: { left: commentsBox.left, width: commentsBox.width },
         rail:
           railBox === null ? null : { left: railBox.left, right: railBox.right },
         paneClientWidth: pane.clientWidth,
@@ -3448,6 +3455,17 @@ test("the document and comments rail stay left-anchored as the viewport changes"
 
   const expandedPopulated = await atWidths([1400, 1600]);
   expectFixedOrigins(expandedPopulated, (reading) => reading.sidebar?.right ?? 0);
+  const constrained = await atWidths([1280]);
+  for (const reading of [...expandedPopulated, ...constrained]) {
+    if (reading.sidebar === null) throw new Error("e2e: docked sidebar is missing");
+    const leftGap = reading.editor.left - reading.sidebar.right;
+    const rightGap = reading.commentsColumn.left - reading.column.right;
+    expect(Math.abs(leftGap - 44)).toBeLessThanOrEqual(1);
+    expect(Math.abs(rightGap - 44)).toBeLessThanOrEqual(1);
+    expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(1);
+    expect(reading.commentsColumn.width).toBe(240);
+  }
+  await page.setViewportSize({ width: 1600, height: 800 });
   for (let index = 0; index < expandedPopulated.length; index += 1) {
     const reading = expandedPopulated[index];
     const empty = expandedEmpty[index];
@@ -3458,6 +3476,8 @@ test("the document and comments rail stay left-anchored as the viewport changes"
     expect(reading.rail).not.toBeNull();
   }
   const [firstPopulated, secondPopulated] = firstTwo(expandedPopulated);
+  expect(firstPopulated.column.width).toBeCloseTo(firstPopulated.column.maxWidth, 1);
+  expect(constrained[0]?.column.width).toBeLessThan(firstPopulated.column.width);
   const firstGap = shownRail(firstPopulated).left - firstPopulated.column.right;
   const secondGap = shownRail(secondPopulated).left - secondPopulated.column.right;
   expect(firstGap).toBeGreaterThan(0);

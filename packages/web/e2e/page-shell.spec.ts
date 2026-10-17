@@ -95,7 +95,9 @@ test.describe("one page shell", () => {
         const reference = await expectShell(page);
         const proseLeft = await page.locator(".ub-editor .ub-paragraph").first().evaluate((node) => node.getBoundingClientRect().left);
         expect(proseLeft).toBeCloseTo(reference.titleLeft, 1);
-        if (layout === "docked") expect(reference.titleLeft).toBe(348);
+        if (layout === "docked") expect(reference.titleLeft).toBe(332);
+        if (layout === "collapsed") expect(reference.titleLeft).toBe(92);
+        if (layout === "ipad" || layout === "drawer") expect(reference.titleLeft).toBe(44);
         const documentImage = info.outputPath(`document-${layout}-${colorScheme}.png`);
         await page.screenshot({ path: documentImage });
         await info.attach(`Document ${layout}`, { path: documentImage, contentType: "image/png" });

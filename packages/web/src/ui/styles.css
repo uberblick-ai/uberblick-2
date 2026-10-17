@@ -133,8 +133,10 @@
   --measure: 72ch;
   --sidebar-width: 18rem;
   --document-rail-width: 15rem;
-  --pane-document-inset: 2rem;
-  --document-rail-gap: 2rem;
+  /* The inset plus block gutter balances the rail gap and keeps the touch +
+     inside the scrolling pane. */
+  --pane-document-inset: 1rem;
+  --document-rail-gap: 2.75rem;
   --pane-trailing-space: 1rem;
   /* Permanently reserve the block gutter so revealing its + moves no prose. */
   --block-gutter: 1.75rem;
