@@ -293,6 +293,23 @@ for (const touch of [false, true]) {
     await expect(row(page, "Agent stance", "Agent question").locator(".ub-decisions-state-label")).toHaveText("Agent stance");
     await expectChromeStyles(page);
     await expectHeaderContained(page);
+    const line = await alphaRow.evaluate((link) => {
+      const box = (selector: string) => {
+        const node = link.querySelector(selector);
+        if (node === null) throw new Error(`e2e: missing ${selector}`);
+        return node.getBoundingClientRect();
+      };
+      const [question, preview, meta] = [box(".ub-decisions-question"), box(".ub-decisions-row-preview"), box(".ub-decisions-row-meta")];
+      const middle = (rect: DOMRect) => rect.top + rect.height / 2;
+      const node = link.querySelector<HTMLElement>(".ub-decisions-question");
+      return {
+        oneLine: Math.abs(middle(question) - middle(preview)) < 2 && Math.abs(middle(question) - middle(meta)) < 2,
+        order: question.right <= preview.left && preview.right <= meta.left,
+        questionClipped: node !== null && node.scrollWidth > node.clientWidth,
+        questionTitle: node?.title,
+      };
+    });
+    expect(line).toEqual({ oneLine: true, order: true, questionClipped: true, questionTitle: alphaQuestion });
 
     const placement = await geometry(page);
     expect(placement.inEditor).toBe(false);

@@ -68,6 +68,8 @@ describe("the compact Decisions block", () => {
     ]).container;
     const review = within(host).getByRole("link", { name: "Under review: Current question" });
     expect(review.textContent).toContain("Current answer");
+    expect(review.querySelector(".ub-decisions-question")?.getAttribute("title")).toBe("Current question");
+    expect(review.querySelector(".ub-decisions-row-preview")?.getAttribute("title")).toBe("Current answer");
     expect(review.textContent).not.toContain("Pending");
     expect(within(host).getByRole("link", { name: "Conflict: Conflict latest" }).textContent).toContain("Nothing is in force.");
     expect(host.textContent).not.toContain("Conflicting first answer");
