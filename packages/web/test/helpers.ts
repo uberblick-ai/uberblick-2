@@ -47,7 +47,7 @@ export function snapshotFragment(ydoc: Y.Doc): FragmentSnapshot[] {
  * layout, and the editor is not the only thing reading this DOM.
  *
  * Anything that finds a block by its id needs the block to be in the document
- * to find it: `document.getElementById` (the outline's scroll-to) returns
+ * to find it: `document.getElementById` returns
  * nothing for a detached tree. A test mounting into a detached div would pass
  * by exercising the fallbacks rather than the rules.
  *

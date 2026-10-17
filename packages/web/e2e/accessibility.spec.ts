@@ -63,7 +63,6 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.getByRole("button", { name: "Comment", exact: true }).click();
       await page.getByPlaceholder(/Comment as/).fill("Scan conversation");
       await page.keyboard.press("Enter");
-      await expect(page.getByRole("button", { name: /^On this page/ })).toBeVisible();
       await expect(page.locator(".ub-thread")).toContainText("Scan conversation");
       await scan("document and docked shell — MacBook 1280px");
 
@@ -98,10 +97,6 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(page.getByRole("alertdialog")).toBeVisible();
       await scan("archive confirmation");
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
-      await page.getByRole("button", { name: /^On this page/ }).click();
-      await expect(page.getByRole("navigation", { name: "On this page" })).toBeVisible();
-      await scan("On this page");
-      await page.keyboard.press("Escape");
 
       const tagsUrl = new URL(`/${harness().workspace}/settings/tags`, page.url()).href;
       await page.goto(tagsUrl);

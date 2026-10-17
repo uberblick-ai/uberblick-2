@@ -85,6 +85,19 @@ export const INITIAL_DOCUMENT_LIST_STATE: DocumentListState = {
   sort: { order: "changed", direction: INITIAL_DIRECTION.changed },
 };
 
+/** The list shows only a topic's latest stage; the topic page carries the detail. */
+type Stage = "in-effect" | "under-discussion";
+
+const STAGE_LABELS: Record<Stage, string> = {
+  "in-effect": "In effect",
+  "under-discussion": "Under discussion",
+};
+
+/** An answer in force with nothing pending is in effect; anything still open is under discussion. */
+function topicStage(state: DecisionTopicState): Stage {
+  return state === "in-force" || state === "agent-stance" ? "in-effect" : "under-discussion";
+}
+
 type ListRow = DirectoryEntry & { topicState?: DecisionTopicState; pinned: boolean; groupName: string | undefined; recordIds: readonly string[] };
 
 function inMode(entry: DirectoryEntry, mode: Mode): boolean {
@@ -404,10 +417,7 @@ export function DocumentList({
         tags: current.tags,
         kind: "decision" as const,
         topicState: decisionTopicState(topic),
-        ...(topic.inForce?.answerPreview == null ? {} : { answerPreview: topic.inForce.answerPreview }),
         approvalChanged: [topic.inForce, ...topic.conflicts].some((record) => record?.approvalChanged === true),
-        ...(topic.records.every((record) => record.commentCount !== undefined)
-          ? { commentCount: topic.records.reduce((total, record) => total + (record.commentCount ?? 0), 0) } : {}),
         ...(stamps.length === 0 ? {} : { updatedAt: Math.max(...stamps) }),
         pinned: pinnedRecord !== undefined,
         groupName: pinnedRecord === undefined ? undefined : groupOf.get(pinnedRecord.uuid),
@@ -480,7 +490,7 @@ export function DocumentList({
         <table className="ub-docs-table">
           <colgroup>
             <col />
-            <col className="ub-docs-group-column" />
+            <col className={mode === "decision" ? "ub-docs-stage-column" : "ub-docs-group-column"} />
             <col className="ub-docs-tags-column" />
             <col className="ub-docs-age-column" />
             <col className="ub-docs-pin-column" />
@@ -488,7 +498,7 @@ export function DocumentList({
           <thead>
             <tr>
               {(["title", "group", "tags", "changed"] as const).map((option) => option === "group" || option === "tags" ? (
-                <th key={option} scope="col" className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}>{option === "group" ? "Group" : "Tags"}</th>
+                <th key={option} scope="col" className={`ub-docs-heading-cell ub-docs-heading-cell--${option}`}>{option === "tags" ? "Tags" : mode === "decision" ? "Stage" : "Group"}</th>
               ) : (
                 <th
                   key={option}
@@ -546,27 +556,26 @@ export function DocumentList({
                   <th scope="row" className="ub-docs-title-cell">
                     <button
                       type="button"
-                      className={`ub-docs-open ${entry.topicState === undefined ? "" : "ub-docs-open--topic"} min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11`}
+                      className={`ub-docs-open min-h-6 min-w-6 [@media(any-pointer:coarse)]:min-h-11 [@media(any-pointer:coarse)]:min-w-11`}
                       onClick={() => onSelect(entry.uuid)}
                       title={entry.uuid}
                     >
                       <span className="ub-docs-title">
                         {entry.title === "" ? <em>Untitled</em> : entry.title}
                       </span>
-                      {entry.topicState === undefined
-                        ? <LifecycleBadge kind={entry.kind} />
-                        : <span className="ub-type-ui text-(--muted-foreground)">{TOPIC_STATES[entry.topicState]}</span>}
-                      {entry.topicState !== undefined && entry.approvalChanged && (
-                        <span className="ub-type-ui text-(--muted-foreground)">Changed after approval</span>
-                      )}
+                      {/* Topic rows stay one line like every other row: the
+                          answer, detailed state and comments live on the topic
+                          page, and the state filter above narrows by state. */}
+                      {entry.topicState === undefined && <LifecycleBadge kind={entry.kind} />}
                     </button>
-                    {entry.topicState !== undefined && <div className="ub-docs-topic-detail">
-                      {entry.topicState === "conflict" ? <span>Nothing is in force.</span>
-                        : entry.answerPreview != null && <span>{entry.answerPreview}</span>}
-                      {entry.commentCount !== undefined && <span>{entry.commentCount} {entry.commentCount === 1 ? "comment" : "comments"}</span>}
-                    </div>}
                   </th>
-                  <td className="ub-docs-group-cell"><span className="ub-docs-group">{entry.groupName}</span></td>
+                  {/* Decision records never sit in sidebar groups, so topics
+                      use this column for their latest stage instead. */}
+                  <td className="ub-docs-group-cell">
+                    {entry.topicState === undefined
+                      ? <span className="ub-docs-group">{entry.groupName}</span>
+                      : <span className="ub-docs-stage" data-stage={topicStage(entry.topicState)}>{STAGE_LABELS[topicStage(entry.topicState)]}</span>}
+                  </td>
                   <td className="ub-docs-tags-cell"><RowTags tags={(rowTags.get(entry.uuid) ?? []).filter(namedTag)} title={entry.title} onPick={(id) => updateState({ selectedTags: [id] })} /></td>
                   <td className="ub-docs-age-cell">
                     <ChangedStamp at={entry.updatedAt} now={now} />

@@ -367,28 +367,25 @@ describe("decision topic navigation and history", () => {
     await act(async () => jump.click());
     expect(document.activeElement).toBe(block);
     expect(window.location.pathname).toBe(docPath(WORKSPACE, RELATED_FIRST));
-    expect(within(host).getByRole("button", { name: /^On this page/ })).toBeDefined();
     await act(async () => tombstoneDirectoryEntry(directory(), FIRST));
     expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
     expect(host.querySelector(".ub-decisions-link")).toBeNull();
-    expect(within(host).getByRole("button", { name: /^On this page/ })).toBeDefined();
     expect(pageUpdates).not.toHaveBeenCalled();
     expect(acquired.filter((name) => [FIRST, CURRENT, REJECTED, WITHDRAWN, OPEN].some((uuid) => name === roomForDoc(WORKSPACE, uuid)))).toEqual([]);
     ydoc.off("update", pageUpdates);
   });
 
-  it("adds the block and heading-free outline when a related topic arrives, then opens its current answer", async () => {
+  it("adds the block when a related topic arrives, then opens its current answer", async () => {
     const ydoc = room(roomForDoc(WORKSPACE, RELATED_FIRST)).ydoc;
     initDoc(ydoc, { uuid: RELATED_FIRST, title: "A page without headings" });
     appendBlock(ydoc, { type: "paragraph", text: "Read this first." });
     regular(RELATED_FIRST, "A page without headings");
     const host = (await open(docPath(WORKSPACE, RELATED_FIRST))).container;
-    expect(within(host).queryByRole("button", { name: /^On this page/ })).toBeNull();
+    expect(within(host).queryByRole("region", { name: "Decisions" })).toBeNull();
     await act(async () => {
       record(FIRST, "A new question", "decided", "A current answer with no cached preview.", { related: RELATED_FIRST, cache: false });
       upsertDirectoryEntry(directory(), { uuid: FIRST, title: "A new question", governs: RELATED_FIRST });
     });
-    expect(within(host).getByRole("button", { name: /^On this page/ })).toBeDefined();
     const row = within(host).getByRole("link", { name: "In force: A new question" });
     expect(row.querySelector(".ub-decisions-row-preview")).toBeNull();
     expect(acquired).not.toContain(roomForDoc(WORKSPACE, FIRST));

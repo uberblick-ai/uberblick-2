@@ -844,7 +844,7 @@ describe("decision topics in the list", () => {
     return host;
   }
 
-  it("lists one current answer per topic using the whole history's caches without joining records", async () => {
+  it("lists one single-line row per topic using the whole history's caches without joining records", async () => {
     const search = localSearch({ "pending proposal": [THREE], "stable answer": [TWO] });
     const peer = peerOf(directoryDoc());
     const records = [
@@ -874,11 +874,13 @@ describe("decision topics in the list", () => {
     expect(rowTitles(host)).toEqual(["Stable answer title", "Alpha answer"]);
     expect(rowUuids(host)).toEqual([ONE, OTHER]);
     const row = topicRow(host, ONE);
-    expect(within(row).getByText("Under review").textContent).toBe("Under review");
-    expect(within(row).getByText("Keep the current answer.").textContent).toBe("Keep the current answer.");
-    expect(row.textContent).not.toContain("unapproved replacement");
-    expect(row.textContent).not.toContain("superseded answer");
-    expect(within(row).getByText("28 comments").textContent).toBe("28 comments");
+    expect(row.querySelector(".ub-docs-title")?.textContent).toBe("Stable answer title");
+    expect(row.querySelector(".ub-docs-open")?.textContent).toBe("Stable answer title");
+    expect(row.querySelector("th")?.children).toHaveLength(1);
+    expect(row.textContent).not.toContain("Under review");
+    expect(row.textContent).not.toContain("answer.");
+    expect(row.textContent).not.toContain("replacement");
+    expect(row.textContent).not.toMatch(/\d+ comments?/);
     expect(within(row).getByRole("time").getAttribute("dateTime")).toBe("1970-01-01T00:00:01.000Z");
     expect([...rooms.keys()].sort()).toEqual(
       [directoryRoom(WORKSPACE), sidebarRoom(WORKSPACE), settingsRoom(WORKSPACE)].sort(),
@@ -896,7 +898,7 @@ describe("decision topics in the list", () => {
     );
   });
 
-  it("omits unknown or null answer caches and an incomplete history count", async () => {
+  it("keeps the answer, state, approval warning and comment count out of every topic row", async () => {
     const host = await open([
       decision(ONE, "No answer cached", { answerPreview: null, commentCount: 0 }),
       decision(TWO, "Older client", { commentCount: 1 }),
@@ -908,12 +910,13 @@ describe("decision topics in the list", () => {
         status: "open", answerPreview: "An unapproved preview.", commentCount: 0,
       }),
     ]);
-    expect(within(topicRow(host, ONE)).getByText("0 comments").textContent).toBe("0 comments");
-    expect(within(topicRow(host, TWO)).getByText("1 comment").textContent).toBe("1 comment");
-    expect(topicRow(host, THREE).textContent).toContain("Known answer.");
-    expect(topicRow(host, THREE).textContent).not.toMatch(/\d+ comments?/);
-    expect(documentTable(host).textContent).not.toContain("An unapproved preview.");
-    expect(topicRow(host, GONE).textContent).toContain("Not yet decided");
+    const table = documentTable(host);
+    for (const text of ["Known answer.", "An unapproved preview.", "Not yet decided", "In force", "Decision"]) {
+      expect(table.querySelector("tbody")?.textContent).not.toContain(text);
+    }
+    expect(table.textContent).not.toMatch(/\d+ comments?/);
+    expect([...table.querySelectorAll(".ub-docs-open")].map((button) => button.textContent))
+      .toEqual(rowTitles(host));
   });
 
   it("uses the newest usable history stamp and places topics without one last", async () => {
@@ -958,18 +961,14 @@ describe("decision topics in the list", () => {
       ["conflict", "Conflict"], ["changed-after-approval", "Changed after approval"],
     ]);
     expect(rowTitles(host)).toEqual(["Agent recommendation", "Answer under review", "Approved", "Latest conflicting title", "Undecided"]);
-    expect(within(topicRow(host, THREE)).getByText("Agent stance").textContent).toBe("Agent stance");
-    expect(topicRow(host, THREE).textContent).not.toContain("In force");
-    expect(topicRow(host, THREE).textContent).toContain("Agent answer.");
-    expect(topicRow(host, FOUR).textContent).toContain("Under review");
-    expect(topicRow(host, FOUR).textContent).toContain("Current stance.");
-    expect(topicRow(host, FOUR).textContent).not.toContain("Proposed stance.");
-    expect(topicRow(host, FOUR).textContent).not.toContain("Changed after approval");
-    expect(topicRow(host, GONE).textContent).toContain("Nothing is in force");
-    expect(topicRow(host, GONE).textContent).not.toContain("conflicting answer");
-    expect(topicRow(host, TWO).textContent).toContain("In force");
-    expect(topicRow(host, TWO).textContent).toContain("Changed after approval");
-    expect(topicRow(host, GONE).textContent).toContain("Changed after approval");
+    expect(topicRow(host, THREE).textContent).not.toContain("Agent stance");
+    expect(topicRow(host, GONE).textContent).not.toContain("Nothing is in force");
+    expect(topicRow(host, TWO).textContent).not.toContain("Changed after approval");
+    expect(within(documentTable(host)).getAllByRole("columnheader").map((cell) => cell.textContent)).toContain("Stage");
+    expect(within(documentTable(host)).queryByRole("columnheader", { name: "Group" })).toBeNull();
+    expect([ONE, TWO, THREE, FOUR, GONE].map((uuid) => topicRow(host, uuid).querySelector(".ub-docs-stage")?.textContent)).toEqual([
+      "Under discussion", "In effect", "In effect", "Under discussion", "Under discussion",
+    ]);
 
     for (const [state, topics] of [
       ["not-yet-decided", [ONE]], ["under-review", [FOUR]],
@@ -992,7 +991,7 @@ describe("decision topics in the list", () => {
     expect(within(documentTable(host)).getByText(/Conflict/).textContent).toContain("Conflict");
   });
 
-  it("warns only about changed current or conflicting answers, not superseded records", async () => {
+  it("counts only changed current or conflicting answers as changed after approval, not superseded records", async () => {
     const host = await open([
       decision(ONE, "Changed old answer", { createdAt: 1, approvalChanged: true }),
       decision(TWO, "Unchanged current answer", { topic: ONE, supersedes: ONE, createdAt: 2 }),
@@ -1197,7 +1196,8 @@ describe("the filter", () => {
 
     await act(async () => mode("Decisions")?.click());
     expect(rowTitles(host)).toEqual(["Cache choice"]);
-    expect(documentTable(host).textContent).toContain("Not yet decided");
+    expect(lifecycleBadges(host)).toHaveLength(0);
+    expect(documentTable(host).textContent).not.toContain("Not yet decided");
   });
 
   it("renders a missing-title fallback but follows the index's matching UUIDs", async () => {

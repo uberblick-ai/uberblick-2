@@ -154,7 +154,7 @@ what their server sends. Other tests belong in `mise run test`. Arguments after
 `--` pass unchanged to Playwright; for example:
 
 ```sh
-mise run e2e -- --repeat-each=3 outline.spec.ts
+mise run e2e -- --repeat-each=3 sidebar.spec.ts
 ```
 
 Wait for saves and drawing through `e2e/settle.ts`. `waitForAcknowledged` names
@@ -329,6 +329,16 @@ Merging also requires CodeQL code scanning results: a pull request that introduc
 a security alert at high or above cannot merge. Lower-severity and non-security
 alerts do not block merging. CodeQL runs on GitHub, outside `ci.yml` and
 `mise run ci`. Only a maintainer decides whether to dismiss an alert.
+
+`.github/workflows/dependency-review.yml` fails a pull request that adds or
+upgrades to a dependency, runtime or development, with an advisory at high or
+above. It compares the pull request with its base, so advisories already on
+`main` do not block it. It is not a required check. Dependabot
+(`.github/dependabot.yml`) opens one grouped pull request for open security
+fixes, a weekly one for npm minor and patch updates, and a monthly one for
+action pins. It skips the exact pins `pnpm-workspace.yaml` explains. Its pull
+requests come from an outside author, so a maintainer merges them by hand once
+the required checks pass.
 
 `mise run ci` runs the same commands locally, in the workflow's order, under
 `CI=true`, and names every check that failed. It is a convenience, not a

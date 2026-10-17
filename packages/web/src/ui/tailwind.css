@@ -33,7 +33,6 @@
 @source "./settings/DevicesSettings.tsx";
 @source "./sidebar/WorkspaceSwitcher.tsx";
 @source "./sidebar/UserMenu.tsx";
-@source "./document/OutlinePane.tsx";
 @source "./document/DocChrome.tsx";
 @source "./PickerList.tsx";
 @source "./editor-controls/CodeLanguageControl.tsx";

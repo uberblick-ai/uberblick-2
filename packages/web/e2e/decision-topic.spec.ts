@@ -329,7 +329,8 @@ test("decision title renames sync without approving answer changes", async ({ br
     await expect.poll(async () => (await writer.call<StoredDoc>("get_doc", { uuid: current.uuid })).approvalChanged).toBe(true);
     const changedTitle = `Changed answer question ${current.uuid}`;
     await title.fill(changedTitle);
-    await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toContainText("Changed after approval");
+    await reader.getByRole("combobox", { name: "Decision state" }).selectOption("changed-after-approval");
+    await expect(reader.locator(".ub-docs-row").filter({ hasText: changedTitle })).toHaveCount(1);
     await expectMcp(() => writer.call<StoredDoc>("get_doc", { uuid: current.uuid }), doc => {
       expect(doc).toMatchObject({ title: changedTitle, approvalChanged: true });
     });
