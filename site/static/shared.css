@@ -186,3 +186,15 @@ td code { white-space: nowrap }
   .changes li > span:last-child { grid-column: 1 / -1 }
 }
 @media (max-width: 520px) { .top nav { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 10px 16px } }
+
+/* Displayed / Markdown example tabs on the Custom Markdown page. */
+.tabs.ex { max-width: none; background: var(--panel) }
+.tabs.ex .tablist { justify-content: flex-start }
+.tabs.ex .tablist .copy { margin: 6px 8px 0 auto }
+.tabs.ex .panel { display: block; padding: 0 }
+.tabs.ex .panel[hidden] { display: none }
+.tabs.ex .panel pre { margin: 0; padding: 14px 16px; background: var(--code); font-size: 13px; line-height: 1.5; overflow-x: auto }
+.tabs.ex .panel img { display: block; width: 100%; height: auto }
+.tabs.ex .panel img.d { display: none }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tabs.ex .panel img.l { display: none } :root:not([data-theme="light"]) .tabs.ex .panel img.d { display: block } }
+:root[data-theme="dark"] .tabs.ex .panel img.l { display: none } :root[data-theme="dark"] .tabs.ex .panel img.d { display: block }
