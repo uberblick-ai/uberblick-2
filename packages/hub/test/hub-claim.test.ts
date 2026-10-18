@@ -204,7 +204,7 @@ describe("operator-authorized GitHub sign-in claim", () => {
     const testRig = rig();
     const { flow, github } = signIn(testRig);
     const code = testRig.claims!.operatorClaimCode();
-    expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(code).toMatch(/^[a-f0-9]{64}$/);
     const signed = await complete(flow, github);
     expect(signed).not.toHaveProperty("claimedWorkspaceId");
     expect(signed.credential.record.workspaces).toEqual([]);
@@ -476,7 +476,7 @@ describe("claim reservation lifecycle", () => {
       }
       expect(rows(testRig)).toEqual(before);
       const nextCode = testRig.claims!.operatorClaimCode()!;
-      expect(nextCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(nextCode).toMatch(/^[a-f0-9]{64}$/);
       expect(nextCode).not.toBe(code);
       github.fetch = originalFetch;
       const next = signIn(testRig, github);

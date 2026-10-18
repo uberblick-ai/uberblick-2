@@ -64,13 +64,13 @@ export class HubClaimState {
     if (!this.state(false).unclaimed) return undefined;
     if (this.reservation !== undefined && this.now() >= this.reservation.expiresAt) this.reservation.release();
     if (this.reservation !== undefined) return undefined;
-    this.code ??= randomBytes(32).toString("base64url");
+    this.code ??= randomBytes(32).toString("hex");
     return this.code;
   }
 
   reserve(code: string): DeviceFlowLease | undefined {
     const available = this.operatorClaimCode();
-    if (available === undefined || !/^[A-Za-z0-9_-]{43}$/.test(code) ||
+    if (available === undefined || !/^[a-f0-9]{64}$/.test(code) ||
         !timingSafeEqual(Buffer.from(code), Buffer.from(available))) return undefined;
     const lease: DeviceFlowLease = { expiresAt: Infinity, release: () => {
       if (this.reservation === lease) this.reservation = undefined;

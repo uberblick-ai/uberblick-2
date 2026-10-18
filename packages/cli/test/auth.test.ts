@@ -299,6 +299,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
   it("claims a fresh deployed hub before storing its workspace credential and leaves the binding unchanged", async () => {
     const remote = await rig([], true, true);
     const claimCode = await remote.claimCode();
+    expect(claimCode).toMatch(/^[a-f0-9]{64}$/);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const binding = readFileSync(configPath(box));
     const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
@@ -419,7 +420,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it.each(["invalid", "used", "closed"])("refuses a %s claim code separately before showing GitHub approval", async kind => {
     const remote = await rig([], true, true);
-    const claimCode = kind === "invalid" ? "not-a-valid-claim-code" : await remote.claimCode();
+    const hostCode = await remote.claimCode();
+    expect(hostCode).toMatch(/^[a-f0-9]{64}$/);
+    const claimCode = kind === "invalid" ? "not-a-valid-claim-code" : hostCode;
     if (kind === "used") {
       const start = await fetch(`${remote.origin}/auth/github/start`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ claimCode }),
@@ -433,7 +436,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const before = remote.github.calls.length;
     const box = sandbox();
     const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
-    expect(login.status).toBe(1);
+    expect(login.status, login.stderr).toBe(1);
     expect(login.stderr).toContain("claim code is invalid, already used, or claiming has closed");
     expect(login.stdout).not.toContain("code       ");
     expect(login.output).not.toContain(claimCode);
