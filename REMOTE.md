@@ -829,6 +829,8 @@ Host-only first-admin setup grants workspace administration only.
 
 A claim made by someone else cannot be recovered in place. There is no operator
 override, administrator recovery or supported way to reopen claiming. The resulting membership admits that account's device credentials to its default workspace.
+A fresh hub has nothing to lose, so start over instead: run
+`sh bin/remote-compose.sh down --volumes`, then `up` again and claim it.
 
 `GET /auth/claim-state` needs no credential and changes nothing. It reports
 only `unclaimed` and `canClaim`, the latter requiring configured GitHub sign-in.
