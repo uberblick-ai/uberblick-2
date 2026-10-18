@@ -16,9 +16,10 @@ import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberbl
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import { createMcpServer, resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
+import { createMcpServer, openWorkspaceReplicas, resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import {
   appendBlock,
+  createTagCatalogEntry,
   directoryRoom,
   editBlock,
   getBlocks,
@@ -652,6 +653,10 @@ describe("ub open: sharing through the upstream hub", () => {
 
   it("searches the shared store while the hub is unreachable and returns every ranked UUID", async () => {
     const { box, env } = configured();
+    // The existing replica cached its vocabulary before the hub became unreachable.
+    const cached = openWorkspaceReplicas(resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }), { hubFree: true });
+    try { createTagCatalogEntry(cached.replicas.settings().doc, "mcp"); }
+    finally { await cached.close(); }
     pointAt(box, FIRST_REMOTE);
     const app = await open(box, ["--port", String(await freePort())], env);
     const instance = createMcpServer(

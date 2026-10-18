@@ -3,12 +3,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { createMcpServer, defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
 import { getWorkspaceMainRepository, setWorkspaceMainRepository } from "@uberblick/schema";
+import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
 import { afterEach, expect, it } from "vitest";
+import { writeHubAdmission } from "../src/config.js";
 import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
+import { cleanUp, rig, seedLogin } from "./auth-fixtures.js";
 import { removeTempDirs, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
-afterEach(removeTempDirs);
+afterEach(async () => { await cleanUp(); removeTempDirs(); });
 
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 
@@ -67,6 +70,47 @@ it("fills id use, preserves an existing value and keeps JSON and binding unchang
   const kept = await runInProcess(["workspace", "use", id, "--json"], box);
   expect(kept).toEqual(filled);
   expect(await repository(box)).toBe("other/selected");
+});
+
+it.each(["admin", "member", "signed-out", "hub-down"] as const)(
+  "fills hub id use only after confirming admin authority: %s", async authority => {
+    const remote = await rig([], true, false, true);
+    const box = remote.box;
+    const identity = remote.hub.principals!.identify("1234", remote.github.identity.login);
+    remote.hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: identity.id,
+      role: authority === "admin" ? "admin" : "member" });
+    await seedLogin(remote);
+    if (authority === "signed-out") {
+      writeFileSync(join(box.configHome, "uberblick", "credentials.json"), "{}");
+    }
+    if (authority === "hub-down") remote.controls.onManagement = () => ({ status: 503, result: { status: "failed" } });
+    const local = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), authSecret: null });
+    await local.close();
+    rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: remote.origin }], box.env);
+    gitOrigin(box, "https://github.com/acme/notes.git");
+    const result = await runInProcess(["workspace", "use", WORKSPACE, "--json"], box);
+    expect(result.status, result.output).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(await repository(box)).toBe(authority === "admin" ? "acme/notes" : null);
+    expect(remote.requests.filter(request => request.path.includes("renew"))).toEqual([]);
+    expect(remote.requests.filter(request => request.path === "/auth/manage").map(request => request.body.operation))
+      .toEqual(authority === "signed-out" ? [] : ["own-role"]);
+  },
+);
+
+it.each(["admin", "member"] as const)("fills fetched hub settings only for a confirmed %s", async role => {
+  const remote = await rig([], true, false, true);
+  const box = remote.box;
+  const identity = remote.hub.principals!.identify("1234", remote.github.identity.login);
+  remote.hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: identity.id, role });
+  const login = await seedLogin(remote);
+  const endpoint = `http://127.0.0.1:${remote.hub.port}`;
+  await writeHubLogin(endpoint, login, box.env);
+  writeHubAdmission(endpoint, true, box.env);
+  gitOrigin(box, "https://github.com/acme/notes.git");
+  const result = await runInProcess(["workspace", "use", `${endpoint}/notes-${WORKSPACE}`, "--json"], box);
+  expect(result.status, result.output).toBe(0);
+  expect(await repository(box)).toBe(role === "admin" ? "acme/notes" : null);
 });
 
 it.each([

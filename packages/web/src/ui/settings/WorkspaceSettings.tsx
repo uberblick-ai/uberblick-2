@@ -317,9 +317,11 @@ function MainRepositoryForm({
 function TagSettings({
   workspace,
   connection,
+  local,
 }: {
   workspace: Workspace;
   connection: RoomConnection | null;
+  local: boolean;
 }): ReactElement {
   const status = useRoomStatus(connection);
   const catalog = useTagCatalog(connection);
@@ -340,8 +342,7 @@ function TagSettings({
     connection !== null &&
     connection.room === settingsRoom(workspace.uuid) &&
     status.hasReceivedServerState;
-  const seeded = arrived && catalog?.seeded === true;
-  const writable = seeded && status.writable;
+  const writable = arrived && status.writable;
 
   // The examples are one schema-owned, merge-safe transition. Wait for the
   // server's answer first: seeding an empty Y.Doc before that answer could
@@ -349,6 +350,7 @@ function TagSettings({
   useEffect(() => {
     if (
       connection === null ||
+      !local ||
       !arrived ||
       !status.writable ||
       isTagCatalogSeeded(connection.ydoc)
@@ -356,7 +358,7 @@ function TagSettings({
       return;
     }
     seedTagCatalog(connection.ydoc);
-  }, [arrived, connection, status.writable]);
+  }, [arrived, connection, local, status.writable]);
 
   useLayoutEffect(() => {
     if (refocus === null) return;
@@ -376,7 +378,7 @@ function TagSettings({
     target?.focus();
   }, [refocus]);
 
-  if (!seeded) {
+  if (!arrived) {
     return (
       <section className="ub-pane ub-page-pane" data-settings-page aria-labelledby="ub-settings-title">
         <div className="ub-column">
@@ -520,6 +522,7 @@ function TagSettings({
 
 export function WorkspaceSettings({
   admin,
+  local = false,
   page = "general",
   workspace,
   workspaceLocation = null,
@@ -532,6 +535,7 @@ export function WorkspaceSettings({
   verifiedHandle = null,
 }: {
   admin: boolean;
+  local?: boolean;
   page?: SettingsPage;
   workspace: Workspace;
   workspaceLocation?: string | null;
@@ -549,7 +553,7 @@ export function WorkspaceSettings({
   return page === "members" ? (
     <AccessSettings key={workspace.uuid} workspace={workspace} serving={serving} subject={subject} verifiedHandle={verifiedHandle} />
   ) : page === "tags" ? (
-    <TagSettings workspace={workspace} connection={catalogConnection} />
+    <TagSettings workspace={workspace} connection={catalogConnection} local={local} />
   ) : (
     <GeneralSettings
       workspace={workspace}

@@ -34,6 +34,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
@@ -41,7 +42,8 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
-import { getBlocks } from "@uberblick/schema";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -179,6 +181,7 @@ export interface Harness {
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
+  changeCurrentWorkspaceRole(role: "member" | "admin"): void;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /** Same-origin bundle and socket proxy that bypasses the serving replica. */
@@ -204,6 +207,9 @@ export interface Harness {
   readonly secondHubUrl?: string;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
+  hubWorkspaceSettings(): { name: string | null; mainRepository: string | null; tags: string[] } | null;
+  /** Observe completed refusal recovery without connecting a browser that claims its notice. */
+  localSettingsReset(): { seq: number; notice: string } | null;
   /** Record upstream admission synchronously across local credential changes. */
   observeHubText(room: string): HubTextHistory;
   /** Verify browser navigation left the project's startup binding untouched. */
@@ -212,6 +218,8 @@ export interface Harness {
   startHub(): Promise<void>;
   /** Flush and stop upstream, leaving `ub open` and the browser alone. */
   stopHub(): Promise<void>;
+  /** Stop local serving while retaining this machine's credentials and replica. */
+  stopOpen(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
   /** Serve the second project on another port using the same machine's replicas. */
@@ -376,6 +384,8 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 export async function startHarness(options: {
   accessRole?: "admin" | "member" | "none";
   hubAdmin?: boolean;
+  /** An authored example vocabulary; defaults to generic rendering fixtures only. */
+  seedExampleTags?: boolean;
   /** Keep a real stored hub login while serving an entirely local workspace. */
   localWorkspace?: boolean;
   /** A real git default isolated from the developer's own configuration. */
@@ -442,6 +452,12 @@ export async function startHarness(options: {
       if (configured.status !== 0) throw new Error("e2e: could not configure the fixture's git display name");
     }
     hub = await createHub(config, accessRole === undefined ? {} : { deviceCredentials: true });
+    // Rendering fixtures own their example vocabulary; hub clients do not seed it.
+    if (options.seedExampleTags ?? (accessRole === undefined)) {
+      const catalog = await hub.hocuspocus.openDirectConnection(settingsRoom(workspaceUuid));
+      try { await catalog.transact(document => { seedTagCatalog(document); }); }
+      finally { await catalog.disconnect(); }
+    }
     // Every later start reuses the port the first one was given, so the served
     // HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;
@@ -551,6 +567,11 @@ export async function startHarness(options: {
       hub = null;
       await running.stop();
     };
+    const stopOpen = async (): Promise<void> => {
+      const child = open;
+      open = null;
+      if (child !== null) await stopChild(child);
+    };
 
     return {
       ...(access === undefined ? {} : { access }),
@@ -575,10 +596,29 @@ export async function startHarness(options: {
         if (principals === undefined || hubAdmins === undefined) throw new Error("Hub admin fixture is missing");
         hubAdmins.remove(principals.identify("5678", "other-admin").id, principals.identify("1234", "browser-person").id);
       },
+      changeCurrentWorkspaceRole(role) {
+        const { principals, memberships } = hub ?? {};
+        if (principals === undefined || memberships === undefined) throw new Error("Workspace role fixture is missing");
+        memberships.changeRole({ workspaceId: workspaceUuid, actorPrincipalId: principals.identify("5678", "other-admin").id,
+          principalId: principals.identify("1234", "browser-person").id, role });
+      },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
         return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
+      },
+      hubWorkspaceSettings() {
+        const document = hub?.hocuspocus.documents.get(settingsRoom(workspaceUuid));
+        return document === undefined ? null : { name: getWorkspaceName(document),
+          mainRepository: getWorkspaceMainRepository(document), tags: listTagCatalog(document).map((tag) => tag.name) };
+      },
+      localSettingsReset() {
+        const storage = resolveStorage({ env: openEnvironment(runDir, bundleDir) });
+        const db = new DatabaseSync(join(storage.workspaceDir, `${workspaceUuid}.sqlite`), { readOnly: true });
+        try {
+          const row = db.prepare("SELECT value FROM meta WHERE key = 'settings_reset'").get();
+          return row === undefined ? null : JSON.parse(String(row.value)) as { seq: number; notice: string };
+        } finally { db.close(); }
       },
       observeHubText(room) {
         const document = hub?.hocuspocus.documents.get(room);
@@ -600,15 +640,14 @@ export async function startHarness(options: {
         hub = await createHub({ ...config, port }, accessRole === undefined ? {} : { deviceCredentials: true });
       },
       stopHub,
+      stopOpen,
       setStoredLogin,
       rebindProject(reboundHubUrl) {
         writeFileSync(join(runDir, ".uberblick.json"),
           `${JSON.stringify({ workspaceId: workspace, hubUrl: reboundHubUrl }, null, 2)}\n`, { mode: 0o600 });
       },
       async restartOpen({ authenticated }) {
-        const child = open;
-        open = null;
-        if (child !== null) await stopChild(child);
+        await stopOpen();
         setStoredLogin(authenticated);
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;

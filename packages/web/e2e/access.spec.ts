@@ -125,7 +125,7 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(page.getByRole("button", { name: "Add as member", exact: true })).toHaveCount(0);
 });
 
-test("a lost hub refuses a role change and redirects on reload until authority returns", async ({ browser }) => {
+test("a lost hub refuses a role change and keeps member management unavailable on reload until authority returns", async ({ browser }) => {
   const page = await openApp(browser, `/${harness().workspace}/settings/members`);
   await expect(page.getByRole("table", { name: "Members", exact: true })).toBeVisible();
   await harness().stopHub();
@@ -134,7 +134,8 @@ test("a lost hub refuses a role change and redirects on reload until authority r
   await expect(page.getByRole("table", { name: "Members", exact: true })).toHaveCount(0);
   await expect(roleToast(page)).toHaveCount(0);
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Members", exact: true })).toBeVisible();
+  await expect(page.getByText(/hub cannot be reached/i).first()).toBeVisible();
   await expect(page.getByRole("table", { name: "Members", exact: true })).toHaveCount(0);
   await expect(roleToast(page)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Look up", exact: true })).toHaveCount(0);

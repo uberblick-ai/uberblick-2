@@ -72,7 +72,7 @@ export async function createWorkspaceCommand(argv: string[], io: Io): Promise<nu
       try {
         storeWorkspaceName(config, name);
         await seedStarterDocs(env, config);
-        await fillMainRepositoryFromOrigin(uuid, config.databasePath);
+        await fillMainRepositoryFromOrigin(uuid, null, config.databasePath);
       } finally { seedLock.release(); }
       writeProjectBinding(binding, { path });
     } finally { lock.release(); }
