@@ -1037,7 +1037,13 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(restore).toBeFocused();
   await expect(trigger).toBeVisible();
   await expect(copyLink).toBeVisible();
+  const previousLinkCopy = (await copyNotice(page, "Link copied").elementHandles())[0];
   await copyLink.click();
+  if (previousLinkCopy !== undefined) {
+    await expect.poll(() => previousLinkCopy.evaluate((element) => element.isConnected)).toBe(false);
+    await previousLinkCopy.dispose();
+  }
+  await expect(copyNotice(page, "Link copied")).toHaveCount(1);
   await expect(copyNotice(page, "Link copied")).toBeVisible();
   await trigger.click();
   await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toHaveCount(0);
