@@ -4,14 +4,14 @@
  */
 import { Extension } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
-import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView, updateColumns } from "@tiptap/extension-table";
+import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView } from "@tiptap/extension-table";
 import type { TableOptions } from "@tiptap/extension-table";
 import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
-import { columnResizing, columnResizingPluginKey, ResizeState } from "@tiptap/pm/tables";
+import { columnResizing, columnResizingPluginKey, ResizeState, updateColumnsOnResize } from "@tiptap/pm/tables";
 import { ySyncPluginKey } from "y-prosemirror";
 import { InvalidTableError, isSupportedColumnWidth, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
 import type { GfmTable } from "@uberblick/schema";
@@ -40,6 +40,8 @@ class IdentifiedTableView extends TableView {
 
   override update(node: ProseMirrorNode): boolean {
     if (!super.update(node)) return false;
+    // TipTap leaves an old inline width when a column becomes unsized.
+    updateColumnsOnResize(node, this.colgroup, this.table, this.cellMinWidth);
     if (typeof node.attrs.id === "string") this.table.id = node.attrs.id;
     else this.table.removeAttribute("id");
     return true;
@@ -101,7 +103,7 @@ function tableResizing(editor: Editor, options: TableOptions): Plugin {
             const wrapper = view.nodeDOM(pos) as HTMLElement | null;
             const table = wrapper?.querySelector("table");
             const colgroup = table?.querySelector("colgroup");
-            if (table && colgroup) updateColumns(node, colgroup, table, options.cellMinWidth);
+            if (table && colgroup) updateColumnsOnResize(node, colgroup, table, options.cellMinWidth);
           });
         }
       },

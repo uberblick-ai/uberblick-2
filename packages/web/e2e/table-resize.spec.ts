@@ -18,7 +18,7 @@ import { waitForAcknowledged } from "./settle.js";
 const { harness, openApp, ws } = setupHarness();
 const SOURCE = "| **A** | B | C |\n| --- | --- | --- |\n| alpha | [one](https://example.com) | first |\n| beta | two | second |\n| gamma | three | third |";
 
-async function publishTable(options: { widths?: number[]; archived?: boolean } = {}): Promise<{
+async function publishTable(options: { widths?: Array<number | null>; archived?: boolean } = {}): Promise<{
   uuid: string; id: string; doc: Y.Doc; directory: Y.Doc; close: () => void;
 }> {
   const uuid = randomUUID();
@@ -30,6 +30,7 @@ async function publishTable(options: { widths?: number[]; archived?: boolean } =
   if (options.widths !== undefined) {
     for (const row of tableRows(sharedTable(doc))) {
       for (const [index, width] of options.widths.entries()) {
+        if (width === null) continue;
         const cell = row[index];
         if (cell === undefined) throw new Error("e2e: missing width fixture cell");
         (cell as unknown as { setAttribute(name: string, value: unknown): void }).setAttribute("colwidth", [width]);
@@ -135,6 +136,7 @@ test("mouse resizing shares one column, contains overflow and undoes separately 
     await expect(editable).toHaveText("beta before resize");
     const beforeContent = await content(table);
     const beforeWidths = await columnWidths(table);
+    expect(Math.abs((await geometry(table)).width - (await geometry(table.locator(".."))).width)).toBeLessThanOrEqual(1);
     await startResize(page, table, 600);
     // The framework previews in the DOM and persists only on mouseup.
     expect(widths(fixture.doc)).toEqual(Array.from({ length: 4 }, () => [null, null, null]));
@@ -145,7 +147,8 @@ test("mouse resizing shares one column, contains overflow and undoes separately 
     for (const row of stored) expect(row).toEqual([chosen, null, null]);
     const afterWidths = await columnWidths(table);
     expect(afterWidths[0] ?? 0).toBeGreaterThan((beforeWidths[0] ?? 0) + 590);
-    for (const column of [1, 2]) expect(Math.abs((afterWidths[column] ?? 0) - (beforeWidths[column] ?? 0))).toBeLessThanOrEqual(1);
+    // Unsized columns share the remaining space, down to the framework minimum.
+    for (const column of [1, 2]) expect(Math.abs((afterWidths[column] ?? 0) - 120)).toBeLessThanOrEqual(1);
     expect(await content(table)).toEqual(beforeContent);
     const wrapper = table.locator("..");
     await expect.poll(() => wrapper.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
@@ -155,10 +158,13 @@ test("mouse resizing shares one column, contains overflow and undoes separately 
     await editor(page).focus();
     await page.keyboard.press("ControlOrMeta+z");
     await expect.poll(() => widths(fixture.doc)).toEqual(Array.from({ length: 4 }, () => [null, null, null]));
+    await expect.poll(() => columnWidths(table)).toEqual(beforeWidths);
+    await expect.poll(() => columnWidths(peerTable)).toEqual(beforeWidths);
     await expect(editable).toHaveText("beta before resize");
     expect(await content(table)).toEqual(beforeContent);
     await page.keyboard.press("ControlOrMeta+Shift+z");
     await expect.poll(() => widths(fixture.doc)).toEqual(stored);
+    await expect.poll(() => columnWidths(table)).toEqual(afterWidths);
     await waitForAcknowledged(page, { path: "upstream" });
     await page.reload();
     await expect(table.locator("tr")).toHaveCount(4);
@@ -209,6 +215,52 @@ test("resized boundaries keep pluses, column moves and row dragging aligned", { 
     await page.getByRole("button", { name: "Insert row after 4", exact: true }).click();
     await expect(table.locator("tr")).toHaveCount(5);
     await expect(table.locator("th")).toHaveText(["B", "A", "", "C"]);
+  } finally { fixture.close(); }
+});
+
+test("moving and deleting a sized column clears its previous rendered width on both clients", { tag: "@webkit" }, async ({ page, browser }) => {
+  const fixture = await publishTable({ widths: [300, null, null] });
+  try {
+    const table = await openTable(page, fixture.uuid);
+    const peer = await openApp(browser, `/${ws()}/${fixture.uuid}`, { upstream: true });
+    const peerTable = peer.locator(".ub-table");
+    await expect(peerTable.locator("tr")).toHaveCount(4);
+    const before = await columnWidths(table);
+    await table.locator("th").first().hover();
+    await page.getByRole("button", { name: "Column 1 actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Move column right", exact: true }).click();
+    await expect(table.locator("th")).toHaveText(["B", "A", "C"]);
+    await expect.poll(() => widths(fixture.doc)[0]).toEqual([null, [300], null]);
+    await expect.poll(() => columnWidths(table)).toEqual([before[1], before[0], before[2]]);
+    await expect.poll(() => columnWidths(peerTable)).toEqual([before[1], before[0], before[2]]);
+
+    await page.getByRole("button", { name: "Column 2 actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Delete column", exact: true }).click();
+    await expect(table.locator("th")).toHaveText(["B", "C"]);
+    await expect.poll(() => widths(fixture.doc)[0]).toEqual([null, null]);
+    const expected = (await geometry(table.locator(".."))).width / 2;
+    for (const target of [table, peerTable]) {
+      await expect.poll(async () => Math.max(...(await columnWidths(target)).map(width => Math.abs(width - expected))))
+        .toBeLessThanOrEqual(1);
+    }
+  } finally { fixture.close(); }
+});
+
+test("unsized archived tables fill the content width and cancelled previews restore that layout", { tag: "@webkit" }, async ({ page }) => {
+  const fixture = await publishTable({ archived: true });
+  try {
+    const table = await openTable(page, fixture.uuid);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    const before = await columnWidths(table);
+    expect(Math.abs((await geometry(table)).width - (await geometry(table.locator(".."))).width)).toBeLessThanOrEqual(1);
+    restoreDirectoryEntry(fixture.directory, fixture.uuid);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "true");
+    await startResize(page, table, 80);
+    tombstoneDirectoryEntry(fixture.directory, fixture.uuid);
+    await expect(editor(page)).toHaveAttribute("contenteditable", "false");
+    await page.mouse.up();
+    await expect.poll(() => columnWidths(table)).toEqual(before);
+    expect(widths(fixture.doc)).toEqual(Array.from({ length: 4 }, () => [null, null, null]));
   } finally { fixture.close(); }
 });
 

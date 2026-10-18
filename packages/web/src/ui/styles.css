@@ -1439,12 +1439,9 @@ h6.ub-heading {
 
 .ub-table {
   table-layout: fixed;
-  /* The framework supplies the sum as min-width until every column is sized.
-     A percentage width would redistribute space in untouched columns. */
-  width: 0;
+  width: 100%;
 }
 
-.ub-table col { width: 120px; }
 .ub-table th, .ub-table td { overflow-wrap: anywhere; }
 
 .ub-table .column-resize-handle {

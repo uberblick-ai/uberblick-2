@@ -361,7 +361,7 @@ test("all rows read like an ordinary table with secondary source and isolated li
     await session.call("insert_block", { uuid, after_block_id: paragraph.id, type: "heading", level: 2, text: "Changelog" });
     await session.call("insert_block", {
       uuid, after_block_id: chart.id, type: "table",
-      text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary | 12.50 % | Jan 1, 2026 | Evidence |",
+      text: "| Name | Autonomous | Day | Evidence |\n| --- | --- | --- | --- |\n| Ordinary table | 12.50 % | Jan 1, 2026 | Evidence |",
     });
     await measurements(session, uuid);
     await waitForDocumentDraw(page, session, uuid);

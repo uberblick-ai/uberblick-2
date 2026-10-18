@@ -138,8 +138,7 @@ async function compactTable(table: Locator): Promise<void> {
   });
   expect(Math.abs(geometry.left - geometry.paragraphLeft)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.frameLeft - geometry.paragraphLeft)).toBeLessThanOrEqual(1);
-  expect(geometry.right).toBeLessThanOrEqual(geometry.paragraphRight + 1);
-  expect(geometry.right).toBeGreaterThan(geometry.left);
+  expect(Math.abs(geometry.right - geometry.paragraphRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.frameRight - geometry.paragraphRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.top - geometry.frameTop)).toBeLessThanOrEqual(1);
 }

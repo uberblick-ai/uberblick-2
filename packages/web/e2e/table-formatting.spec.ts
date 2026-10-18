@@ -3,7 +3,7 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
-import { closeIfOpen, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
+import { closeIfOpen, createDoc, docTitle, setupHarness } from "./app-helpers.js";
 import { keys, placeCaret } from "./harness.js";
 import { setNativeSelection } from "./native-selection.js";
 
@@ -215,15 +215,6 @@ test("Tab selection is navigation, triple click selects one cell, and cross-cell
   await expect(popup(page)).toHaveCount(0);
 
   if (info.project.use.hasTouch !== true) {
-    // Line-start/end select a visual line. Widen the column through its
-    // boundary so the complete fixture text occupies one line.
-    const cell = await first.boundingBox();
-    if (cell === null) throw new Error("e2e: missing resize boundary");
-    await page.mouse.move(cell.x + cell.width - 2, cell.y + cell.height - 8);
-    await expect(editor(page)).toHaveClass(/resize-cursor/);
-    await page.mouse.down();
-    await page.mouse.move(cell.x + cell.width + 178, cell.y + cell.height - 8, { steps: 8 });
-    await page.mouse.up();
     const paragraph = first.locator("p");
     const bounds = await paragraph.boundingBox();
     if (bounds === null) throw new Error("e2e: missing cell paragraph geometry");

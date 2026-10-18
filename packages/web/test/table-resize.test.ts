@@ -8,16 +8,17 @@ import { appendBlock, createAnnotation, deleteBlock, getBlocks, getBlocksFragmen
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { findForeignBlocks } from "../src/editor/palette.js";
 import { isOrdinaryTable } from "../src/editor/table.js";
+import { deleteTableColumn, moveTableColumn, tableColumnTargets } from "../src/editor/table-controls.js";
 import { mountEditor } from "./helpers.js";
 
 const SOURCE = "| A | B |\n| --- | --- |\n| alpha | bravo |";
 
-function fixture(): { ydoc: Y.Doc; id: string; table: Y.XmlElement } {
+function fixture(sized = true): { ydoc: Y.Doc; id: string; table: Y.XmlElement } {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: "table-resize", title: "Tables" });
   const id = appendBlock(ydoc, { type: "table", text: SOURCE });
   const table = getBlocksFragment(ydoc).get(0) as Y.XmlElement;
-  ydoc.transact(() => {
+  if (sized) ydoc.transact(() => {
     for (const row of tableRows(table)) {
       row[0]!.setAttribute("colwidth", [180] as unknown as string);
       row[1]!.setAttribute("colwidth", [220] as unknown as string);
@@ -60,6 +61,63 @@ function finishDrag(x: number): void {
 }
 
 describe("table column resizing", () => {
+  it("clears an unsized column's rendered width after undo and on collaborators", () => {
+    const f = fixture(false);
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(f.ydoc));
+    const { editor } = mountEditor(f.ydoc);
+    const { editor: other } = mountEditor(remote);
+    try {
+      const column = editor.view.dom.querySelector("col")!;
+      const remoteColumn = other.view.dom.querySelector("col")!;
+      expect(column.style.width).toBe("");
+      startDrag(editor, 0);
+      finishDrag(300);
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(f.ydoc));
+      expect(column.style.width).toBe("300px");
+      expect(remoteColumn.style.width).toBe("300px");
+      expect(undo(editor.state)).toBe(true);
+      Y.applyUpdate(remote, Y.encodeStateAsUpdate(f.ydoc));
+      expect(widths(f.table)).toEqual([[undefined, undefined], [undefined, undefined]]);
+      expect(column.style.width).toBe("");
+      expect(remoteColumn.style.width).toBe("");
+    } finally { finishDrag(0); editor.destroy(); other.destroy(); f.ydoc.destroy(); remote.destroy(); }
+  });
+
+  it.each(["move", "delete"] as const)("clears a vacated column's rendered width after %s", (action) => {
+    const f = fixture(false);
+    const { editor } = mountEditor(f.ydoc);
+    try {
+      startDrag(editor, 0);
+      finishDrag(300);
+      const target = tableColumnTargets(editor, f.id)![0]!;
+      if (action === "move") {
+        expect(moveTableColumn(editor, target, 1)).toBe(true);
+        expect(widths(f.table)).toEqual([[undefined, [300]], [undefined, [300]]]);
+        expect(Array.from(editor.view.dom.querySelectorAll("col"), (col) => col.style.width)).toEqual(["", "300px"]);
+      } else {
+        expect(deleteTableColumn(editor, target)).toBe(true);
+        expect(widths(f.table)).toEqual([[undefined], [undefined]]);
+        expect(Array.from(editor.view.dom.querySelectorAll("col"), (col) => col.style.width)).toEqual([""]);
+      }
+    } finally { finishDrag(0); editor.destroy(); f.ydoc.destroy(); }
+  });
+
+  it("clears an unsized column's preview when editing becomes unavailable", () => {
+    const f = fixture(false);
+    const { editor } = mountEditor(f.ydoc);
+    try {
+      startDrag(editor, 0);
+      moveDrag(300);
+      expect(editor.view.dom.querySelector("col")!.style.width).toBe("300px");
+      editor.setEditable(false);
+      expect(editor.view.dom.querySelector("col")!.style.width).toBe("");
+      expect(columnResizingPluginKey.getState(editor.state)?.dragging).toBeFalsy();
+      finishDrag(300);
+      expect(widths(f.table)).toEqual([[undefined, undefined], [undefined, undefined]]);
+    } finally { finishDrag(0); editor.destroy(); f.ydoc.destroy(); }
+  });
+
   it("accepts saved widths and changes only the dragged column, preserving shared content and highlights", () => {
     const f = fixture();
     const rows = tableRows(f.table);
