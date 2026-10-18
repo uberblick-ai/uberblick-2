@@ -110,7 +110,7 @@ registrations are unchanged. A failed create leaves the previous binding
 unchanged; re-running makes a complete new workspace and leaves any partial
 replica alone.
 
-`ub workspace` prints its help. `ub workspace status` shows the selected workspace,
+`ub workspace` prints its help. `ub status` shows the selected workspace,
 its source, replica storage and sync state. `ub workspace list`
 lists local workspace databases. Select a recorded replica with its id or a
 unique prefix; its hub comes from this machine's record:
@@ -155,10 +155,9 @@ Homebrew installs both `ub` and `uberblick` on PATH. The user commands include:
 ub auth login      # sign in to the project's hub
 ub update          # update the Homebrew installation
 ub open            # serve the web app and a hub, and open the browser
-ub status          # whether work is syncing: hub, sign-in, pending changes and problems
+ub status          # workspace, selection source, local storage and sync status
 ub status --json   # the same short report as one JSON object, for scripts
 ub workspace       # print workspace help
-ub workspace status  # selected workspace, its source, storage and sync state
 ub workspace list  # workspaces this machine has a database for
 ub workspace use <id-or-prefix>  # select a replica with its recorded hub
 ub workspace create "Project notes"
@@ -215,8 +214,8 @@ The string `"local"` in a project file is rejected; use JSON null.
 A hub address is normalized to its sync endpoint; a workspace ID can have a
 display slug, but only its UUID identifies data. The file contains no credentials
 and may be committed when its selection is appropriate for everyone using the
-project. `ub status` shows whether work is reaching the hub. `ub workspace status`
-shows the selected workspace, selection source and replica storage path.
+project. `ub status` shows the selected workspace, selection source, replica
+storage path and whether work is reaching the hub.
 `ub workspace use` updates the nearest project file, or creates one in the
 current directory. `ub workspace create` always writes in the current directory,
 leaving an ancestor binding alone.
@@ -279,7 +278,7 @@ so setting `XDG_CONFIG_HOME` alone leaves the databases under
 requires. Resolution cannot throw and no command has an opinion about which
 layout is in force.
 
-`ub workspace status` shows the selected replica's resolved storage path.
+`ub status` shows the selected replica's resolved storage path.
 `HUB_DB_PATH` and `UBERBLICK_DB` name a database file outright and outrank those
 defaults.
 A replica database records the workspace it holds: pointing `UBERBLICK_DB`

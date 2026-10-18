@@ -95,10 +95,10 @@ describe("atomic project bindings", () => {
     await ensureWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
     vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
     for (const id of [first, `notes-${first}`]) {
-      const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
+      const run = await runInProcess(["status"], box, { UB_WORKSPACE_ID: id });
       expect(run.status, run.output).toBe(0);
       expect(run.stdout).toContain(first);
-      expect(run.stdout).toContain(hubUrl ?? "local");
+      expect(run.stdout).toContain(hubUrl === null ? "local, this computer only" : "https://recorded.example.test");
       expect(run.stdout).toMatch(/^chosen by\s+environment$/m);
       const resolved = resolveConfig({ env: { ...box.env, UB_WORKSPACE_ID: id }, cwd: box.cwd });
       expect([resolved.env.UB_WORKSPACE_ID, resolved.env.UB_HUB_URL])
@@ -119,7 +119,7 @@ describe("atomic project bindings", () => {
 
   it.each([first, `notes-${first}`])("refuses an unknown id-only override instead of inferring local or using the project hub: %s", async (id) => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: "https://project.example.test" } });
-    const run = runUb(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
+    const run = runUb(["status"], box, { UB_WORKSPACE_ID: id });
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("Add UB_HUB_URL (a hub address, or local)");
     expect(run.stderr).toContain("ub workspace use <link>");
@@ -130,9 +130,9 @@ describe("atomic project bindings", () => {
     const box = sandbox();
     await ensureWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
     const before = readFileSync(workspaceRegistryPath(box.env));
-    const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
+    const run = await runInProcess(["status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toContain("wss://explicit.example.test/ws");
+    expect(run.stdout).toContain("https://explicit.example.test");
     expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(before);
   });
 });
