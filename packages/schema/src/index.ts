@@ -92,7 +92,7 @@ export type { ListMarkerInput } from "./lists.js";
 
 export {
   TABLE_CELL_MARKS, buildTableCell, buildTableElement, buildTableRow,
-  isSupportedTable, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
+  isSupportedTable, isSupportedColumnWidth, parseGfmTable, parseTableInput, parseTableCell, plainXmlText,
   seedNewTableCells, tableCellText, tableCellTexts, tableRows, tableText, writeGfmTable,
 } from "./table.js";
 export type { ColumnAlign, GfmTable, TableMapping } from "./table.js";
