@@ -184,6 +184,14 @@ export function setCodeCheck(ydoc: Y.Doc, input: CodeCheckInput): void {
   });
 }
 
+/** Code-check-only transactions refresh discovery caches without recording an edit. */
+export function isCodeCheckOnlyTransaction(transaction: Y.Transaction): boolean {
+  if (transaction.changed.size !== 1) return false;
+  const change = transaction.changed.entries().next().value;
+  return change !== undefined && Object.is(change[0], getMetaMap(transaction.doc)) &&
+    change[1].size > 0 && [...change[1]].every((key) => key?.startsWith(CODE_CHECK_PREFIX));
+}
+
 /**
  * Make the assignment equal to `tags`, writing only the tags whose presence
  * changed. An unchanged tag must not compete with another replica's toggle.
