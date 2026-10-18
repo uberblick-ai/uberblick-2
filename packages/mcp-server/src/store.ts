@@ -340,6 +340,8 @@ export function readStoredSyncStatus(databasePath: string, workspaceId: string):
   if (!existsSync(databasePath)) return { pendingRooms: [], lastSync: null, logEntries: 0 };
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {
+    // A concurrent first opener briefly takes an exclusive lock to enable WAL.
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     return transactional(db, () => {
       const tables = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map(row => row.name));
       const owner = tables.has("meta") ? db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get() : undefined;

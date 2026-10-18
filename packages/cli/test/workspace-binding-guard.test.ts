@@ -1,4 +1,6 @@
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -135,6 +137,70 @@ describe("passive commands preserve this machine's workspace hub", () => {
 });
 
 describe("status of a mismatched replica", () => {
+  it("waits for a replica's transient exclusive lock without losing its stored sync facts", async () => {
+    const box = sandbox();
+    const path = defaultWorkspaceDatabasePath(WORKSPACE, box.env);
+    const store = new MirrorStore(path, WORKSPACE);
+    const doc = new Y.Doc();
+    const timestamp = Date.parse("2026-10-05T19:58:12Z");
+    try {
+      doc.getText("offline").insert(0, "Unacknowledged work");
+      store.appendUpdate(`${WORKSPACE}/${DOCUMENT}`, Y.encodeStateAsUpdate(doc), "local");
+      store.recordLastSync(timestamp);
+    } finally { doc.destroy(); store.close(); }
+    const holder = new DatabaseSync(path);
+    holder.exec("PRAGMA journal_mode = DELETE");
+    const before = readFileSync(path);
+    holder.exec("BEGIN EXCLUSIVE");
+    let locked = true;
+    const release = (): void => {
+      if (locked) {
+        holder.exec("ROLLBACK");
+        locked = false;
+      }
+    };
+    const source = `
+import { readStoredSyncStatus } from ${JSON.stringify(new URL("../../mcp-server/src/store.ts", import.meta.url).href)};
+process.stderr.write("reader ready\\n");
+console.log(JSON.stringify(readStoredSyncStatus(${JSON.stringify(path)}, ${JSON.stringify(WORKSPACE)})));
+`;
+    const child = spawn(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), "--input-type=module", "--eval", source], {
+      cwd: box.cwd, env: box.env, timeout: 10_000,
+    });
+    let stdout = "";
+    let stderr = "";
+    let waited = false;
+    let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+      if (releaseTimer === undefined && stderr.includes("reader ready\n")) {
+        releaseTimer = setTimeout(() => {
+          waited = child.exitCode === null;
+          release();
+        }, 100);
+      }
+    });
+    const done = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    try {
+      expect(await done, stderr).toBe(0);
+      expect(waited).toBe(true);
+      expect(JSON.parse(stdout)).toMatchObject({
+        pendingRooms: [{ room: `${WORKSPACE}/${DOCUMENT}` }], lastSync: timestamp,
+      });
+      expect(readFileSync(path)).toEqual(before);
+    } finally {
+      clearTimeout(releaseTimer);
+      release();
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await Promise.allSettled([done]);
+      holder.close();
+    }
+  });
+
   it.each([
     { source: "project", local: false },
     { source: "environment", local: false },
