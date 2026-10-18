@@ -23,6 +23,7 @@ const osSensitive = [
   "stdin-eof",
   "store",
   "store-open",
+  "workspace-fork",
   "workspace-removal",
 ];
 
