@@ -57,7 +57,17 @@ vi.mock("../src/config.js", () => ({
   // `rooms.ts` re-reads the configuration before every connect attempt; a
   // resolved one is what the mock stands for, so this is the settled read.
   resolveClientConfig: async () => injected.local ? { servedWorkspaces: {} } : {},
+  servedLocally: () => injected.local,
 }));
+// A ub open page receives its room tokens from ub open, signed by the served key.
+vi.mock("../src/collab/local-session.js", async () => {
+  const { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } = await import("@uberblick/schema/token");
+  return {
+    localRoomToken: async (workspace: string, subject: string) => await mintToken(await importRootSecret(injected.secret), {
+      typ: "room", sub: subject, workspace, scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    }),
+  };
+});
 vi.mock("../src/notifications.js", () => ({
   notifyTransient: ({ message }: { message: string }) => injected.notices.push(message),
 }));

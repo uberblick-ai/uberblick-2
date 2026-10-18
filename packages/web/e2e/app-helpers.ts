@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
-import { openUpstreamApp, startHarness } from "./harness.js";
+import { authorizeBrowser, openUpstreamApp, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 import { activateControl } from "./input-helpers.js";
 export { activateControl, closeIfOpen } from "./input-helpers.js";
@@ -34,7 +34,7 @@ export function setupHarness(options: {
     return started;
   }
 
-  const start = async (): Promise<void> => {
+  const start = async ({ browser }: { browser: Browser }): Promise<void> => {
     started = await startHarness({
       ...(options.accessRole === undefined ? {} : { accessRole: options.accessRole }),
       ...(options.hubAdmin === undefined ? {} : { hubAdmin: options.hubAdmin }),
@@ -42,6 +42,7 @@ export function setupHarness(options: {
       ...(options.localWorkspace === undefined ? {} : { localWorkspace: options.localWorkspace }),
       ...(options.gitUserName === undefined ? {} : { gitUserName: options.gitUserName }),
     });
+    await authorizeBrowser(browser);
   };
   const stop = async (): Promise<void> => {
     const running = started;

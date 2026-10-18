@@ -67,6 +67,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 }));
 
 const { App } = await import("../src/ui/App.js");
+const { rereadClientConfigForTesting } = await import("../src/config.js");
 
 let mounted: RenderResult | null = null;
 let stored: Map<string, string>;
@@ -98,7 +99,8 @@ function sidebarWidth(narrow: boolean): { change: (next: boolean) => Promise<voi
 }
 
 beforeEach(() => {
-  stored = new Map();
+  rereadClientConfigForTesting();
+  stored = new Map([["uberblick:ub-open-session", "s".repeat(43)]]);
   writes = [];
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null,

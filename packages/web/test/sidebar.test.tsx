@@ -95,6 +95,7 @@ vi.mock("../src/collab/rooms.js", () => ({
 }));
 
 const { App } = await import("../src/ui/App.js");
+const { rereadClientConfigForTesting } = await import("../src/config.js");
 
 /** A second client holding the same document: updates flow both ways. */
 function peerOf(local: Y.Doc): Y.Doc {
@@ -108,10 +109,11 @@ function peerOf(local: Y.Doc): Y.Doc {
 /**
  * A fresh in-memory Storage. Node's own experimental `localStorage` global
  * shadows jsdom's here and is unusable without `--localstorage-file`, so the
- * test provides the one thing `useStoredFlag` needs.
+ * test provides the one thing `useStoredFlag` needs, and the page's ub open
+ * session.
  */
 function installStorage(): void {
-  const store = new Map<string, string>();
+  const store = new Map<string, string>([["uberblick:ub-open-session", "s".repeat(43)]]);
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
@@ -126,6 +128,7 @@ function installStorage(): void {
 let mounted: RenderResult | null = null;
 
 beforeEach(() => {
+  rereadClientConfigForTesting();
   installStorage();
   vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 404 }));
   vi.stubGlobal(

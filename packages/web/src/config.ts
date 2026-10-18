@@ -6,13 +6,12 @@
  *      "hubAuthToken": "<token-signing key>",
  *      "remoteHubUrl": "wss://team-host/ws", "rebound": true,
  *      "defaultPresenceName": "Ana Lopez",
- *      "servedWorkspaces": {"<uuid>": {"browserKey": "<workspace key>",
- *        "remoteHubUrl": "wss://team-host/ws"}}}
+ *      "servedWorkspaces": {"<uuid>": {"remoteHubUrl": "wss://team-host/ws"}}}
  *
  * ub open supplies its loopback hubUrl, upstream remoteHubUrl and rebound flag;
  * rebound means the startup binding changed and the serving process needs a
- * restart. servedWorkspaces uses bare UUIDs and stable independent browser keys
- * admitting only that workspace's rooms and API, never the upstream hub.
+ * restart. servedWorkspaces uses bare UUIDs and carries no key: its pages ask
+ * ub open for room tokens with their session (collab/local-session.ts).
  * A null upstream means local-only; the top-level fields describe startup.
  * Unbound serving supplies no workspace or key. Only ub open supplies the
  * default presence name, from git user.name or the OS username; other routes
@@ -66,7 +65,7 @@ export interface ClientConfig {
   workspaces: readonly string[];
   /** No `"fallback"`: there is no in-code workspace, only a build without one. */
   workspacesSource: "document" | "define";
-  /** Document-only browser key or loopback signing secret; empty exposes tokenMissing. */
+  /** Document-only loopback development signing secret; empty exposes tokenMissing. */
   hubAuthToken: string;
   /** Same-document workspace/upstream pair; never attribute a fallback workspace to ub open. */
   localServing: LocalServing | null;
@@ -75,7 +74,6 @@ export interface ClientConfig {
 }
 
 export interface ServedWorkspace extends LocalServing {
-  browserKey: string;
   /** Name read from this machine's replica without taking its serving role. */
   name: string | null;
 }
@@ -258,7 +256,6 @@ function usableServedWorkspaces(
       continue;
     }
     map[uuid] = {
-      browserKey: typeof entry.browserKey === "string" ? entry.browserKey.trim() : "",
       workspace: offered.get(uuid) ?? uuid,
       remoteHubUrl: remote?.url ?? null,
       rebound: rebound && uuid === startupUuid,
@@ -441,15 +438,15 @@ let pending: Promise<ClientConfig> | null = null;
 
 /**
  * Share one configuration read across startup and room acquisition. Do not
- * memoise an answer without a signing key: every connect retries under the
- * same deadline, allowing a late-starting server or timed-out request to recover.
+ * memoise an answer without a signing key or a ub open map: every connect
+ * retries under the same deadline, so a late-starting server can recover.
  */
 export function resolveClientConfig(
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<ClientConfig> {
   pending ??= readClientConfig(fetchImpl).then(({ rejected, ...config }) => {
     resolved = config;
-    if (config.hubAuthToken === "" && !Object.values(config.servedWorkspaces ?? {}).some((entry) => entry.browserKey !== "")) pending = null;
+    if (config.hubAuthToken === "" && config.servedWorkspaces === undefined) pending = null;
     // Name sources and refusal together so missing config differs from hub failure.
     const say = rejected === undefined ? console.info : console.warn;
     const used =
@@ -467,6 +464,11 @@ export function resolveClientConfig(
   return pending;
 }
 
+/** Let the next read fetch the document again, so a test can serve another; unused by the app. */
+export function rereadClientConfigForTesting(): void {
+  pending = null;
+}
+
 /** Room acquisition waits for the fetch; the endpoint cannot be a startup constant. */
 export function hubUrl(): string {
   return settled().hubUrl;
@@ -478,18 +480,22 @@ export function defaultPresenceName(): string | null {
 }
 
 /**
- * Runtime-only workspace browser key or direct loopback signing secret.
+ * Runtime-only direct loopback signing secret; a ub open page never has one.
  * Read after configuration settles; empty is the caller's tokenMissing state.
  */
-export function hubAuthToken(workspace?: string): string {
+export function hubAuthToken(): string {
   const config = settled();
-  if (config.servedWorkspaces === undefined) return config.hubAuthToken;
-  const selected = workspace ?? config.workspaces[0];
-  if (selected === undefined) return "";
+  return config.servedWorkspaces === undefined ? config.hubAuthToken : "";
+}
+
+/** Whether ub open serves this workspace, so its room tokens come from there. */
+export function servedLocally(workspace: string): boolean {
+  const served = settled().servedWorkspaces;
+  if (served === undefined) return false;
   try {
-    return config.servedWorkspaces[parseWorkspaceId(selected).uuid]?.browserKey ?? "";
+    return Object.hasOwn(served, parseWorkspaceId(workspace).uuid);
   } catch {
-    return "";
+    return false;
   }
 }
 
@@ -538,7 +544,7 @@ export function browserSignInRequired(): boolean {
   const config = settled();
   // A released Docker proxy can be published on host loopback while its hub
   // still requires a device login. Unlike development or ub open, its public
-  // runtime document supplies no browser key or local-serving diagnostic.
+  // runtime document supplies no signing key or local-serving diagnostic.
   return config.hubUrl !== "" && (
     !isLoopbackEndpoint(config.hubUrl) ||
     (RUNTIME_CONFIG_ONLY && config.hubAuthToken === "" && config.localServing === null && config.servedWorkspaces === undefined)
