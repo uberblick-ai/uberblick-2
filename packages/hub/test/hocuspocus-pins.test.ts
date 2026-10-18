@@ -34,6 +34,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { hocuspocusLogger, stderrLogger } from "../src/log.js";
 
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -77,6 +78,12 @@ describe("@hocuspocus/* is pinned to an exact version", () => {
 
     for (const path of [
       "src/ClientConnection.ts",
+      "src/Connection.ts",
+      "src/Hocuspocus.ts",
+      "src/MessageReceiver.ts",
+      "src/Server.ts",
+      "src/types.ts",
+      "dist/index.d.ts",
       "dist/hocuspocus-server.esm.js",
       "dist/hocuspocus-server.cjs",
     ]) {
@@ -237,6 +244,10 @@ describe("the patched admission rule is live in both runtime builds", () => {
       string,
       { connectionConfig: { isAuthenticated: boolean } }
     >;
+    documentConnections: Record<
+      string,
+      { waitForPendingMessages: () => Promise<void> }
+    >;
   };
   type ServerBuild = {
     MessageType: { Auth: number; Sync: number; CLOSE: number };
@@ -377,6 +388,14 @@ describe("the patched admission rule is live in both runtime builds", () => {
         connection.handleMessage(frame(build, room, build.MessageType.Auth));
         return tasks[before] ?? Promise.resolve();
       },
+      async message(room: string, type: number) {
+        connection.handleMessage(frame(build, room, type));
+        await Promise.all(
+          Object.values(connection.documentConnections).map((document) =>
+            document.waitForPendingMessages(),
+          ),
+        );
+      },
       async dispose() {
         websocket.readyState = 3;
         connection.handleClose();
@@ -392,6 +411,123 @@ describe("the patched admission rule is live in both runtime builds", () => {
     ["esm", ESM_BUILD],
     ["cjs", CJS_BUILD],
   ] as const) {
+    for (const limit of ["pending", "queue"] as const) {
+      it(`JSON-escapes unauthenticated ${limit} warnings without changing another instance (${label} build)`, async () => {
+        const entered = gate();
+        const held = gate();
+        const lines: string[] = [];
+        const stderr = vi.spyOn(process.stderr, "write").mockImplementation((line) => {
+          lines.push(String(line));
+          return true;
+        });
+        const consoleWarning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const malicious = 'room\n{"event":"forged"}\r\t"\\';
+        const client = await probe(buildPath, {
+          logger: hocuspocusLogger(stderrLogger),
+          maxUnauthenticatedQueueMessages: 0,
+          onAuthenticate: async () => {
+            entered.resolve();
+            await held.promise;
+          },
+        });
+        const defaultClient = await probe(buildPath, {
+          onAuthenticate: () => held.promise,
+        });
+        try {
+          const finished = client.auth(malicious);
+          await entered.promise;
+          if (limit === "pending") {
+            await client.auth(`${malicious}overflow`);
+          } else {
+            const build = await load(buildPath);
+            client.connection.handleMessage(frame(build, malicious, build.MessageType.Sync));
+          }
+          expect(client.closes).toEqual([4205]);
+          expect(lines).toHaveLength(1);
+          expect(lines[0]?.split("\n")).toHaveLength(2);
+          expect(JSON.parse(lines[0] ?? "")).toEqual({
+            event: "hub.hocuspocus.warning",
+            message: expect.stringContaining(malicious),
+          });
+          expect(consoleWarning).not.toHaveBeenCalled();
+
+          // A separate consumer keeps the library's normal output destination.
+          void defaultClient.auth("held-default");
+          await defaultClient.auth("default-overflow");
+          expect(consoleWarning).toHaveBeenCalledOnce();
+          expect(lines).toHaveLength(1);
+          held.resolve();
+          await finished;
+        } finally {
+          held.resolve();
+          await client.dispose();
+          await defaultClient.dispose();
+          consoleWarning.mockRestore();
+          stderr.mockRestore();
+        }
+      });
+    }
+
+    it(`JSON-escapes client text in logged hook errors (${label} build)`, async () => {
+      const lines: string[] = [];
+      const stderr = vi.spyOn(process.stderr, "write").mockImplementation((line) => {
+        lines.push(String(line));
+        return true;
+      });
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const malicious = 'room\n{"event":"forged"}\r\t"\\';
+      const client = await probe(buildPath, {
+        logger: hocuspocusLogger(stderrLogger),
+        onAuthenticate: ({ documentName }: { documentName: string }) => {
+          throw new Error(`Workspace mismatch for ${documentName}`);
+        },
+      });
+      try {
+        await client.auth(malicious);
+        expect(consoleError).not.toHaveBeenCalled();
+        expect(lines).toHaveLength(1);
+        expect(lines[0]?.split("\n")).toHaveLength(2);
+        expect(JSON.parse(lines[0] ?? "")).toEqual({
+          event: "hub.hocuspocus.error",
+          message: `[onAuthenticate] Workspace mismatch for ${malicious}`,
+        });
+      } finally {
+        await client.dispose();
+        consoleError.mockRestore();
+        stderr.mockRestore();
+      }
+    });
+
+    it(`keeps receiver and connection errors on the instance logger (${label} build)`, async () => {
+      const errors: string[] = [];
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const room = 'room\n{"event":"forged"}';
+      let refuse = false;
+      const client = await probe(buildPath, {
+        logger: hocuspocusLogger((record) => errors.push(JSON.stringify(record))),
+        beforeHandleMessage: () => {
+          if (refuse) throw new Error(`Refused ${room}`);
+        },
+      });
+      try {
+        await client.auth(room);
+        await client.message(room, 99);
+        expect(errors.map((line) => JSON.parse(line).message)).toEqual([
+          "Unable to handle message of type 99: no handler defined! Are your provider/server versions aligned?",
+        ]);
+        refuse = true;
+        await client.message(room, 99);
+        expect(errors).toHaveLength(3);
+        expect(JSON.parse(errors[1] ?? "").message).toContain(room);
+        expect(JSON.parse(errors[2] ?? "").message).toContain(room);
+        expect(errors.every((line) => !line.includes("\n"))).toBe(true);
+        expect(consoleError).not.toHaveBeenCalled();
+      } finally {
+        await client.dispose();
+        consoleError.mockRestore();
+      }
+    });
+
     it(`enforces the pending ceiling while authentication is running (${label} build)`, async () => {
       const entered = gate();
       const held = gate();

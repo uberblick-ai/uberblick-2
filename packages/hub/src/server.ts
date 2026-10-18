@@ -7,16 +7,17 @@ import type {
 } from "@hocuspocus/server";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@hocuspocus/server";
-import { parseRoom } from "@uberblick/schema";
+import { isRoomNameWithinBounds, parseRoom } from "@uberblick/schema";
 import type { HubConfig } from "./config.js";
 import {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  MAX_MESSAGE_BYTES,
   MAX_PENDING_DOCUMENTS,
 } from "./config.js";
 import type { HubLogger } from "./log.js";
 import type { CredentialContext } from "./credential-admission.js";
-import { stderrLogger } from "./log.js";
+import { hocuspocusLogger, stderrLogger } from "./log.js";
 import { HubDatabase, isEphemeralDatabase } from "./persistence.js";
 import { DeletedRooms } from "./deleted-rooms.js";
 import {
@@ -168,6 +169,7 @@ export function resolvePeer(headers: Headers): PeerAddress {
 
 /** Every reason the hub refuses a connection, as one closed vocabulary. */
 type RejectionCause =
+  | "room-name-invalid"
   | "token-in-query"
   | "protocol-mismatch"
   | TokenFailure
@@ -222,15 +224,15 @@ export async function createRoomAuthenticator(options: {
         async ([workspace, secret]) => [workspace, await importRootSecret(secret)] as const,
       )));
 
-  return async ({
-    token,
-    documentName,
-    requestHeaders,
-    requestParameters,
-    connectionConfig,
-  }) => {
+  return async (payload) => {
+    const { documentName, requestHeaders, requestParameters, connectionConfig } = payload;
     // Attribute each rejection to its peer without exposing token contents.
     const peer = resolvePeer(requestHeaders);
+    if (!isRoomNameWithinBounds(documentName)) {
+      options.log({ event: "hub.auth.rejected", peer: peer.address,
+        proxied: peer.proxied, cause: "room-name-invalid" });
+      throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
+    }
     const rejected = (
       cause: RejectionCause,
       fields: Record<string, unknown> = {},
@@ -257,7 +259,7 @@ export async function createRoomAuthenticator(options: {
     }
 
     // Bound the envelope before parsing; reject skew/bare tokens before trusting claims.
-    const envelope = readAuthEnvelope(token);
+    const envelope = readAuthEnvelope(payload.token);
     if (
       envelope === null ||
       envelope.protocolVersion !== options.protocolVersion
@@ -347,6 +349,20 @@ function roomWorkspace(room: string): string | null {
   } catch {
     return null;
   }
+}
+
+function unconfiguredRoomAuthenticator(protocolVersion: number, log: HubLogger): RoomAuthenticator {
+  return async payload => {
+    if (!isRoomNameWithinBounds(payload.documentName)) {
+      log({ event: "hub.auth.rejected", cause: "room-name-invalid" });
+      throw new AuthError("room-name-invalid", "room name exceeds admission bounds");
+    }
+    const envelope = readAuthEnvelope(payload.token);
+    const reason = envelope === null || envelope.protocolVersion !== protocolVersion
+      ? protocolMismatchReason(protocolVersion) : "device-sign-in-unavailable";
+    log({ event: "hub.auth.rejected", cause: "sign-in-not-configured" });
+    throw new AuthError(reason, "Remote hub requires configured GitHub sign-in");
+  };
 }
 
 /**
@@ -555,6 +571,8 @@ export async function createHub(config: HubConfig, options: {
     stopOnSignals: false,
     // No start banner on stdout; startup is one structured line on stderr.
     quiet: true,
+    logger: hocuspocusLogger(log),
+    websocketOptions: { maxPayload: MAX_MESSAGE_BYTES },
     // Own the auth-in-flight ceiling across library upgrades; see MAX_PENDING_DOCUMENTS.
     maxPendingDocuments: config.maxPendingDocuments ?? MAX_PENDING_DOCUMENTS,
     ...(config.debounce === undefined ? {} : { debounce: config.debounce }),
@@ -573,13 +591,7 @@ export async function createHub(config: HubConfig, options: {
 
     ...(authenticate !== undefined ? { onAuthenticate: authenticate } :
       extension?.admissionConfigured === true ? {} : {
-        async onAuthenticate({ token }: onAuthenticatePayload<HubContext>): Promise<never> {
-          const envelope = readAuthEnvelope(token);
-          const reason = envelope === null || envelope.protocolVersion !== protocolVersion
-            ? protocolMismatchReason(protocolVersion) : "device-sign-in-unavailable";
-          log({ event: "hub.auth.rejected", cause: "sign-in-not-configured" });
-          throw new AuthError(reason, "Remote hub requires configured GitHub sign-in");
-        },
+        onAuthenticate: unconfiguredRoomAuthenticator(protocolVersion, log),
       }),
 
     async onRequest({ request, response }) {

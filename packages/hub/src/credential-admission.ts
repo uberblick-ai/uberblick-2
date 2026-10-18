@@ -7,7 +7,7 @@ import type {
   connectedPayload,
   onAuthenticatePayload,
 } from "@hocuspocus/server";
-import { parseRoom, settingsRoom } from "@uberblick/schema";
+import { isRoomNameWithinBounds, parseRoom, settingsRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
@@ -73,24 +73,21 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     };
   }
 
-  onAuthenticate = async ({
-    documentName,
-    token,
-    requestHeaders,
-    requestParameters,
-    connectionConfig,
-    instance,
-  }: onAuthenticatePayload<CredentialContext>): Promise<CredentialContext> => {
+  onAuthenticate = async (payload: onAuthenticatePayload<CredentialContext>): Promise<CredentialContext> => {
+    const { documentName, requestHeaders, requestParameters, connectionConfig, instance } = payload;
     const peer = resolvePeer(requestHeaders);
     const refuse = (cause: string, reason?: string): never => {
       // No client claims, token, signature or key material in diagnostic output.
       this.options.log({ event: "hub.auth.rejected", peer: peer.address, cause });
       throw new CredentialRefusal(reason);
     };
+    if (!isRoomNameWithinBounds(documentName)) {
+      return refuse("room-name-invalid", "room-name-invalid");
+    }
     if (TOKEN_QUERY_PARAMS.some((key) => requestParameters.has(key))) {
       return refuse("token-in-query");
     }
-    const envelope = readAuthEnvelope(token);
+    const envelope = readAuthEnvelope(payload.token);
     if (
       envelope === null ||
       envelope.protocolVersion !== this.options.protocolVersion

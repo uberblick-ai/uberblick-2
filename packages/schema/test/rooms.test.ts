@@ -3,11 +3,13 @@ import {
   DIRECTORY_SUFFIX,
   InvalidRoomError,
   InvalidWorkspaceIdError,
+  MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   directoryRoom,
   isCanonicalRoom,
+  isRoomNameWithinBounds,
   parseRoom,
   parseWorkspaceId,
   roomForDoc,
@@ -114,6 +116,24 @@ describe("room names", () => {
     expect(() => roomForDoc("a/b", UUID)).toThrow(InvalidWorkspaceIdError);
     expect(() => roomForDoc(WORKSPACE, "")).toThrow(InvalidRoomError);
     expect(() => roomForDoc(WORKSPACE, "a/b")).toThrow(InvalidRoomError);
+  });
+});
+
+describe("room admission bounds", () => {
+  it("admits current and legacy names without imposing the canonical grammar", () => {
+    for (const document of [UUID, UUID.toUpperCase(), "_directory", "_sidebar", "_settings", "_feedback", "notauuid"]) {
+      expect(isRoomNameWithinBounds(`${WORKSPACE}/${document}`)).toBe(true);
+      expect(isRoomNameWithinBounds(`${WORKSPACE.toUpperCase()}/${document}`)).toBe(true);
+    }
+  });
+
+  it("bounds length and excludes controls, whitespace, quotes and backslashes", () => {
+    expect(isRoomNameWithinBounds("a".repeat(MAX_ROOM_NAME_LENGTH))).toBe(true);
+    expect(isRoomNameWithinBounds("a".repeat(MAX_ROOM_NAME_LENGTH + 1))).toBe(false);
+    for (const value of ["\n", "\r", "\t", "\0", " ", '"', "'", "\\", "é", "\u2028"]) {
+      expect(isRoomNameWithinBounds(`${WORKSPACE}/${value}`), JSON.stringify(value)).toBe(false);
+    }
+    expect(isRoomNameWithinBounds("")).toBe(false);
   });
 });
 
