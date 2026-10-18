@@ -2344,6 +2344,7 @@ for (const scheme of ["light", "dark"] as const) {
       await trigger.press(key);
       await expect(page.getByRole("option").first()).toBeFocused();
       await page.keyboard.press("Escape");
+      await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
       await expect(trigger).toBeFocused();
     }
     await activate(trigger);
