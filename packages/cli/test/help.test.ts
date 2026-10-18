@@ -433,7 +433,9 @@ commands:
     const run = await dispatch(["auth", "login", "--help"]);
     expect(run.status).toBe(0);
     const help = run.stdout.replace(/\s+/g, " ");
-    expect(help).toMatch(/first GitHub account.*approval.*claims.*default workspace.*administrator/);
+    expect(help).toMatch(/host operator.*ub-hub status.*--claim-code/);
+    expect(help).toContain("Without a claim code, sign-in will not claim the hub.");
+    expect(help).toMatch(/valid code reserves.*approval makes this account hub administrator.*default workspace/);
     expect(help).toMatch(/(?:never changes|stays unchanged).*binding|binding.*(?:never changes|stays unchanged)/);
   });
 

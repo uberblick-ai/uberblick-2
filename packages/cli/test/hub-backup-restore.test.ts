@@ -38,6 +38,7 @@ import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { requestOperator } from "../../hub/src/operator-client.js";
 import { getWorkspaceName, setWorkspaceName } from "@uberblick/schema";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
@@ -149,7 +150,7 @@ interface Fixture {
 }
 
 function fixture(): Fixture {
-  const checkout = realpathSync(mkdtempSync(join(tmpdir(), `uberblick-${process.env.UB_AGENTS_RUN ?? "test"}-hub-operators-`)));
+  const checkout = realpathSync(mkdtempSync(join(tmpdir(), `ub-${process.env.UB_AGENTS_RUN ?? "test"}-ops-`)));
   directories.push(checkout);
   const volume = join(checkout, "volume");
   mkdirSync(volume, { recursive: true });
@@ -387,15 +388,18 @@ describe("hub-restore.sh", () => {
       }) as typeof fetch,
     };
     const config = { port: 0, databasePath: live, authSecret: "backup-test-only-signing-secret", github, log: silentLogger };
-    const options = { initializeDefaultWorkspace: true };
+    const options = { initializeDefaultWorkspace: true, operatorSetup: true };
     const hub = await createHub(config, options);
     let completed: Record<string, unknown> | undefined;
     try {
       expect(await (await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).json())
         .toEqual({ unclaimed: true, canClaim: true });
       if (claimed) {
+        const status = await requestOperator(live, "hub-status");
+        const claimCode = (status.info as Record<string, unknown>).claimCode;
+        expect(claimCode).toEqual(expect.any(String));
         const started = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/start`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ claimCode }),
         })).json() as { requestId: string; collectionSecret: string };
         time += 1_000;
         completed = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/collect`, {
