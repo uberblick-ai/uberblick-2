@@ -5,11 +5,14 @@ import { isLoopbackHost } from "@uberblick/schema/loopback";
 export const DEFAULT_PORT = 1234;
 export const DEFAULT_HOST = "127.0.0.1";
 
+/** Maximum bytes in one encoded room message, including sync framing. */
+export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+
 /**
  * Per-socket auth-in-flight memory bound: each pending room owns a queue and
  * hook payload. Exceeding it terminates the whole socket, including healthy
  * rooms, so clients must bound attach concurrency on every reconnect.
- * Keep the hub ceiling explicit across library upgrades. Per-room byte/message
+ * Keep the hub ceiling explicit across library upgrades. Per-socket byte/message
  * limits remain at library defaults (5 MiB/1000) until measurements justify a change.
  */
 export const MAX_PENDING_DOCUMENTS = 100;

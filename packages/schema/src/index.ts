@@ -122,12 +122,14 @@ export type {
 
 export {
   DIRECTORY_SUFFIX,
+  MAX_ROOM_NAME_LENGTH,
   SETTINGS_SUFFIX,
   SIDEBAR_SUFFIX,
   assertCanonicalRoom,
   canonicalDocumentUuid,
   directoryRoom,
   isCanonicalRoom,
+  isRoomNameWithinBounds,
   parseRoom,
   roomForDoc,
   settingsRoom,

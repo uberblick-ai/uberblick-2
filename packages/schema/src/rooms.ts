@@ -14,6 +14,15 @@ export const SETTINGS_SUFFIX = "_settings";
 
 const SEPARATOR = "/";
 
+/** Transport admission bound, independent of the structural and canonical grammars. */
+export const MAX_ROOM_NAME_LENGTH = 128;
+
+/** Keep room names bounded and free of log delimiters, including legacy rooms. */
+export function isRoomNameWithinBounds(room: string): boolean {
+  return room.length > 0 && room.length <= MAX_ROOM_NAME_LENGTH &&
+    /^[A-Za-z0-9_/-]+$/.test(room);
+}
+
 function assertSegment(room: string, label: string, value: string): void {
   if (value === "") {
     throw new InvalidRoomError(room, `${label} is empty`);

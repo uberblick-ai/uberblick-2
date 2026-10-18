@@ -1483,6 +1483,19 @@ volume, so normal container replacement and `sh bin/remote-compose.sh down`
 preserve it. Both the hub and `ub-hub` require a non-empty `HUB_DB_PATH` for database operations;
 an unset or empty value refuses startup and names the setting.
 
+The sync endpoint accepts WebSocket messages up to 16 MiB (16,777,216 bytes),
+including encoded room names and Yjs framing. A larger message closes its whole
+multiplexed socket with code 1009; other sockets keep serving. Clients reconnect
+and retry, so a room whose single message exceeds the ceiling cannot sync.
+The separate unauthenticated queue budget remains 5 MiB / 1,000 messages per socket.
+
+Room names are limited to 128 ASCII letters, digits, underscores, hyphens and
+slashes. Names outside those bounds are refused as `room-name-invalid` before
+token inspection; the rejection event omits the name. Current UUID rooms and
+reserved roots, including the retired `_feedback`, remain admissible.
+Hub events and Hocuspocus warnings and errors use one JSON event per stderr line;
+client text appears only in JSON-escaped strings.
+
 ### Checking the hub
 
 The hub image supplies `ub-hub` for status, diagnostics, first-admin setup,
