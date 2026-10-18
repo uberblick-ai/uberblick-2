@@ -163,6 +163,26 @@ describe.each(modes)("ub auth status without usable remote login, JSON=%s", json
 });
 
 describe("ub auth status bounded read-only check", () => {
+  it("reports an expired login as login-refused without renewing or changing the stored snapshot", async () => {
+    const remote = await rig();
+    const login = await seedLogin(remote);
+    const database = new DatabaseSync(remote.databasePath);
+    try {
+      database.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+        .run(Date.now() - 30 * 24 * 60 * 60 * 1000, login.credential.record.id);
+    } finally { database.close(); }
+    const before = storedBytes(remote.box);
+    const run = await runInProcess(["auth", "status", remote.origin, "--json"], remote.box);
+    expect(run.status).toBe(1);
+    expect(report(run)).toMatchObject({ outcome: "login-refused", loginAccepted: false, hubAdmin: null,
+      storedLogin: { account: { login: login.identity.githubUsername, provider: "github" } } });
+    expect(run.stderr).toContain(`ub auth login ${remote.origin}`);
+    expect(storedBytes(remote.box)).toEqual(before);
+    expect(remote.requests).toHaveLength(1);
+    expect(remote.requests[0]?.body.operation).toBe("own-hub-role");
+    expect(remote.github.calls).toEqual([]);
+  });
+
   it("asks the real hub once per invocation and follows current authority without changing credentials or access", async () => {
     const remote = await rig();
     const login = await seedLogin(remote);

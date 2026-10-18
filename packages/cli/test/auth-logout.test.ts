@@ -198,6 +198,25 @@ describe("ub auth logout retires devices", () => {
     expect(run.output).not.toMatch(/[\u007f-\u009f]/);
   });
 
+  it("all-devices omits expired device history from its list and revocations", async () => {
+    const remote = await rig();
+    const expired = await signedIn(remote);
+    const current = await signedIn(remote);
+    const database = new DatabaseSync(remote.databasePath);
+    try {
+      database.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+        .run(Date.now() - 30 * 24 * 60 * 60 * 1000, expired.login.credential.record.id);
+    } finally { database.close(); }
+    const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], current.box);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain(`revoked    1 devices of ${USERNAME}`);
+    const revocations = remote.requests.filter(request => request.body.operation === "revoke-device");
+    expect(revocations.map(request => request.body.deviceId)).toEqual([current.login.credential.record.deviceId]);
+    expect(privateDeviceRows(remote.databasePath).find(row => row.id === expired.login.credential.record.id)?.revoked_at).toBeNull();
+    expect(privateDeviceRows(remote.databasePath).find(row => row.id === current.login.credential.record.id)?.revoked_at).not.toBeNull();
+    assertPublicOnly(run, remote, current.login.credential.key);
+  });
+
   it("all-devices cannot start without a login and does not contact the hub", async () => {
     const remote = await rig();
     const run = await runInProcess(["auth", "logout", "--all-devices", remote.origin], sandbox());
@@ -306,20 +325,34 @@ describe("ub auth logout retires devices", () => {
 });
 
 describe("ub auth login replaces and retires its previous device", () => {
-  it.each(["same", "different"])("stores the new login for the %s account before revoking with the old credential; the new credential survives", async account => {
+  it.each([
+    { account: "same", expired: false },
+    { account: "same", expired: true },
+    { account: "different", expired: false },
+    { account: "different", expired: true },
+  ])("stores a new login for the $account account before retiring its expired=$expired predecessor with that account's authority", async ({ account, expired }) => {
     const remote = await rig([WORKSPACE]);
     const { box, login: old } = await signedIn(remote);
     const binding = readFileSync(join(box.cwd, ".uberblick.json"));
     const access = memberships(remote.databasePath);
+    if (expired) {
+      const database = new DatabaseSync(remote.databasePath);
+      try {
+        database.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+          .run(Date.now() - 30 * 24 * 60 * 60 * 1000, old.credential.record.id);
+      } finally { database.close(); }
+    }
+    if (account === "same" && expired) remote.github.identity = { id: 1234, login: "renamed-account" };
     if (account === "different") remote.github.identity = { id: 5678, login: "another-account" };
     let proofVerified = false;
     remote.controls.onManagement = async body => {
       expect(savedLogin(box, remote.origin).credential.record.deviceId).not.toBe(old.credential.record.deviceId);
       expect(body).toMatchObject({ operation: "revoke-device", deviceId: old.credential.record.deviceId });
-      const publicKey = createPublicKey(createPrivateKey({ key: Buffer.from(old.credential.key, "base64url"), type: "pkcs8", format: "der" })).export({ format: "jwk" }).x!;
+      const authority = account === "same" ? savedLogin(box, remote.origin) : old;
+      const publicKey = createPublicKey(createPrivateKey({ key: Buffer.from(authority.credential.key, "base64url"), type: "pkcs8", format: "der" })).export({ format: "jwk" }).x!;
       const proof = await inspectRequestProof(await importCredentialPublicKey(Buffer.from(publicKey, "base64url")),
         String(body.token), { operation: "revoke-device", deviceId: old.credential.record.deviceId });
-      proofVerified = "kid" in proof && proof.kid === old.credential.record.id;
+      proofVerified = "kid" in proof && proof.kid === authority.credential.record.id;
       return undefined;
     };
     const run = await runInProcess(["auth", "login", remote.origin], box);
@@ -329,6 +362,15 @@ describe("ub auth login replaces and retires its previous device", () => {
     remote.controls.onManagement = undefined;
     expect((await manageRequest(remote.origin, { operation: "list-devices" }, old)).status).toBe(401);
     expect((await manageRequest(remote.origin, { operation: "list-devices" }, next)).status).toBe(200);
+    const oldRow = privateDeviceRows(remote.databasePath).find(row => row.id === old.credential.record.id);
+    expect(oldRow).toBeDefined();
+    if (account === "same" || !expired) {
+      expect(oldRow?.revoked_at).not.toBeNull();
+      expect(run.stderr).toBe("");
+    } else {
+      expect(oldRow?.revoked_at).toBeNull();
+      expect(run.stderr).toContain("previous device is not revoked");
+    }
     expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(binding);
     expect(memberships(remote.databasePath)).toEqual(access);
     assertPublicOnly(run, remote, old.credential.key);

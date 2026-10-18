@@ -31,7 +31,7 @@ import { MembershipRegistry } from "../src/memberships.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import { importCredentialKey, importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,
@@ -112,7 +112,12 @@ function issue(registry: CredentialRegistry, deviceId: string, workspaces = [WOR
   return issueCredential(registry, { principalId, deviceId, workspaces });
 }
 
-type AccessEnd = "revocation" | "membership removal" | "replacement" | "suspension";
+type AccessEnd = "revocation" | "membership removal" | "replacement" | "suspension" | "expiry";
+
+function expiresSoon(rig: Awaited<ReturnType<typeof startServer>>, credential: IssuedCredential): void {
+  rig.database.connection.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+    .run(Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS + 2_000, credential.record.id);
+}
 
 async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: AccessEnd, credential: IssuedCredential) {
   if (kind === "revocation") {
@@ -121,6 +126,13 @@ async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: Acc
     rig.memberships.remove({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: credential.record.principalId });
   } else if (kind === "suspension") {
     rig.hubAdmins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
+  } else if (kind === "expiry") {
+    await waitUntil("the credential deadline to fence and close its rooms", () => {
+      const record = rig.registry.get(credential.record.id);
+      return record !== null && rig.registry.isExpired(record) &&
+        [...rig.hocuspocus.documents.values()].every(document =>
+          document.getConnections().every(connection => connection.context.credentialId !== record.id));
+    });
   } else {
     const proof = await mintRequestProof(await importCredentialKey(credential.keyBytes), {
       kid: credential.record.id,
@@ -134,6 +146,7 @@ async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: Acc
 function accessEndCause(kind: AccessEnd) {
   if (kind === "membership removal") return "missing-membership";
   if (kind === "suspension") return "workspace-suspended";
+  if (kind === "expiry") return "expired-credential";
   return kind === "revocation" ? "revoked-credential" : "replaced-credential";
 }
 
@@ -319,6 +332,27 @@ describe("credential admission on a composed server", () => {
       rig.hocuspocus.documents.get(rooms[1]!)?.getText(TEXT_KEY).toString() === "second workspace");
   });
 
+  it("closes a silent room at credential expiry and stops sending it another device's updates", async () => {
+    const rig = await startServer();
+    const laptop = issue(rig.registry, "laptop");
+    expiresSoon(rig, laptop);
+    const phone = issue(rig.registry, "phone");
+    const room = testRoom();
+    const silent = connect({ port: rig.port, room, token: await credentialToken(laptop) });
+    const peer = connect({ port: rig.port, room, token: await credentialToken(phone) });
+    await waitFor("both devices to sync before expiry", Promise.all([silent.synced, peer.synced]));
+    peer.text.insert(0, "before expiry");
+    await waitUntil("the silent room to receive its last authorized update", () => silent.text.toString() === "before expiry");
+    await waitFor("the silent room to close without sending another message", silent.closed);
+    expect(rig.registry.isExpired(rig.registry.get(laptop.record.id)!)).toBe(true);
+    peer.text.insert(peer.text.length, " + after expiry");
+    await waitUntil("the other device to keep syncing after expiry", () =>
+      !peer.provider.hasUnsyncedChanges && rig.hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() === "before expiry + after expiry");
+    expect(silent.text.toString()).toBe("before expiry");
+    expect(rig.hocuspocus.documents.get(room)?.getConnections().map(connection => connection.context.credentialId))
+      .toEqual([phone.record.id]);
+  });
+
   it("refuses scope escalation and credential forgery with one public reason and distinct logged causes", async () => {
     const rig = await startServer();
     const laptop = issue(rig.registry, "laptop");
@@ -469,7 +503,7 @@ describe("credential admission on a composed server", () => {
     }
   });
 
-  it.each(["revocation", "membership removal", "suspension"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
+  it.each(["revocation", "membership removal", "suspension", "expiry"] as const)("reads authority after verification's final await so %s during verification wins", async (accessEnd) => {
     const rig = await startServer();
     const held = gate();
     const verified = gate();
@@ -481,6 +515,7 @@ describe("credential admission on a composed server", () => {
       return result;
     });
     const laptop = issue(rig.registry, "laptop");
+    if (accessEnd === "expiry") expiresSoon(rig, laptop);
     const room = testRoom();
     const offline = new Y.Doc();
     offline.getText(TEXT_KEY).insert(0, "authenticating write must not land");
@@ -604,6 +639,10 @@ describe("credential admission on a composed server", () => {
       ["revocation", "a detached connection's live update", messageYjsUpdate, true],
       ["revocation", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
       ["membership removal", "a live update", messageYjsUpdate, false],
+      ["expiry", "a live update", messageYjsUpdate, false],
+      ["expiry", "a reconnect diff", messageYjsSyncStep2, false],
+      ["expiry", "a detached connection's live update", messageYjsUpdate, true],
+      ["expiry", "a detached connection's reconnect diff", messageYjsSyncStep2, true],
       ["suspension", "a live update", messageYjsUpdate, false],
       ["suspension", "a reconnect diff", messageYjsSyncStep2, false],
       ["suspension", "a detached connection's live update", messageYjsUpdate, true],
@@ -633,6 +672,7 @@ describe("credential admission on a composed server", () => {
         },
       });
       const laptop = issue(rig.registry, "laptop");
+      if (accessEnd === "expiry") expiresSoon(rig, laptop);
       const phone = issue(rig.registry, "phone", [WORKSPACE], "observer");
       victimId = laptop.record.id;
       const room = testRoom();

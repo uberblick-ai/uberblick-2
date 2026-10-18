@@ -19,7 +19,7 @@ import {
   SYNC_PROTOCOL_VERSION,
   wrapToken,
 } from "@uberblick/schema/protocol";
-import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
+import { DEVICE_CREDENTIAL_RENEWAL_AGE_MS, ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { hubTransportProblem, isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import * as Y from "yjs";
@@ -417,6 +417,7 @@ export class HubSync {
   /** The credential actually offered by each room, rather than a later login. */
   private readonly offeredLogins = new Map<string, StoredHubLogin>();
   private deviceRetryTimer: NodeJS.Timeout | null = null;
+  private deviceRenewalTimer: NodeJS.Timeout | null = null;
   private deviceRetryAttempts = 0;
   private checkingDeviceRefusal = false;
   private readonly deviceWork = new Set<Promise<unknown>>();
@@ -610,39 +611,16 @@ export class HubSync {
   /** Mint a fresh token for this agent session. */
   private async token(room: string): Promise<string | null> {
     if (this.config.deviceLogin !== undefined) {
-      const rejected = this.rejectedLogin;
-      const work = ensureDeviceLogin(this.config.hubUrl, this.config.workspaceId, {
-        ...(this.config.deviceLogin.env === undefined ? {} : { env: this.config.deviceLogin.env }),
-        ...(rejected === undefined ? {} : { rejected }),
-        signal: this.deviceAbort.signal,
-        ...(this.config.deviceRenewalCooldownMs === undefined ? {} : { renewalCooldownMs: this.config.deviceRenewalCooldownMs }),
-      });
-      this.deviceWork.add(work);
-      const result = await work.finally(() => this.deviceWork.delete(work));
-      if (this.stopped) return null;
-      // A token already minting before the refusal says nothing about it.
-      if (rejected !== undefined || this.offeredLogins.size === 0) this.checkingDeviceRefusal = false;
-      if (result.status !== "ready") {
-        this.deviceReading = this.deviceFailure(result);
-        this.stateChanged();
-        if (result.status === "update-required" && result.hubVersion !== undefined) {
-          this.stopForProtocolMismatch(result.hubVersion);
-        } else {
-          this.retryDeviceConnection();
-        }
-        return null;
-      }
-      this.deviceReading = null;
-      this.stateChanged();
-      this.rejectedLogin = undefined;
-      this.offeredLogins.set(room, result.login);
+      const login = await this.ensureLogin();
+      if (login === null || this.stopped) return null;
+      this.offeredLogins.set(room, login);
       this.mintCount += 1;
-      return mintToken(await importCredentialKey(Buffer.from(result.login.credential.key, "base64url")), {
+      return mintToken(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
         typ: "room",
         sub: this.config.sessionId,
         workspace: this.config.workspaceId,
         scope: "read-write",
-        kid: result.login.credential.record.id,
+        kid: login.credential.record.id,
         lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
       });
     }
@@ -666,6 +644,50 @@ export class HubSync {
     );
   }
 
+  private async ensureLogin(): Promise<StoredHubLogin | null> {
+    const rejected = this.rejectedLogin;
+    const work = ensureDeviceLogin(this.config.hubUrl, this.config.workspaceId, {
+      ...(this.config.deviceLogin?.env === undefined ? {} : { env: this.config.deviceLogin.env }),
+      ...(rejected === undefined ? {} : { rejected }),
+      signal: this.deviceAbort.signal,
+      ...(this.config.deviceRenewalCooldownMs === undefined ? {} : { renewalCooldownMs: this.config.deviceRenewalCooldownMs }),
+    });
+    this.deviceWork.add(work);
+    const result = await work.finally(() => this.deviceWork.delete(work));
+    if (this.stopped) return null;
+    // A token already minting before the refusal says nothing about it.
+    if (rejected !== undefined || this.offeredLogins.size === 0) this.checkingDeviceRefusal = false;
+    if (result.status !== "ready") {
+      this.deviceReading = this.deviceFailure(result);
+      this.stateChanged();
+      if (result.status === "update-required" && result.hubVersion !== undefined) {
+        this.stopForProtocolMismatch(result.hubVersion);
+      } else {
+        this.retryDeviceConnection();
+      }
+      return null;
+    }
+    this.deviceReading = null;
+    this.stateChanged();
+    this.rejectedLogin = undefined;
+    this.scheduleDeviceRenewal(result.login);
+    return result.login;
+  }
+
+  /** Renew idle rooms too; token minting alone never revisits a live admission. */
+  private scheduleDeviceRenewal(login: StoredHubLogin): void {
+    if (this.deviceRenewalTimer !== null) clearTimeout(this.deviceRenewalTimer);
+    const delay = login.credential.record.issuedAt + DEVICE_CREDENTIAL_RENEWAL_AGE_MS - Date.now();
+    this.deviceRenewalTimer = setTimeout(() => {
+      this.deviceRenewalTimer = null;
+      if (this.stopped) return;
+      const work = this.ensureLogin();
+      this.deviceWork.add(work);
+      void work.catch(() => {}).finally(() => this.deviceWork.delete(work));
+    }, Math.max(1, Math.min(delay, 2_147_483_647)));
+    this.deviceRenewalTimer.unref();
+  }
+
   private deviceFailure(result: DeviceLoginFailure): Omit<HubState, "protocolVersion"> {
     const authRecovery = result.status === "sign-in-required" ? "sign-in-required"
       : result.status === "no-access" ? "no-workspace-access"
@@ -684,6 +706,8 @@ export class HubSync {
     this.deviceAbort.abort();
     if (this.deviceRetryTimer !== null) clearTimeout(this.deviceRetryTimer);
     this.deviceRetryTimer = null;
+    if (this.deviceRenewalTimer !== null) clearTimeout(this.deviceRenewalTimer);
+    this.deviceRenewalTimer = null;
     this.checkingDeviceRefusal = false;
     this.offeredLogins.clear();
     this.rejectedLogin = undefined;

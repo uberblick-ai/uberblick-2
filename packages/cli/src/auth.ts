@@ -634,7 +634,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
           }
           await deviceRequest(selection.origin, {
             operation: "revoke-device", deviceId: replaced.credential.record.deviceId,
-          }, replaced, io);
+          }, replaced.identity.githubAccountId === credential.identity.githubAccountId ? credential : replaced, io);
         } catch (error) {
           io.err(`ub auth: warning: the previous device is not revoked on ${selection.origin}: ${error instanceof DeviceFailure ? error.message : "revocation not confirmed"}. The new login is stored.\n`);
         }

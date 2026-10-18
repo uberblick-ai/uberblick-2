@@ -8,25 +8,25 @@ import { MembershipRegistry } from "../src/memberships.js";
 import { generateTestCredentialKeyPair, mintDeviceRequestProof, renewalPublicKey } from "./device-credentials.js";
 import { importCredentialPublicKey } from "@uberblick/schema/token";
 import { HubDatabase } from "../src/persistence.js";
-import { MAX_TOKEN_LENGTH, MAX_TOKEN_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken, readTokenKeyId } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, MAX_TOKEN_LENGTH, MAX_TOKEN_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken, readTokenKeyId } from "@uberblick/schema/token";
 import { removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
 const OTHER_WORKSPACE = "00000000-0000-4000-8000-000000000002";
 const databases: HubDatabase[] = [];
 
-function registry(path = ":memory:"): CredentialRegistry {
+function registry(path = ":memory:", now?: () => number): CredentialRegistry {
   const database = new HubDatabase(path, (error) => { throw error; });
   databases.push(database);
   database.open();
-  return new CredentialRegistry(database);
+  return new CredentialRegistry(database, undefined, undefined, now);
 }
 
 function issue(store: CredentialRegistry, deviceId = "laptop"): IssuedCredential {
   return issueCredential(store, { principalId: "person", deviceId, workspaces: [WORKSPACE] });
 }
 
-async function token(issued: IssuedCredential, keyBytes = issued.keyBytes): Promise<string> {
+async function token(issued: IssuedCredential, keyBytes = issued.keyBytes, iat?: number): Promise<string> {
   return mintToken(await importCredentialKey(keyBytes), {
     typ: "room",
     sub: "untrusted-client-identity",
@@ -34,6 +34,7 @@ async function token(issued: IssuedCredential, keyBytes = issued.keyBytes): Prom
     scope: "read-write",
     kid: issued.record.id,
     lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+    ...(iat === undefined ? {} : { iat }),
   });
 }
 
@@ -44,6 +45,59 @@ afterEach(() => {
 });
 
 describe("hub-owned credential registry", () => {
+  it("refuses rooms and management at exactly thirty days, omits expired devices and retains their history", async () => {
+    let now = Date.now();
+    const store = registry(":memory:", () => now);
+    const issued = issue(store);
+    now += DEVICE_CREDENTIAL_LIFETIME_MS - 1;
+    const signed = await token(issued, issued.keyBytes, Math.floor(now / 1000));
+    const readAction = { operation: "list-devices" } as const;
+    const readProof = await mintDeviceRequestProof(await importCredentialKey(issued.keyBytes), {
+      kid: issued.record.id, ...readAction, lifetimeSeconds: 60, iat: Math.floor(now / 1000),
+    });
+    const mutation = { operation: "revoke-device", deviceId: issued.record.deviceId } as const;
+    const mutationProof = await mintDeviceRequestProof(await importCredentialKey(issued.keyBytes), {
+      kid: issued.record.id, ...mutation, lifetimeSeconds: 60, iat: Math.floor(now / 1000),
+    });
+    expect(await store.verify(signed)).toHaveProperty("record", issued.record);
+    expect(await store.verifyRequest(readProof, readAction)).toHaveProperty("record", issued.record);
+    expect(store.listDevices("person")).toHaveLength(1);
+    now += 1;
+    expect(await store.verify(signed)).toEqual({ failure: "expired-credential" });
+    expect(await store.verifyRequest(readProof, readAction)).toBeNull();
+    expect(await store.verifyRequest(mutationProof, mutation)).toBeNull();
+    expect(store.listDevices("person")).toEqual([]);
+    expect(store.get(issued.record.id)).toEqual(issued.record);
+    const fresh = issue(store, "phone");
+    expect(store.listDevices("person").map(device => device.deviceId)).toEqual([fresh.record.deviceId]);
+  });
+
+  it.each(["room", "management"] as const)("lets credential expiry win during %s signature verification", async kind => {
+    let now = Date.now();
+    const store = registry(":memory:", () => now);
+    const issued = issue(store);
+    now += DEVICE_CREDENTIAL_LIFETIME_MS - 1;
+    const signed = kind === "room" ? await token(issued, issued.keyBytes, Math.floor(now / 1000))
+      : await mintDeviceRequestProof(await importCredentialKey(issued.keyBytes), {
+        kid: issued.record.id, operation: "list-devices", lifetimeSeconds: 60, iat: Math.floor(now / 1000),
+      });
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "verify").mockImplementation(async (...args) => {
+      entered();
+      await held;
+      return verify(...args);
+    });
+    const verifying = kind === "room" ? store.verify(signed) : store.verifyRequest(signed, { operation: "list-devices" });
+    await reached;
+    now += 1;
+    release();
+    expect(await verifying).toEqual(kind === "room" ? { failure: "expired-credential" } : null);
+  });
+
   it("stores only the device's public key and admits no signatures made from database bytes", async () => {
     const store = registry();
     const pair = generateTestCredentialKeyPair();

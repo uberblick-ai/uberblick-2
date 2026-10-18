@@ -25,6 +25,9 @@ export type TokenType = "room";
  */
 export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
 
+/** Hub-enforced device lifetime measured from the stored issuance time. */
+export const DEVICE_CREDENTIAL_LIFETIME_MS = 30 * 24 * 60 * 60_000;
+
 /**
  * Future iat grace only; expiry gets none so the lifetime bound cannot compound.
  * Room tokens are minted per connect; larger skew is a clock configuration fault.

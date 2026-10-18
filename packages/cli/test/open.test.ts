@@ -128,18 +128,18 @@ describe("ub open", () => {
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBeUndefined();
   });
 
-  it.each([false, true])("serves the local browser endpoint and names the upstream with stored login %s", async signedIn => {
+  it.each(["missing", "current", "expired"])("serves the local browser endpoint and names the upstream with a %s login", async loginState => {
     const { box, env } = configured();
     const remote = "wss://hub.example.ts.net/ws";
     pointAt(box, remote);
-    if (signedIn) {
+    if (loginState !== "missing") {
       const principalId = crypto.randomUUID();
       await writeHubLogin("https://hub.example.ts.net", {
         identity: { id: principalId, githubAccountId: "12345", githubUsername: "open-person" },
         credential: {
           key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
           record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(),
-            workspaces: [], issuedAt: Date.now(), revokedAt: null },
+            workspaces: [], issuedAt: Date.now() - (loginState === "expired" ? 30 * 24 * 60 * 60 * 1000 : 0), revokedAt: null },
         },
       }, box.env);
     }
@@ -157,7 +157,7 @@ describe("ub open", () => {
     expect(app.stdout()).toBe(
       `web        ${app.url}\n` +
       `workspace  ${WORKSPACE} (https://hub.example.ts.net)\n` +
-      (signedIn
+      (loginState === "current"
         ? "hub        unreachable, changes stay on this machine until it is back\n"
         : "hub        not signed in, changes stay on this machine\n             → ub auth login\n") +
       "\n" +

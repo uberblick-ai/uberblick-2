@@ -78,7 +78,7 @@ export async function handleAccessManagement(
     // synchronously with the write, on the hub's shared database handle.
     const readCurrent = () => {
       const current = verified === null ? null : credentials.get(verified.record.id);
-      if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
+      if (current === null || current.revokedAt !== null || current.replacedAt !== null || credentials.isExpired(current) ||
         verified === null || clampToken(verified.claims, Math.floor(Date.now() / 1000)) !== null) {
         reply(401, { status: "sign-in-required" });
         return null;
