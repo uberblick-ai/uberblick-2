@@ -154,9 +154,9 @@ class UnqueuedHocuspocusProviderWebsocket extends HocuspocusProviderWebsocket {
 
 /**
  * Hocuspocus listeners can send before the async token resolves, bypassing the
- * room bound. Gate updates and presence until the admitted handshake starts;
+ * room bound. Gate updates and presence until the hub authenticates this room;
  * the handshake reconciles suppressed updates and closed-socket frames.
- * Explicit detach CLOSE frames on an open socket bypass this pre-token gate.
+ * Explicit detach CLOSE frames on an open socket bypass this gate.
  */
 class AdmittedHocuspocusProvider extends HocuspocusProvider {
   private admittedGeneration: number | null = null;
@@ -184,17 +184,53 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
     this.admittedGeneration = null;
     this.tokenSent = false;
     this.syncStarted = false;
+    this.isAuthenticated = false;
   }
 
   hasCurrentSync(): boolean {
-    return this.syncStarted && this.hasCurrentAdmission();
+    return this.syncStarted && this.isAuthenticated && this.hasCurrentAdmission();
+  }
+
+  override onMessage(event: MessageEvent): void {
+    if (!this.isAttached || !this.socketOpen()) return;
+    if (!this.hasCurrentSync()) {
+      // The socket has already routed the room name. Inspect only its bounded
+      // byte-length prefix and frame type; Hocuspocus still decodes the payload.
+      const bytes = new Uint8Array(event.data);
+      let nameLength = 0;
+      let factor = 1;
+      let type: number | undefined;
+      for (let offset = 0; offset < 5 && offset < bytes.length; offset += 1) {
+        const byte = bytes[offset];
+        if (byte === undefined) return;
+        nameLength += (byte & 0x7f) * factor;
+        if (nameLength > bytes.length) return;
+        if (byte < 0x80) {
+          type = bytes[offset + 1 + nameLength];
+          break;
+        }
+        factor *= 128;
+      }
+      if (type !== MessageType.Auth && type !== MessageType.CLOSE) return;
+    }
+    super.onMessage(event);
+  }
+
+  private socketOpen(): boolean {
+    const socket = this.configuration.websocketProvider.webSocket;
+    return socket !== null && socket.readyState === socket.OPEN;
+  }
+
+  override authenticatedHandler(scope: string): void {
+    if (!this.tokenSent || !this.hasCurrentAdmission() || !this.socketOpen() || !this.isAttached) return;
+    super.authenticatedHandler(scope);
+    this.startSync();
   }
 
   override startSync(): void {
-    if (!this.tokenSent || !this.hasCurrentAdmission() || this.syncStarted) return;
-    // The parent resets its acknowledgement count before sending the handshake.
-    // Keep updates gated through sendToken's async continuation so that reset
-    // cannot discard the debt of an update already sent on this connection.
+    if (!this.isAuthenticated || !this.tokenSent || !this.hasCurrentAdmission() || this.syncStarted) return;
+    // The parent resets acknowledgement debt. Run once so a duplicate auth or
+    // token continuation cannot discard debt for an update already sent.
     this.syncStarted = true;
     super.startSync();
   }
@@ -203,7 +239,7 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
     Message: Parameters<HocuspocusProvider["send"]>[0],
     args: Parameters<HocuspocusProvider["send"]>[1],
   ): void {
-    if (args.token === "") {
+    if (args.token === "" || !this.socketOpen()) {
       return;
     }
     if (this.hasCurrentSync()) {
@@ -213,7 +249,12 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 
     // Inspect the public frame type only before admission; ordinary updates
     // avoid this allocation once the handshake has opened the gate.
-    if (new Message().type !== MessageType.Auth) {
+    const type = new Message().type;
+    if (type === MessageType.CLOSE) {
+      super.send(Message, args);
+      return;
+    }
+    if (type !== MessageType.Auth) {
       return;
     }
     const generation = this.admittedGeneration;
@@ -226,7 +267,7 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 }
 
 export interface HubSyncOptions {
-  /** Positive room deletion evidence is scoped to that room, not authentication. */
+  /** An authenticated room's deletion refusal authorizes purging only its copy. */
   onDocDeleted?: (room: string) => void;
   /**
    * Override the admission bound for small stress fixtures. Must be a positive
@@ -807,10 +848,11 @@ export class HubSync {
         this.stateChanged();
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
+        const authenticated = provider.hasCurrentSync();
         provider.blockUntilToken();
         if (isDocDeletedReason(reason)) {
           this.detach(room);
-          this.onDocDeleted?.(room);
+          if (authenticated) this.onDocDeleted?.(room);
           return;
         }
         // Strict parsing yields only a validated different version, never wire
@@ -854,9 +896,9 @@ export class HubSync {
       },
       onClose: ({ event }) => {
         provider.blockUntilToken();
-        if (isDocDeletedReason(event.reason) && !this.deletedRooms.has(room)) {
+        const socket = this.socket?.webSocket ?? null;
+        if (isDocDeletedReason(event.reason) && socket !== null && socket.readyState === socket.OPEN) {
           this.detach(room);
-          this.onDocDeleted?.(room);
           return;
         }
         // A closed room releases its slot even without an auth answer.

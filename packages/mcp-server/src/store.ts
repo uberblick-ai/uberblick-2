@@ -935,7 +935,7 @@ export class MirrorStore {
     this.unindexTx(uuid);
   }
 
-  /** Only positive directory deletion evidence authorizes removing authoritative rows. */
+  /** Only a deletion mark or authenticated room refusal authorizes removing authoritative rows. */
   purgeDoc(room: string, uuid: string): void {
     this.assertWorkspacePresent();
     const tables = [

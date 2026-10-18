@@ -6,7 +6,6 @@ import {
   SIDEBAR_SUFFIX,
   directoryRoom,
   directoryStubDiffers,
-  deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   documentDirectoryFields,
   decisionTopicArchived,
@@ -170,6 +169,9 @@ export class Replicas {
 
   private readonly replicas = new Map<string, Replica>();
 
+  /** Room-local refusals halt rooms in this process without authoring directory marks. */
+  private readonly refusedDeletedDocs = new Set<string>();
+
   private readonly cursorTimers = new Map<string, NodeJS.Timeout>();
 
   /** Reads publish presence without a caret, so each has an independent TTL. */
@@ -224,7 +226,8 @@ export class Replicas {
       const prefix = `${config.workspaceId}/`;
       if (!room.startsWith(prefix)) return;
       const uuid = room.slice(prefix.length);
-      deleteDirectoryEntry(this.directory().doc, uuid);
+      if ([DIRECTORY_SUFFIX, SIDEBAR_SUFFIX, SETTINGS_SUFFIX].includes(uuid)) return;
+      this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
     } });
 
@@ -369,7 +372,7 @@ export class Replicas {
   }
 
   isDeleted(uuid: string): boolean {
-    return isDirectoryEntryDeleted(this.directory().doc, uuid);
+    return this.refusedDeletedDocs.has(uuid) || isDirectoryEntryDeleted(this.directory().doc, uuid);
   }
 
   assertNotDeleted(uuid: string): void {
@@ -854,6 +857,7 @@ export class Replicas {
     for (const entry of listDirectory(this.directory().doc, {
       includeDeleted: true,
     })) {
+      if (this.isDeleted(entry.uuid)) continue;
       if (decisionTopicArchived(this.directory().doc, entry.uuid)) {
         // Catch tombstones missed by observers during hydration or old rebuilds.
         // Queue actual deletes so lock waits do not multiply with the backlog;
@@ -1018,13 +1022,13 @@ export class Replicas {
     }
   }
 
-  /** Run only after directory evidence is logged; stale peers may add rows again. */
+  /** Purge only directory marks or authenticated refusals; stale peers may add rows again. */
   private purgeDeletedDocs(): void {
     if (this.persistenceFailure !== null) return;
     const directory = this.directory();
     enforceDeletedDirectoryEntries(directory.doc);
     this.assertHealthy();
-    for (const uuid of listDeletedDirectoryUuids(directory.doc)) {
+    for (const uuid of new Set([...listDeletedDirectoryUuids(directory.doc), ...this.refusedDeletedDocs])) {
       const room = roomForDoc(this.config.workspaceId, uuid);
       this.sync.detach(room);
       const replica = this.replicas.get(room);
