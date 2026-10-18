@@ -39,25 +39,30 @@ function withDatabase(box: Sandbox, uuid: string): void {
   writeFileSync(join(dir, `${uuid}.sqlite`), "", "utf8");
 }
 
-describe("ub workspace status", () => {
+describe("ub status workspace selection", () => {
   it("shows the project binding from a descendant directory and its origin", async () => {
     const box = sandbox();
     bind(box);
     const nested = join(box.cwd, "packages", "app");
     mkdirSync(nested, { recursive: true });
-    const shown = await runInProcess(["workspace", "status"], { ...box, cwd: nested });
+    const shown = await runInProcess(["status"], { ...box, cwd: nested });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(WORKSPACE);
-    expect(shown.stdout).toContain(`chosen by  project config in ${box.cwd}`);
+    expect(shown.stdout).toContain(`chosen by   project config in ${box.cwd}`);
     expect(shown.stdout).not.toContain(`project config in ${nested}`);
-    expect(shown.stdout).toContain(HUB);
+    expect(shown.stdout).toContain("hub         https://hub.example.test\n");
+    const json = await runInProcess(["status", "--json"], { ...box, cwd: nested });
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout).chosenBy).toEqual({
+      source: "project-config", path: join(box.cwd, ".uberblick.json"),
+    });
   });
 
   it("ignores a legacy machine default without an explicit project binding", async () => {
     const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
-    const shown = await runInProcess(["workspace", "status"], box);
+    const shown = await runInProcess(["status"], box);
     expect(shown.status).toBe(1);
-    expect(shown.stderr).toContain("No workspace selected");
+    expect(shown.stderr).toContain("no .uberblick.json here or in any parent directory");
     expect(shown.stderr).toContain("ub workspace create <name>");
     expect(shown.stdout).toBe("");
     expect(existsSync(box.dataHome)).toBe(false);
@@ -66,33 +71,50 @@ describe("ub workspace status", () => {
   it("reports a complete environment override", async () => {
     const box = sandbox();
     bind(box);
-    const shown = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" });
+    const env = { UB_WORKSPACE_ID: OTHER, UB_HUB_URL: "local" };
+    const shown = await runInProcess(["status"], box, env);
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(OTHER);
     expect(shown.stdout).toContain("environment");
-    expect(shown.stdout).toContain("local (this computer)");
+    expect(shown.stdout).toContain("local, this computer only");
+    const json = await runInProcess(["status", "--json"], box, env);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      workspace: { id: OTHER },
+      chosenBy: { source: "environment", path: null },
+      storedIn: join(box.dataHome, "uberblick", `${OTHER}.sqlite`),
+    });
   });
 
-  it("shows a local name, canonical id, custom replica path and the doc's line order", async () => {
+  it.each(["absolute", "relative"])("shows a local name, canonical id and an %s custom replica path in the documented line order", async (pathKind) => {
     const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
     const databasePath = join(box.cwd, "custom.sqlite");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE, UBERBLICK_DB: databasePath }), "Project notes");
-    const shown = await runInProcess(["workspace", "status"], box, { UBERBLICK_DB: databasePath });
+    const env = { UBERBLICK_DB: pathKind === "absolute" ? databasePath : "custom.sqlite" };
+    const shown = await runInProcess(["status"], box, env);
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toBe(
-      `workspace  Project notes\nid         ${WORKSPACE}\nhub        local (this computer)\n` +
-      `chosen by  project config in ${box.cwd}\nstored in  ${databasePath}\nsync       local only, no hub sync\n`,
+      `workspace   Project notes (${WORKSPACE})\nhub         local, this computer only\n` +
+      `account     none needed for a local workspace\nchosen by   project config in ${box.cwd}\n` +
+      `stored in   ${databasePath}\nproblems    none\n`,
     );
+    const json = await runInProcess(["status", "--json"], box, env);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      workspace: { id: WORKSPACE, name: "Project notes" },
+      chosenBy: { source: "project-config", path: join(box.cwd, ".uberblick.json") },
+      storedIn: databasePath,
+    });
   });
 
   it("still identifies a selected workspace whose replica has no name", async () => {
     const box = sandbox({ projectBinding: { workspaceId: `notes-${WORKSPACE}`, hubUrl: null } });
-    const shown = await runInProcess(["workspace", "status"], box);
+    const shown = await runInProcess(["status"], box);
     expect(shown.status, shown.output).toBe(0);
-    expect(shown.stdout).toContain(`workspace  notes-${WORKSPACE}\nid         ${WORKSPACE}\n`);
+    expect(shown.stdout).toContain(`workspace   ${WORKSPACE}\n`);
   });
 
-  it.each([false, true])("reports the stored account for shared-secret admission: login present %s", async (signedIn) => {
+  it.each([false, true])("keeps secrets private and preserves account reporting with a stored login: %s", async (signedIn) => {
     const endpoint = "ws://127.0.0.1:1";
     const login = fixture([WORKSPACE]);
     const box = sandbox({
@@ -100,13 +122,19 @@ describe("ub workspace status", () => {
       credentials: { signingSecret: "synthetic-status-secret", ...(signedIn
         ? { hubLogins: { "http://127.0.0.1:1": login } } : {}) },
     });
-    const shown = await runInProcess(["workspace", "status"], box);
+    const shown = await runInProcess(["status"], box);
     expect(shown.status, shown.output).toBe(0);
-    const account = signedIn ? "@previous-user (GitHub)" : "not signed in, run ub auth login http://127.0.0.1:1";
-    expect(shown.stdout).toContain(`hub        ${endpoint}\naccount    ${account}\nchosen by  `);
-    expect(shown.stdout).not.toContain("up to date");
+    expect(shown.stdout).toContain(signedIn
+      ? "hub         http://127.0.0.1:1\naccount     @previous-user (GitHub)\nchosen by   "
+      : "hub         http://127.0.0.1:1\nchosen by   ");
     expect(shown.output).not.toContain("synthetic-status-secret");
     expect(shown.output).not.toContain(login.credential.key);
+    const json = await runInProcess(["status", "--json"], box);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout).account).toEqual(signedIn
+      ? { login: "previous-user", provider: "github" } : null);
+    expect(json.output).not.toContain("synthetic-status-secret");
+    expect(json.output).not.toContain(login.credential.key);
   });
 
   it("reports a stored device login even when the hub cannot be reached", async () => {
@@ -115,25 +143,23 @@ describe("ub workspace status", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: "wss://hub.example.test/ws" },
       credentials: { hubLogins: { "https://hub.example.test": login } },
     });
-    const shown = await runInProcess(["workspace", "status"], box);
+    const shown = await runInProcess(["status"], box);
     expect(shown.status, shown.output).toBe(0);
-    expect(shown.stdout).toContain("account    @previous-user (GitHub)\n");
-    expect(shown.stdout).not.toContain("up to date");
+    expect(shown.stdout).toContain("account     @previous-user (GitHub)\nchosen by   ");
   });
 
-  it("names pending rooms when the hub cannot acknowledge local changes", async () => {
+  it("reports pending changes when the hub cannot acknowledge local changes", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:1" } });
     record(box, WORKSPACE, "ws://127.0.0.1:1");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Pending notes");
-    const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
+    const shown = await runInProcess(["status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
     expect(shown.status, shown.output).toBe(0);
-    expect(shown.stdout).toMatch(/sync\s+\d+ rooms? with unacknowledged local changes/);
-    expect(shown.stdout).not.toContain("up to date");
+    expect(shown.stdout).toMatch(/pending\s+\d+ changes? not yet on the hub/);
   });
 
-  it.each([["--json"], ["extra"]])("refuses unsupported status arguments %j before opening anything", async (args) => {
+  it("refuses unsupported status operands before opening anything", async () => {
     const box = unboundSandbox();
-    const shown = await runInProcess(["workspace", "status", ...args], box);
+    const shown = await runInProcess(["status", "extra"], box);
     expect(shown.status, shown.output).toBe(2);
     expect(shown.stdout).toBe("");
     expect(existsSync(box.dataHome)).toBe(false);
@@ -487,7 +513,7 @@ syncBuiltinESMExports();
     record(box, target, null);
     const files = [databasePath(box, target), workspaceRegistryPath(box.env), join(box.cwd, ".uberblick.json")];
     const env = selection === "environment" ? { UB_WORKSPACE_ID: `notes-${OTHER}`, UB_HUB_URL: "local" } : {};
-    const status = await runInProcess(["workspace", "status"], box, env);
+    const status = await runInProcess(["status"], box, env);
     expect(status.stdout).toContain(target);
     const before = files.map(path => readFileSync(path));
     const run = await runInProcess(["workspace", "remove", target, "--yes"], box, env);

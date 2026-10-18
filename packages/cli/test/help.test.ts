@@ -37,7 +37,6 @@ import { DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "../src/data.js
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
-import { WORKSPACE_STATUS_HELP } from "../src/workspace-status.js";
 import {
   WORKSPACE_MEMBER_HELP,
   WORKSPACE_MEMBER_SUBCOMMAND_HELP,
@@ -172,9 +171,8 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["status", "create", "promote", "member", "list", "use", "remove"],
+    children: ["create", "promote", "member", "list", "use", "remove"],
   },
-  { argv: ["workspace", "status"], help: WORKSPACE_STATUS_HELP, options: {} },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
   { argv: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS },
@@ -396,6 +394,17 @@ options:
     expect(removed.stdout).toBe("");
     expect(removed.stderr).toContain("unknown command");
   });
+
+  it.each([[], ["--help"], ["--json"], ["extra"]].map(args => ({ args })))(
+    "refuses removed workspace status through generic unknown-command handling: %j",
+    async ({ args }) => {
+      expect(WORKSPACE_HELP).not.toMatch(/^ {2}status\b/m);
+      const removed = await dispatch(["workspace", "status", ...args]);
+      expect(removed.status).toBe(2);
+      expect(removed.stdout).toBe("");
+      expect(removed.stderr).toBe(`ub workspace: unknown command "status"\n\n${WORKSPACE_HELP}`);
+    },
+  );
 
   it.each([{ argv: ["env"] }, { argv: ["env", "--", process.execPath, "-e", "process.exit(99)"] }])(
     "refuses the removed wrapper through generic unknown-command handling: %j",

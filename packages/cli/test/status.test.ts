@@ -113,6 +113,8 @@ describe("the short status report", () => {
       `workspace   Uberblick (${WORKSPACE})\n` +
       `hub         ${ORIGIN}\n` +
       "account     @bk-one (GitHub)\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
       "connection  connected\n" +
       "pending     none\n" +
       "last sync   never\n" +
@@ -122,6 +124,8 @@ describe("the short status report", () => {
       workspace: { id: WORKSPACE, name: "Uberblick" },
       hub: ORIGIN,
       account: { login: "bk-one", provider: "github" },
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
       connection: { state: "connected", cause: null, detail: null },
       pending: { count: 0 },
       lastSync: null,
@@ -145,7 +149,7 @@ describe("the short status report", () => {
     expect(renderStatus(reading)).not.toMatch(/37|5284|rooms|local log|selection|recovery|failures|uuid/);
   });
 
-  it.each([null, "2026-10-05T19:58:12Z"])("prints four local rows regardless of stored sync time %s", (lastSync) => {
+  it.each([null, "2026-10-05T19:58:12Z"])("prints the local report regardless of stored sync time %s", (lastSync) => {
     const reading = report({
       binding: { workspaceId: WORKSPACE, hubUrl: null },
       lastSync, unsyncedChanges: 5, inFlightUpdates: 7,
@@ -154,11 +158,33 @@ describe("the short status report", () => {
       `workspace   My Workspace (${WORKSPACE})\n` +
       "hub         local, this computer only\n" +
       "account     none needed for a local workspace\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
       "problems    none\n",
     );
     expect(shortStatusReport(reading, "My Workspace")).toEqual({
       workspace: { id: WORKSPACE, name: "My Workspace" },
       hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
+    });
+  });
+
+  it.each([
+    { name: "workspace-hub-mismatch", bindingProblem: { reason: "hub mismatch", fix: "restore the binding" } },
+    { name: "refused hub", hub: { status: "auth-failed", url: HUB, protocolVersion: SYNC_PROTOCOL_VERSION } },
+    { name: "insecure hub", hubTransportProblem: { reason: "unencrypted connection refused", fix: "use wss" } },
+  ] satisfies (Partial<StatusReport> & { name: string })[])("keeps selection and storage before connection for $name", ({ name: _name, ...overrides }) => {
+    const reading = report(overrides);
+    expect(renderStatus(reading)).toContain(
+      "account     @bk-one (GitHub)\n" +
+      "chosen by   project config in /project\n" +
+      "stored in   /workspace/replica.sqlite\n" +
+      "connection  ",
+    );
+    expect(shortStatusReport(reading)).toMatchObject({
+      chosenBy: { source: "project-config", path: "/project/.uberblick.json" },
+      storedIn: "/workspace/replica.sqlite",
     });
   });
 
@@ -412,7 +438,7 @@ describe("the real project's short report", () => {
     expect(run.output).not.toContain("url-secret");
   });
 
-  it("uses the same binding from nested directories without exposing selection or storage", async () => {
+  it("reports the binding file and replica from nested directories", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const nested = join(box.cwd, "src", "nested");
     mkdirSync(nested, { recursive: true });
@@ -420,8 +446,13 @@ describe("the real project's short report", () => {
     expect(run.status).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ workspace: { id: WORKSPACE, name: null },
       hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
+      chosenBy: { source: "project-config", path: join(box.cwd, ".uberblick.json") },
+      storedIn: defaultWorkspaceDatabasePath(WORKSPACE, box.env),
     });
-    expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(`workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\nproblems    none\n`);
+    expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(
+      `workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\n` +
+      `chosen by   project config in ${box.cwd}\nstored in   ${defaultWorkspaceDatabasePath(WORKSPACE, box.env)}\nproblems    none\n`,
+    );
   });
 
   it.each([DEAD_HUB_URL, null])("reads the local name and counts reserved pending rooms only for a hub %s", async (hubUrl) => {
@@ -445,7 +476,7 @@ describe("the real project's short report", () => {
     const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const reading = JSON.parse(json.stdout);
-    expect(Object.keys(reading).sort()).toEqual(["account", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "workspace"]);
+    expect(Object.keys(reading).sort()).toEqual(["account", "chosenBy", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "storedIn", "workspace"]);
     expect(reading.workspace).toEqual({ id: WORKSPACE, name: "Stored name" });
     expect(reading.pending).toEqual({ count: hubUrl === null ? 0 : 4 });
     const text = await runInProcess(["status"], box);
@@ -453,7 +484,7 @@ describe("the real project's short report", () => {
     expect(row(text.stdout, "workspace")).toBe(`workspace   Stored name (${WORKSPACE})`);
     if (hubUrl === null) {
       expect(reading.lastSync).toBeNull();
-      expect(text.stdout.trim().split("\n")).toHaveLength(4);
+      expect(text.stdout.trim().split("\n")).toHaveLength(6);
     } else {
       expect(row(text.stdout, "pending")).toBe("pending     4 changes not yet on the hub");
       expect(reading.connection.state).toBe("failed");

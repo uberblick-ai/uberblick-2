@@ -3,7 +3,7 @@
  *
  * The layout itself is proved in the CLI storage-layout suite; this one is about
  * the commands: that whoever creates the tree first leaves it owner-only, that
- * `ub workspace status` reports the resolved replica path, and that there is
+ * `ub status` reports the resolved replica path, and that there is
  * no layout question left for `ub doctor` to have an opinion about.
  */
 
@@ -15,8 +15,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import { hubDatabasePath } from "../src/hub-config.js";
 import { credentialsPath, resolveConfig, userConfigPath, writeCredentials } from "../src/config.js";
 import { doctorReport } from "../src/doctor.js";
-import { statusReport } from "../src/status.js";
-import { renderWorkspaceStatus } from "../src/workspace-status.js";
+import { renderStatus, statusReport } from "../src/status.js";
 import { DEAD_HUB_URL, REPO_ROOT, SECRET_IN_ENV, SECRET_ON_FILE, removeTempDirs, sandbox, tracesOf } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -126,14 +125,14 @@ describe("the resolved roots", () => {
 });
 
 describe("workspace storage and selection", () => {
-  it("keeps resolved paths in the diagnostic reading and shows the replica in workspace status", async () => {
+  it("keeps resolved paths in the diagnostic reading and shows the replica in status", async () => {
     const box = sandbox({
       credentials: { signingSecret: "storage-test-secret-91af3c" },
       projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:9/dead" },
     });
 
     // The command must yield while this worker's hub answers it.
-    const run = await runInProcess(["workspace", "status"], box);
+    const run = await runInProcess(["status"], box);
     expect(run.status).toBe(0);
     const { report } = await statusReport({ env: box.env, cwd: box.cwd });
     if (report.workspace === null) throw new Error("expected the project binding");
@@ -146,7 +145,7 @@ describe("workspace storage and selection", () => {
       hub: join(box.dataHome, "uberblick", "hub.sqlite"),
       workspace: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`),
     });
-    expect(run.stdout).toContain(`stored in  ${report.storage.workspace}\n`);
+    expect(run.stdout).toContain(`stored in   ${report.storage.workspace}\n`);
     expect(run.output).not.toContain("storage-test-secret-91af3c");
   });
 
@@ -193,19 +192,18 @@ describe("workspace storage and selection", () => {
     expect(selected.report.binding).toEqual({ workspaceId: PINNED, hubUrl: null });
     expect(selected.report.projectConfig).toBeNull();
     expect(selected.report.shadowed).toBeUndefined();
-    const text = renderWorkspaceStatus(selected.report, selected.workspaceName ?? null, selected.caughtUp === true);
+    const text = renderStatus(selected.report, selected.accountOrigin, selected.workspaceName);
     expect(text).toMatch(/chosen by\s+environment/);
-    expect(text).toMatch(/hub\s+local \(this computer\)/);
+    expect(text).toMatch(/hub\s+local, this computer only/);
     expect(selected.warnings).toEqual([]);
   });
 
-  it("keeps database and storage paths outside the human overview", async () => {
+  it("shows the replica storage path in the human overview", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     const run = await runInProcess(["status"], box);
 
     expect(run.status).toBe(0);
-    expect(run.stdout).not.toMatch(/^storage|^database/m);
-    expect(run.stdout).not.toContain(box.dataHome);
+    expect(run.stdout).toContain(`stored in   ${join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`)}\n`);
   });
 });
 
