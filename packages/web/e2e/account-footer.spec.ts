@@ -85,6 +85,7 @@ for (const scheme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(harness().appUrl);
       await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+      await expect(account(page)).toContainText(`@${handle}`);
       await account(page).tap();
       const menuitem = page.getByRole("menuitem", { name: "Preferences", exact: true });
       expect((await menuitem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
