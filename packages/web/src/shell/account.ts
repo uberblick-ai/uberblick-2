@@ -1,20 +1,26 @@
-/** Only the served account's public handle crosses the local browser boundary. */
+/** Only selected public account identity crosses the local browser boundary. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
+import { isGithubAccountId } from "@uberblick/schema/github-identity";
 
 export type AccountIdentity =
-  | { state: "signed-in"; handle: string }
+  | { state: "signed-in"; handle: string; accountId?: string }
   | { state: "signed-out" | "unavailable" };
 
 export type AccountClient = (signal: AbortSignal) => Promise<AccountIdentity>;
 
-function account(value: unknown): AccountIdentity {
+function account(value: unknown, includeAccountId: boolean): AccountIdentity {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid account answer");
   }
   const body = value as Record<string, unknown>;
   if (body.state === "signed-in" && typeof body.handle === "string" &&
     body.handle.length <= 39 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(body.handle)) {
-    return { state: body.state, handle: body.handle };
+    const accountId = includeAccountId ? body.accountId : undefined;
+    if (accountId !== undefined && !isGithubAccountId(accountId)) {
+      throw new Error("Invalid account answer");
+    }
+    return { state: body.state, handle: body.handle,
+      ...(accountId === undefined ? {} : { accountId }) };
   }
   if (body.state === "signed-out" || body.state === "unavailable") {
     return { state: body.state };
@@ -39,7 +45,7 @@ function createIdentityClient(
       signal,
     });
     if (!response.ok) throw new Error("Account unavailable");
-    return account(await response.json());
+    return account(await response.json(), path === "/api/device-login");
   };
 }
 

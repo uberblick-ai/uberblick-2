@@ -58,6 +58,7 @@ export class PacedRoomProvider extends HocuspocusProvider {
   constructor(
     private readonly admission: RoomAdmission,
     configuration: ConstructorParameters<typeof HocuspocusProvider>[0],
+    private readonly canSync: () => boolean = () => true,
   ) {
     super(configuration);
     this.on("authenticated", () => this.ticket?.finish());
@@ -112,7 +113,7 @@ export class PacedRoomProvider extends HocuspocusProvider {
   }
 
   override startSync(): void {
-    if (this.tokenSent && this.socketOpen()) super.startSync();
+    if (this.tokenSent && this.canSync() && this.socketOpen()) super.startSync();
   }
 
   override send(
@@ -120,13 +121,15 @@ export class PacedRoomProvider extends HocuspocusProvider {
     args: Parameters<HocuspocusProvider["send"]>[1],
   ): void {
     if (!this.socketOpen()) return;
+    const type = new Message().type;
+    // Sync replies have no type on their message wrapper; gate them too.
+    if (!this.canSync() && type !== MessageType.Auth && type !== MessageType.CLOSE) return;
     if (this.tokenSent) {
       // An older onOpen continuation returns the empty sentinel after a flap.
       if (args.token === "") return;
       super.send(Message, args);
       return;
     }
-    const type = new Message().type;
     if (type === MessageType.CLOSE) {
       super.send(Message, args);
     } else if (

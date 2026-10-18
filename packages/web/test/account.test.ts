@@ -15,10 +15,10 @@ function client(body: unknown, status = 200) {
 
 describe("the served account answer", () => {
   it("reads stored login state through its protected local route with the same safe projection", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ state: "signed-in", handle: "octocat", credential: "private", identity: "private" }));
+    const fetchImpl = vi.fn(async () => Response.json({ state: "signed-in", handle: "octocat", accountId: "1234", credential: "private", identity: "private" }));
     const read = createDeviceLoginClient("workspace", "presence-name", fetchImpl as typeof fetch);
     const signal = new AbortController().signal;
-    await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat" });
+    await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat", accountId: "1234" });
     expect(fetchImpl).toHaveBeenCalledWith("/api/device-login", expect.objectContaining({
       cache: "no-store", redirect: "error", signal,
       headers: { Accept: "application/json", Authorization: "Bearer browser-key-proof" },
@@ -30,13 +30,19 @@ describe("the served account answer", () => {
   });
 
   it("uses the browser proof and projects only a verified handle", async () => {
-    const { read, fetchImpl } = client({ state: "signed-in", handle: "octocat", credential: "ignored" });
+    const { read, fetchImpl } = client({ state: "signed-in", handle: "octocat", accountId: "1234", credential: "ignored" });
     const signal = new AbortController().signal;
     await expect(read(signal)).resolves.toEqual({ state: "signed-in", handle: "octocat" });
     expect(fetchImpl).toHaveBeenCalledWith("/api/account", expect.objectContaining({
       cache: "no-store", redirect: "error", signal,
       headers: { Accept: "application/json", Authorization: "Bearer browser-key-proof" },
     }));
+  });
+
+  it.each([null, "", "0", "12x", 1234, "9007199254740992"])("refuses an invalid stored-login account id %j", async (accountId) => {
+    const read = createDeviceLoginClient("workspace", "presence-name", async () =>
+      Response.json({ state: "signed-in", handle: "octocat", accountId }));
+    await expect(read(new AbortController().signal)).rejects.toThrow("Invalid account answer");
   });
 
   it.each(["signed-out", "unavailable"])("never retains a handle for %s", async (state) => {

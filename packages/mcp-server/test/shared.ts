@@ -207,6 +207,7 @@ export function testConfig(options: TestConfigOptions = {}): McpConfig {
   return {
     workspaceId: options.workspaceId ?? WORKSPACE,
     hubUrl: options.hubUrl ?? "ws://127.0.0.1:1",
+    localWorkspace: options.hubUrl === undefined && options.authSecret == null,
     authSecret: options.authSecret === undefined ? null : options.authSecret,
     databasePath: options.databasePath ?? tempDatabasePath(),
     sessionId: `agent-test-${randomUUID()}`,

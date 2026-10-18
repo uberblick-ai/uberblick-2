@@ -22,6 +22,7 @@ export async function seedTagCatalogOnce(replicas: Replicas): Promise<void> {
     log.warn("the tag catalog could not settle before seeding", error);
     return;
   }
+  if (replicas.config.localWorkspace !== true) return;
   if (replicas.persistenceError() !== null) return;
 
   const settings = replicas.settings();

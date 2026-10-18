@@ -288,7 +288,7 @@ type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"
 
 async function deviceRequest(origin: string, action: DeviceAction, login: StoredHubLogin, io: Io) {
   const transport = hubTransportProblem(origin);
-  if (transport !== null) throw new DeviceFailure(`${transport.reason} ${transport.fix}`);
+  if (transport !== null) throw new DeviceFailure(`${transport.reason}; ${transport.fix}`);
   let reply: Awaited<ReturnType<typeof manageRequest>>;
   try { reply = await manageRequest(origin, action, login); } catch (error) {
     throw new DeviceFailure(error instanceof ManagementResponseError
@@ -711,7 +711,7 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   }
   const transport = hubTransportProblem(hub ?? selection.endpoint);
   if (transport !== null && (hub !== undefined || sub !== "logout")) {
-    const guidance = `${transport.reason} ${transport.fix}`;
+    const guidance = `${transport.reason}; ${transport.fix}`;
     if (sub === "status" && hub === undefined) {
       return printAuthStatus(selection.origin, "binding-invalid", null, io, json, guidance);
     }

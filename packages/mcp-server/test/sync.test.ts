@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   appendBlock,
+  createTagCatalogEntry,
   getBlocks,
   getBlocksFragment,
   getMeta,
@@ -20,6 +21,7 @@ import {
   listDirectory,
   roomForDoc,
   setTldr,
+  settingsRoom,
   upsertDirectoryEntry,
 } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
@@ -352,6 +354,10 @@ describe("hub sync", () => {
 
   it("lets a fresh replica enumerate and search a corpus it has never seen", async () => {
     const running = await hub();
+    const catalog = await peer(running.port, settingsRoom(WORKSPACE));
+    await catalog.synced;
+    createTagCatalogEntry(catalog.doc, "auth");
+    await waitUntil("the curated catalog to reach the hub", () => !catalog.provider.hasUnsyncedChanges);
     const author = await serverOn(running.port);
 
     const first = await author.ok("create_doc", {

@@ -38,6 +38,16 @@ it("permits only exact host and effective port entries from the environment", ()
   expect(authenticationOrigin("ws://candidate-hub:1234")).not.toBe(authenticationOrigin("wss://candidate-hub:1234"));
 });
 
+it.each([
+  ["ws://hub.example:80/ws\u001b[31m\u0007end", "use wss://hub.example:80/ws%1B[31m%07end"],
+  ["http://hub.example:80/ws\nforged", "use https://hub.example:80/wsforged"],
+  ["ws://hu\tb.example:443/ws", "use wss://hub.example/ws"],
+])("serializes a safe secure-address fix: %j", (endpoint, fix) => {
+  const problem = hubTransportProblem(endpoint, {});
+  expect(problem?.fix).toBe(fix);
+  expect(problem?.fix).not.toMatch(/[\u0000-\u001f\u007f]/);
+});
+
 it.each(["ws://private-secret@hub.example", "http://hub.example/?private-secret", "ws://hub.example/#private-secret", "ftp://private-secret"])(
   "validates before including a secure address in a refusal: %s", endpoint => {
     expect(() => assertHubTransport(endpoint, {})).toThrow();

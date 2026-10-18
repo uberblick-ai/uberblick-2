@@ -251,6 +251,28 @@ describe("hub-owned workspace memberships", () => {
     expect(removed).toEqual([]);
   });
 
+  it("persists role changes before synchronously notifying every fence, and retries notifications without restoring authority", () => {
+    const store = registry();
+    grant(store, "admin", "admin");
+    grant(store, "other-admin", "admin");
+    const changes: string[] = [];
+    const unsubscribeFailure = store.onRoleChange(() => { throw new Error("first fence failed"); });
+    const unsubscribe = store.onRoleChange((workspaceId, principalId, role) => {
+      expect(store.roleFor(workspaceId, principalId)).toBe(role);
+      changes.push(`${workspaceId}/${principalId}/${role}`);
+    });
+    const request = { workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "other-admin", role: "member" as const };
+    expect(() => store.changeRole(request)).toThrow("fencing failed");
+    expect(store.roleFor(WORKSPACE, "other-admin")).toBe("member");
+    expect(changes).toEqual([`${WORKSPACE}/other-admin/member`]);
+    unsubscribeFailure();
+    store.changeRole(request);
+    expect(changes).toHaveLength(2);
+    unsubscribe();
+    store.changeRole({ ...request, role: "admin" });
+    expect(changes).toHaveLength(2);
+  });
+
   it("adds memberships to an existing document and credential database and preserves all state through restart", async () => {
     const path = tempDatabasePath();
     copyFileSync(fileURLToPath(new URL("./fixtures/extension-sqlite.sqlite", import.meta.url)), path);

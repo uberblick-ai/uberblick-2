@@ -17,7 +17,6 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
-import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
 export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
@@ -228,11 +227,6 @@ export async function useRemoteWorkspace(
   io: Io,
   options: WorkspaceUseOptions,
 ): Promise<number> {
-  try { assertHubTransport(flags.endpoint); }
-  catch (error) {
-    io.err(`ub workspace use: ${error instanceof Error ? error.message : "invalid hub"}\n`);
-    return 2;
-  }
   const resolved = resolveConfig();
   // Resolve the target's admission, rather than inheriting the current project's
   // mode. In particular, a recorded Docker endpoint must never use a local secret.
@@ -320,7 +314,7 @@ export async function useRemoteWorkspace(
         deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
       });
       bindingWritten = true;
-      await fillMainRepositoryFromOrigin(flags.workspace);
+      await fillMainRepositoryFromOrigin(flags.workspace, flags.endpoint);
       const name = readWorkspaceName(defaultWorkspaceDatabasePath(flags.workspace), flags.workspace) ?? flags.workspace;
       const archived = fetched.corpus.entries.filter(doc => doc.deleted).length;
       text = useField("fetched", `${name} from ${displayWorkspaceHub(flags.endpoint)}: ${plural(fetched.corpus.entries.length, "document")}, ${archived} archived`);

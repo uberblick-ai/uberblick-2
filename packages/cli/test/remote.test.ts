@@ -703,7 +703,7 @@ describe("ub workspace use <link>", () => {
     return joinUrl(hub);
   }
 
-  it.each([null, "other/selected"])("fills a fetched workspace only after verification and preserves existing repository %s", async initial => {
+  it.each([null, "other/selected"])("leaves fetched settings unchanged without confirmed admin authority: %s", async initial => {
     const hub = await startHub();
     if (initial !== null) {
       const settings = await openRoom(hub, settingsRoom(WORKSPACE));
@@ -723,9 +723,8 @@ describe("ub workspace use <link>", () => {
       .toEqual({ workspaceId: selectedWorkspace, hubUrl: url(hub) });
     expect(result.stderr.trim().split("\n")).toEqual([`ub workspace: fetching http://127.0.0.1:${hub.port}…`]);
     const local = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), authSecret: null });
-    try { expect(getWorkspaceMainRepository(local.replicas.settings().doc)).toBe(initial ?? "acme/notes"); }
+    try { expect(getWorkspaceMainRepository(local.replicas.settings().doc)).toBe(initial); }
     finally { await local.close(); }
-    // The optional fill is local pending state after the fetched snapshot was verified.
     const remote = await openRoom(hub, settingsRoom(WORKSPACE));
     expect(getWorkspaceMainRepository(remote.doc)).toBe(initial);
     await remote.done();

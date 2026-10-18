@@ -30,21 +30,28 @@ export function useWorkspaceNames(
     if (localMenu || !menuOpen || otherUuids === "") return;
     const stops = otherUuids.split(",").map((uuid) => {
       const handle = acquireRoom(settingsRoom(uuid), identity, { presence: false });
-      const room = handle.connection;
-      const read = (): void => {
-        if (!room.status.hasReceivedServerState) return;
-        const name = getWorkspaceName(room.ydoc);
-        setOtherNames((previous) => {
-          if (previous.has(uuid) && previous.get(uuid) === name) return previous;
-          return new Map(previous).set(uuid, name);
-        });
+      let stopReading = (): void => {};
+      const bind = (room: RoomConnection): void => {
+        stopReading();
+        const ydoc = room.ydoc;
+        const read = (): void => {
+          if (!room.status.hasReceivedServerState) return;
+          const name = getWorkspaceName(ydoc);
+          setOtherNames((previous) => {
+            if (previous.has(uuid) && previous.get(uuid) === name) return previous;
+            return new Map(previous).set(uuid, name);
+          });
+        };
+        ydoc.on("update", read);
+        const stopStatus = room.onStatusChange(read);
+        read();
+        stopReading = () => { stopStatus(); ydoc.off("update", read); };
       };
-      room.ydoc.on("update", read);
-      const stopStatus = room.onStatusChange(read);
-      read();
+      bind(handle.connection);
+      const stopReplacement = handle.onReplace?.(bind);
       return () => {
-        stopStatus();
-        room.ydoc.off("update", read);
+        stopReplacement?.();
+        stopReading();
         handle.release();
       };
     });

@@ -74,6 +74,7 @@ export class MembershipRegistry {
   private readonly updateRole: StatementSync;
   private readonly deleteMember: StatementSync;
   private readonly removeListeners = new Set<(workspaceId: string, principalId: string) => void>();
+  private readonly roleListeners = new Set<(workspaceId: string, principalId: string, role: MembershipRole) => void>();
 
   constructor(database: HubDatabase) {
     const db = database.connection;
@@ -181,6 +182,17 @@ export class MembershipRegistry {
       principalId: request.principalId,
       role: request.role,
     });
+    const failures: unknown[] = [];
+    for (const listener of this.roleListeners) {
+      try {
+        listener(request.workspaceId, request.principalId, request.role);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "MembershipRegistry.changeRole: fencing failed");
+    }
   }
 
   /**
@@ -214,6 +226,11 @@ export class MembershipRegistry {
   onRemove(listener: (workspaceId: string, principalId: string) => void): () => void {
     this.removeListeners.add(listener);
     return () => this.removeListeners.delete(listener);
+  }
+
+  onRoleChange(listener: (workspaceId: string, principalId: string, role: MembershipRole) => void): () => void {
+    this.roleListeners.add(listener);
+    return () => this.roleListeners.delete(listener);
   }
 
   private protectLastAdmin(workspaceId: string, previousRole: MembershipRole | null): void {

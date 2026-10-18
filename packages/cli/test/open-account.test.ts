@@ -47,14 +47,14 @@ describe("ub open: account projection", () => {
     const accountScoped = { ...stored, credential: { ...stored.credential, record: { ...stored.credential.record, workspaces: [] } } };
     await writeHubLogin(ORIGIN, accountScoped, box.env);
     const fetch = vi.spyOn(globalThis, "fetch");
-    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "account-person" });
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "account-person", accountId: "1234" });
     expect(requestDeviceLogin({ ...binding, hubUrl: "https://another-hub.example" })).toEqual({ state: "signed-out" });
     expect(requestDeviceLogin({ ...binding, hubUrl: null })).toEqual({ state: "signed-out" });
     expect(requestDeviceLogin(binding, true)).toEqual({ state: "unavailable" });
     await removeHubLogin(ORIGIN, box.env);
     expect(requestDeviceLogin(binding)).toEqual({ state: "signed-out" });
     await writeHubLogin(ORIGIN, login("replacement-person"), box.env);
-    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "replacement-person" });
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-in", handle: "replacement-person", accountId: "1234" });
     expect(fetch).not.toHaveBeenCalled();
   });
 

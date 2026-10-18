@@ -108,7 +108,8 @@ export function hubTransportProblem(
   if (url.protocol === "wss:" || isLoopbackHost(url.hostname)) return null;
   const authority = `${url.hostname}:${url.port || "80"}`;
   if (env.UB_INSECURE_HUBS?.split(",").some(entry => entry.trim() === authority)) return null;
-  const secure = endpoint.trim().replace(/^http:/i, "https:").replace(/^ws:/i, "wss:");
+  // Parse after changing scheme to retain an explicit cleartext default port.
+  const secure = new URL(endpoint.trim().replace(/^http:/i, "https:").replace(/^ws:/i, "wss:")).href;
   return {
     reason: "refusing an unencrypted connection to a hub on another computer",
     fix: `use ${secure}`,

@@ -7,7 +7,7 @@ import type {
   connectedPayload,
   onAuthenticatePayload,
 } from "@hocuspocus/server";
-import { parseRoom } from "@uberblick/schema";
+import { parseRoom, settingsRoom } from "@uberblick/schema";
 import type { CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
@@ -22,7 +22,7 @@ export interface CredentialContext {
   workspaces: readonly string[];
   workspace: string;
   /** Shared across Hocuspocus' context copies, never populated by a client. */
-  authorization: { active: boolean };
+  authorization: { active: boolean; readOnly: boolean };
 }
 
 class CredentialRefusal extends Error {
@@ -51,12 +51,24 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.closeWhere((context) =>
         context.workspace === workspace && context.principalId === principalId);
     });
+    const unsubscribeRole = memberships.onRoleChange((workspace, principalId, role) => {
+      if (role === "admin") return;
+      for (const connection of this.allConnections()) {
+        if (connection.context.workspace === workspace &&
+            connection.context.principalId === principalId &&
+            connection.document.name === settingsRoom(workspace)) {
+          // A later hook may already be awaiting before the receiver applies.
+          connection.readOnly = true;
+        }
+      }
+    });
     const unsubscribeSuspend = hubAdmins?.onSuspend(workspace => {
       this.closeWhere(context => context.workspace === workspace);
     });
     this.unsubscribe = () => {
       unsubscribeRevoke();
       unsubscribeRemove();
+      unsubscribeRole();
       unsubscribeSuspend?.();
     };
   }
@@ -117,9 +129,11 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       deviceId: record.deviceId,
       workspaces: record.workspaces,
       workspace,
-      authorization: { active: true },
+      authorization: { active: true, readOnly: verified.claims.scope === "read-only" },
     };
-    connectionConfig.readOnly = verified.claims.scope === "read-only";
+    connectionConfig.readOnly = context.authorization.readOnly ||
+      (documentName === settingsRoom(workspace) &&
+        this.memberships.roleFor(workspace, record.principalId) !== "admin");
     this.instances.add(instance);
     this.options.log({
       event: "hub.auth.accepted", credentialId: record.id, workspace,
@@ -157,16 +171,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
    * frames and message loops able to apply updates.
    */
   closeWhere(predicate: (context: CredentialContext) => boolean): void {
-    const candidates = new Set(this.connections);
-    for (const instance of this.instances) {
-      for (const document of instance.documents.values()) {
-        for (const connection of document.getConnections()) {
-          candidates.add(connection);
-        }
-      }
-    }
     const connections: Connection<CredentialContext>[] = [];
-    for (const connection of candidates) {
+    for (const connection of this.allConnections()) {
       if (predicate(connection.context)) {
         connection.context.authorization.active = false;
         // MessageReceiver checks this *after* awaiting beforeSync and
@@ -179,6 +185,16 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     for (const connection of connections) {
       connection.close({ code: 4403, reason: "device-credential-refused" });
     }
+  }
+
+  private allConnections(): Set<Connection<CredentialContext>> {
+    const candidates = new Set(this.connections);
+    for (const instance of this.instances) {
+      for (const document of instance.documents.values()) {
+        for (const connection of document.getConnections()) candidates.add(connection);
+      }
+    }
+    return candidates;
   }
 
   private check(connection: Connection<CredentialContext>, room: string): void {
@@ -209,6 +225,10 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       connection.close({ code: 4403, reason: "device-credential-refused" });
       this.options.log({ event: "hub.auth.rejected", cause });
       throw new CredentialRefusal();
+    }
+    if (room === settingsRoom(context.workspace)) {
+      connection.readOnly = context.authorization.readOnly ||
+        this.memberships.roleFor(context.workspace, context.principalId) !== "admin";
     }
   }
 

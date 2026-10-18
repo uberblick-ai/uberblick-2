@@ -1,6 +1,6 @@
 /** One-time bootstrap authority, private to the deployed hub's database. */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { setWorkspaceName } from "@uberblick/schema";
+import { seedTagCatalog, setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
@@ -33,6 +33,7 @@ export class HubClaimState {
           const settings = new Y.Doc();
           try {
             setWorkspaceName(settings, "Default workspace");
+            seedTagCatalog(settings);
             db.prepare("INSERT INTO documents (name, data) VALUES (?, ?)")
               .run(`${workspaceId}/_settings`, Y.encodeStateAsUpdate(settings));
           } finally { settings.destroy(); }

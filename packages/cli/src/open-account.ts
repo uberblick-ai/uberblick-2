@@ -5,7 +5,7 @@ import { hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import type { AccessBinding } from "./open-access.js";
 
-export type ServingAccount = { state: "signed-in"; handle: string }
+export type ServingAccount = { state: "signed-in"; handle: string; accountId?: string }
   | { state: "signed-out" | "unavailable" };
 
 type NotSharedReason = ServingSyncStatus["notSharedReason"];
@@ -25,7 +25,7 @@ export function requestDeviceLogin(binding: AccessBinding, rebound = false): Ser
       return { state: current.status === "sign-in-required" ? "signed-out" : "unavailable" };
     }
     return isGithubUsername(current.login.identity.githubUsername)
-      ? { state: "signed-in", handle: current.login.identity.githubUsername }
+      ? { state: "signed-in", handle: current.login.identity.githubUsername, accountId: current.login.identity.githubAccountId }
       : { state: "unavailable" };
   } catch {
     return { state: "unavailable" };
