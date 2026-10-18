@@ -14,6 +14,7 @@ import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
 import { cliVersion } from "./version.js";
+import { recentDevicesNotice, requestRecentDevices, type RecentDevice } from "./recent-devices.js";
 
 /** Diagnostic paths contain no credentials or values read from them. */
 export interface StorageReport {
@@ -129,6 +130,7 @@ export async function statusReport(
   accountOrigin?: string;
   workspaceName?: string | null;
   caughtUp?: boolean;
+  recentDevices?: RecentDevice[] | null;
 }> {
   const resolved = resolveConfig(options);
   if (resolved.binding === null) {
@@ -140,8 +142,12 @@ export async function statusReport(
   const config = resolveMcpConfig(resolved.env);
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
   let caughtUp = false;
-  const sync = await readSyncStatus(config, options.workspaceStatus === true
-    ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined);
+  const [sync, recentDevices] = await Promise.all([
+    readSyncStatus(config, options.workspaceStatus === true
+      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined),
+    options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
+      : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
+  ]);
   // Read the stored account without login or renewal, even after a hub refusal.
   const deviceLogin = config.deviceLogin === undefined &&
     !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
@@ -149,6 +155,7 @@ export async function statusReport(
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
+    recentDevices,
     workspaceName: readWorkspaceName(config.databasePath, config.workspaceId),
     ...(options.workspaceStatus === true ? { caughtUp } : {}),
     ...(accountOrigin === undefined ? {} : { accountOrigin }),
@@ -226,6 +233,7 @@ export interface ShortStatusReport {
   } | null;
   pending: { count: number };
   lastSync: string | null;
+  recentDevices: RecentDevice[] | null;
   problems: { name: string; fix: string }[];
 }
 
@@ -240,7 +248,9 @@ function connectionState(report: StatusReport): NonNullable<ShortStatusReport["c
   return "failed";
 }
 
-export function shortStatusReport(report: StatusReport, workspaceName: string | null = null): ShortStatusReport {
+export function shortStatusReport(
+  report: StatusReport, workspaceName: string | null = null, recentDevices: RecentDevice[] | null = null,
+): ShortStatusReport {
   const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
   const hub = report.hub;
   const state = connectionState(report);
@@ -294,6 +304,7 @@ export function shortStatusReport(report: StatusReport, workspaceName: string | 
     },
     pending: { count: origin === null ? 0 : report.unsyncedChanges },
     lastSync: origin === null ? null : report.lastSync,
+    recentDevices: origin === null ? null : recentDevices,
     problems,
   };
 }
@@ -337,6 +348,7 @@ export function renderStatus(
   report: StatusReport | UnboundStatusReport,
   accountOrigin?: string,
   workspaceName: string | null = null,
+  recentDevices: RecentDevice[] | null = null,
 ): string {
   if (report.binding === null) return "";
   const short = shortStatusReport(report, workspaceName);
@@ -355,6 +367,7 @@ export function renderStatus(
     text += field("pending", short.pending.count === 0
       ? "none" : `${plural(short.pending.count, "change")} not yet on the hub`);
     text += field("last sync", lastSyncAge(short.lastSync));
+    text += recentDevicesNotice(recentDevices, short.hub);
   }
   if (short.problems.length === 0) return text + field("problems", "none");
   for (const [index, problem] of short.problems.entries()) {
@@ -403,7 +416,7 @@ export async function statusCommand(
     return 2;
   }
 
-  const { report, warnings, accountOrigin, workspaceName } = await statusReport();
+  const { report, warnings, accountOrigin, workspaceName, recentDevices } = await statusReport();
   for (const warning of warnings) {
     io.err(`ub: warning: ${warning}\n`);
   }
@@ -412,7 +425,7 @@ export async function statusCommand(
       "  → ub workspace create <name>, or ub workspace use <link|id>\n");
     return 1;
   }
-  io.out(json ? `${JSON.stringify(shortStatusReport(report, workspaceName), null, 2)}\n`
-    : renderStatus(report, accountOrigin, workspaceName));
+  io.out(json ? `${JSON.stringify(shortStatusReport(report, workspaceName, recentDevices), null, 2)}\n`
+    : renderStatus(report, accountOrigin, workspaceName, recentDevices));
   return 0;
 }

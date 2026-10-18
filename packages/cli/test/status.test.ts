@@ -124,6 +124,7 @@ describe("the short status report", () => {
       connection: { state: "connected", cause: null, detail: null },
       pending: { count: 0 },
       lastSync: null,
+      recentDevices: null,
       problems: [],
     });
   });
@@ -156,7 +157,7 @@ describe("the short status report", () => {
     );
     expect(shortStatusReport(reading, "My Workspace")).toEqual({
       workspace: { id: WORKSPACE, name: "My Workspace" },
-      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, problems: [],
+      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
     });
   });
 
@@ -417,7 +418,7 @@ describe("the real project's short report", () => {
     const run = await runInProcess(["status", "--json"], { ...box, cwd: nested });
     expect(run.status).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual({ workspace: { id: WORKSPACE, name: null },
-      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, problems: [],
+      hub: null, account: null, connection: null, pending: { count: 0 }, lastSync: null, recentDevices: null, problems: [],
     });
     expect((await runInProcess(["status"], { ...box, cwd: nested })).stdout).toBe(`workspace   ${WORKSPACE}\nhub         local, this computer only\naccount     none needed for a local workspace\nproblems    none\n`);
   });
@@ -442,7 +443,7 @@ describe("the real project's short report", () => {
     const json = await runInProcess(["status", "--json"], box);
     expect(json.status, json.stderr).toBe(0);
     const reading = JSON.parse(json.stdout);
-    expect(Object.keys(reading).sort()).toEqual(["account", "connection", "hub", "lastSync", "pending", "problems", "workspace"]);
+    expect(Object.keys(reading).sort()).toEqual(["account", "connection", "hub", "lastSync", "pending", "problems", "recentDevices", "workspace"]);
     expect(reading.workspace).toEqual({ id: WORKSPACE, name: "Stored name" });
     expect(reading.pending).toEqual({ count: hubUrl === null ? 0 : 4 });
     const text = await runInProcess(["status"], box);

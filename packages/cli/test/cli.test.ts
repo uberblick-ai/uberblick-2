@@ -112,7 +112,7 @@ describe("ub status", () => {
 
     const report = JSON.parse(run.stdout);
     expect(Object.keys(report)).toEqual([
-      "workspace", "hub", "account", "connection", "pending", "lastSync", "problems",
+      "workspace", "hub", "account", "connection", "pending", "lastSync", "recentDevices", "problems",
     ]);
     expect(report.workspace).toEqual({ id: WORKSPACE, name: null });
     expect(report.hub).toBe("http://127.0.0.1:1");
@@ -120,6 +120,7 @@ describe("ub status", () => {
     expect(report.connection).toEqual({ state: "failed", cause: null, detail: null });
     expect(report.pending).toEqual({ count: expect.any(Number) });
     expect(report.lastSync).toBeNull();
+    expect(report.recentDevices).toBeNull();
     expect(report.problems).toEqual([{ name: "sync-disabled", fix: "ub doctor for details" }]);
   });
 

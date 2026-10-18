@@ -76,6 +76,96 @@ async function expectP95Within250ms(
 }
 
 describe("ub open: sharing through the upstream hub", () => {
+  it.each([false, true])("names other recent account devices at startup without changing the login (verbose %s)", async verbose => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "recent-devices-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://127.0.0.1:${hub.port}`;
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const currentId = crypto.randomUUID();
+    const namedId = crypto.randomUUID();
+    const unnamedId = crypto.randomUUID();
+    const strangerId = crypto.randomUUID();
+    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: currentId,
+      deviceName: "My laptop", workspaces: [WORKSPACE] });
+    hub.credentials!.issue({ principalId: person.id, deviceId: namedId, deviceName: "My laptop", workspaces: [WORKSPACE] });
+    hub.credentials!.issue({ principalId: person.id, deviceId: unnamedId, workspaces: [WORKSPACE] });
+    const stranger = hub.principals!.identify("67890", "another-person");
+    hub.credentials!.issue({ principalId: stranger.id, deviceId: strangerId, deviceName: "Another account's computer", workspaces: [] });
+    const { replacedAt: _replaced, ...record } = issued.record;
+    await writeHubLogin(origin, { identity: person, credential: {
+      record, key: Buffer.from(issued.keyBytes).toString("base64url"),
+    } }, box.env);
+    const credentialsPath = join(configDir(box), "credentials.json");
+    const credentialsBefore = readFileSync(credentialsPath, "utf8");
+    const app = await open(box, ["--port", String(await freePort()), ...(verbose ? ["--verbose"] : [])],
+      { ...env, NODE_NO_WARNINGS: "1" });
+    try {
+      const output = app.stdout();
+      expect(output).toMatch(new RegExp(`new device  My laptop \\(${namedId.slice(0, 8)}\\), signed in (just now|\\d+ seconds? ago)`));
+      expect(output).toMatch(new RegExp(`new device  Unnamed device \\(${unnamedId.slice(0, 8)}\\), signed in (just now|\\d+ seconds? ago)`));
+      expect(output.match(/Settings → User → Devices/g)).toHaveLength(2);
+      expect(output.split(`ub auth logout --all-devices ${origin}`)).toHaveLength(3);
+      expect(output).not.toContain(currentId.slice(0, 8));
+      expect(output).not.toContain(strangerId.slice(0, 8));
+      expect(output).not.toContain("Another account's computer");
+      expect(output).not.toContain(issued.record.id);
+      expect(output).not.toContain(Buffer.from(issued.keyBytes).toString("base64url"));
+      expect(readFileSync(credentialsPath, "utf8")).toBe(credentialsBefore);
+      expect((await get(app.url)).status).toBe(200);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+    expect(readFileSync(credentialsPath, "utf8")).toBe(credentialsBefore);
+    const restarted = await open(box, ["--port", String(await freePort()), ...(verbose ? ["--verbose"] : [])],
+      { ...env, NODE_NO_WARNINGS: "1" });
+    try {
+      expect(restarted.stdout()).toContain(`new device  My laptop (${namedId.slice(0, 8)}), signed in `);
+      expect(restarted.stdout()).toContain(`new device  Unnamed device (${unnamedId.slice(0, 8)}), signed in `);
+      expect(readFileSync(credentialsPath, "utf8")).toBe(credentialsBefore);
+    } finally { expect((await restarted.interrupt()).status).toBe(0); }
+  });
+
+  it("keeps startup bounded and silent when the device list never answers", async () => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "silent-devices-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    const origin = `http://127.0.0.1:${hub.port}`;
+    pointAt(box, `ws://127.0.0.1:${hub.port}`);
+    const person = hub.principals!.identify("12345", "open-person");
+    hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
+    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const { replacedAt: _replaced, ...record } = issued.record;
+    await writeHubLogin(origin, { identity: person, credential: {
+      record, key: Buffer.from(issued.keyBytes).toString("base64url"),
+    } }, box.env);
+    const credentialsPath = join(configDir(box), "credentials.json");
+    const credentialsBefore = readFileSync(credentialsPath, "utf8");
+    const handlers = hub.server.httpServer.listeners("request");
+    hub.server.httpServer.removeAllListeners("request");
+    let requested = false;
+    hub.server.httpServer.on("request", (request, response) => {
+      if (request.url === "/auth/manage") {
+        requested = true;
+        request.resume();
+        return;
+      }
+      for (const handler of handlers) handler.call(hub.server.httpServer, request, response);
+    });
+    const started = Date.now();
+    const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1", UB_TEST_MAX_WAIT_MS: "400.5" });
+    try {
+      expect(requested).toBe(true);
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(app.stdout()).toBe(`web        ${app.url}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`);
+      expect(app.stderr()).toBe("");
+      expect(readFileSync(credentialsPath, "utf8")).toBe(credentialsBefore);
+      expect((await get(app.url)).status).toBe(200);
+    } finally { expect((await app.interrupt()).status).toBe(0); }
+  });
+
   it.each([false, true])("keeps browser edits local without any insecure upstream connection (stored login=%s)", async stored => {
     const { box, env } = configured();
     const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "insecure-hub.sqlite"),

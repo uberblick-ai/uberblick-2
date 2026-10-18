@@ -49,6 +49,7 @@ import { readAccessAction, requestAccess, type AccessBinding } from "./open-acce
 import { requestAccount, requestDeviceLogin } from "./open-account.js";
 import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
+import { requestRecentDevices } from "./recent-devices.js";
 import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
 import { rememberWorkspaceBinding } from "./workspace-registry.js";
 import { displayWorkspaceHub } from "./workspace-use-output.js";
@@ -1066,6 +1067,19 @@ function missingHubLogin(hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: bool
     readDeviceLogin(hubUrl, workspace, env).status === "sign-in-required";
 }
 
+/** Both readings share the startup connection budget, including response bodies. */
+async function openStartupReadings(
+  sync: ReturnType<typeof openHubSource>,
+  connectTimeoutMs: number,
+  binding: AccessBinding,
+) {
+  return await Promise.all([
+    sync === null ? null : waitForOpenHubState(sync, connectTimeoutMs),
+    sync === null || !sync.deviceAuthenticated() || connectTimeoutMs <= 0 ? null
+      : requestRecentDevices(binding, AbortSignal.timeout(Math.floor(connectTimeoutMs))),
+  ]);
+}
+
 function monitorEngine(engine: UberblickMcpEngine): EngineMonitor {
   let failure: string | null = null;
   let wake!: (message: string) => void;
@@ -1371,7 +1385,8 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
 
   const url = servedUrl.href;
   const sync = owned.engine === null ? null : openHubSource(owned.engine, hubUrl, env, hubDeviceAuthenticated);
-  const hubState = sync === null ? null : await waitForOpenHubState(sync, owned.engine?.replicas.config.connectTimeoutMs ?? 0);
+  const connectTimeoutMs = owned.engine?.replicas.config.connectTimeoutMs ?? 0;
+  const [hubState, recentDevices] = await openStartupReadings(sync, connectTimeoutMs, { ...projectBinding, env });
   if (foreground.interrupted()) return await foreground.shutdown(0);
   const earlyFailure = owned.engineMonitor?.failure() ?? null;
   if (earlyFailure !== null) {
@@ -1386,7 +1401,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     url, verbose: options.verbose, secretCreated: initial.secretCreated,
     binding: projectBinding, databasePath: owned.engine?.replicas.config.databasePath,
     hubNote, signInRequired: hubSignInRequired, showHubNote,
-    deviceHub, hubUrl, hubState, transportProblem: transport,
+    deviceHub, hubUrl, hubState, recentDevices, transportProblem: transport,
   }));
   if (sync !== null) {
     owned.hubMonitor = monitorOpenHub(sync, displayWorkspaceHub(hubUrl), text => io.err(text), {

@@ -3,6 +3,8 @@ import type { HubState } from "@uberblick/mcp-server";
 import type { ProjectBinding } from "./project-binding.js";
 import { endpointOf, isLocalHost } from "./probes.js";
 import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
+import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { recentDevicesNotice, type RecentDevice } from "./recent-devices.js";
 
 interface OpenBanner {
   url: string;
@@ -16,6 +18,7 @@ interface OpenBanner {
   deviceHub: boolean;
   hubUrl: string;
   hubState: HubState | null;
+  recentDevices?: RecentDevice[] | null;
   transportProblem?: { reason: string; fix: string } | null;
 }
 
@@ -58,6 +61,9 @@ export function openBanner(input: OpenBanner): string {
     banner += useField("hub", "unreachable, changes stay on this machine until it is back");
   } else if (!input.verbose && showNote) {
     banner += useField("hub", note);
+  }
+  if (input.binding.hubUrl !== null) {
+    banner += recentDevicesNotice(input.recentDevices ?? null, authenticationOrigin(input.binding.hubUrl));
   }
   return `${banner}\nCtrl-C to stop.\n`;
 }
