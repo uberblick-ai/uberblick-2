@@ -92,8 +92,8 @@ const copied = async (text, fallback) => {{
   catch {{ const r = document.createRange(); r.selectNodeContents(fallback); getSelection().removeAllRanges(); getSelection().addRange(r); toast.textContent = 'Select and copy'; }}
   toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1400);
 }};
-for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', () => copied(b.getAttribute('data-copy'), b.closest('.block').querySelector('pre')));
-for (const b of document.querySelectorAll('.copy')) b.addEventListener('click', () => {{ const code = b.parentNode.querySelector('code'); copied(code.textContent, code); }});
+for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', () => copied(b.getAttribute('data-copy'), b.closest('.block, .tabs').querySelector('pre')));
+for (const b of document.querySelectorAll('.copy:not([data-copy])')) b.addEventListener('click', () => {{ const code = b.parentNode.querySelector('code'); copied(code.textContent, code); }});
 for (const box of document.querySelectorAll('.tabs')) {{
   const tabs = box.querySelectorAll('[role="tab"]');
   for (const tab of tabs) tab.addEventListener('click', () => {{
