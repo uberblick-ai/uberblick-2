@@ -28,7 +28,7 @@ export const DIRECTORY_DELETED_KEY = "deleted-docs";
 
 /**
  * Per-client max candidates survive losing whole-stub writes. Retained until
- * permanent deletion: one key per uuid/client; a resolution scans the map.
+ * permanent deletion: one key per uuid/client, resolved by a local index.
  */
 const DIRECTORY_UPDATED_AT_KEY = "updatedAt";
 
@@ -194,18 +194,41 @@ function candidateKey(uuid: string, clientId: number): string {
   return `${uuid}:${clientId}`;
 }
 
-/**
- * A flat map avoids racing to install a nested type; distinct client keys keep
- * both first writes. Future clock stamps persist until an authored write exceeds them.
- */
-function recordedUpdatedAt(dirDoc: Y.Doc, uuid: string): number | undefined {
-  const prefix = `${uuid}:`;
-  let resolved: number | undefined;
-  for (const [key, value] of getUpdatedAtMap(dirDoc).entries()) {
-    if (!key.startsWith(prefix)) continue;
-    resolved = greaterStamp(resolved, readStamp(value));
-  }
+/** Derived maxima leave the synced, flat per-client stamp map unchanged. */
+const updatedAtIndexes = new WeakMap<Y.Doc, Map<string, number>>();
+
+function updatedAtIndex(dirDoc: Y.Doc): Map<string, number> {
+  const existing = updatedAtIndexes.get(dirDoc);
+  if (existing !== undefined) return existing;
+  const resolved = new Map<string, number>();
+  const stamps = getUpdatedAtMap(dirDoc);
+  const rebuild = () => {
+    resolved.clear();
+    for (const [key, value] of stamps.entries()) {
+      // Single-entry reads accept any suffix, including additional colons.
+      const separator = key.indexOf(":");
+      const stamp = readStamp(value);
+      if (separator < 1 || stamp === undefined) continue;
+      const uuid = key.slice(0, separator);
+      resolved.set(uuid, Math.max(resolved.get(uuid) ?? -Infinity, stamp));
+    }
+  };
+  updatedAtIndexes.set(dirDoc, resolved);
+  // Refresh once per update, before directory observers can read new stubs.
+  dirDoc.on("beforeObserverCalls", (transaction: Y.Transaction) => {
+    for (const changed of transaction.changed.keys()) {
+      if (Object.is(changed, stamps)) {
+        rebuild();
+        break;
+      }
+    }
+  });
+  rebuild();
   return resolved;
+}
+
+function recordedUpdatedAt(dirDoc: Y.Doc, uuid: string): number | undefined {
+  return updatedAtIndex(dirDoc).get(uuid);
 }
 
 function recordedUpdatedAts(dirDoc: Y.Doc): Map<string, number> {
@@ -414,6 +437,8 @@ export function upsertDirectoryEntry(
         candidateKey(entry.uuid, dirDoc.clientID),
         candidate,
       );
+      // Nested helpers read before observers run at the outer transaction's end.
+      updatedAtIndex(dirDoc).set(entry.uuid, candidate);
     }
     const description = readDescription(
       entry.description ?? existing?.description,

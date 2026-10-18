@@ -433,15 +433,19 @@ export class Replicas {
     // Collect them here to avoid reindexing the whole corpus for a title edit.
     if (replica.isDirectory) {
       getDirectoryMap(doc).observe((event) => {
+        const changedTopics = new Set<string>();
         for (const uuid of event.keysChanged) {
           if (readSyncedDocId(uuid, "directory key") === null) continue;
           this.staleStubs.add(uuid);
           const first = getDirectoryEntry(doc, uuid);
           if (first?.kind === "decision" && (first.topic ?? first.uuid) === uuid) {
-            for (const record of listDirectory(doc, { includeDeleted: true })) {
-              if (record.kind === "decision" && (record.topic ?? record.uuid) === uuid) {
-                this.staleStubs.add(record.uuid);
-              }
+            changedTopics.add(uuid);
+          }
+        }
+        if (changedTopics.size > 0) {
+          for (const record of listDirectory(doc, { includeDeleted: true })) {
+            if (record.kind === "decision" && changedTopics.has(record.topic ?? record.uuid)) {
+              this.staleStubs.add(record.uuid);
             }
           }
         }
