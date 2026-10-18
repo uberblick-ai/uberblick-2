@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import {
   addComment,
@@ -6,6 +6,7 @@ import {
   createAnnotation,
   deleteBlock,
   deleteDirectoryEntry,
+  decisionTopicArchived,
   directoryStubDiffers,
   documentDirectoryFields,
   enforceDeletedDirectoryEntries,
@@ -802,6 +803,140 @@ describe("directory unresolved thread cache", () => {
     const winner = getDirectoryEntry(a, ALPHA);
     expect(getDirectoryEntry(b, ALPHA)).toEqual(winner);
     expect(winner?.openThreadCount).toBe(winner?.title === "From A" ? 1 : 2);
+  });
+});
+
+describe("directory timestamp reads", () => {
+  it("preserves arbitrary synced suffixes and the existing single-read prefix semantics", () => {
+    const directory = new Y.Doc();
+    getDirectoryMap(directory).set(ALPHA, { title: "Alpha", tags: [] });
+    expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBeUndefined();
+    directory.transact(() => {
+      const stamps = directory.getMap("updatedAt");
+      stamps.set(`${ALPHA}:not-a-client-id`, 100);
+      stamps.set(`${ALPHA}:`, 200);
+      stamps.set(`${ALPHA}:replica:foreign`, 300);
+      stamps.set(`${ALPHA}:malformed`, Number.NaN);
+      stamps.set(`${ALPHA}x:foreign`, 1_000);
+    });
+    expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(300);
+    expect(listDirectory(directory)[0]?.updatedAt).toBe(200);
+  });
+
+  it("refreshes a warm maximum when remote candidates decrease, disappear or become malformed", () => {
+    const writer = new Y.Doc();
+    const reader = new Y.Doc();
+    getDirectoryMap(writer).set(ALPHA, { title: "Alpha", tags: [] });
+    const stamps = writer.getMap("updatedAt");
+    stamps.set(`${ALPHA}:first`, 100);
+    stamps.set(`${ALPHA}:second`, 200);
+    const receive = (): void => {
+      Y.applyUpdate(reader, Y.encodeStateAsUpdate(writer, Y.encodeStateVector(reader)));
+    };
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBe(200);
+
+    stamps.set(`${ALPHA}:second`, 50);
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBe(100);
+    stamps.set(`${ALPHA}:first`, Number.NaN);
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBe(50);
+    stamps.set(`${ALPHA}:second`, "malformed");
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBeUndefined();
+    stamps.set(`${ALPHA}:third`, 300);
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBe(300);
+    stamps.delete(`${ALPHA}:third`);
+    receive();
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBeUndefined();
+  });
+
+  it("exposes remote stamps to the docs observer before the stamp-map observer runs", () => {
+    const reader = new Y.Doc();
+    getDirectoryMap(reader).set(ALPHA, { title: "Alpha", tags: [] });
+    expect(getDirectoryEntry(reader, ALPHA)?.updatedAt).toBeUndefined();
+    const observed: Array<[string, number | undefined]> = [];
+    getDirectoryMap(reader).observe(() => {
+      observed.push(["docs", getDirectoryEntry(reader, ALPHA)?.updatedAt]);
+    });
+    reader.getMap("updatedAt").observe(() => {
+      observed.push(["stamps", getDirectoryEntry(reader, ALPHA)?.updatedAt]);
+    });
+    const writer = new Y.Doc();
+    Y.applyUpdate(writer, Y.encodeStateAsUpdate(reader));
+    writer.transact(() => {
+      getDirectoryMap(writer).set(ALPHA, { title: "Renamed", tags: [] });
+      writer.getMap("updatedAt").set(`${ALPHA}:remote-writer`, 500);
+    });
+    Y.applyUpdate(reader, Y.encodeStateAsUpdate(writer, Y.encodeStateVector(reader)));
+    expect(observed).toEqual([["docs", 500], ["stamps", 500]]);
+  });
+
+  it("keeps local upserts and lifecycle reads current inside one outer transaction", () => {
+    const directory = new Y.Doc();
+    directory.transact(() => {
+      upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Alpha", updatedAt: 100 });
+      expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(100);
+      upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Renamed", updatedAt: 200 });
+      expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(200);
+      tombstoneDirectoryEntry(directory, ALPHA);
+      expect(getDirectoryMap(directory).get(ALPHA)).toMatchObject({ deleted: true, updatedAt: 200 });
+      restoreDirectoryEntry(directory, ALPHA);
+      expect(getDirectoryMap(directory).get(ALPHA)).toMatchObject({ updatedAt: 200 });
+      expect(getDirectoryEntry(directory, ALPHA)?.deleted).toBeUndefined();
+      upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Newer", updatedAt: 300 });
+      expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(300);
+    });
+    expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(300);
+  });
+
+  it("keeps permanent deletion authoritative after warming timestamp reads", () => {
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: ALPHA, title: "Alpha", updatedAt: 100 });
+    upsertDirectoryEntry(directory, { uuid: BETA, title: "Beta", updatedAt: 200 });
+    expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(100);
+    deleteDirectoryEntry(directory, ALPHA);
+    getDirectoryMap(directory).set(ALPHA, { title: "Late metadata", tags: [] });
+    directory.getMap("updatedAt").set(`${ALPHA}:remote-writer`, 500);
+    expect(getDirectoryEntry(directory, ALPHA)).toBeNull();
+    enforceDeletedDirectoryEntries(directory);
+    expect(directory.getMap("updatedAt").has(`${ALPHA}:remote-writer`)).toBe(false);
+    expect(getDirectoryEntry(directory, ALPHA)).toBeNull();
+    expect(getDirectoryEntry(directory, BETA)?.updatedAt).toBe(200);
+  });
+
+  it("does not enumerate the stamp map for repeated entry and shared-topic archive reads", () => {
+    const directory = new Y.Doc();
+    const uuids = [ALPHA, ...Array.from({ length: 63 }, (_, index) =>
+      `${(index + 1).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`)];
+    directory.transact(() => {
+      const stamps = directory.getMap("updatedAt");
+      for (const [index, uuid] of uuids.entries()) {
+        getDirectoryMap(directory).set(uuid, { title: uuid, tags: [], kind: "decision", topic: ALPHA });
+        stamps.set(`${uuid}:foreign`, index);
+        stamps.set(`${ALPHA}:writer-${index}`, index);
+      }
+    });
+    expect(getDirectoryEntry(directory, ALPHA)?.updatedAt).toBe(63);
+    const stamps = directory.getMap("updatedAt");
+    const scans = [
+      vi.spyOn(stamps, "entries"),
+      vi.spyOn(stamps, "keys"),
+      vi.spyOn(stamps, "values"),
+      vi.spyOn(stamps, "forEach"),
+      vi.spyOn(stamps, Symbol.iterator),
+    ];
+    try {
+      for (const uuid of uuids) {
+        expect(getDirectoryEntry(directory, uuid)).not.toBeNull();
+        expect(decisionTopicArchived(directory, uuid)).toBe(false);
+      }
+      for (const scan of scans) expect(scan).not.toHaveBeenCalled();
+    } finally {
+      for (const scan of scans) scan.mockRestore();
+    }
   });
 });
 
