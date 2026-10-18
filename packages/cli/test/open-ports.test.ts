@@ -526,13 +526,15 @@ describe("ub open: hub, ports and serving role", () => {
     expect(tls.status).toBe(1);
     expect(tls.output).toContain("plain ws://");
 
-    pointAt(box, "ws://127.0.0.1");
-    const noPort = await openFails(box, ["--port", String(webPort)], env);
+    const noPortConfig = configured();
+    pointAt(noPortConfig.box, "ws://127.0.0.1");
+    const noPort = await openFails(noPortConfig.box, ["--port", String(webPort)], noPortConfig.env);
     expect(noPort.status).toBe(1);
     expect(noPort.output).toContain("names no port to bind");
 
-    pointAt(box, "ws://127.0.0.1:0");
-    const ephemeral = await openFails(box, ["--port", String(webPort)], env);
+    const ephemeralConfig = configured();
+    pointAt(ephemeralConfig.box, "ws://127.0.0.1:0");
+    const ephemeral = await openFails(ephemeralConfig.box, ["--port", String(webPort)], ephemeralConfig.env);
     expect(ephemeral.status).toBe(1);
     expect(ephemeral.output).toContain("names no port to bind");
   });
