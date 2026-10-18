@@ -17,13 +17,19 @@ Links inside the site are root-relative (/compare, /css/landing.css), so the
 output is meant to be served, not opened as files:
 
     python3 -m http.server 8000 --directory site/out
+
+SITE_URL sets the origin the canonical links name (default https://uberblick.ai),
+so a second Pages project can serve the same pages on another host; SITE_NOINDEX,
+set to anything, adds a robots noindex meta tag for a host that search engines
+should not index.
 """
-import re, shutil, sys
+import os, re, shutil, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PAGES, STATIC, OUT = ROOT / 'pages', ROOT / 'static', ROOT / 'out'
-SITE = 'https://uberblick.ai'
+SITE = os.environ.get('SITE_URL', 'https://uberblick.ai').rstrip('/')
+NOINDEX = '<meta name="robots" content="noindex">\n' if os.environ.get('SITE_NOINDEX') else ''
 
 SKELETON = '''<!doctype html>
 <html lang="en">
@@ -31,7 +37,7 @@ SKELETON = '''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="stylesheet" href="/shared.css">
-{head}{canonical}</head>
+{head}{canonical}{noindex}</head>
 <body>
 {body}
 </body>
@@ -71,7 +77,7 @@ def main():
         path, target = route(page)
         canonical = '' if path == '/404' else f'<link rel="canonical" href="{SITE}{path}">\n'
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(SKELETON.format(head=head, canonical=canonical, body=body))
+        target.write_text(SKELETON.format(head=head, canonical=canonical, noindex=NOINDEX, body=body))
         built.add(path)
         hrefs |= {h.split('#')[0] for h in re.findall(r'href="(/[^"]*)"', body)}
     missing = sorted(h for h in hrefs if h and h not in built and not (OUT / h.lstrip('/')).is_file())

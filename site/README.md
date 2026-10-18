@@ -21,6 +21,25 @@ python3 -m http.server 8000 --directory site/out  # then open http://127.0.0.1:8
 
 agents.uberblick.ai and skills.uberblick.ai link `https://uberblick.ai/shared.css`
 and keep only their own overrides and navigation, so the three sites read as
-one. After a change merges, Cloudflare Pages rebuilds from `main` with the build
-command `python3 site/build.py` and the output directory `site/out`; creating
-that project and pointing the domain at it is a maintainer step.
+one.
+
+## Deploying
+
+A Cloudflare Pages project connected to this repository builds the site from
+`main` on every push that touches `site/`. Its settings, all in the Pages
+dashboard, are a maintainer step; no token lives in the repository:
+
+| Setting | Value |
+| --- | --- |
+| Production branch | `main` |
+| Build command | `python3 site/build.py` |
+| Build output directory | `site/out` |
+| Build watch paths | `site/*` |
+| Environment variable `SITE_URL` | the origin the project serves, for example `https://next.uberblick.ai`; omitted, the canonical links name `https://uberblick.ai` |
+| Environment variable `SITE_NOINDEX` | set to `1` on a host search engines should not index |
+| Custom domain | the host name; Cloudflare adds the DNS record when the zone is on Cloudflare, otherwise add a CNAME to the project's `pages.dev` host |
+
+The new site runs on next.uberblick.ai first, from a project with
+`SITE_URL=https://next.uberblick.ai` and `SITE_NOINDEX=1`; uberblick.ai stays as
+it is until the move. Pages serves `404.html` for unknown paths and redirects
+`/<path>.html` to `/<path>`, which is why the build writes extensionless pages.
