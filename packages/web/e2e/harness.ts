@@ -378,6 +378,8 @@ export async function placeCaret(page: Page, edge: "start" | "end" = "end"): Pro
 export async function startHarness(options: {
   accessRole?: "admin" | "member" | "none";
   hubAdmin?: boolean;
+  /** An authored example vocabulary; defaults to generic rendering fixtures only. */
+  seedExampleTags?: boolean;
   /** Keep a real stored hub login while serving an entirely local workspace. */
   localWorkspace?: boolean;
   /** A real git default isolated from the developer's own configuration. */
@@ -444,8 +446,8 @@ export async function startHarness(options: {
       if (configured.status !== 0) throw new Error("e2e: could not configure the fixture's git display name");
     }
     hub = await createHub(config, accessRole === undefined ? {} : { deviceCredentials: true });
-    // Generic rendering fixtures own their vocabulary; hub clients do not seed it.
-    if (accessRole === undefined) {
+    // Rendering fixtures own their example vocabulary; hub clients do not seed it.
+    if (options.seedExampleTags ?? (accessRole === undefined)) {
       const catalog = await hub.hocuspocus.openDirectConnection(settingsRoom(workspaceUuid));
       try { await catalog.transact(document => { seedTagCatalog(document); }); }
       finally { await catalog.disconnect(); }
