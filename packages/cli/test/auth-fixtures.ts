@@ -1,6 +1,6 @@
 /** Fixtures shared by the `ub auth` suites: a fake GitHub, a real hub and its HTTP front. */
 
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { hostname } from "node:os";
 import { writeHubLogin } from "../src/auth-store.js";
 import { DatabaseSync } from "node:sqlite";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { expect } from "vitest";
 import { type Run, type Sandbox, sandbox } from "./helpers.js";
 
@@ -40,7 +41,7 @@ export function fixture(workspaces = [WORKSPACE]): Login {
         id: randomUUID(), principalId, deviceId: randomUUID(), workspaces,
         issuedAt: Date.now(), revokedAt: null,
       },
-      key: Buffer.alloc(32, 7).toString("base64url"),
+      key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
     },
   };
 }
@@ -66,7 +67,7 @@ export function savedLogin(box: Sandbox, origin: string): Login {
 /** Management fixtures need a real issued credential, without repeating GitHub approval. */
 export async function seedLogin(remote: Awaited<ReturnType<typeof rig>>, box = remote.box, storedUsername?: string): Promise<Login> {
   const identity = remote.hub.principals!.identify(String(remote.github.identity.id), remote.github.identity.login);
-  const issued = remote.hub.credentials!.issue({
+  const issued = issueCredential(remote.hub.credentials!, {
     principalId: identity.id,
     deviceId: randomUUID(),
     deviceName: hostname(),

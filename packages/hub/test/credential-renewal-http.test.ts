@@ -1,14 +1,17 @@
+import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { generateTestCredentialKeyPair, renewalPublicKey } from "./device-credentials.js";
 import { settingsRoom, setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
-import { CredentialRegistry, type CredentialRenewal, type IssuedCredential } from "../src/credentials.js";
+import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { PrincipalRegistry } from "../src/principals.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { Hub } from "../src/server.js";
-import { importCredentialKey, mintRequestProof } from "@uberblick/schema/token";
+import { importCredentialKey } from "@uberblick/schema/token";
 import { WorkspaceNameReader } from "../src/workspace-names.js";
 import { OTHER_WORKSPACE, removeTempDatabases, startHub, tempDatabasePath, WORKSPACE } from "./helpers.js";
 
@@ -26,7 +29,7 @@ async function rig() {
   let issued: IssuedCredential;
   try {
     const credentials = new CredentialRegistry(database);
-    issued = credentials.issue({ principalId: "person", deviceId: "laptop", workspaces: [] });
+    issued = issueCredential(credentials, { principalId: "person", deviceId: "laptop", workspaces: [] });
     new MembershipRegistry(database).grant({ workspaceId: WORKSPACE, principalId: "person", role: "admin" });
     const settings = new Y.Doc();
     setWorkspaceName(settings, "Original workspace");
@@ -58,6 +61,26 @@ async function post(hub: Hub, body: unknown, options: { raw?: string; headers?: 
 const envelope = (token: string, protocolVersion = SYNC_PROTOCOL_VERSION) => ({ protocolVersion, token });
 
 describe("public credential renewal", () => {
+  it("requires the device's signed new public key and preserves pre-change protocol guidance", async () => {
+    const { hub, proof, issued } = await rig();
+    const send = async (body: unknown) => {
+      const response = await globalThis.fetch(`http://127.0.0.1:${hub.port}/auth/credential/renew`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      return { code: response.status, result: await response.json() };
+    };
+    expect(await send(envelope(proof))).toEqual({ code: 400, result: { status: "invalid-request" } });
+    expect(await send(envelope(proof, 4))).toEqual({ code: 409,
+      result: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } });
+    expect(await send(envelope(""))).toEqual({ code: 401, result: { status: "sign-in-required" } });
+    const swappedPublicKey = Buffer.from(generateTestCredentialKeyPair().publicKey).toString("base64url");
+    expect(await send({ ...envelope(proof), publicKey: swappedPublicKey }))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(hub.credentials!.get(issued.record.id)).toEqual(issued.record);
+    const renewed = await send({ ...envelope(proof), publicKey: renewalPublicKey(proof) });
+    expect(renewed).toMatchObject({ code: 200, result: { status: "renewed", credential: { record: { id: expect.any(String) } } } });
+    expect(renewed.result).not.toHaveProperty("credential.key");
+  });
   it("discovers a direct grant on each existing device's next renewal without GitHub approval", async () => {
     const databasePath = tempDatabasePath();
     const database = new HubDatabase(databasePath, (error) => { throw error; });
@@ -74,8 +97,8 @@ describe("public credential renewal", () => {
       memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: memberId, role: "member" });
       const credentials = new CredentialRegistry(database);
       issued = [
-        credentials.issue({ principalId: memberId, deviceId: "empty-device", workspaces: [] }),
-        credentials.issue({ principalId: memberId, deviceId: "existing-device", workspaces: [OTHER_WORKSPACE] }),
+        issueCredential(credentials, { principalId: memberId, deviceId: "empty-device", workspaces: [] }),
+        issueCredential(credentials, { principalId: memberId, deviceId: "existing-device", workspaces: [OTHER_WORKSPACE] }),
       ];
     } finally {
       database.close();
@@ -107,7 +130,7 @@ describe("public credential renewal", () => {
     const renewed = await post(hub, { ...envelope(proof), ifWorkspacesChanged: true });
     if (!("credential" in renewed.result)) throw new Error("grant did not renew");
     const credential = renewed.result.credential;
-    const request = await mintRequestProof(await importCredentialKey(Buffer.from(credential.key, "base64url")), {
+    const request = await mintRequestProof(await importCredentialKey(credentialPrivateKey(credential.record)), {
       kid: credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
     });
     expect(await post(hub, { ...envelope(request), ifWorkspacesChanged: true }))
@@ -121,14 +144,13 @@ describe("public credential renewal", () => {
     expect(hub.credentials?.get(issued.record.id)?.replacedAt).toBeTypeOf("number");
   });
 
-  it("renews a zero-workspace device against current membership with GitHub unreachable, and delivers its key once", async () => {
+  it("renews a zero-workspace device against current membership without GitHub or key replies", async () => {
     const { hub, github, logs, issued, proof } = await rig();
     const renewed = await post(hub, envelope(proof));
     expect(renewed.code).toBe(200);
     if (!("credential" in renewed.result)) throw new Error("renewal failed");
     expect(renewed.result).toEqual({ status: "renewed", credential: {
       record: { ...issued.record, id: expect.any(String), issuedAt: expect.any(Number), workspaces: [WORKSPACE] },
-      key: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
       workspaceNames: { [WORKSPACE]: "Original workspace" },
     } });
     expect(renewed.result.credential.record.id).not.toBe(issued.record.id);
@@ -137,7 +159,8 @@ describe("public credential renewal", () => {
     expect(await post(hub, envelope("github-token")))
       .toEqual({ code: 401, result: { status: "sign-in-required" } });
     expect(github).not.toHaveBeenCalled();
-    const key = renewed.result.credential.key;
+    expect(renewed.result.credential).not.toHaveProperty("key");
+    const key = Buffer.from(credentialPrivateKey(renewed.result.credential.record)).toString("base64url");
     expect(JSON.stringify(logs)).not.toContain(key);
     expect(JSON.stringify(logs)).not.toContain(Buffer.from(issued.keyBytes).toString("base64url"));
     expect(JSON.stringify(logs)).not.toContain(proof);
@@ -178,7 +201,7 @@ describe("public credential renewal", () => {
     expect(renewed.result.credential.record.workspaces).toEqual([WORKSPACE]);
     expect(hub.credentials!.get(issued.record.id)?.replacedAt).toBeTypeOf("number");
     const replacementProof = await mintRequestProof(
-      await importCredentialKey(Buffer.from(renewed.result.credential.key, "base64url")),
+      await importCredentialKey(credentialPrivateKey(renewed.result.credential.record)),
       { kid: renewed.result.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60 },
     );
     expect((await post(hub, { ...envelope(replacementProof), ifWorkspacesChanged: true })).result)

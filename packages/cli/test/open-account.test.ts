@@ -1,5 +1,6 @@
 /** The account projection is read-only, live, and contains no private fields. */
 import { chmodSync, rmSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync } from "node:crypto";
 import { join } from "node:path";
 import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
@@ -12,7 +13,7 @@ const ORIGIN = "https://account-hub.example";
 function login(handle = "account-person"): StoredHubLogin {
   const principalId = crypto.randomUUID();
   return { identity: { id: principalId, githubAccountId: "1234", githubUsername: handle }, credential: {
-    key: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+    key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
     record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE],
       issuedAt: Date.now(), revokedAt: null },
   } };
@@ -30,6 +31,17 @@ async function rig() {
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 
 describe("ub open: account projection", () => {
+  it("shows an old HMAC login as signed out without contacting the hub", async () => {
+    const { box, binding } = await rig();
+    const old = login();
+    old.credential.key = Buffer.alloc(32, 7).toString("base64url");
+    writeFileSync(join(configDir(box), "credentials.json"), JSON.stringify({ hubLogins: { [ORIGIN]: old } }));
+    const fetch = vi.spyOn(globalThis, "fetch");
+    expect(requestDeviceLogin(binding)).toEqual({ state: "signed-out" });
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-out" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("sends no account proof to an unencrypted remote hub and forwards its exact environment opt-in", async () => {
     const { box } = configured();
     const origin = "http://account-hub.example:1234";

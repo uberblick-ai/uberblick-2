@@ -1,3 +1,4 @@
+import { deviceFetch as fetch } from "./device-credentials.js";
 /**
  * The signal path, in the process that actually receives the signal.
  *

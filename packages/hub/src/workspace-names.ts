@@ -26,7 +26,7 @@ export class WorkspaceNameReader {
       Y.applyUpdate(settings, bytes);
       return getWorkspaceName(settings);
     } catch {
-      // Display data cannot turn a successful issuance into a lost key.
+      // Display data cannot turn a successful issuance into a failed sign-in.
       return null;
     } finally {
       settings?.destroy();
@@ -35,7 +35,7 @@ export class WorkspaceNameReader {
 }
 
 interface CredentialReply {
-  credential: { record: CredentialRecord; key: string; workspaceNames?: Record<string, string> };
+  credential: { record: CredentialRecord; workspaceNames?: Record<string, string> };
 }
 
 /** Preserve the full envelope and credential, adding names only while it fits. */
@@ -57,7 +57,7 @@ export function addWorkspaceNames<T extends CredentialReply>(
       } catch {
         continue;
       }
-      const safe = sanitizeWorkspaceNames({ [workspaceId]: name }, [workspaceId], reply.credential.key, collectionSecret);
+      const safe = sanitizeWorkspaceNames({ [workspaceId]: name }, [workspaceId], collectionSecret);
       const safeName = safe?.[workspaceId];
       if (safeName === undefined) continue;
       const bytes = Buffer.byteLength(`${JSON.stringify(workspaceId)}:${JSON.stringify(safeName)}`) + (count > 0 ? 1 : 0);
@@ -68,7 +68,7 @@ export function addWorkspaceNames<T extends CredentialReply>(
     }
     return count === 0 ? reply : { ...reply, credential: { ...reply.credential, workspaceNames } };
   } catch {
-    // Nothing after issue/renew may hide the only copy of a new device key.
+    // Optional display data must not hide successful issuance or renewal.
     return reply;
   }
 }

@@ -1,3 +1,5 @@
+import { collectDeviceSignIn, startDeviceSignIn } from "./device-credentials.js";
+import { credentialPrivateKey } from "./device-credentials.js";
 /** Sign-in issues credentials from the same authority composed admission reads. */
 import { Server } from "@hocuspocus/server";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,10 +67,10 @@ async function startServer() {
   return {
     port: server.address.port, database, principals, credentials, memberships,
     async completeSignIn(): Promise<CompletedSignIn> {
-      const started = await signIn.start();
+      const started = await startDeviceSignIn(signIn);
       if (started.status !== "pending") throw new Error("sign-in did not start");
       now += 1000;
-      const collected = await signIn.collect(started.requestId, started.collectionSecret);
+      const collected = await collectDeviceSignIn(signIn, started.requestId, started.collectionSecret);
       if (collected.status !== "complete") throw new Error("sign-in did not complete");
       return collected;
     },
@@ -80,7 +82,7 @@ function membershipSnapshot(database: HubDatabase) {
 }
 
 async function credentialToken(signedIn: CompletedSignIn, workspace: string) {
-  return mintToken(await importCredentialKey(Buffer.from(signedIn.credential.key, "base64url")), {
+  return mintToken(await importCredentialKey(credentialPrivateKey(signedIn.credential.record)), {
     typ: "room", sub: signedIn.identity.id, workspace, scope: "read-write",
     kid: signedIn.credential.record.id, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
   });

@@ -7,6 +7,7 @@
  */
 
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +41,8 @@ describe("resolveMcpConfig", () => {
       await writeHubLogin("http://localhost:8080", {
         identity: { id, githubAccountId: "12345", githubUsername: "test-person" },
         credential: { record: { id, principalId: id, deviceId: id,
-          workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+          workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null },
+          key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url") },
       }, authEnv);
       const proxy = resolveMcpConfig({ ...authEnv, HUB_URL: "ws://localhost:8080/arbitrary-proxy-path" });
       expect(proxy.deviceLogin).toBeDefined();

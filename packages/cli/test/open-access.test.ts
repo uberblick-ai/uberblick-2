@@ -1,9 +1,11 @@
 /** The local browser's access authority is bounded to its frozen binding. */
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { removeHubLogin, writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { build } from "esbuild";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +20,7 @@ afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 function issue(hub: Hub, id: string, username: string, role?: "admin" | "member", workspaces?: string[]) {
   const identity = hub.principals!.identify(id, username);
   if (role !== undefined) hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: identity.id, role });
-  const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
+  const issued = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: crypto.randomUUID(),
     workspaces: workspaces ?? (role === undefined ? [] : [WORKSPACE]) });
   const { replacedAt: _replaced, ...record } = issued.record;
   const login: StoredHubLogin = { identity, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } };
@@ -59,7 +61,7 @@ async function rig(role: "admin" | "member" | null = "admin", snapshot?: string[
 function storedLogin(handle: string): StoredHubLogin {
   const principalId = crypto.randomUUID();
   return { identity: { id: principalId, githubAccountId: "1234", githubUsername: handle }, credential: {
-    key: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+    key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
     record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE],
       issuedAt: Date.now(), revokedAt: null },
   } };
@@ -245,9 +247,9 @@ describe("ub open: live Access bridge", () => {
 
   it("relays own device names beside legacy rows with no new upstream fields", async () => {
     const { app, post, hub, login, other, origin } = await rig("member");
-    const named = hub.credentials!.issue({ principalId: login.identity.id, deviceId: crypto.randomUUID(),
+    const named = issueCredential(hub.credentials!, { principalId: login.identity.id, deviceId: crypto.randomUUID(),
       deviceName: "agent-server", workspaces: [] });
-    hub.credentials!.issue({ principalId: other.identity.id, deviceId: crypto.randomUUID(),
+    issueCredential(hub.credentials!, { principalId: other.identity.id, deviceId: crypto.randomUUID(),
       deviceName: "foreign-server", workspaces: [WORKSPACE] });
     try {
       expect(await post({ operation: "list-devices" })).toEqual({ code: 200, body: { status: "ok", hub: origin, handle: "this-person",

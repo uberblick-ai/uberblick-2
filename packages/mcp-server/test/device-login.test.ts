@@ -5,7 +5,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { credentialsPath, readHubLogins, removeHubLogin, writeHubLogin } from "../src/auth-store.js";
+import { credentialsPath, readHubLogins, removeHubLogin, usesDeviceCredentials, writeHubLogin } from "../src/auth-store.js";
 import { ensureDeviceLogin, readDeviceLogin } from "../src/device-login.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { cleanupTestResources } from "./helpers.js";
@@ -42,6 +42,20 @@ async function waitForRequest(hub: Awaited<ReturnType<typeof startDeviceSyncHub>
 }
 
 describe("stored device login renewal", () => {
+  it("requires sign-in for an old HMAC login without treating its store as damaged or falling back on loopback", async () => {
+    const test = await setup();
+    const old = test.hub.issue({ workspaces: [WORKSPACE] });
+    await writeHubLogin(test.hub.origin, old, test.env);
+    old.credential.key = Buffer.alloc(32, 7).toString("base64url");
+    writeFileSync(credentialsPath(test.env), JSON.stringify({ hubLogins: { [test.hub.origin]: old } }));
+    expect(usesDeviceCredentials(test.hub.url, test.env)).toBe(true);
+    expect(readDeviceLogin(test.hub.url, WORKSPACE, test.env)).toMatchObject({
+      status: "sign-in-required", message: expect.stringContaining(`ub auth login ${test.hub.origin}`),
+    });
+    expect((await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env })).status).toBe("sign-in-required");
+    expect(test.hub.renewalCount).toBe(0);
+  });
+
   it("renews once after suspension and polls for restore without replacing the credential again", async () => {
     const test = await setup();
     test.hub.grant(WORKSPACE);
@@ -80,18 +94,23 @@ describe("stored device login renewal", () => {
 
     const next = test.hub.issue({ workspaces: [WORKSPACE, OTHER_WORKSPACE], deviceId: before.credential.record.deviceId });
     next.credential.workspaceNames = { [WORKSPACE]: "After rename", [OTHER_WORKSPACE]: "New grant" };
-    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: next.credential } });
+    const { key: _key, ...publicCredential } = next.credential;
+    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: publicCredential } });
     const renewed = await ensureDeviceLogin(test.hub.url, OTHER_WORKSPACE, { env: test.env, renewalCooldownMs: 0 });
     expect(renewed.status).toBe("ready");
     const stored = readHubLogins(test.env).logins[test.hub.origin]!;
-    expect(stored.credential).toEqual(next.credential);
+    expect(stored.credential).toMatchObject(publicCredential);
+    expect(stored.credential.key).not.toBe(before.credential.key);
+    expect(stored.credential.key).not.toBe(next.credential.key);
     expect(test.hub.renewalCount).toBe(1);
 
     const unnamed = test.hub.issue({ workspaces: [WORKSPACE, OTHER_WORKSPACE], deviceId: before.credential.record.deviceId });
-    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: unnamed.credential } });
+    const { key: _unnamedKey, ...unnamedPublicCredential } = unnamed.credential;
+    test.hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: unnamedPublicCredential } });
     const refreshed = await ensureDeviceLogin(test.hub.url, WORKSPACE, { env: test.env, rejected: stored });
     expect(refreshed.status).toBe("ready");
-    expect(readHubLogins(test.env).logins[test.hub.origin]!.credential).toEqual(unnamed.credential);
+    expect(readHubLogins(test.env).logins[test.hub.origin]!.credential).toMatchObject(unnamedPublicCredential);
+    expect(readHubLogins(test.env).logins[test.hub.origin]!.credential.workspaceNames).toBeUndefined();
     expect(test.hub.renewalCount).toBe(2);
   });
 

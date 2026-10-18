@@ -1,17 +1,18 @@
 /** Signed transport and the public projection used by the local Access page. */
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StoredHubLogin } from "../src/auth-store.js";
 import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "../src/management-client.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { importCredentialKey, inspectRequestProof } from "@uberblick/schema/token";
+import { importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 
 const WORKSPACE = randomUUID();
 const PRINCIPAL = randomUUID();
 const DEVICE = randomUUID();
+const keyPair = generateKeyPairSync("ed25519");
 const login: StoredHubLogin = {
   identity: { id: PRINCIPAL, githubAccountId: "1234", githubUsername: "octocat" },
-  credential: { key: Buffer.alloc(32, 7).toString("base64url"), record: {
+  credential: { key: keyPair.privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"), record: {
     id: randomUUID(), principalId: PRINCIPAL, deviceId: DEVICE, workspaces: [WORKSPACE],
     issuedAt: Date.now(), revokedAt: null,
   } },
@@ -34,7 +35,8 @@ describe("shared management transport", () => {
     expect(options).toMatchObject({ method: "POST", redirect: "error", headers: { "Content-Type": "application/json" } });
     const body = JSON.parse(options!.body as string) as Record<string, unknown>;
     expect(body).toEqual({ ...action, protocolVersion: SYNC_PROTOCOL_VERSION, token: expect.any(String) });
-    const proof = await inspectRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), body.token as string, action);
+    const publicKey = keyPair.publicKey.export({ format: "jwk" }).x!;
+    const proof = await inspectRequestProof(await importCredentialPublicKey(Buffer.from(publicKey, "base64url")), body.token as string, action);
     expect(proof).not.toHaveProperty("failure");
     if ("failure" in proof) throw new Error("the target-bound proof was refused");
     expect(proof).toMatchObject({ ...action, kid: login.credential.record.id });

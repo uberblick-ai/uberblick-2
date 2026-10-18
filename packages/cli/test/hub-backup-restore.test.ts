@@ -20,6 +20,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { generateCredentialKeyPair } from "@uberblick/schema/token";
 import type { SpawnSyncReturns } from "node:child_process";
 import {
   copyFileSync,
@@ -366,6 +367,36 @@ describe("hub-backup.sh", () => {
 });
 
 describe("hub-restore.sh", () => {
+  it("revokes and erases restored HMAC credentials when the hub opens without GitHub sign-in", async () => {
+    const fix = fixture();
+    const live = join(fix.volume, "hub.sqlite");
+    hubDatabase(live, 1, true);
+    const legacy = new DatabaseSync(live);
+    legacy.prepare("INSERT INTO hub_credentials VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("6c1f0f4a-2b3d-4c5e-8f90-1a2b3c4d5e6f", "old-principal", "old-device", "[]", Buffer.alloc(32, 7), 123, null);
+    legacy.close();
+    const backup = join(fix.caller, "legacy.sqlite");
+    expect(run(fix, "hub-backup.sh", [backup]).status).toBe(0);
+    rmSync(live);
+    const restored = run(fix, "hub-restore.sh", [backup]);
+    expect(restored.status, restored.stderr).toBe(0);
+    const recreated = await createHub({ port: 0, databasePath: live,
+      authSecret: "backup-test-only-signing-secret", log: silentLogger });
+    await recreated.stop();
+    const database = new DatabaseSync(live, { readOnly: true });
+    try {
+      expect(database.prepare("PRAGMA table_info(hub_credentials)").all().map((column) => column.name))
+        .not.toContain("signing_key");
+      expect(database.prepare("SELECT * FROM hub_credentials").get()).toMatchObject({
+        id: "6c1f0f4a-2b3d-4c5e-8f90-1a2b3c4d5e6f", principal_id: "old-principal", device_id: "old-device",
+        public_key: null, issued_at: 123, revoked_at: expect.any(Number),
+      });
+      expect(database.prepare("SELECT count(*) AS count FROM documents").get()?.count).toBe(1);
+    } finally {
+      database.close();
+    }
+  });
+
   it.each([false, true])("preserves default workspace, rename and claim state across restore and recreation (claimed=%s)", async (claimed) => {
     const fix = fixture();
     const live = join(fix.volume, "hub.sqlite");
@@ -394,13 +425,14 @@ describe("hub-restore.sh", () => {
       expect(await (await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`)).json())
         .toEqual({ unclaimed: true, canClaim: true });
       if (claimed) {
+        const publicKey = Buffer.from((await generateCredentialKeyPair()).publicKey).toString("base64url");
         const started = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/start`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publicKey }),
         })).json() as { requestId: string; collectionSecret: string };
         time += 1_000;
         completed = await (await fetch(`http://127.0.0.1:${hub.port}/auth/github/collect`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ requestId: started.requestId, collectionSecret: started.collectionSecret }),
+          body: JSON.stringify({ requestId: started.requestId, collectionSecret: started.collectionSecret, publicKey }),
         })).json() as Record<string, unknown>;
         expect(completed.status).toBe("complete");
       }

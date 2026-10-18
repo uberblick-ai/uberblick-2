@@ -1,13 +1,15 @@
+import { deviceFetch as fetch } from "./device-credentials.js";
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { deleteDirectoryEntry, directoryRoom, parseRoom } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveCoreHubConfig } from "../src/config.js";
-import type { IssuedCredential } from "../src/credentials.js";
+
 import type { HubLogRecord } from "../src/log.js";
 import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { isLoopbackHost } from "@uberblick/schema/loopback";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, mintRequestProof, mintToken } from "@uberblick/schema/token";
+import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom, token, storedText,
   type TestClient, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -65,7 +67,7 @@ describe("remote createHub admission", () => {
     const { hub } = await remote();
     const member = hub.principals!.identify("1234", "member");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "admin" });
-    const issued = hub.credentials!.issue({ principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     const presented = await credentialToken(issued);
     const room = testRoom();
     const writer = connect(hub, room, presented);
@@ -101,12 +103,12 @@ describe("remote createHub admission", () => {
     await expect(connect(hub, testRoom(), root, SYNC_PROTOCOL_VERSION - 1).denied)
       .resolves.toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
     const member = hub.principals!.identify("1234", "member");
-    const issued = hub.credentials!.issue({ principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     await expect(connect(hub, testRoom(), await credentialToken(issued)).denied).resolves.toBe("device-credential-refused");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "admin" });
     const admitted = connect(hub, testRoom(), await credentialToken(issued));
     await admitted.synced;
-    const outsideLimit = hub.credentials!.issue({ principalId: member.id, deviceId: randomUUID(), workspaces: [] });
+    const outsideLimit = issueCredential(hub.credentials!, { principalId: member.id, deviceId: randomUUID(), workspaces: [] });
     await expect(connect(hub, testRoom(), await credentialToken(outsideLimit)).denied).resolves.toBe("device-credential-refused");
   });
 
@@ -123,8 +125,8 @@ describe("remote createHub admission", () => {
     const admin = hub.principals!.identify("5678", "admin");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: admin.id, role: "admin" });
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: member.id, role: "member" });
-    const issued = hub.credentials!.issue({ principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
-    const observerCredential = hub.credentials!.issue({ principalId: admin.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: member.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const observerCredential = issueCredential(hub.credentials!, { principalId: admin.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     const room = testRoom();
     const writer = connect(hub, room, await credentialToken(issued));
     const observer = connect(hub, room, await credentialToken(observerCredential));
@@ -153,7 +155,7 @@ describe("remote createHub admission", () => {
     const issued = [first, second].map((hub, index) => {
       const principalId = [firstMember.id, secondMember.id][index]!;
       hub.memberships!.grant({ workspaceId: WORKSPACE, principalId, role: "admin" });
-      return hub.credentials!.issue({ principalId, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+      return issueCredential(hub.credentials!, { principalId, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     });
     const firstToken = await credentialToken(issued[0]!);
     const secondClient = connect(second, testRoom(), await credentialToken(issued[1]!));

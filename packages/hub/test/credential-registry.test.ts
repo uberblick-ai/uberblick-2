@@ -1,17 +1,14 @@
+import { issueCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { copyFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
+import { CredentialRegistry } from "../src/credentials.js";
+import { MembershipRegistry } from "../src/memberships.js";
+import { generateTestCredentialKeyPair, mintDeviceRequestProof, renewalPublicKey } from "./device-credentials.js";
+import { importCredentialPublicKey } from "@uberblick/schema/token";
 import { HubDatabase } from "../src/persistence.js";
-import {
-  MAX_TOKEN_LENGTH,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  importCredentialKey,
-  importRootSecret,
-  mintToken,
-  readTokenKeyId,
-} from "@uberblick/schema/token";
+import { MAX_TOKEN_LENGTH, MAX_TOKEN_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken, readTokenKeyId } from "@uberblick/schema/token";
 import { removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
@@ -26,7 +23,7 @@ function registry(path = ":memory:"): CredentialRegistry {
 }
 
 function issue(store: CredentialRegistry, deviceId = "laptop"): IssuedCredential {
-  return store.issue({ principalId: "person", deviceId, workspaces: [WORKSPACE] });
+  return issueCredential(store, { principalId: "person", deviceId, workspaces: [WORKSPACE] });
 }
 
 async function token(issued: IssuedCredential, keyBytes = issued.keyBytes): Promise<string> {
@@ -47,14 +44,37 @@ afterEach(() => {
 });
 
 describe("hub-owned credential registry", () => {
+  it("stores only the device's public key and admits no signatures made from database bytes", async () => {
+    const store = registry();
+    const pair = generateTestCredentialKeyPair();
+    const issued = store.issue({ principalId: "person", deviceId: "laptop", workspaces: [WORKSPACE], publicKey: pair.publicKey });
+    expect(Object.keys(issued)).toEqual(["record"]);
+    const row = databases[0]!.connection.prepare("SELECT * FROM hub_credentials WHERE id = ?").get(issued.record.id)!;
+    expect(row.public_key).toEqual(pair.publicKey);
+    expect(row).not.toHaveProperty("signing_key");
+    const publicKey = await importCredentialPublicKey(row.public_key as Uint8Array);
+    await expect(mintToken(publicKey, { typ: "room", sub: "person", workspace: WORKSPACE, scope: "read-write",
+      kid: issued.record.id, lifetimeSeconds: 60 })).rejects.toThrow();
+    const databaseHmac = await crypto.subtle.importKey("raw", new Uint8Array(row.public_key as Uint8Array),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const forgedRoom = await mintToken(databaseHmac, { typ: "room", sub: "person", workspace: WORKSPACE, scope: "read-write",
+      kid: issued.record.id, lifetimeSeconds: 60 });
+    expect(await store.verify(forgedRoom)).toEqual({ failure: "bad-signature" });
+    const forgedManagement = await mintDeviceRequestProof(databaseHmac, { kid: issued.record.id, operation: "list-devices", lifetimeSeconds: 60 });
+    expect(await store.verifyRequest(forgedManagement, { operation: "list-devices" })).toBeNull();
+    const forgedRenewal = await mintDeviceRequestProof(databaseHmac, { kid: issued.record.id, operation: "renew-credential", lifetimeSeconds: 60 });
+    expect(await store.renew(forgedRenewal, new MembershipRegistry(databases[0]!), { publicKey: renewalPublicKey(forgedRenewal) }))
+      .toEqual({ status: "sign-in-required" });
+    expect(store.get(issued.record.id)).toEqual(issued.record);
+  });
   it("persists optional nonunique device names without changing identity or exposing them in credentials", async () => {
     const path = tempDatabasePath();
     const first = registry(path);
     const name = "a".repeat(253);
-    const laptop = first.issue({ principalId: "person", deviceId: "laptop", deviceName: name, workspaces: [WORKSPACE] });
-    const otherLaptop = first.issue({ principalId: "person", deviceId: "other-laptop", deviceName: name, workspaces: [] });
+    const laptop = issueCredential(first, { principalId: "person", deviceId: "laptop", deviceName: name, workspaces: [WORKSPACE] });
+    const otherLaptop = issueCredential(first, { principalId: "person", deviceId: "other-laptop", deviceName: name, workspaces: [] });
     const unnamed = issue(first, "legacy");
-    first.issue({ principalId: "another-person", deviceId: "foreign", deviceName: "private-host", workspaces: [] });
+    issueCredential(first, { principalId: "another-person", deviceId: "foreign", deviceName: "private-host", workspaces: [] });
     expect(laptop.record).not.toHaveProperty("deviceName");
     expect(first.get(laptop.record.id)).not.toHaveProperty("deviceName");
     const expected = [
@@ -75,8 +95,8 @@ describe("hub-owned credential registry", () => {
   it.each(["", "  ", "line\nbreak", "format\u200dcharacter", "control\u0000character", "a".repeat(254)])(
     "ignores an invalid device name without interfering with key issuance", (deviceName) => {
       const store = registry();
-      const issued = store.issue({ principalId: "person", deviceId: "laptop", deviceName, workspaces: [] });
-      expect(issued.keyBytes).toHaveLength(32);
+      const issued = issueCredential(store, { principalId: "person", deviceId: "laptop", deviceName, workspaces: [] });
+      expect(issued.keyBytes).toHaveLength(48);
       expect(store.listDevices("person")).toEqual([
         { deviceId: "laptop", signedInAt: issued.record.issuedAt, workspaces: [] },
       ]);
@@ -89,7 +109,7 @@ describe("hub-owned credential registry", () => {
     const laptop = issue(store);
     const phone = issue(store, "phone");
     expect(laptop.record.id).not.toBe(phone.record.id);
-    expect(laptop.keyBytes).toHaveLength(32);
+    expect(laptop.keyBytes).toHaveLength(48);
     expect(laptop.keyBytes).not.toEqual(phone.keyBytes);
 
     const signed = await token(laptop);
@@ -112,7 +132,7 @@ describe("hub-owned credential registry", () => {
   it("fixes a workspace set at issuance and accepts no widening through returned objects", () => {
     const store = registry();
     const requested = [OTHER_WORKSPACE, WORKSPACE, WORKSPACE];
-    const issued = store.issue({ principalId: "person", deviceId: "laptop", workspaces: requested });
+    const issued = issueCredential(store, { principalId: "person", deviceId: "laptop", workspaces: requested });
     const expected = [...new Set(requested)].sort();
     requested.length = 0;
     issued.record.workspaces.push("client-added");
@@ -125,7 +145,7 @@ describe("hub-owned credential registry", () => {
     }
     expect(store.get(issued.record.id)?.workspaces).toEqual(expected);
     expect(store.get(issued.record.id)?.revokedAt).toBeNull();
-    expect(() => store.issue({ principalId: "person", deviceId: "laptop", workspaces: [`slug-${WORKSPACE}`] }))
+    expect(() => issueCredential(store, { principalId: "person", deviceId: "laptop", workspaces: [`slug-${WORKSPACE}`] }))
       .toThrow("workspaces must be bare UUIDs");
   });
 

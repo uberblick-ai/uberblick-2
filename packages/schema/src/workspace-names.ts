@@ -5,16 +5,14 @@ import { validateWorkspaceName } from "./workspace-settings.js";
 export function sanitizeWorkspaceNames(
   value: unknown,
   workspaces: readonly string[],
-  credentialKey: string,
-  collectionSecret?: string,
+  ...secrets: (string | undefined)[]
 ): Record<string, string> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const names: Record<string, string> = {};
   for (const workspace of workspaces) {
     if (!Object.hasOwn(value, workspace)) continue;
     const name = (value as Record<string, unknown>)[workspace];
-    if (typeof name !== "string" || name.includes(credentialKey) ||
-        (collectionSecret !== undefined && name.includes(collectionSecret))) continue;
+    if (typeof name !== "string" || secrets.some((secret) => secret !== undefined && secret !== "" && name.includes(secret))) continue;
     try {
       if (validateWorkspaceName(name) === name) names[workspace] = name;
     } catch { /* Unsafe names remain unnamed. */ }

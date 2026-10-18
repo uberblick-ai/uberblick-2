@@ -1,6 +1,6 @@
 /** The real protocol boundary `ub open` serves, over loopback and real Yjs. */
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import type { Server as NetServer } from "node:net";
 import {
@@ -26,7 +26,7 @@ import {
 import type { HubLogRecord } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { DOC_DELETED_REASON, SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
+import { generateCredentialKeyPair, importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEXT_KEY,
@@ -488,7 +488,7 @@ describe("the ub open browser server", () => {
     const writer = await box.connect(room);
     await writer.synced;
 
-    const deviceToken = await mintToken(await importCredentialKey(randomBytes(32)), {
+    const deviceToken = await mintToken(await importCredentialKey((await generateCredentialKeyPair()).privateKey), {
       typ: "room",
       sub: "device-client",
       workspace: WORKSPACE,

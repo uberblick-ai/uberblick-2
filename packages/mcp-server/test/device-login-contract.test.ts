@@ -122,7 +122,8 @@ describe("device renewal response and recovery contracts", () => {
       const replacement = hub.issue({ workspaces: [WORKSPACE], deviceId: login.credential.record.deviceId });
       if (changed === "principal") replacement.credential.record.principalId = randomUUID();
       if (changed === "revocation") replacement.credential.record.revokedAt = Date.now();
-      hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: replacement.credential } });
+      const { key: _key, ...publicCredential } = replacement.credential;
+      hub.setRenewalReply({ status: 200, body: { status: "renewed", credential: publicCredential } });
       const result = await ensureDeviceLogin(hub.url, WORKSPACE, { env });
       expect(result.status).toBe("hub-down");
       expect(JSON.stringify(result)).not.toContain(login.credential.key);

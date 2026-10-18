@@ -5,6 +5,7 @@ import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import { type AuthEnvelope, protocolMismatchReason, readAuthEnvelope } from "@uberblick/schema/protocol";
 import { addWorkspaceNames, type WorkspaceNameReader } from "./workspace-names.js";
+import { isCredentialPublicKey } from "@uberblick/schema/token";
 
 export async function handleCredentialRenewal(
   credentials: CredentialRegistry | undefined,
@@ -31,6 +32,8 @@ export async function handleCredentialRenewal(
   }
   let envelope: AuthEnvelope;
   let ifWorkspacesChanged = false;
+  let publicKey = "";
+  let rawPublicKey: unknown;
   try {
     let size = 0;
     const chunks: Buffer[] = [];
@@ -45,8 +48,9 @@ export async function handleCredentialRenewal(
     const parsed = readAuthEnvelope(raw);
     if (body === null || typeof body !== "object" || Array.isArray(body) || parsed === null) throw new Error();
     const fields = body as Record<string, unknown>;
-    if (Object.keys(fields).some(key => !["protocolVersion", "token", "ifWorkspacesChanged"].includes(key)) ||
+    if (Object.keys(fields).some(key => !["protocolVersion", "token", "publicKey", "ifWorkspacesChanged"].includes(key)) ||
       (fields.ifWorkspacesChanged !== undefined && fields.ifWorkspacesChanged !== true)) throw new Error();
+    rawPublicKey = fields.publicKey;
     ifWorkspacesChanged = fields.ifWorkspacesChanged === true;
     envelope = parsed;
   } catch {
@@ -57,8 +61,15 @@ export async function handleCredentialRenewal(
     reply(409, { status: "protocol-mismatch", reason: protocolMismatchReason(protocolVersion) });
     return true;
   }
+  // Keep the credential-free protocol probe stable across upgrades.
+  if ((envelope.token !== "" && !isCredentialPublicKey(rawPublicKey)) ||
+    (rawPublicKey !== undefined && !isCredentialPublicKey(rawPublicKey))) {
+    reply(400, { status: "invalid-request" });
+    return true;
+  }
+  publicKey = typeof rawPublicKey === "string" ? rawPublicKey : "";
   try {
-    const result = await credentials.renew(envelope.token, memberships, { ifWorkspacesChanged });
+    const result = await credentials.renew(envelope.token, memberships, { publicKey, ifWorkspacesChanged });
     reply(result.status === "renewed" || result.status === "unchanged" ? 200 : 401,
       result.status === "renewed" && workspaceNames !== undefined ? addWorkspaceNames(result, workspaceNames) : result);
   } catch {

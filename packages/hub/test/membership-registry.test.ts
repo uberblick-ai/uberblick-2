@@ -1,14 +1,11 @@
+import { issueCredential } from "./device-credentials.js";
 import { copyFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry, type MembershipRole } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  importCredentialKey,
-  mintToken,
-} from "@uberblick/schema/token";
+import { MAX_TOKEN_LIFETIME_SECONDS, importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const databases: HubDatabase[] = [];
@@ -278,7 +275,7 @@ describe("hub-owned workspace memberships", () => {
     copyFileSync(fileURLToPath(new URL("./fixtures/extension-sqlite.sqlite", import.meta.url)), path);
     const firstDatabase = database(path);
     const credentials = new CredentialRegistry(firstDatabase);
-    const issued = credentials.issue({ principalId: "person", deviceId: "laptop", workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    const issued = issueCredential(credentials, { principalId: "person", deviceId: "laptop", workspaces: [WORKSPACE, OTHER_WORKSPACE] });
     const signed = await mintToken(await importCredentialKey(issued.keyBytes), {
       typ: "room", sub: "client-asserted-admin", workspace: WORKSPACE, scope: "read-write",
       kid: issued.record.id, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,

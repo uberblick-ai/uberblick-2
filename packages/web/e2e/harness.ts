@@ -42,6 +42,7 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
@@ -487,7 +488,7 @@ export async function startHarness(options: {
         hubAdmins.grant(principal.id);
         hubAdmins.grant(foreign.id);
       }
-      const issue = (principalId: string, deviceName?: string) => registry.issue({ principalId, deviceId: randomUUID(),
+      const issue = (principalId: string, deviceName?: string) => issueCredential(registry, { principalId, deviceId: randomUUID(),
         workspaces: principalId === principal.id && accessRole === "none" ? [] : [workspaceUuid], ...(deviceName === undefined ? {} : { deviceName }) });
       const deviceName = "browser-laptop";
       const current = issue(principal.id, deviceName);
@@ -523,7 +524,7 @@ export async function startHarness(options: {
         if (principals === undefined || memberships === undefined || registry === undefined) throw new Error("Second hub needs device registries");
         const principal = principals.identify("4321", "second-person");
         memberships.grant({ workspaceId: secondWorkspace, principalId: principal.id, role: "admin" });
-        const issued = registry.issue({ principalId: principal.id, deviceId: randomUUID(), workspaces: [secondWorkspace] });
+        const issued = issueCredential(registry, { principalId: principal.id, deviceId: randomUUID(), workspaces: [secondWorkspace] });
         const { replacedAt: _replaced, ...record } = issued.record;
         const logins = storedCredentials as { hubLogins: Record<string, unknown> };
         logins.hubLogins[`http://127.0.0.1:${secondHub.port}`] = {

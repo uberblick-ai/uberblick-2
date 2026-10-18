@@ -25,6 +25,18 @@ afterEach(cleanUp);
 afterAll(removeTempDirs);
 
 describe("ub auth local selection and command surface", () => {
+  it("reports an old HMAC login as not signed in without contacting the hub", async () => {
+    const old = fixture();
+    old.credential.key = Buffer.alloc(32, 7).toString("base64url");
+    const box = sandbox({ credentials: { hubLogins: { [OTHER_HUB]: old } } });
+    const run = await runInProcess(["auth", "status", OTHER_HUB, "--json"], box);
+    expect(run.status).toBe(1);
+    expect(JSON.parse(run.stdout)).toMatchObject({ outcome: "not-signed-in", storedLogin: null });
+    expect(run.stderr).toContain(`ub auth login ${OTHER_HUB}`);
+    expect(run.output).not.toContain("credential-store");
+    expect(run.output).not.toContain(old.credential.key);
+  });
+
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
       if (JSON.parse(String(init?.body)).operation !== "own-hub-role") throw new Error("unreachable fixture hub");
@@ -284,6 +296,19 @@ describe("ub auth local selection and command surface", () => {
 });
 
 describe("hub-driven CLI GitHub sign-in", () => {
+  it("replaces an old HMAC login without warning about an already-invalid previous device", async () => {
+    const remote = await rig();
+    const old = fixture();
+    old.credential.key = Buffer.alloc(32, 7).toString("base64url");
+    const box = sandbox({ credentials: { hubLogins: { [remote.origin]: old } } });
+    const run = await runInProcess(["auth", "login", remote.origin], box);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(savedLogin(box, remote.origin).credential.key).not.toBe(old.credential.key);
+    expect(remote.requests.some(request => request.body.operation === "revoke-device")).toBe(false);
+    expect(JSON.stringify(remote.requests)).not.toContain(savedLogin(box, remote.origin).credential.key);
+  });
+
   it("claims a fresh deployed hub before storing its workspace credential and leaves the binding unchanged", async () => {
     const remote = await rig([], true, true);
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
@@ -493,7 +518,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(stored.identity).toMatchObject({ githubAccountId: "1234", githubUsername: USERNAME });
     expect(stored.credential.record.workspaces).toEqual([OTHER_WORKSPACE, WORKSPACE].sort());
     expect(stored.credential.record.principalId).toBe(stored.identity.id);
-    expect(stored.credential.key.length).toBe(43);
+    expect(Buffer.from(stored.credential.key, "base64url")).toHaveLength(48);
     expect(readStore(box).hubLogins?.[OTHER_HUB]).toEqual(other);
     expect(readStore(box).signingSecret).toBe(SIGNING_SECRET);
     expect(statSync(credentialPath(box)).mode & 0o077).toBe(0);
@@ -502,9 +527,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     for (const request of remote.requests) {
       expect(request.method).toBe(request.path === "/auth/claim-state" ? "GET" : "POST");
       expect(request.authorization).toBeUndefined();
-      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? ["deviceName"]
+      expect(Object.keys(request.body).sort()).toEqual(request.path.endsWith("start") ? ["deviceName", "publicKey"]
         : request.path === "/auth/claim-state" ? []
-        : request.path === "/auth/credential/renew" ? ["protocolVersion", "token"] : ["collectionSecret", "requestId"]);
+        : request.path === "/auth/credential/renew" ? ["protocolVersion", "token"] : ["collectionSecret", "publicKey", "requestId"]);
       if (request.path === "/auth/credential/renew") expect(request.body).toEqual({ protocolVersion: SYNC_PROTOCOL_VERSION, token: "" });
       if (request.path.endsWith("start")) expect(request.body.deviceName).toBe(hostname());
     }
@@ -547,9 +572,9 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const name = 'Synthetic 🧭 "workspace" \\';
     remote.controls.transform = (path, status, result, body) => {
       if (path !== "/auth/github/collect" || result.status !== "complete") return { status, result };
-      const credential = result.credential as { key: string };
+      const credential = result.credential as Record<string, unknown>;
       const values = [name, "unsafe\u009bname", "unsafe\u202ename", " padded ",
-        `key ${credential.key}`, `secret ${String(body.collectionSecret)}`];
+        `secret ${String(body.collectionSecret)}`, `secret ${String(body.collectionSecret)}`];
       return { status, result: { ...result, credential: { ...credential,
         workspaceNames: { ...Object.fromEntries(workspaces.map((workspace, index) => [workspace, values[index]])),
           [OTHER_WORKSPACE]: "Not issued" },

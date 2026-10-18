@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { generateCredentialKeyPair } from "@uberblick/schema/token";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox, sleep, waitUntil } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -121,8 +122,9 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     assertPublicOnly(failure, remote);
     remote.github.failAt = undefined;
     remote.github.lifetime = 60;
+    const publicKey = Buffer.from((await generateCredentialKeyPair()).publicKey).toString("base64url");
     await Promise.all(Array.from({ length: 100 }, () => fetch(`http://127.0.0.1:${remote.hub.port}/auth/github/start`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ publicKey }),
     }).then((response) => response.arrayBuffer())));
     const busy = await runInProcess(["auth", "login", remote.origin], box);
     expect(busy.status).toBe(1);
@@ -163,16 +165,18 @@ describe("CLI sign-in validates availability and has a finite lifetime", () => {
     }
   });
 
-  it.each(["username-echoes-key", "username-echoes-collection-secret"])("refuses a complete response with %s and explains the issued device", async (kind) => {
+  it.each(["credential-contains-key", "username-echoes-collection-secret"])("refuses a complete response with %s and explains the issued device", async (kind) => {
     const remote = await rig();
     let issuedKey: string | undefined;
     remote.controls.transform = (path, status, result) => {
       if (!path.endsWith("collect") || result.status !== "complete") return { status, result };
       const credential = result.credential as Login["credential"];
       const identity = result.identity as Login["identity"];
-      issuedKey = credential.key;
-      const echoed = kind === "username-echoes-key" ? credential.key
-        : remote.requests.at(-1)?.body.collectionSecret;
+      if (kind === "credential-contains-key") {
+        issuedKey = "private-upstream-device-key";
+        return { status, result: { ...result, credential: { ...credential, key: issuedKey } } };
+      }
+      const echoed = remote.requests.at(-1)?.body.collectionSecret;
       return { status, result: { ...result, identity: { ...identity, githubUsername: echoed } } };
     };
     const box = sandbox({ credentials: { hubLogins: { [remote.origin]: fixture() } } });

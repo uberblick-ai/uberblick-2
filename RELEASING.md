@@ -181,8 +181,11 @@ mise exec -- node scripts/hub-release-proof.mjs 0.5.0 0.6.0 "$(git rev-parse HEA
 This probe requires Docker Engine 28.0.0 and Compose 2.24.4 or newer, the release
 floors. It extracts host files into empty directories and starts an isolated,
 disposable project on loopback HTTP, then checks backup, restore, setup
-status and replacement retaining private access and Caddy state. It cleans up
-its containers and volumes. It does not exercise Tailscale or public DNS
+status and replacement retaining documents, private history and Caddy state.
+Crossing from HMAC to public-key device credentials must retain the credential
+rows as revoked history without keys, including after restoring the older
+backup; upgrades between public-key releases must retain credentials unchanged.
+It cleans up its containers and volumes. It does not exercise Tailscale or public DNS
 certificate issuance, GitHub approval, the Mac Mini journey or anonymous
 registry pulls; those remain attended release checks.
 

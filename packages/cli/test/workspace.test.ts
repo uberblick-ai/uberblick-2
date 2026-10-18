@@ -146,7 +146,7 @@ it("workspace use remembers device admission after logout and never clears anoth
   await writeHubLogin("http://localhost:8080", {
     identity: { id: WORKSPACE, githubAccountId: "12345", githubUsername: "synthetic-person" },
     credential: { record: { id: WORKSPACE, principalId: WORKSPACE, deviceId: OTHER,
-      workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: Buffer.alloc(32).toString("base64url") },
+      workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null }, key: fixture().credential.key },
   }, box.env);
   record(box, WORKSPACE, endpoint);
   record(box, OTHER, otherEndpoint);

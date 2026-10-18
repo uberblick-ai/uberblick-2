@@ -17,6 +17,7 @@ import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { readAuthEnvelope, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import type { TokenClaims } from "@uberblick/schema/token";
+import { issueCredential } from "./device-credentials.js";
 
 export interface DeviceSyncAuthentication {
   room: string;
@@ -132,7 +133,7 @@ export async function startDeviceSyncHub(options: {
     get renewalCount(): number { return renewalCount; },
     principalId, logs, authentications,
     issue(request: { workspaces: string[]; principalId?: string; deviceId?: string }): StoredHubLogin {
-      const issued = credentials.issue({
+      const issued = issueCredential(credentials, {
         workspaces: request.workspaces,
         principalId: request.principalId ?? principalId,
         deviceId: request.deviceId ?? randomUUID(),

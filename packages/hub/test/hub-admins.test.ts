@@ -1,3 +1,4 @@
+import { issueCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { setWorkspaceName } from "@uberblick/schema";
 import { afterEach, expect, it } from "vitest";
@@ -82,7 +83,7 @@ it("persists suspension through restart, preserves workspace data and commits be
   registry.grant(owner.id);
   const workspaceId = randomUUID();
   memberships.grant({ workspaceId, principalId: owner.id, role: "admin" });
-  const issued = credentials.issue({ principalId: owner.id, deviceId: randomUUID(), workspaces: [workspaceId] });
+  const issued = issueCredential(credentials, { principalId: owner.id, deviceId: randomUUID(), workspaces: [workspaceId] });
   const directory = new Y.Doc();
   database.connection.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(`${workspaceId}/_directory`, Y.encodeStateAsUpdate(directory));
   directory.destroy();
@@ -175,7 +176,7 @@ it("retrieves inventories larger than the transport bound through bounded pages,
     const registry = new HubAdminRegistry(database);
     const owner = principals.identify("999999999", "owner");
     registry.grant(owner.id);
-    const issued = credentials.issue({ principalId: owner.id, deviceId: randomUUID(), workspaces: [] });
+    const issued = issueCredential(credentials, { principalId: owner.id, deviceId: randomUUID(), workspaces: [] });
     const settings = new Y.Doc();
     setWorkspaceName(settings, "A".repeat(64));
     settings.getText("private-content").insert(0, "private document content");

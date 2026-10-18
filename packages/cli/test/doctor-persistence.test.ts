@@ -4,7 +4,7 @@
  * diagnostic's stored state exactly as it was found.
  */
 
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -94,7 +94,7 @@ function deviceSandbox(): Sandbox {
     credential: {
       record: { id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [WORKSPACE],
         issuedAt: Date.now(), revokedAt: null },
-      key: Buffer.alloc(32, 1).toString("base64url"),
+      key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
       workspaceNames: { [WORKSPACE]: "Credential name" },
     },
   };

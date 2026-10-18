@@ -88,7 +88,7 @@ describe("CLI device hostname metadata", () => {
     const name = "remote-agent.example.test";
     const run = await loginWithHostname(box, remote.origin, name).result;
     expect(run.status, run.stderr).toBe(0);
-    expect(remote.requests.find(request => request.path.endsWith("start"))?.body).toEqual({ deviceName: name });
+    expect(remote.requests.find(request => request.path.endsWith("start"))?.body).toEqual({ deviceName: name, publicKey: expect.any(String) });
     const login = savedLogin(box, remote.origin);
     const devices = await manageRequest(remote.origin, { operation: "list-devices" }, login);
     expect(devices.body).toMatchObject({ status: "ok", devices: [{ deviceId: login.credential.record.deviceId, deviceName: name, current: true }] });
@@ -104,27 +104,27 @@ describe("CLI device hostname metadata", () => {
     const remote = await rig(); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, name, throws).result;
     expect(run.status, run.stderr).toBe(0);
-    expect(remote.requests.find(request => request.path.endsWith("start"))?.body).toEqual({});
+    expect(remote.requests.find(request => request.path.endsWith("start"))?.body).toEqual({ publicKey: expect.any(String) });
     const devices = await manageRequest(remote.origin, { operation: "list-devices" }, savedLogin(box, remote.origin));
     expect(devices.status).toBe(200);
     expect(devices.body).toMatchObject({ status: "ok", devices: [expect.not.objectContaining({ deviceName: expect.anything() })] });
   });
 
-  it("retries a pre-name hub once with an empty body and stores the delivered credential", async () => {
+  it("never drops the public key when a hub refuses the named start", async () => {
     const remote = await olderHub(); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
-    expect(run.status, run.stderr).toBe(0);
+    expect(run.status).toBe(1);
     expect(remote.probes).toEqual([{ body: { protocolVersion: SYNC_PROTOCOL_VERSION, token: "" }, authorization: undefined }]);
-    expect(remote.starts).toEqual([{ deviceName: "agent-server" }, {}]);
-    expect(savedLogin(box, remote.origin)).toEqual(remote.login);
+    expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
+    expect(existsSync(credentialPath(box))).toBe(false);
     expect(remote.cancellations).toEqual([]);
   });
 
-  it("does not keep retrying after the unnamed start is refused", async () => {
+  it("does not retry a refused start", async () => {
     const remote = await olderHub(undefined, true); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
     expect(run.status).toBe(1);
-    expect(remote.starts).toEqual([{ deviceName: "agent-server" }, {}]);
+    expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
     expect(existsSync(credentialPath(box))).toBe(false);
   });
 
@@ -136,10 +136,10 @@ describe("CLI device hostname metadata", () => {
     const remote = await olderHub({ status, result }); const box = sandbox();
     const run = await loginWithHostname(box, remote.origin, "agent-server").result;
     expect(run.status).toBe(1);
-    expect(remote.starts).toEqual([{ deviceName: "agent-server" }]);
+    expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
     expect(existsSync(credentialPath(box))).toBe(false);
     expect(remote.cancellations).toEqual("requestId" in result
-      ? [{ requestId: REQUEST_ID, collectionSecret: started.collectionSecret }] : []);
+      ? [{ requestId: REQUEST_ID, collectionSecret: started.collectionSecret, publicKey: expect.any(String) }] : []);
   });
 
   it("does not start a fallback attempt after interruption while the named refusal is pending", async () => {
@@ -155,7 +155,7 @@ describe("CLI device hostname metadata", () => {
       const result = await run.result;
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("GitHub sign-in interrupted");
-      expect(remote.starts).toEqual([{ deviceName: "agent-server" }]);
+      expect(remote.starts).toEqual([{ deviceName: "agent-server", publicKey: expect.any(String) }]);
       expect(existsSync(credentialPath(box))).toBe(false);
     } finally { release(); await run.result; }
   });

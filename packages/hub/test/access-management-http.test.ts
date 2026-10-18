@@ -1,11 +1,13 @@
+import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CredentialRegistry, type CredentialRenewal, type IssuedCredential } from "../src/credentials.js";
+import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, importRootSecret, mintRequestProof, mintToken, type RequestAction } from "@uberblick/schema/token";
+import { importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -34,7 +36,7 @@ async function rig(options: { loopback?: boolean; github?: boolean; githubFetch?
 function person(hub: Hub, accountId: string, username: string, memberships: [string, MembershipRole][] = []) {
   const principal = hub.principals!.identify(accountId, username);
   for (const [workspaceId, role] of memberships) hub.memberships!.grant({ workspaceId, principalId: principal.id, role });
-  const issued = hub.credentials!.issue({ principalId: principal.id, deviceId: randomUUID(),
+  const issued = issueCredential(hub.credentials!, { principalId: principal.id, deviceId: randomUUID(),
     workspaces: memberships.map(([workspace]) => workspace) });
   return { principal, issued };
 }
@@ -105,7 +107,7 @@ describe("authenticated hub access management", () => {
     const completed = await signInPost("collect", { requestId: pending.requestId, collectionSecret: pending.collectionSecret });
     expect(completed.status).toBe("complete");
     const credential = completed.credential as { record: IssuedCredential["record"]; key: string };
-    const issued: IssuedCredential = { record: credential.record, keyBytes: Buffer.from(credential.key, "base64url") };
+    const issued: IssuedCredential = { record: credential.record, keyBytes: credentialPrivateKey(credential.record) };
     expect(issued.record.principalId).toBe(principal.id);
     expect(issued.record).not.toHaveProperty("deviceName");
     expect(credential).not.toHaveProperty("deviceName");
@@ -193,7 +195,7 @@ describe("authenticated hub access management", () => {
       { operation: "remove-member", workspaceId: WORKSPACE, principalId: member.principal.id }] as Action[]) {
       const payload = Buffer.from(JSON.stringify({ typ: "request", kid: admin.issued.record.id,
         ...action, iat, exp: iat + 61 })).toString("base64url");
-      const signature = await globalThis.crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+      const signature = await globalThis.crypto.subtle.sign("Ed25519", key, new TextEncoder().encode(payload));
       const presented = `${payload}.${Buffer.from(signature).toString("base64url")}`;
       expect(await post(hub, envelope(presented, action))).toEqual({ code: 401, result: { status: "sign-in-required" } });
     }
@@ -240,8 +242,8 @@ describe("authenticated hub access management", () => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(signedInAt);
     const owner = person(hub, "1234", "owner");
     clock.mockRestore();
-    const second = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
-    const retired = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    const second = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    const retired = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
     hub.credentials!.revoke(retired.record.id);
     const foreign = person(hub, "5678", "foreign", [[WORKSPACE, "admin"]]);
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: owner.principal.id, role: "member" });
@@ -255,7 +257,7 @@ describe("authenticated hub access management", () => {
     const renewed = await response.json() as CredentialRenewal;
     if (renewed.status !== "renewed") throw new Error("credential did not renew");
     const replacement: IssuedCredential = { record: renewed.credential.record,
-      keyBytes: Buffer.from(renewed.credential.key, "base64url") };
+      keyBytes: credentialPrivateKey(renewed.credential.record) };
     expect(replacement.record.issuedAt).toBeGreaterThan(signedInAt);
     expect(await manage(hub, second, { operation: "list-devices" })).toEqual({ code: 200, result: { status: "ok",
       devices: expect.arrayContaining([
@@ -324,7 +326,7 @@ describe("authenticated hub access management", () => {
     expect(renew.status).toBe(401);
     expect(await renew.json()).toEqual({ status: "sign-in-required" });
     await expect(connect(hub, testRoom(), managementProof).denied).resolves.toBe("device-credential-refused");
-    const replaced = await hub.credentials!.renew(renewal, hub.memberships!);
+    const replaced = await renewCredential(hub.credentials!, renewal, hub.memberships!);
     expect(replaced.status).toBe("renewed");
     expect(await post(hub, envelope(managementProof, action))).toEqual({ code: 401, result: { status: "sign-in-required" } });
     hub.credentials!.revoke(member.issued.record.id);
@@ -424,7 +426,7 @@ describe("authenticated hub access management", () => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const member = person(hub, "5678", "member", [[WORKSPACE, "member"], [OTHER_WORKSPACE, "admin"]]);
-    const second = hub.credentials!.issue({ principalId: member.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    const second = issueCredential(hub.credentials!, { principalId: member.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE, OTHER_WORKSPACE] });
     const room = testRoom();
     const writer = connect(hub, room, await roomToken(member.issued));
     const otherDevice = connect(hub, room, await roomToken(second));
@@ -488,7 +490,7 @@ describe("direct GitHub account grants", () => {
   it("shares an account's lookup allowance across its devices and workspaces without blocking another account", async () => {
     const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"], [OTHER_WORKSPACE, "admin"]]);
-    const spare = hub.credentials!.issue({ principalId: admin.principal.id, deviceId: randomUUID(),
+    const spare = issueCredential(hub.credentials!, { principalId: admin.principal.id, deviceId: randomUUID(),
       workspaces: [WORKSPACE, OTHER_WORKSPACE] });
     const other = person(hub, "9012", "other-admin", [[OTHER_WORKSPACE, "admin"]]);
     const resolve = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" } as const;
@@ -694,7 +696,7 @@ describe("direct GitHub account grants", () => {
     const renewal = await mintRequestProof(await importCredentialKey(replaced.issued.keyBytes), {
       kid: replaced.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
     });
-    expect((await hub.credentials!.renew(renewal, hub.memberships!)).status).toBe("renewed");
+    expect((await renewCredential(hub.credentials!, renewal, hub.memberships!)).status).toBe("renewed");
     for (const action of [
       { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" },
       { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "4567" },
@@ -838,7 +840,7 @@ describe("direct GitHub account grants", () => {
           const renewal = await mintRequestProof(await importCredentialKey(admin.issued.keyBytes), {
             kid: admin.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
           });
-          expect((await hub.credentials!.renew(renewal, hub.memberships!)).status).toBe("renewed");
+          expect((await renewCredential(hub.credentials!, renewal, hub.memberships!)).status).toBe("renewed");
         }
         if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
       } finally {
@@ -858,7 +860,7 @@ describe("direct GitHub account grants", () => {
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     hub.hubAdmins!.grant(admin.principal.id);
     const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
-    const spare = hub.credentials!.issue({ principalId: admin.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    const spare = issueCredential(hub.credentials!, { principalId: admin.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
     expect(await manage(hub, admin.issued, { operation: "list-devices" })).toMatchObject({ code: 200, result: { status: "ok" } });
     expect(await manage(hub, admin.issued, { operation: "revoke-device", deviceId: spare.record.deviceId }))
       .toEqual({ code: 200, result: { status: "ok" } });
@@ -1007,20 +1009,20 @@ describe("hub administration", () => {
     const owner = person(hub, "1234", "hub-admin", [[WORKSPACE, "member"]]);
     hub.hubAdmins!.grant(owner.principal.id);
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 1_000);
-    const second = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    const second = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
     hub.credentials!.revoke(second.record.id);
     clock.mockReturnValue(second.record.issuedAt + 1_000);
     const renewal = await mintRequestProof(await importCredentialKey(owner.issued.keyBytes), {
       kid: owner.issued.record.id, operation: "renew-credential", lifetimeSeconds: 60,
     });
-    const renewed = await hub.credentials!.renew(renewal, hub.memberships!);
+    const renewed = await renewCredential(hub.credentials!, renewal, hub.memberships!);
     if (renewed.status !== "renewed") throw new Error("credential did not renew");
-    const replacement = { record: renewed.credential.record, keyBytes: Buffer.from(renewed.credential.key, "base64url") };
+    const replacement = { record: renewed.credential.record, keyBytes: credentialPrivateKey(renewed.credential.record) };
     expect(await manage(hub, replacement, { operation: "list-hub-admins" })).toMatchObject({ code: 200,
       result: { admins: [{ lastSignedInAt: second.record.issuedAt, workspaces: 1 }] } });
     // Insertion order still identifies the newest login when the clock moves backwards.
     clock.mockReturnValue(owner.issued.record.issuedAt - 1_000);
-    const third = hub.credentials!.issue({ principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
+    const third = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [] });
     clock.mockRestore();
     expect(await manage(hub, replacement, { operation: "list-hub-admins" })).toMatchObject({ code: 200,
       result: { admins: [{ lastSignedInAt: third.record.issuedAt }] } });

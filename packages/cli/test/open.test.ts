@@ -19,6 +19,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
@@ -136,7 +137,7 @@ describe("ub open", () => {
       await writeHubLogin("https://hub.example.ts.net", {
         identity: { id: principalId, githubAccountId: "12345", githubUsername: "open-person" },
         credential: {
-          key: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+          key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"),
           record: { id: crypto.randomUUID(), principalId, deviceId: crypto.randomUUID(),
             workspaces: [], issuedAt: Date.now(), revokedAt: null },
         },

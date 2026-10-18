@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { writeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { createMcpEngine, defaultWorkspaceDatabasePath, resolveMcpConfig, type ServingSyncStatus } from "@uberblick/mcp-server";
 import { appendBlock, directoryRoom, editBlock, getBlocks, getDirectoryEntry, initDoc,
@@ -60,7 +61,7 @@ async function deviceHub(box: Sandbox, workspace: string, handle: string, permit
   hubs.push(hub);
   const identity = hub.principals!.identify(permitted ? "1234" : "5678", handle);
   if (permitted) hub.memberships!.grant({ workspaceId: workspace, principalId: identity.id, role: "admin" });
-  const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
+  const issued = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: crypto.randomUUID(),
     workspaces: permitted ? [workspace] : [] });
   const { replacedAt: _replaced, ...record } = issued.record;
   const login: StoredHubLogin = { identity, credential: {

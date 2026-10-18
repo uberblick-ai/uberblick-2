@@ -1,10 +1,11 @@
 /** Device retirement uses real hub credentials; an unconfirmed reply is never success. */
 import { readFileSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { importCredentialKey, inspectRequestProof } from "@uberblick/schema/token";
+import { importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manageRequest } from "../src/access-management.js";
 import {
@@ -141,7 +142,7 @@ describe("ub auth logout retires devices", () => {
     const older = await signedIn(remote);
     const current = await signedIn(remote);
     // A client predating hostname metadata still issues an unnamed UUID device.
-    const unnamed = remote.hub.credentials!.issue({
+    const unnamed = issueCredential(remote.hub.credentials!, {
       principalId: current.login.identity.id, deviceId: randomUUID(), workspaces: [WORKSPACE],
     });
     const ownDevices = await manageRequest(remote.origin, { operation: "list-devices" }, current.login);
@@ -315,7 +316,8 @@ describe("ub auth login replaces and retires its previous device", () => {
     remote.controls.onManagement = async body => {
       expect(savedLogin(box, remote.origin).credential.record.deviceId).not.toBe(old.credential.record.deviceId);
       expect(body).toMatchObject({ operation: "revoke-device", deviceId: old.credential.record.deviceId });
-      const proof = await inspectRequestProof(await importCredentialKey(Buffer.from(old.credential.key, "base64url")),
+      const publicKey = createPublicKey(createPrivateKey({ key: Buffer.from(old.credential.key, "base64url"), type: "pkcs8", format: "der" })).export({ format: "jwk" }).x!;
+      const proof = await inspectRequestProof(await importCredentialPublicKey(Buffer.from(publicKey, "base64url")),
         String(body.token), { operation: "revoke-device", deviceId: old.credential.record.deviceId });
       proofVerified = "kid" in proof && proof.kid === old.credential.record.id;
       return undefined;

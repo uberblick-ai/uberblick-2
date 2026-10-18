@@ -1,3 +1,4 @@
+import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { createInterface } from "node:readline";
@@ -169,7 +170,7 @@ describe("independent hubs sharing the public GitHub app", () => {
     expect(loginA.credential.record.workspaces).toEqual([WORKSPACE]);
     expect(loginB.credential.record.workspaces).toEqual([]);
     expect(loginB.credential.record.id).not.toBe(loginA.credential.record.id);
-    expect(loginB.credential.key).not.toBe(loginA.credential.key);
+    expect(credentialPrivateKey(loginB.credential.record)).not.toEqual(credentialPrivateKey(loginA.credential.record));
     expect(privateRows(a.databasePath).memberships).toEqual([
       { workspace_id: WORKSPACE, principal_id: loginA.identity.id, role: "admin" },
     ]);
@@ -188,8 +189,8 @@ describe("independent hubs sharing the public GitHub app", () => {
     try {
       const credentialsA = new CredentialRegistry(dbA);
       const credentialsB = new CredentialRegistry(dbB);
-      const sign = async (login: Complete, key = login.credential.key) => mintToken(
-        await importCredentialKey(Buffer.from(key, "base64url")), {
+      const sign = async (login: Complete, key = credentialPrivateKey(login.credential.record)) => mintToken(
+        await importCredentialKey(key), {
           typ: "room", sub: login.identity.id, workspace: WORKSPACE, scope: "read-write",
           kid: login.credential.record.id, lifetimeSeconds: 60,
         });
@@ -199,7 +200,7 @@ describe("independent hubs sharing the public GitHub app", () => {
       expect(await credentialsB.verify(tokenB)).toMatchObject({ record: loginB.credential.record });
       expect(await credentialsB.verify(tokenA)).toEqual({ failure: "unknown-credential" });
       expect(await credentialsA.verify(tokenB)).toEqual({ failure: "unknown-credential" });
-      expect(await credentialsB.verify(await sign(loginB, loginA.credential.key))).toEqual({ failure: "bad-signature" });
+      expect(await credentialsB.verify(await sign(loginB, credentialPrivateKey(loginA.credential.record)))).toEqual({ failure: "bad-signature" });
       expect(credentialsA.revoke(loginA.credential.record.id)).toBe(true);
       expect(await credentialsA.verify(tokenA)).toEqual({ failure: "revoked-credential" });
       expect(await credentialsB.verify(tokenB)).toMatchObject({ record: loginB.credential.record });

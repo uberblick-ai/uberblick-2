@@ -63,7 +63,7 @@ function createTeamExtension(
       if (adopted !== undefined) log({ event: "hub.admin.adopted", ...adopted });
     }
     if (config.github !== undefined) {
-      credentials = new CredentialRegistry(database);
+      credentials = new CredentialRegistry(database, hubAdmins, log);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
       signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
       accounts = new GithubAccountLookup(config.github.fetch, config.github.now);

@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { setImmediate } from "node:timers/promises";
@@ -30,7 +30,7 @@ it("keeps MCP local edits durable while refusing sync, renewal and management be
   const principalId = randomUUID();
   const login = {
     identity: { id: principalId, githubAccountId: "1234", githubUsername: "octocat" },
-    credential: { key: Buffer.alloc(32, 7).toString("base64url"), record: {
+    credential: { key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url"), record: {
       id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [], issuedAt: Date.now(), revokedAt: null,
     } },
   };

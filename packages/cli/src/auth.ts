@@ -19,6 +19,7 @@ import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
 import { assertHubTransport, authenticationOrigin, hubTransportProblem, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
+import { generateCredentialKeyPair } from "@uberblick/schema/token";
 import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 
@@ -538,7 +539,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
   const interrupt = () => interrupted.abort();
   process.on("SIGINT", interrupt);
   process.on("SIGTERM", interrupt);
-  let attempt: { requestId: string; collectionSecret: string } | undefined;
+  let attempt: { requestId: string; collectionSecret: string; publicKey: string } | undefined;
   let deadline: number | undefined;
   let collected = false;
   let stored = false;
@@ -548,6 +549,8 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     const unclaimed = await isUnclaimed(selection.origin, interrupted.signal);
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
+    const keyPair = await generateCredentialKeyPair();
+    const publicKey = Buffer.from(keyPair.publicKey).toString("base64url");
     // A start interrupted before its reply has no collection secret to cancel
     // with. Finish this bounded read so a late reply can still be abandoned.
     let deviceName: string | undefined;
@@ -557,16 +560,10 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
       // are malformed. Never display any of the private start fields.
       if (typeof result.requestId === "string" && UUID.test(result.requestId) &&
           typeof result.collectionSecret === "string" && /^[A-Za-z0-9_-]{43}$/.test(result.collectionSecret)) {
-        attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret };
+        attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret, publicKey };
       }
     });
-    let started = await start(deviceName === undefined ? {} : { deviceName });
-    // Older hubs require an empty start body. Only a validated refusal with
-    // no attempt authority permits one unnamed retry; interrupted starts stop.
-    if (deviceName !== undefined && started.status === "invalid-request" &&
-        Object.keys(started).length === 1 && !interrupted.signal.aborted) {
-      started = await start({});
-    }
+    const started = await start({ publicKey, ...(deviceName === undefined ? {} : { deviceName }) });
     if (started.status !== "pending") terminal(started);
     if (attempt === undefined ||
         started.verificationUri !== GITHUB_APPROVAL_URL ||
@@ -602,7 +599,12 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
       if (result.status === "pending" && seconds(result.interval)) { interval = result.interval; continue; }
       if (result.status !== "complete") terminal(result);
       collected = true;
-      const supplied = { identity: result.identity, credential: result.credential };
+      if (!object(result.credential) || Object.hasOwn(result.credential, "key")) {
+        throw new SignInFailure("the hub returned an invalid sign-in credential; run login again");
+      }
+      const supplied = { identity: result.identity, credential: {
+        ...result.credential, key: Buffer.from(keyPair.privateKey).toString("base64url"),
+      } };
       if (!isHubLogin(supplied) || supplied.identity.githubUsername.includes(attempt.collectionSecret)) {
         throw new SignInFailure("the hub returned an invalid sign-in credential; run login again");
       }
