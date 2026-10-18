@@ -273,7 +273,7 @@ host-served pages. Each sign-in creates its signing key on that device; the
 hub receives only its public key.
 
 When the upgraded hub opens its database, it revokes every earlier HMAC device
-credential and erases its signing key. This also happens when it opens a
+credential and removes its signing key. This also happens when it opens a
 restored backup from before the upgrade. There is no exchange of an old
 credential for a new key pair or compatibility window. An updated client
 treats an earlier login as signed out: `ub auth status` reports
@@ -1539,7 +1539,7 @@ or empty backup leaves the volume untouched. A running hub also refuses the
 restore and names `docker compose stop hub`.
 
 Opening a restored backup made before the device-created-key upgrade revokes
-its HMAC device credentials and erases their keys. Every computer and unattended
+its HMAC device credentials and removes their keys. Every computer and unattended
 agent host must then run `ub auth login <hub-origin>` again. Restoring any
 backup restores its recorded access state, including previously revoked
 devices or removed members; it does not add rollback protection.

@@ -15,6 +15,7 @@ import http from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assertHubDatabaseUpgrade, seedReleaseCredential, snapshotHubDatabase } from "./lib/hub-release-database.mjs";
 
 const WORKSPACE = "00000000-0000-4000-8000-000000001172";
 const PRINCIPAL = "00000000-0000-4000-8000-000000001173";
@@ -131,6 +132,7 @@ async function main() {
   let namedRoute = false;
   const extractionContainers = new Set();
   const imageOperators = new Map();
+  const imageProtocols = new Map();
   const cancel = (signal) => { if (!cleaningUp) { interrupted = signal; stopChild("SIGTERM"); } };
   const onInterrupt = () => cancel("SIGINT");
   const onTerminate = () => cancel("SIGTERM");
@@ -151,14 +153,14 @@ async function main() {
   const live = (source) => compose(["exec", "-T", "hub", "node", "-e", source]);
   const snapshotSource = `const { DatabaseSync } = require("node:sqlite");
 const db = new DatabaseSync("/data/hub.sqlite", {readOnly:true});
-const result = { documents: db.prepare("SELECT name, hex(data) AS data FROM documents ORDER BY name").all() };
-for (const table of ${JSON.stringify(PRIVATE_TABLES)}) {
-  result[table] = db.prepare(table === "hub_credentials" ?
-    "SELECT id, principal_id, device_id, workspaces, hex(signing_key) AS signing_key, issued_at, revoked_at, replaced_at FROM hub_credentials ORDER BY id" :
-    "SELECT * FROM " + table + " ORDER BY 1, 2").all();
-}
+const result = (${snapshotHubDatabase.toString()})(db, ${JSON.stringify(PRIVATE_TABLES)});
 db.close(); console.log(JSON.stringify(result));`;
-  const snapshot = async () => JSON.parse((await live(snapshotSource)).stdout);
+  const snapshot = async () => {
+    const result = JSON.parse((await live(snapshotSource)).stdout);
+    assert.equal(result.credentialKeyColumn, imageProtocols.get(deployment) >= 6 ? "public_key" : "signing_key",
+      "the database uses the credential schema required by the release protocol");
+    return result;
+  };
   const caddyStateCommand = "find /data -type f \\( -name '*.crt' -o -name '*.key' \\) -exec sha256sum {} \\; | sort; cat /data/release-proof /config/release-proof";
   const certificateState = async (running = true) => (await compose(running
     ? ["exec", "-T", "caddy", "sh", "-c", caddyStateCommand]
@@ -185,6 +187,7 @@ db.close(); console.log(JSON.stringify(result));`;
     assert.deepEqual(readdirSync(join(directory, "bin")).sort(),
       ["remote-compose.sh", "hub-backup.sh", "hub-restore.sh", ...(commands.operator ? [] : ["hub-admin-setup.sh"])].sort());
     const metadata = JSON.parse(readFileSync(join(directory, "release.json"), "utf8"));
+    imageProtocols.set(directory, metadata.syncProtocolVersion);
     assert.equal(metadata.version, version);
     if (expectedSha !== undefined && index === 1) assert.equal(metadata.sourceCommit, expectedSha);
     assert.equal(metadata.images.hub, hub);
@@ -293,9 +296,7 @@ db.prepare("UPDATE hub_claim_state SET default_workspace_id = ?, unclaimed = 0 W
 db.prepare("INSERT INTO documents(name,data) VALUES (?,?)").run("${WORKSPACE}/${SETUP}", Buffer.from("${UPDATE}", "base64"));
 db.prepare("INSERT INTO hub_principals VALUES (?,?,?)").run("${PRINCIPAL}", "11720001", "release-proof");
 db.prepare("INSERT INTO hub_memberships VALUES (?,?,?)").run("${WORKSPACE}", "${PRINCIPAL}", "admin");
-db.prepare("INSERT INTO hub_credentials(id,principal_id,device_id,workspaces,signing_key,issued_at) VALUES (?,?,?,?,?,?)")
-  .run("00000000-0000-4000-8000-000000001175", "${PRINCIPAL}", "00000000-0000-4000-8000-000000001176",
-    JSON.stringify(["${WORKSPACE}"]), Buffer.alloc(32,7), 1172000);
+(${seedReleaseCredential.toString()})(db, "${PRINCIPAL}", "${WORKSPACE}");
 db.prepare("INSERT INTO hub_admin_setup_grants VALUES (?,?,?,?,?,?)")
   .run("${SETUP}", "${WORKSPACE}", "${PRINCIPAL}", "11720001", "release-proof", 1);
 db.exec("COMMIT"); db.close();`);
@@ -343,14 +344,15 @@ db.exec("COMMIT"); db.close();`);
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();
     assert.notEqual((await compose(["ps", "--quiet", "hub"])).stdout.trim(), before);
-    assert.deepEqual(await snapshot(), original);
+    let upgraded = await snapshot();
+    assertHubDatabaseUpgrade(upgraded, original);
     assert.equal(await certificateState(), certificates);
     for (const [service, image] of [["hub", `ghcr.io/uberblick-ai/hub:${versions[1]}`], ["caddy", `ghcr.io/uberblick-ai/hub-web:${versions[1]}`]]) {
       const id = (await compose(["ps", "--quiet", service])).stdout.trim();
       assert.equal((await command("docker", ["inspect", "--format", "{{.Config.Image}}", id])).stdout.trim(), image);
     }
     assert.match((await setupCommand(["status", SETUP])).stdout, /complete: release-proof/);
-    console.log(`Recreated ${versions[0]} as ${versions[1]} from newly extracted files; database, private access, claim and Caddy volume state survived.`);
+    console.log(`Recreated ${versions[0]} as ${versions[1]} from newly extracted files; documents, private history, claim and Caddy volumes survived; legacy HMAC credentials are revoked when crossing to public keys.`);
 
     if (imageOperators.get(deployment)) {
       const help = await compose(["exec", "-T", "hub", "ub-hub", "--help"]);
@@ -363,17 +365,19 @@ db.exec("COMMIT"); db.close();`);
       assert.ok(backupPath, "online backup reports its private volume path");
       const mode = await live(`const fs = require("node:fs"); console.log(fs.statSync(${JSON.stringify(backupPath)}).mode & 0o777);`);
       assert.equal(Number(mode.stdout), 0o600);
-      assert.deepEqual(await snapshot(), original);
+      assert.deepEqual(await snapshot(), upgraded);
       const running = await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "-"],
         { input: legacyBackup, allowFailure: true });
       assert.equal(running.code, 1);
       assert.match(running.stdout + running.stderr, /docker compose stop hub/);
-      assert.deepEqual(await snapshot(), original);
+      assert.deepEqual(await snapshot(), upgraded);
       await compose(["stop", "hub"]);
       await compose(["run", "--rm", "--no-deps", "-T", "hub", "ub-hub", "restore", "-"], { input: legacyBackup });
       await compose(["start", "hub"]);
       await serving();
-      assert.deepEqual(await snapshot(), original);
+      const restored = await snapshot();
+      assertHubDatabaseUpgrade(restored, original);
+      upgraded = restored;
       console.log("ub-hub is on PATH; online backup remains private and keeps serving; restore refuses a running hub and accepts a legacy backup through standard input.");
     }
 
@@ -392,14 +396,14 @@ db.exec("COMMIT"); db.close();`);
     // but leave Caddy stopped: this host has no public DNS/certificate authority.
     await compose(["create", "--no-build", "--pull", "never", "--force-recreate"]);
     await compose(["start", "hub"]);
-    assert.deepEqual(await snapshot(), original);
+    assert.deepEqual(await snapshot(), upgraded);
     assert.equal(await certificateState(false), certificates);
     await compose(["stop", "hub"]);
     writeFileSync(join(deployment, ".env"), localSettings, { mode: 0o600 });
     namedRoute = false;
     await compose(["up", "--detach", "--no-build", "--pull", "never", "--force-recreate"]);
     await serving();
-    assert.deepEqual(await snapshot(), original);
+    assert.deepEqual(await snapshot(), upgraded);
     assert.equal(await certificateState(), certificates);
     console.log("Switching loopback to a named HTTPS configuration and back retained documents, private access, claim and synthetic certificate/configuration state.");
     console.log("Loopback HTTP, public config, claim-state proxy and /ws passed without Tailscale. Anonymous GHCR pulls, trusted certificate issuance and GitHub approval remain attended checks.");
