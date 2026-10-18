@@ -19,8 +19,8 @@ export const TOKEN_SCOPES: readonly TokenScope[] = ["read-write", "read-only"];
 export type TokenType = "room";
 
 /**
- * Hub-enforced lifetime ceiling, also checked at minting. Local offline minters
- * cannot extend admission by signing a longer-lived token.
+ * Hub-enforced room-token lifetime ceiling, also checked at minting. Local
+ * offline minters cannot extend admission by signing a longer-lived token.
  */
 export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
 
@@ -30,7 +30,7 @@ export const MAX_TOKEN_LIFETIME_SECONDS = 15 * 60;
  */
 export const CLOCK_SKEW_SECONDS = 60;
 
-/** Lifetime of the per-request device sign-in proofs minted by clients. */
+/** Hub-enforced lifetime ceiling for per-request device sign-in proofs. */
 export const REQUEST_PROOF_LIFETIME_SECONDS = 60;
 
 /**
@@ -302,10 +302,10 @@ export async function mintRequestProof(
   if (
     !Number.isInteger(claims.lifetimeSeconds) ||
     claims.lifetimeSeconds <= 0 ||
-    claims.lifetimeSeconds > MAX_TOKEN_LIFETIME_SECONDS
+    claims.lifetimeSeconds > REQUEST_PROOF_LIFETIME_SECONDS
   ) {
     throw new Error(
-      `mintRequestProof: lifetimeSeconds must be a positive integer no greater than ${MAX_TOKEN_LIFETIME_SECONDS}`,
+      `mintRequestProof: lifetimeSeconds must be a positive integer no greater than ${REQUEST_PROOF_LIFETIME_SECONDS}`,
     );
   }
   const iat = claims.iat ?? Math.floor(Date.now() / 1000);
@@ -313,11 +313,12 @@ export async function mintRequestProof(
   if (!isEpochSeconds(exp)) {
     throw new Error("mintRequestProof: iat + lifetimeSeconds is not a whole second");
   }
-  return signClaims(
-    key,
-    { typ: "request", kid: claims.kid, ...action, iat, exp },
-    "mintRequestProof",
-  );
+  const payload = {
+    typ: "request" as const, kid: claims.kid, ...action, iat, exp,
+    // Independent requests in the same second need distinct replay keys.
+    nonce: globalThis.crypto.randomUUID(),
+  };
+  return signClaims(key, payload, "mintRequestProof");
 }
 
 async function signClaims(
@@ -625,7 +626,7 @@ export async function verifyToken(
 
 /** Why a correctly signed token is still not admissible. */
 export type ClampFailure =
-  /** Longer-lived than {@link MAX_TOKEN_LIFETIME_SECONDS}, whatever it claims. */
+  /** Longer-lived than the room-token or request-proof ceiling. */
   | "lifetime-too-long"
   /** Issued further ahead of the hub's clock than {@link CLOCK_SKEW_SECONDS}. */
   | "not-yet-issued"
@@ -636,10 +637,13 @@ export type ClampFailure =
  * of the minter's claims. Null means admissible freshness, never authenticity.
  */
 export function clampToken(
-  claims: Pick<TokenClaims, "iat" | "exp">,
+  claims: Pick<TokenClaims | RequestProofClaims, "typ" | "iat" | "exp">,
   nowSeconds: number,
 ): ClampFailure | null {
-  if (claims.exp - claims.iat > MAX_TOKEN_LIFETIME_SECONDS) {
+  const lifetime = claims.typ === "request"
+    ? REQUEST_PROOF_LIFETIME_SECONDS
+    : MAX_TOKEN_LIFETIME_SECONDS;
+  if (claims.exp - claims.iat > lifetime) {
     return "lifetime-too-long";
   }
   if (claims.iat > nowSeconds + CLOCK_SKEW_SECONDS) {

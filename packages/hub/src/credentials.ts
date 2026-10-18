@@ -126,12 +126,25 @@ export class CredentialRegistry {
   private readonly selectDevices: StatementSync;
   private readonly selectDeviceCredentials: StatementSync;
   private readonly markDeviceRevoked: StatementSync;
+  private readonly insertUsedProof: StatementSync;
+  private readonly deleteExpiredProofs: StatementSync;
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
   constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database)) {
     const db = database.connection;
     this.db = db;
     db.exec(SCHEMA);
+    db.exec(`CREATE TABLE IF NOT EXISTS hub_used_request_proofs (
+      proof TEXT PRIMARY KEY NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`);
+    db.exec("CREATE INDEX IF NOT EXISTS hub_used_request_proofs_expiry ON hub_used_request_proofs(expires_at)");
+    this.insertUsedProof = db.prepare(`
+      INSERT INTO hub_used_request_proofs (proof, expires_at) VALUES ($proof, $expiresAt)
+      ON CONFLICT(proof) DO NOTHING
+    `);
+    this.deleteExpiredProofs = db.prepare("DELETE FROM hub_used_request_proofs WHERE expires_at < $now");
+    this.deleteExpiredProofs.run({ now: Math.floor(Date.now() / 1000) });
     // CREATE IF NOT EXISTS leaves existing tables unchanged. Add nullable
     // columns without changing existing rows' issued/revoked meaning.
     if (!db.prepare("PRAGMA table_info(hub_credentials)").all()
@@ -245,7 +258,7 @@ export class CredentialRegistry {
   }
 
   /**
-   * Possession grants no room or credential. After awaiting, callers must
+   * Valid mutation proofs are spent before returning. After awaiting, callers must
    * synchronously re-read authority and clamp the proof at the operation's time.
    */
   async verifyRequest(token: string, request: RequestAction): Promise<CredentialRequestVerification | null> {
@@ -260,8 +273,27 @@ export class CredentialRegistry {
       return null;
     }
     const current = this.get(proof.kid);
-    return current !== null && current.revokedAt === null && current.replacedAt === null
-      ? { record: current, claims: proof } : null;
+    if (current === null || current.revokedAt !== null || current.replacedAt !== null ||
+      !this.consumeProof(token, proof)) return null;
+    return { record: current, claims: proof };
+  }
+
+  private consumeProof(token: string, proof: RequestProofClaims): boolean {
+    // Expiry itself is still admissible. Cleanup and the unique insert never
+    // yield, so another request cannot consume the same proof between them.
+    this.deleteExpiredProofs.run({ now: Math.floor(Date.now() / 1000) });
+    switch (proof.operation) {
+      case "own-role":
+      case "list-members":
+      case "list-devices":
+      case "own-hub-role":
+      case "list-hub-admins":
+      case "list-hub-workspaces":
+      case "resolve-account":
+        return true;
+      default:
+        return this.insertUsedProof.run({ proof: token, expiresAt: proof.exp }).changes === 1;
+    }
   }
 
   async verify(token: string): Promise<CredentialVerification> {
@@ -306,15 +338,15 @@ export class CredentialRegistry {
       return refusal;
     }
 
-    // No await follows the last verification. Check, membership snapshot,
-    // issuance and retirement are one transaction on the hub's one handle:
+    // No await follows verification. Current-row checks, proof consumption,
+    // membership snapshot, issuance and retirement share one transaction:
     // a revoke or second exchange that got here first wins, and a failed write
     // cannot leave a second usable credential behind.
     let issued: IssuedCredential;
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.get(proof.kid);
-      if (current === null || current.revokedAt !== null) {
+      if (current === null || current.revokedAt !== null || !this.consumeProof(token, proof)) {
         this.db.exec("ROLLBACK");
         return refusal;
       }
