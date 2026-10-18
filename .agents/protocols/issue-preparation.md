@@ -27,8 +27,6 @@
    Stop dependent work, continue independent work and gather evidence needed for
    the question; code grounding may reveal further questions later. Missing
    required context is not waived. Ask only about unresolved choices or new conflicts.
-   A contract that needs a `SYNC_PROTOCOL_VERSION` change asks a maintainer to
-   approve that change by name before it is ready ([merge policy](delivery-policy.md#merge-policy--the-rules-are-the-authority-not-a-session)).
 4. **Record.** Put the outcome and pointers in the issue under
    [ISSUE_SPEC](../../.github/ISSUE_SPEC.md#body-sections). Cite sources with short
    reading reasons, including relevant decision topic/record UUIDs and open records
