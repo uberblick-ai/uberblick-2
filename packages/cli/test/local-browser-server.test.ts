@@ -15,7 +15,7 @@ import {
   removeAwarenessStates,
 } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { parseRoom } from "@uberblick/schema";
+import { parseRoom, settingsRoom } from "@uberblick/schema";
 import {
   bridgeAwareness,
   createLocalBrowserServer,
@@ -119,6 +119,8 @@ async function fixture(options: {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const updates = new Map<string, Uint8Array[]>();
+  const resets = new Map<string, { seq: number; notice: string; state: Uint8Array }>();
+  const deliveredNotices = new Map<string, number>();
   const reads: { room: string; afterSeq: number }[] = [];
   const logs: HubLogRecord[] = [];
   let failure: unknown = null;
@@ -146,13 +148,22 @@ async function fixture(options: {
       reads.push({ room, afterSeq });
       if (roomReadFailures.has(room)) throw roomReadFailures.get(room);
       if (readFailure !== null) throw readFailure;
+      const reset = resets.get(room);
+      const offset = Math.max(0, afterSeq - (reset?.seq ?? 0));
       return {
-        snapshot: null,
-        updates: (updates.get(room) ?? []).slice(afterSeq).map((payload, index) => ({
-          seq: afterSeq + index + 1,
+        ...(reset === undefined ? {} : { reset }),
+        snapshot: reset !== undefined && afterSeq < reset.seq ? { state: reset.state, throughSeq: reset.seq } : null,
+        updates: (updates.get(room) ?? []).slice(offset).map((payload, index) => ({
+          seq: Math.max(afterSeq, reset?.seq ?? 0) + index + 1,
           payload,
         })),
       };
+    },
+    takeSettingsResetNotice: (room, seq) => {
+      const reset = resets.get(room);
+      if (reset?.seq !== seq || deliveredNotices.get(room) === seq) return null;
+      deliveredNotices.set(room, seq);
+      return reset.notice;
     },
     appendUpdate: (room, payload) => {
       if (failure !== null) throw failure;
@@ -193,6 +204,11 @@ async function fixture(options: {
     updates,
     awarenessForRoom,
     logs,
+    resetRoom(room: string, state: Uint8Array, notice: string) {
+      const seq = (resets.get(room)?.seq ?? 0) + (updates.get(room)?.length ?? 0) + 1;
+      resets.set(room, { seq, state, notice });
+      updates.set(room, []);
+    },
     storeUpdate: (room: string, payload: Uint8Array) => {
       const stored = updates.get(room) ?? [];
       stored.push(payload);
@@ -241,6 +257,7 @@ function sharedClient(socket: HocuspocusProviderWebsocket, room: string, token: 
   const provider = new HocuspocusProvider({
     websocketProvider: socket,
     name: room,
+    sessionAwareness: room === settingsRoom(WORKSPACE),
     token: wrapToken(token, SYNC_PROTOCOL_VERSION),
     document: doc,
   });
@@ -254,6 +271,71 @@ function sharedClient(socket: HocuspocusProviderWebsocket, room: string, token: 
 }
 
 describe("the ub open browser server", () => {
+  it("replaces refused settings for open tabs without closing their document socket", async () => {
+    const box = await fixture();
+    const room = settingsRoom(WORKSPACE);
+    const docRoom = `${WORKSPACE}/${randomUUID()}`;
+    box.storeUpdate(room, updateWithText("refused local state"));
+    const socket = sharedSocket(box);
+    const settings = sharedClient(socket, room, await browserToken());
+    const document = sharedClient(socket, docRoom, await browserToken());
+    await socket.connect();
+    await Promise.all([settings.synced, document.synced]);
+    const originalSocket = socket.webSocket;
+    const notices: string[] = [];
+    settings.provider.on("stateless", ({ payload }: { payload: string }) => {
+      const notice = JSON.parse(payload);
+      if (notice.type === "settings-reset") notices.push(notice.message);
+    });
+    const closed = new Promise<string>(resolve => settings.provider.on("close", ({ event }: { event: { reason: string } }) => resolve(event.reason)));
+    box.resetRoom(room, updateWithText("hub settings"), "Workspace name change refused");
+    box.server.refresh();
+    expect(await closed).toBe("uberblick:settings-reset");
+    expect(notices).toEqual(["Workspace name change refused"]);
+    settings.provider.destroy();
+    const replacement = sharedClient(socket, room, await browserToken());
+    replacement.provider.on("stateless", ({ payload }: { payload: string }) => {
+      const notice = JSON.parse(payload);
+      if (notice.type === "settings-reset") notices.push(notice.message);
+    });
+    await replacement.synced;
+    expect(replacement.text.toString()).toBe("hub settings");
+    expect(replacement.provider.document.clientID).not.toBe(settings.provider.document.clientID);
+    document.text.insert(0, "other room stays writable");
+    await waitUntil("the unaffected document to persist", () => textFrom(box.updates.get(docRoom) ?? []) === "other room stays writable");
+    expect(socket.webSocket).toBe(originalSocket);
+    expect(document.provider.isAuthenticated).toBe(true);
+    box.server.refresh();
+    expect(notices).toHaveLength(1);
+  });
+
+  it("delivers a reset made without connected tabs to the next settings reader once", async () => {
+    const box = await fixture();
+    const room = settingsRoom(WORKSPACE);
+    box.storeUpdate(room, updateWithText("refused local state"));
+    box.resetRoom(room, updateWithText("hub settings"), "Workspace name change refused");
+    box.server.refresh();
+    const socket = sharedSocket(box);
+    const settings = sharedClient(socket, room, await browserToken());
+    const notices: string[] = [];
+    const observeNotice = ({ payload }: { payload: string }) => {
+      const notice = JSON.parse(payload);
+      if (notice.type === "settings-reset") notices.push(notice.message);
+    };
+    settings.provider.on("stateless", observeNotice);
+    await socket.connect();
+    await settings.synced;
+    await waitUntil("the stored refusal notice to reach a tab", () => notices.length > 0);
+    expect(settings.text.toString()).toBe("hub settings");
+    expect(notices).toEqual(["Workspace name change refused"]);
+    settings.provider.destroy();
+    const next = sharedClient(socket, room, await browserToken());
+    next.provider.on("stateless", observeNotice);
+    await next.synced;
+    box.server.refresh();
+    expect(notices).toEqual(["Workspace name change refused"]);
+  });
+
   it("waits for the native browser socket to close before returning from client cleanup", async () => {
     const box = await fixture();
     const client = await box.connect(`${WORKSPACE}/${randomUUID()}`);

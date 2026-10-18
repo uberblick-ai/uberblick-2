@@ -19,6 +19,9 @@ import {
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
   listDirectory,
+  getWorkspaceName,
+  getWorkspaceMainRepository,
+  listTagCatalog,
   normalizeLegacyTables,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
@@ -42,7 +45,7 @@ import { githubReference } from "./github-reference.js";
 import { log } from "./log.js";
 import { collectReplicaSyncState } from "./status.js";
 import type { MirrorStore, UpdateOrigin } from "./store.js";
-import { WorkspaceRemovedError } from "./store.js";
+import { SettingsResetError, WorkspaceRemovedError } from "./store.js";
 import { HubSync, type SyncWaitResult } from "./sync.js";
 
 /** Replayed updates are already durable; the update observer must skip them. */
@@ -68,6 +71,8 @@ export interface Replica {
   lastSeq: number;
   /** The highest log cut applied before deriving this replica's index rows. */
   indexedThroughSeq: number;
+  /** Settings history generation used to reject writes from stale processes. */
+  settingsResetSeq: number;
 }
 
 /**
@@ -229,7 +234,7 @@ export class Replicas {
       if ([DIRECTORY_SUFFIX, SIDEBAR_SUFFIX, SETTINGS_SUFFIX].includes(uuid)) return;
       this.refusedDeletedDocs.add(uuid);
       this.purgeDeletedDocs();
-    } });
+    }, onSettingsReset: (state, refused) => this.acceptSettingsReset(state, refused) });
 
     // Discovery reads this synced directory, not this process's creations.
     // Attach from boot so stub repair and the first tool's hydration can use it.
@@ -359,6 +364,7 @@ export class Replicas {
 
   /** The workspace settings replica, including the curated tag catalog. */
   settings(): Replica {
+    this.reloadSettingsIfReplaced();
     return this.ensureRoom(
       settingsRoom(this.config.workspaceId),
       SETTINGS_SUFFIX,
@@ -418,6 +424,7 @@ export class Replicas {
       awareness,
       lastSeq: 0,
       indexedThroughSeq: 0,
+      settingsResetSeq: id === SETTINGS_SUFFIX ? (this.store.settingsReset()?.seq ?? 0) : 0,
     };
 
     // Only this observer identifies changed entries; an update payload cannot.
@@ -458,8 +465,13 @@ export class Replicas {
       // then refuses further workspace tools.
       let appendedSeq: number;
       try {
-        appendedSeq = this.store.appendUpdate(room, payload, kind);
+        appendedSeq = this.store.appendUpdate(room, payload, kind, replica.isSettings ? replica.settingsResetSeq : undefined);
       } catch (error) {
+        if (error instanceof SettingsResetError) {
+          this.sync.releaseRoom(room);
+          queueMicrotask(() => this.reloadSettingsIfReplaced());
+          return;
+        }
         this.persistenceFailure ??= { room, error };
         log.error("failed to append to the update log", {
           room,
@@ -538,6 +550,10 @@ export class Replicas {
     fromSeq: number,
   ): { applied: boolean; throughSeq: number } {
     const slice = this.store.readSince(replica.room, fromSeq);
+    if (replica.isSettings && (slice.reset?.seq ?? 0) !== replica.settingsResetSeq) {
+      this.reloadSettingsIfReplaced();
+      return { applied: false, throughSeq: fromSeq };
+    }
     let applied = false;
     let throughSeq = fromSeq;
     if (slice.snapshot !== null) {
@@ -1011,6 +1027,7 @@ export class Replicas {
 
   /** Replay the log tail and attach newly discovered documents. Synchronous. */
   private refreshReplicas(): void {
+    this.reloadSettingsIfReplaced();
     this.poll(this.directory());
     this.purgeDeletedDocs();
     this.pollAll();
@@ -1019,6 +1036,47 @@ export class Replicas {
     // one previously refused entry, so untouched documents still recover.
     if (this.staleStubs.size > 0 || this.pacedStubs.size > 0) {
       this.reconcileDirectory();
+    }
+  }
+
+  private reloadSettingsIfReplaced(): void {
+    const room = settingsRoom(this.config.workspaceId);
+    const old = this.replicas.get(room);
+    if (old === undefined || old.settingsResetSeq === (this.store.settingsReset()?.seq ?? 0)) return;
+    this.sync.releaseRoom(room);
+    this.replicas.delete(room);
+    old.awareness.destroy();
+    old.doc.destroy();
+    this.ensureRoom(room, SETTINGS_SUFFIX);
+    this.settleNeeded = true;
+  }
+
+  private acceptSettingsReset(state: Uint8Array, refused: Y.Doc): void {
+    const room = settingsRoom(this.config.workspaceId);
+    const authoritative = new Y.Doc();
+    try {
+      Y.applyUpdate(authoritative, state);
+      const replica = this.settings();
+      const old = replica.doc;
+      if (old !== refused) return;
+      const changes: string[] = [];
+      if (getWorkspaceName(old) !== getWorkspaceName(authoritative)) changes.push("workspace name");
+      if (getWorkspaceMainRepository(old) !== getWorkspaceMainRepository(authoritative)) changes.push("main repository");
+      if (JSON.stringify(listTagCatalog(old)) !== JSON.stringify(listTagCatalog(authoritative))) changes.push("tag catalog");
+      const notice = `The hub refused changes to ${changes.length === 0 ? "workspace settings" : changes.join(", ")} because workspace-admin authority is required. The hub's settings have been restored.`;
+      this.store.replaceSettings(state, notice, replica.settingsResetSeq);
+      this.reloadSettingsIfReplaced();
+      log.warn(notice);
+    } catch (error) {
+      if (error instanceof SettingsResetError) {
+        this.reloadSettingsIfReplaced();
+        return;
+      }
+      this.persistenceFailure ??= { room, error };
+      this.sync.quarantine();
+      log.error("failed to replace refused workspace settings", { error: String(error) });
+    } finally {
+      authoritative.destroy();
     }
   }
 
@@ -1149,6 +1207,7 @@ export class Replicas {
           replica.room,
           Y.encodeStateAsUpdate(replica.doc),
           replica.lastSeq,
+          replica.isSettings ? replica.settingsResetSeq : undefined,
         );
         log.debug("compacted log", {
           room: replica.room,

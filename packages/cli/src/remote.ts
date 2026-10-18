@@ -314,7 +314,7 @@ export async function useRemoteWorkspace(
         deviceAdmission: bridge.base.deviceLogin !== undefined || usesDeviceLogin(bridge.target, bridge.env),
       });
       bindingWritten = true;
-      await fillMainRepositoryFromOrigin(flags.workspace);
+      await fillMainRepositoryFromOrigin(flags.workspace, flags.endpoint);
       const name = readWorkspaceName(defaultWorkspaceDatabasePath(flags.workspace), flags.workspace) ?? flags.workspace;
       const archived = fetched.corpus.entries.filter(doc => doc.deleted).length;
       text = useField("fetched", `${name} from ${displayWorkspaceHub(flags.endpoint)}: ${plural(fetched.corpus.entries.length, "document")}, ${archived} archived`);

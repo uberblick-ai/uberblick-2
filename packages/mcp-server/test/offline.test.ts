@@ -22,9 +22,13 @@ import type { Rig } from "./helpers.js";
 const rigs: Rig[] = [];
 
 async function offlineRig(): Promise<Rig> {
+  const databasePath = tempDatabasePath();
+  // This existing replica received its catalog before losing its hub.
+  const initialized = await startServer(testConfig({ databasePath }));
+  await initialized.close();
   // A configured hub that is not there: nothing listens on port 1.
   const rig = await startServer(
-    testConfig({ authSecret: TEST_SECRET, hubUrl: "ws://127.0.0.1:1" }),
+    testConfig({ databasePath, authSecret: TEST_SECRET, hubUrl: "ws://127.0.0.1:1" }),
   );
   rigs.push(rig);
   return rig;

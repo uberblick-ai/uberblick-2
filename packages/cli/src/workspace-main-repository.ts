@@ -1,13 +1,16 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fillWorkspaceMainRepository } from "@uberblick/mcp-server";
-import { githubRepository } from "@uberblick/schema";
+import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
+import { githubRepository, parseWorkspaceId } from "@uberblick/schema";
 
 const runFile = promisify(execFile);
 
 /** Optional checkout metadata never changes the command's result or output. */
-export async function fillMainRepositoryFromOrigin(workspaceId: string, databasePath?: string): Promise<void> {
+export async function fillMainRepositoryFromOrigin(workspaceId: string, hubUrl: string | null, databasePath?: string): Promise<void> {
   try {
+    workspaceId = parseWorkspaceId(workspaceId).uuid;
     const options = {
       cwd: process.cwd(),
       env: process.env,
@@ -22,9 +25,24 @@ export async function fillMainRepositoryFromOrigin(workspaceId: string, database
     const origin = stdout.trim();
     if (!/^(?:https:\/\/|ssh:\/\/git@|git@github\.com:)/i.test(origin)) return;
     const repository = githubRepository(origin);
-    if (repository !== null) fillWorkspaceMainRepository(workspaceId, repository, databasePath);
+    if (repository === null) return;
+    if (hubUrl !== null && !await confirmedWorkspaceAdmin(workspaceId, hubUrl)) return;
+    fillWorkspaceMainRepository(workspaceId, repository, databasePath);
   } catch {
     // No checkout, missing git, failed or stalled lookup and unreadable replicas
     // leave this optional setting alone without changing the binding operation.
   }
+}
+
+async function confirmedWorkspaceAdmin(workspaceId: string, hubUrl: string): Promise<boolean> {
+  const current = readDeviceLogin(hubUrl, workspaceId);
+  if (current.status !== "ready") return false;
+  const action = { operation: "own-role", workspaceId } as const;
+  const reply = sanitizeManagementReply(action, await manageRequest(current.origin, action, current.login, {
+    signal: AbortSignal.timeout(4_000),
+  }));
+  if (reply.status !== 200 || reply.body.status !== "ok" || reply.body.role !== "admin") return false;
+  const latest = readDeviceLogin(hubUrl, workspaceId);
+  return latest.status === "ready" && latest.login.credential.record.id === current.login.credential.record.id &&
+    latest.login.credential.key === current.login.credential.key;
 }

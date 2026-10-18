@@ -491,7 +491,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
     warn(io, admission.warnings);
     const registersPrevious = previous !== null && readWorkspaceHub(previous.workspaceId) === undefined;
     path = writeProjectBinding({ workspaceId: id, hubUrl: hub });
-    await fillMainRepositoryFromOrigin(id);
+    await fillMainRepositoryFromOrigin(id, hub);
     written = [...admission.written, ...(registersPrevious ? [workspaceRegistryPath()] : []), path];
     text = useBindingLines({ workspaceId: id, hubUrl: hub }, previous, path);
   } catch (error) {

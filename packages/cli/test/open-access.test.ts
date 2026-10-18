@@ -121,7 +121,7 @@ describe("ub open: live Access bridge", () => {
     };
     try {
       const verify = vi.spyOn(hub.credentials!, "verifyRequest");
-      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person", accountId: login.identity.githubAccountId });
       expect(verify).not.toHaveBeenCalled();
       expect(JSON.stringify(await read())).not.toContain(login.credential.key);
       for (const sample of [
@@ -139,7 +139,7 @@ describe("ub open: live Access bridge", () => {
       expect(mutation.headers.get("allow")).toBe("GET");
       await mutation.text();
       await hub.stop();
-      expect(await read()).toEqual({ state: "signed-in", handle: "this-person" });
+      expect(await read()).toEqual({ state: "signed-in", handle: "this-person", accountId: login.identity.githubAccountId });
       await removeHubLogin(origin, box.env);
       expect(await read()).toEqual({ state: "signed-out" });
       await writeHubLogin(origin, login, box.env);

@@ -279,7 +279,9 @@ it.each([
 
 it("purges only a room refused after authentication without writing a directory mark", async () => {
   const peer = await endpoint();
-  const opened = workspace(peer.port);
+  const rig = await startServer(testConfig({ hubUrl: hubUrl(peer.port), authSecret: TEST_SECRET }));
+  rigs.push(rig);
+  const opened = rig.instance;
   const target = seed(opened);
   const healthy = seed(opened, "Healthy retained room");
   await waitUntil("all room auth frames", () => peer.sockets.length === 1 &&
@@ -301,6 +303,9 @@ it("purges only a room refused after authentication without writing a directory 
   expect(opened.replicas.known(target.uuid)).toBe(false);
   expect(opened.replicas.isDeleted(target.uuid)).toBe(true);
   expect(() => opened.replicas.replica(target.uuid)).toThrow("permanently deleted");
+  expect(await rig.call("get_doc", { uuid: target.uuid })).toMatchObject({
+    isError: true, payload: { error: "doc_deleted", uuid: target.uuid },
+  });
   expect(isDirectoryEntryDeleted(opened.replicas.directory().doc, target.uuid)).toBe(false);
   expect(Y.encodeStateAsUpdate(opened.replicas.directory().doc)).toEqual(directoryState);
   expect(opened.store.readSince(opened.replicas.directory().room, 0)).toEqual(directoryLog);

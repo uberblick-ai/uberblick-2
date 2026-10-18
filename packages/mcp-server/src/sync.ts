@@ -22,8 +22,9 @@ import {
 import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
-import type * as Y from "yjs";
-import type { Awareness } from "y-protocols/awareness";
+import * as Y from "yjs";
+import { Awareness } from "y-protocols/awareness";
+import { settingsRoom } from "@uberblick/schema";
 import type { McpConfig } from "./config.js";
 import { log } from "./log.js";
 import { HubConnection } from "./hub-connection.js";
@@ -269,6 +270,8 @@ class AdmittedHocuspocusProvider extends HocuspocusProvider {
 export interface HubSyncOptions {
   /** An authenticated room's deletion refusal authorizes purging only its copy. */
   onDocDeleted?: (room: string) => void;
+  /** Replace a refused settings replica only after a clean hub read completes. */
+  onSettingsReset?: (state: Uint8Array, refused: Y.Doc) => void;
   /**
    * Override the admission bound for small stress fixtures. Must be a positive
    * integer: zero would leave every room queued forever on a working socket.
@@ -302,6 +305,10 @@ export class HubSync {
   private readonly deletedRooms = new Set<string>();
 
   private readonly onDocDeleted: ((room: string) => void) | undefined;
+
+  private readonly onSettingsReset: ((state: Uint8Array, refused: Y.Doc) => void) | undefined;
+
+  private settingsRecovery: { doc: Y.Doc; awareness: Awareness; refused: Y.Doc } | null = null;
 
   private socketStatus: "connecting" | "connected" | "disconnected" =
     "connecting";
@@ -420,6 +427,7 @@ export class HubSync {
     options: HubSyncOptions = {},
   ) {
     this.onDocDeleted = options.onDocDeleted;
+    this.onSettingsReset = options.onSettingsReset;
     if (!isLoopbackEndpoint(config.hubUrl)) {
       config = { ...config, authSecret: null, deviceLogin: config.deviceLogin ?? {} };
     }
@@ -775,6 +783,9 @@ export class HubSync {
 
     const provider = new AdmittedHocuspocusProvider({
       name: room,
+      // Refusal recovery replaces providers on the same socket. Session routing
+      // keeps late acknowledgements and CLOSEs on their retired incarnation.
+      sessionAwareness: room === settingsRoom(this.config.workspaceId),
       document: doc,
       awareness,
       websocketProvider: this.socket,
@@ -782,10 +793,12 @@ export class HubSync {
       // the token in its message, never the URL; a queued room publishes nothing.
       token: async () => {
         for (;;) {
+          if (this.providers.get(room) !== provider) return "";
           if (provider.hasCurrentAdmission()) {
             return "";
           }
           const generation = await this.admission(room);
+          if (this.providers.get(room) !== provider) return "";
           if (this.stopped || generation === null || this.deletedRooms.has(room)) {
             // Empty means send nothing: no terminal or duplicate call may requeue.
             return "";
@@ -795,24 +808,8 @@ export class HubSync {
             this.roomAnswered(room);
             return "";
           }
-          let token: string | null;
-          try {
-            token = await this.token(room);
-          } catch {
-            if (this.config.deviceLogin === undefined) throw new Error("could not mint a hub token");
-            if (!this.stopped && this.config.deviceLogin !== undefined) {
-              // Store, transport and crypto exceptions can contain secrets.
-              // No exception text reaches the provider's error callback.
-              this.deviceReading = {
-                status: "hub-down", url: this.config.hubUrl, recoveryClass: "retry",
-                reason: "could not check the stored device login; the client will retry",
-              };
-              this.checkingDeviceRefusal = false;
-              this.retryDeviceConnection();
-            }
-            this.roomAnswered(room);
-            return "";
-          }
+          const token = await this.roomToken(room, provider);
+          if (this.providers.get(room) !== provider) return "";
           if (token === null || this.stopped || this.deletedRooms.has(room)) {
             this.roomAnswered(room);
             return "";
@@ -840,12 +837,24 @@ export class HubSync {
           this.syncedRooms.add(room);
         }
         this.stateChanged();
+        this.finishSettingsRecovery(room, provider);
       },
       onUnsyncedChanges: ({ number }) => {
         if (number === 0) {
           for (const listener of this.roomQuietListeners) listener();
         }
         this.stateChanged();
+        this.finishSettingsRecovery(room, provider);
+      },
+      onMessage: ({ message }) => {
+        if (room !== settingsRoom(this.config.workspaceId) || this.onSettingsReset === undefined) return;
+        message.readVarString();
+        if (message.readVarUint() !== MessageType.SyncStatus || message.readVarUint() !== 0) return;
+        // Finish this receiver before retiring its provider. A refusal belongs
+        // to this room and never starts device-login or shared-socket recovery.
+        queueMicrotask(() => {
+          if (this.providers.get(room) === provider) this.recoverSettings(room);
+        });
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         const authenticated = provider.hasCurrentSync();
@@ -912,8 +921,8 @@ export class HubSync {
       this.socketStatus === "connected" ? this.socketGeneration : null,
     );
     // Shared-socket providers require explicit attach to subscribe and authenticate.
-    provider.attach();
     this.providers.set(room, provider);
+    provider.attach();
     this.stateChanged();
   }
 
@@ -921,6 +930,11 @@ export class HubSync {
   detach(room: string): void {
     if (this.deletedRooms.has(room) && !this.providers.has(room) && !this.waiting.has(room) && !this.attaching.has(room)) return;
     this.deletedRooms.add(room);
+    this.releaseRoom(room);
+  }
+
+  /** Retire a provider while allowing the same room to attach a fresh replica. */
+  releaseRoom(room: string): void {
     const ticket = this.waiting.get(room);
     this.waiting.delete(room);
     ticket?.admit(null);
@@ -932,7 +946,60 @@ export class HubSync {
       provider.blockUntilToken();
       provider.destroy();
     }
+    const recovery = this.settingsRecovery;
+    if (recovery !== null && provider?.document === recovery.doc) {
+      this.settingsRecovery = null;
+      recovery.awareness.destroy();
+      recovery.doc.destroy();
+    }
     this.roomAnswered(room);
+  }
+
+  private recoverSettings(room: string): void {
+    if (this.settingsRecovery !== null || this.stopped) return;
+    const refused = this.providers.get(room)?.document;
+    if (refused === undefined) return;
+    const doc = new Y.Doc();
+    const awareness = new Awareness(doc);
+    awareness.setLocalState(null);
+    this.releaseRoom(room);
+    this.settingsRecovery = { doc, awareness, refused };
+    this.attach({ room, doc, awareness });
+  }
+
+  private finishSettingsRecovery(room: string, provider: AdmittedHocuspocusProvider): void {
+    const recovery = this.settingsRecovery;
+    const quiet = () => this.state().status === "connected" && provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
+    if (recovery === null || provider.document !== recovery.doc || !quiet()) return;
+    queueMicrotask(() => {
+      if (this.settingsRecovery !== recovery || this.providers.get(room) !== provider || !quiet()) return;
+      this.settingsRecovery = null;
+      try {
+        this.onSettingsReset?.(Y.encodeStateAsUpdate(recovery.doc), recovery.refused);
+      } finally {
+        recovery.awareness.destroy();
+        recovery.doc.destroy();
+      }
+    });
+  }
+
+  private async roomToken(room: string, provider: AdmittedHocuspocusProvider): Promise<string | null> {
+    try {
+      return await this.token(room);
+    } catch {
+      if (this.providers.get(room) !== provider) return null;
+      if (this.config.deviceLogin === undefined) throw new Error("could not mint a hub token");
+      if (!this.stopped) {
+        // Store, transport and crypto exceptions may contain secrets.
+        this.deviceReading = {
+          status: "hub-down", url: this.config.hubUrl, recoveryClass: "retry",
+          reason: "could not check the stored device login; the client will retry",
+        };
+        this.checkingDeviceRefusal = false;
+        this.retryDeviceConnection();
+      }
+      return null;
+    }
   }
 
   /**
@@ -1078,6 +1145,7 @@ export class HubSync {
     if (provider === undefined) {
       return false;
     }
+    if (provider.document === this.settingsRecovery?.doc) return false;
     return provider.hasCurrentSync() && provider.isSynced && !provider.hasUnsyncedChanges;
   }
 
@@ -1251,6 +1319,11 @@ export class HubSync {
         close(() => provider.destroy());
       }
       this.providers.clear();
+      if (this.settingsRecovery !== null) {
+        close(() => this.settingsRecovery?.awareness.destroy());
+        close(() => this.settingsRecovery?.doc.destroy());
+        this.settingsRecovery = null;
+      }
       close(() => this.releaseAdmissions());
       close(() => this.socket?.destroy());
       if (errors.length) throw new AggregateError(errors, "hub sync teardown failed");

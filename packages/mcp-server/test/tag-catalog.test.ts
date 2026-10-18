@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Hub } from "@uberblick/hub";
-import { EXAMPLE_TAGS, retireTagCatalogEntry, settingsRoom } from "@uberblick/schema";
+import { EXAMPLE_TAGS, isTagCatalogSeeded, retireTagCatalogEntry, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { cleanupTestResources, FailingStore, hubUrl, LIVE_HUB_SETTLE, peerClient, startHub, startServer, tempDatabasePath, testConfig, TEST_SECRET, waitForCorpus, waitUntil, WAIT_TIMEOUT_MS, WORKSPACE } from "./helpers.js";
 import type { PeerClient, Rig } from "./helpers.js";
 
@@ -105,7 +105,8 @@ describe("the workspace tag catalog", () => {
     rigs.push(rig);
 
     const listed = await rig.ok("list_tags");
-    expect(listed).toMatchObject({ complete: false });
+    expect(listed).toMatchObject({ complete: false, tags: [] });
+    expect(isTagCatalogSeeded(rig.instance.replicas.settings().doc)).toBe(false);
     expect(listed.hub.status).not.toBe("connected");
 
     // The curated value this replica has never seen is not an argument to
@@ -127,6 +128,7 @@ describe("the workspace tag catalog", () => {
     // A retirement this replica already holds is not waiting on the hub:
     // hydration cannot make the value assignable, so the caller is told to
     // correct the call rather than to repeat it.
+    seedTagCatalog(rig.instance.replicas.settings().doc);
     retireTagCatalogEntry(rig.instance.replicas.settings().doc, AUTH.id);
     const blocked = await rig.call("create_doc", {
       title: "Must not exist either",
@@ -143,9 +145,24 @@ describe("the workspace tag catalog", () => {
     expect((await rig.ok("list_docs")).docs).toEqual([]);
   });
 
+  it.each([null, TEST_SECRET])("does not seed an unseeded shared workspace with admission %s", async authSecret => {
+    const hub = await startHub();
+    hubs.push(hub);
+    const rig = await startServer(testConfig({ hubUrl: hubUrl(hub.port), authSecret, ...LIVE_HUB_SETTLE }));
+    rigs.push(rig);
+    const listed = await rig.ok("list_tags");
+    expect(listed.tags).toEqual([]);
+    expect(isTagCatalogSeeded(rig.instance.replicas.settings().doc)).toBe(false);
+    expect(rig.instance.store.pendingRooms().some(entry => entry.room === settingsRoom(WORKSPACE))).toBe(false);
+  });
+
   it("rebuilds and converges the derived tag index across the hub and an offline restart", async () => {
     const hub = await startHub();
     hubs.push(hub);
+    const initialCatalog = await peerClient(hub.port, settingsRoom(WORKSPACE));
+    peers.push(initialCatalog);
+    await initialCatalog.synced;
+    seedTagCatalog(initialCatalog.doc);
     const author = await synced(hub.port);
     const created = await author.ok("create_doc", {
       title: "Convergent catalog",

@@ -42,10 +42,11 @@ vi.mock("@hocuspocus/provider", async () => {
     unsyncedChanges = 0;
     awareness: InstanceType<typeof RealAwareness>;
     token: () => Promise<string>;
-    constructor(options: { document: Y.Doc; token: () => Promise<string> }) {
-      this.awareness = new RealAwareness(options.document);
-      this.token = options.token;
+    constructor(readonly configuration: { document: Y.Doc; token: () => Promise<string> }) {
+      this.awareness = new RealAwareness(configuration.document);
+      this.token = configuration.token;
     }
+    get document(): Y.Doc { return this.configuration.document; }
     attach(): void {}
     on(): void {}
     setAwarenessField(field: string, value: unknown): void {

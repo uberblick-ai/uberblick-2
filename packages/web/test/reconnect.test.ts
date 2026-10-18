@@ -33,8 +33,10 @@ import type { Hub } from "@uberblick/hub";
 import { DOC_DELETED_REASON, wrapToken } from "@uberblick/schema/protocol";
 import { deleteDirectoryEntry, directoryRoom, getBlocks, getDirectoryMap, getWorkspaceName, initDoc, insertBlock, isDirectoryEntryDeleted, setWorkspaceName, settingsRoom, upsertDirectoryEntry } from "@uberblick/schema";
 import * as Y from "yjs";
+import { Awareness } from "y-protocols/awareness";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import { PacedRoomProvider, RoomAdmission } from "../src/collab/room-admission.js";
+import { createLocalBrowserServer } from "../../cli/src/local-browser-server.js";
 
 const SECRET = "reconnect-test-secret";
 /** The workspace these rooms live in. A workspace id is a uuid. */
@@ -47,14 +49,17 @@ const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
  * a completed `resolveClientConfig()`; resolution itself is covered by
  * `hub-config.test.ts`.
  */
-const injected = vi.hoisted(() => ({ url: "", secret: "" }));
+const injected = vi.hoisted(() => ({ url: "", secret: "", local: false, notices: [] as string[] }));
 vi.mock("../src/config.js", () => ({
   HUB_CONFIG_PATH: "/uberblick-config.json",
   hubUrl: () => injected.url,
   hubAuthToken: () => injected.secret,
   // `rooms.ts` re-reads the configuration before every connect attempt; a
   // resolved one is what the mock stands for, so this is the settled read.
-  resolveClientConfig: async () => ({}),
+  resolveClientConfig: async () => injected.local ? { servedWorkspaces: {} } : {},
+}));
+vi.mock("../src/notifications.js", () => ({
+  notifyTransient: ({ message }: { message: string }) => injected.notices.push(message),
 }));
 
 const hubs: Hub[] = [];
@@ -68,6 +73,9 @@ afterEach(async () => {
   // Every test gets its own `rooms.ts`: the shared socket and the forced-drop
   // cooldown are module state.
   vi.resetModules();
+  vi.unstubAllGlobals();
+  injected.local = false;
+  injected.notices.length = 0;
 });
 
 function databasePath(): string {
@@ -241,7 +249,7 @@ async function seedDocument(tab: Tab, uuid: string): Promise<void> {
   );
 }
 
-it("keeps a room on a live socket read-only until its token is admitted", async () => {
+it("keeps a new room on a live socket read-only until it authenticates", async () => {
   const hub = await startHub(0, databasePath());
   const firstUuid = randomUUID();
   const first = await openTab(`${WORKSPACE}/${firstUuid}`, hub.port);
@@ -252,13 +260,11 @@ it("keeps a room on a live socket read-only until its token is admitted", async 
   expect(second.history[0]).toMatchObject({
     hasReceivedServerState: false,
     hasAnswered: false,
+    writable: false,
   });
   await waitFor("the second room's token to be admitted", () =>
     second.latest().writable,
   );
-  expect(
-    second.history.some(({ connected, writable }) => connected && !writable),
-  ).toBe(true);
   await waitFor("the second room's server answer", () => second.latest().hasAnswered);
   expect(second.latest().hasReceivedServerState).toBe(true);
 }, TEST_TIMEOUT_MS);
@@ -489,6 +495,7 @@ it("ignores inbound sync and sends only auth until each room authenticates again
   expect(Y.encodeStateAsUpdate(tab.connection.ydoc)).toEqual(before);
   expect(roomFrameTypes(endpoint.frames[0]!, room)).toEqual([MessageType.Auth]);
   expect(tab.latest().hasReceivedServerState).toBe(false);
+  expect(tab.latest().writable).toBe(false);
 
   endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 2, ...wireString("read-write")));
   await waitFor("the authenticated room's sync", () =>
@@ -505,6 +512,7 @@ it("ignores inbound sync and sends only auth until each room authenticates again
   await sleep(50);
   expect(Y.encodeStateAsUpdate(tab.connection.ydoc)).toEqual(before);
   expect(roomFrameTypes(endpoint.frames[1]!, room)).toEqual([MessageType.Auth]);
+  expect(tab.latest().writable).toBe(false);
   expect(tab.latest().deleted).toBe(false);
   expect(other.connection.provider.isAttached).toBe(true);
   endpoint.sockets[1]!.send(wireFrame(room, MessageType.Auth, 1, ...wireString(DOC_DELETED_REASON)));
@@ -684,6 +692,103 @@ async function admissionToken(workspace = WORKSPACE): Promise<string> {
     lifetimeSeconds: 60,
   }));
 }
+
+it("replaces a stale settings tab before its reconnect can republish refused history", async () => {
+  const origin = "http://127.0.0.1";
+  const NativeWebSocket = globalThis.WebSocket;
+  vi.stubGlobal("WebSocket", class extends NativeWebSocket {
+    constructor(url: string | URL) {
+      super(url, { headers: { Origin: origin } } as unknown as string[]);
+    }
+  });
+  const initial = new Y.Doc();
+  const clean = new Y.Doc();
+  const awareness = new Awareness(initial);
+  setWorkspaceName(initial, "Refused offline name");
+  setWorkspaceName(clean, "Hub name");
+  let state = Y.encodeStateAsUpdate(initial);
+  let generation = 0;
+  let pendingNotice: string | null = null;
+  const updates: { seq: number; payload: Uint8Array }[] = [];
+  let holdAdmission: Promise<void> | null = null;
+  let resumeAdmission: (() => void) | undefined;
+  let preparations = 0;
+  const server = await createLocalBrowserServer({
+    port: 0, expectedOrigin: origin, workspaces: new Map([[WORKSPACE, SECRET]]),
+    log: silentLogger,
+    prepareRoom: async () => { preparations += 1; await holdAdmission; },
+    readRoom: (_room, afterSeq) => ({
+      ...(generation === 0 ? {} : { reset: { seq: generation, notice: "Workspace name change refused" } }),
+      snapshot: afterSeq <= generation ? { state, throughSeq: generation } : null,
+      updates: updates.filter((update) => update.seq > afterSeq),
+    }),
+    takeSettingsResetNotice: () => {
+      const notice = pendingNotice;
+      pendingNotice = null;
+      return notice;
+    },
+    appendUpdate: (_room, payload) => updates.push({ seq: generation + updates.length + 1, payload }),
+    awarenessForRoom: () => awareness,
+    onRequest: (_request, response) => response.end(),
+  });
+  injected.url = `ws://127.0.0.1:${server.port}`;
+  injected.secret = SECRET;
+  injected.local = true;
+  const { acquireRoom } = await import("../src/collab/rooms.js");
+  const tab = acquireRoom(settingsRoom(WORKSPACE), { name: "tab", color: "#abcdef" });
+  const socket = sharedSocket(tab.connection);
+  const original = tab.connection;
+  let replacements = 0;
+  tab.onReplace?.(() => { replacements += 1; });
+  const storedName = (): string | null => {
+    const doc = new Y.Doc();
+    try {
+      Y.applyUpdate(doc, state);
+      for (const update of updates) Y.applyUpdate(doc, update.payload);
+      return getWorkspaceName(doc);
+    } finally { doc.destroy(); }
+  };
+  try {
+    await waitFor("the original settings to sync", () => original.status.synced);
+    expect(getWorkspaceName(original.ydoc)).toBe("Refused offline name");
+    socket.disconnect();
+    await waitFor("the settings socket to disconnect", () => socket.webSocket === null);
+    generation = 100;
+    state = Y.encodeStateAsUpdate(clean);
+    updates.length = 0;
+    pendingNotice = "Workspace name change refused";
+    server.refresh();
+    holdAdmission = new Promise<void>((resolve) => { resumeAdmission = resolve; });
+    const reconnected = socket.connect();
+    await waitFor("the reconnect token to reach admission", () => preparations >= 2);
+    setWorkspaceName(original.ydoc, "Refused edit during reconnect");
+    expect(updates).toHaveLength(0);
+    resumeAdmission?.();
+    await reconnected;
+    await waitFor("a clean replacement settings room", () => replacements === 1 && tab.connection.status.synced);
+    expect(getWorkspaceName(tab.connection.ydoc)).toBe("Hub name");
+    expect(tab.connection.ydoc.clientID).not.toBe(original.ydoc.clientID);
+    expect(storedName()).toBe("Hub name");
+    expect(updates).toHaveLength(0);
+    expect(injected.notices).toEqual(["Workspace name change refused"]);
+    setWorkspaceName(tab.connection.ydoc, "Fresh admin edit");
+    await waitFor("fresh settings to persist", () => storedName() === "Fresh admin edit");
+    socket.disconnect();
+    await waitFor("the replacement socket to disconnect", () => socket.webSocket === null);
+    await socket.connect();
+    await waitFor("the current settings generation to rejoin", () => tab.connection.status.synced);
+    expect(replacements).toBe(1);
+    expect(injected.notices).toHaveLength(1);
+  } finally {
+    resumeAdmission?.();
+    tab.release();
+    socket.destroy();
+    await server.stop();
+    awareness.destroy();
+    initial.destroy();
+    clean.destroy();
+  }
+}, TEST_TIMEOUT_MS);
 
 it("paces live name rooms below the hub ceiling, including after a reconnect", async () => {
   const dir = mkdtempSync(join(tmpdir(), `room-admission-${process.env.UB_AGENTS_RUN ?? process.pid}-`));

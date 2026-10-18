@@ -21,11 +21,11 @@ function boundWorkspace(serving: LocalServing | null): string | null {
 
 /** Independent live readings share lifecycle mechanics, never permission results. */
 export function useAccessReading(workspace: string | null, serving: LocalServing | null,
-  subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices"): HubAdministration {
+  subject: string, path: string, operation: "own-hub-role" | "own-role" | "list-devices", account: string | null = null): HubAdministration {
   const available = workspace !== null && boundWorkspace(serving) === workspace;
   const binding = serving?.remoteHubUrl;
   const client = useMemo(() => available && workspace !== null
-    ? { send: createWorkspaceAccessClient(workspace, subject), binding } : null, [available, binding, subject, workspace]);
+    ? { send: createWorkspaceAccessClient(workspace, subject), binding, account } : null, [available, binding, subject, workspace, account]);
   const revision = useRef(0);
   const [answer, setAnswer] = useState<{ client: NonNullable<typeof client>; authority: AccessAnswer } | null>(null);
   const request = useCallback(async (action: AccessAction, signal: AbortSignal): Promise<AccessAnswer> => {

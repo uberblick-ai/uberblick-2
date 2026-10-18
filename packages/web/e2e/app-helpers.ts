@@ -20,6 +20,7 @@ export function setupHarness(options: {
   app?: OpenAppOptions;
   accessRole?: "admin" | "member" | "none";
   hubAdmin?: boolean;
+  seedExampleTags?: boolean;
   localWorkspace?: boolean;
   gitUserName?: string;
 } = {}) {
@@ -37,6 +38,7 @@ export function setupHarness(options: {
     started = await startHarness({
       ...(options.accessRole === undefined ? {} : { accessRole: options.accessRole }),
       ...(options.hubAdmin === undefined ? {} : { hubAdmin: options.hubAdmin }),
+      ...(options.seedExampleTags === undefined ? {} : { seedExampleTags: options.seedExampleTags }),
       ...(options.localWorkspace === undefined ? {} : { localWorkspace: options.localWorkspace }),
       ...(options.gitUserName === undefined ? {} : { gitUserName: options.gitUserName }),
     });

@@ -6,7 +6,6 @@ import {
   decisionTopicArchived,
   getBlocksWithInline,
   getDirectoryEntry,
-  isDirectoryEntryDeleted,
   getMeta,
   getMetaMap,
   isProseBlockType,
@@ -116,7 +115,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   const requireNotDeleted = (uuid: string): void => {
-    if (isDirectoryEntryDeleted(replicas.directory().doc, uuid)) {
+    if (replicas.isDeleted(uuid)) {
       throw new ToolError("doc_deleted", `Document ${uuid} was permanently deleted`, { uuid });
     }
   };

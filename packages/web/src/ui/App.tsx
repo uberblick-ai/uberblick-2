@@ -1093,6 +1093,7 @@ export function App(): ReactElement {
         ) : settings ? (
           <WorkspaceSettings
             admin={settingsAccess.workspaceAdmin}
+            local={settingsAccess.local}
             key={route.workspace.uuid}
             page={route.page}
             workspace={route.workspace}

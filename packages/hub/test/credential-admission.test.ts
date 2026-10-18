@@ -10,12 +10,15 @@ import { join } from "node:path";
 import {
   HocuspocusProvider,
   HocuspocusProviderWebsocket,
+  MessageType,
   type onCloseParameters,
+  type onMessageParameters,
 } from "@hocuspocus/provider";
 import { Server, type Connection, type Hocuspocus, type ServerConfiguration } from "@hocuspocus/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
 import * as Y from "yjs";
+import { getWorkspaceName, setWorkspaceName, settingsRoom } from "@uberblick/schema";
 import {
   CredentialAdmission,
   type CredentialContext,
@@ -306,7 +309,7 @@ describe("credential admission on a composed server", () => {
       deviceId: "laptop",
       workspaces: [WORKSPACE, OTHER_WORKSPACE],
       workspace: WORKSPACE,
-      authorization: { active: true },
+      authorization: { active: true, readOnly: false },
     });
     expect(contexts.get(rooms[1]!)).toEqual({ ...contexts.get(rooms[0]!), workspace: OTHER_WORKSPACE });
     expect(contexts.get(rooms[2]!)).toEqual({
@@ -315,7 +318,7 @@ describe("credential admission on a composed server", () => {
       deviceId: "phone",
       workspaces: [WORKSPACE],
       workspace: WORKSPACE,
-      authorization: { active: true },
+      authorization: { active: true, readOnly: false },
     });
     laptopSecond.text.insert(0, "second workspace");
     await waitUntil("the second workspace write to land", () =>
@@ -515,6 +518,65 @@ describe("credential admission on a composed server", () => {
 
   // Held apply hooks expose the gap after authorization through real sockets;
   // both update forms must respect the shared apply fence after access ends.
+  it.each([messageYjsUpdate, messageYjsSyncStep2])("demotion fences settings frame type %s already past authorization and its queued updates without closing the room", async (type) => {
+    const held = gate();
+    const entered = gate();
+    let armed = false;
+    let victimId = "";
+    let queued!: Promise<void>;
+    let victimConnection!: Connection<CredentialContext>;
+    const rig = await startServer({
+      beforeSync: async ({ context, type: receivedType, connection }) => {
+        if (!armed || context.credentialId !== victimId || receivedType !== type) return;
+        armed = false;
+        victimConnection = connection;
+        queued = frameBarrier(connection, 4);
+        entered.open();
+        await held.opened;
+      },
+    });
+    rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person", role: "admin" });
+    const laptop = issue(rig.registry, "laptop");
+    const peer = issue(rig.registry, "peer", [WORKSPACE], "admin");
+    victimId = laptop.record.id;
+    const room = settingsRoom(WORKSPACE);
+    const observer = connect({ port: rig.port, room, token: await credentialToken(peer) });
+    await waitFor("the settings admin to sync", observer.synced);
+    setWorkspaceName(observer.doc, "Preserved settings");
+    await waitUntil("the existing settings to settle", () => !observer.provider.hasUnsyncedChanges);
+    const offline = new Y.Doc();
+    Y.applyUpdate(offline, Y.encodeStateAsUpdate(observer.doc));
+    if (type === messageYjsSyncStep2) setWorkspaceName(offline, "Held reconnect rename");
+    armed = type === messageYjsSyncStep2;
+    const sender = connect({ port: rig.port, room, token: await credentialToken(laptop), document: offline });
+    let refusals = 0;
+    sender.provider.on("message", ({ message }: onMessageParameters) => {
+      message.readVarString();
+      if (message.readVarUint() === MessageType.SyncStatus && message.readVarUint() === 0) refusals += 1;
+    });
+    if (type === messageYjsUpdate) {
+      await waitFor("the settings sender to sync", sender.synced);
+      armed = true;
+      setWorkspaceName(sender.doc, "Held live rename");
+    }
+    try {
+      await waitFor("the authorized settings frame to pause", entered.opened);
+      for (let index = 0; index < 4; index += 1) setWorkspaceName(sender.doc, `Queued rename ${index}`);
+      await waitFor("settings updates to queue behind the paused frame", queued);
+      rig.memberships.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: "admin", principalId: "person", role: "member" });
+      expect(victimConnection.readOnly).toBe(true);
+      held.open();
+      await waitFor("the held and queued settings frames to finish", victimConnection.waitForPendingMessages());
+      await waitUntil("settings writes to receive room-local refusals", () => refusals >= 1);
+      expect(getWorkspaceName(rig.hocuspocus.documents.get(room)!)).toBe("Preserved settings");
+      expect(getWorkspaceName(observer.doc)).toBe("Preserved settings");
+      expect(sender.provider.isAuthenticated).toBe(true);
+      expect(rig.hocuspocus.documents.get(room)?.getConnectionsCount()).toBe(2);
+    } finally {
+      held.open();
+    }
+  });
+
   describe("ended access fences", () => {
     it.each([
       ["revocation", "a live update", messageYjsUpdate, false],
