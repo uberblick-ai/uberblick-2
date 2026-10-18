@@ -14,6 +14,8 @@ export interface HelpTopic {
 /** The same orientation is served in initialize.instructions and its help topic. */
 export const STARTUP_ORIENTATION =
   "Uberblick organizes local-first workspaces into documents, blocks and decision records. " +
+  "Before you change anything in this repo, consult the corpus and its decision records for relevant documents: " +
+  "use `search` with a query or tags. If the request conflicts with a decision in force, ask before building. " +
   "Document tools operate on your selected workspace: discover with `get_sidebar`, `list_docs` or `search`, " +
   "then read with `get_doc` before editing. Use returned text and rev for block edits. " +
   "Structured data has dedicated tools and can supply document views. Discover version-matched product help " +
