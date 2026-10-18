@@ -7,6 +7,8 @@ const osSensitive = [
   "admin-setup",
   "admin-setup-public",
   "hub-admin-setup-wrapper",
+  "operator-restore-access",
+  "operator-restore-command",
   "persistence",
   "shutdown",
   "startup",

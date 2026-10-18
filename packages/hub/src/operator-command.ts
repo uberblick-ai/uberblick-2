@@ -1,4 +1,5 @@
 import { readFileSync, realpathSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { runAdminSetup } from "./admin-setup-command.js";
 import { requestOperator } from "./operator-client.js";
@@ -16,8 +17,21 @@ commands:
   hub-admin add <github-login>         Appoint an account that has signed in
   hub-admin add --account-id <id>      Appoint by durable GitHub account ID
   backup                              Verify and save an online database copy
-  restore <file|->                     Restore a database while the hub is stopped
+  restore [--yes] <file|->             Restore a database while the hub is stopped
 `;
+
+async function confirmRestore(signal?: AbortSignal): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return false;
+  const terminal = createInterface({ input: process.stdin, output: process.stderr });
+  const closed = new AbortController();
+  const cancel = () => closed.abort();
+  terminal.once("close", cancel);
+  terminal.once("SIGINT", cancel);
+  try {
+    const promptSignal = signal ? AbortSignal.any([signal, closed.signal]) : closed.signal;
+    return /^y(es)?$/i.test((await terminal.question("Restore and undo these access changes? [y/N] ", { signal: promptSignal })).trim());
+  } finally { terminal.close(); }
+}
 
 function releaseIdentity(path: string): void {
   const release = JSON.parse(readFileSync(path, "utf8"));
@@ -105,8 +119,10 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
     return;
   }
   if (command === "hub-admin") { await runHubAdminCommand(args); return; }
+  const restoreInput = args[1] === "--yes" ? args[2] : args[1];
   const valid = args.length === 1 && ["status", "doctor", "backup"].includes(command ?? "") ||
-    command === "restore" && args.length === 2 && args[1] !== "" && !args[1]?.startsWith("--");
+    command === "restore" && args.length === (args[1] === "--yes" ? 3 : 2) &&
+      restoreInput !== undefined && restoreInput !== "" && !restoreInput.startsWith("--");
   if (!valid) { console.error(USAGE); process.exitCode = 2; return; }
   if (command === "status") releaseIdentity(releasePath);
   const databasePath = requiredHubDatabasePath();
@@ -140,8 +156,9 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
       console.log(`backup     ${result.path}\ncopy       docker compose cp hub:${result.path} ./hub-backup.sqlite`);
     });
   } else if (command === "restore") {
-    const input = args[1] ?? "";
-    await runWithSignals(signal => restoreDatabase(databasePath, input === "-" ? process.stdin : input, { signal }));
+    const input = restoreInput ?? "";
+    await runWithSignals(signal => restoreDatabase(databasePath, input === "-" ? process.stdin : input,
+      { signal, yes: args[1] === "--yes", confirm: confirmRestore }));
     console.log(`restored   ${databasePath}`);
   }
 }
