@@ -1,13 +1,14 @@
 import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
 import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -81,7 +82,45 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function expireCredential(hub: Hub, credential: IssuedCredential): void {
+  const db = new DatabaseSync(hub.databasePath);
+  try {
+    db.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+      .run(Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS, credential.record.id);
+  } finally {
+    db.close();
+  }
+}
+
 describe("authenticated hub access management", () => {
+  it("refuses expired device credentials for every management operation and omits them from device lists", async () => {
+    const { hub, github } = await rig();
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
+    hub.hubAdmins!.grant(owner.principal.id);
+    const current = issueCredential(hub.credentials!, { principalId: owner.principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+    expireCredential(hub, owner.issued);
+    const actions: Action[] = [
+      { operation: "list-devices" }, { operation: "revoke-device", deviceId: current.record.deviceId },
+      { operation: "own-role", workspaceId: WORKSPACE }, { operation: "list-members", workspaceId: WORKSPACE },
+      { operation: "change-role", workspaceId: WORKSPACE, principalId: owner.principal.id, role: "member" },
+      { operation: "remove-member", workspaceId: WORKSPACE, principalId: owner.principal.id },
+      { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" },
+      { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" },
+      { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() },
+      { operation: "own-hub-role" }, { operation: "list-hub-admins" }, { operation: "list-hub-workspaces" },
+      { operation: "remove-hub-admin", principalId: owner.principal.id },
+      { operation: "suspend-workspace", workspaceId: WORKSPACE }, { operation: "restore-workspace", workspaceId: WORKSPACE },
+    ];
+    for (const action of actions) {
+      expect(await manage(hub, owner.issued, action)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+    }
+    expect(await manage(hub, current, { operation: "list-devices" })).toMatchObject({ code: 200, result: {
+      status: "ok", devices: [{ deviceId: current.record.deviceId, current: true }],
+    } });
+    expect(hub.credentials!.get(owner.issued.record.id)?.revokedAt).toBeNull();
+    expect(github).not.toHaveBeenCalled();
+  });
+
   it("accepts a device collected through public GitHub sign-in using the same principal and membership registries", async () => {
     let githubTime = Date.now();
     const githubFetch: typeof fetch = async input => {
@@ -360,7 +399,7 @@ describe("authenticated hub access management", () => {
   });
 
   // One change per mechanism: credential state, membership and the clock.
-  it.each(["revoke", "demote", "expire"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
+  it.each(["revoke", "demote", "expire", "credential expiry"] as const)("rechecks %s after asynchronous proof verification before acting", async change => {
     const { hub } = await rig();
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const backup = person(hub, "5678", "backup-admin", [[WORKSPACE, "admin"]]);
@@ -374,6 +413,7 @@ describe("authenticated hub access management", () => {
       if (change === "demote") hub.memberships!.changeRole({ workspaceId: WORKSPACE,
         principalId: admin.principal.id, actorPrincipalId: backup.principal.id, role: "member" });
       if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+      if (change === "credential expiry") expireCredential(hub, admin.issued);
       return verified;
     });
     expect(await post(hub, envelope(presented, action))).toEqual(change === "demote"
@@ -820,7 +860,7 @@ describe("direct GitHub account grants", () => {
   });
 
   describe.each(["resolve-account", "grant-member"] as const)("%s lookup authority", operation => {
-    it.each(["demote", "remove", "revoke", "replace", "expire"] as const)("rechecks %s after the provider await before any write", async change => {
+    it.each(["demote", "remove", "revoke", "replace", "expire", "credential expiry"] as const)("rechecks %s after the provider await before any write", async change => {
       const release = deferred<Response>();
       const { hub, github } = await rig({ githubFetch: () => release.promise });
       const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
@@ -844,6 +884,7 @@ describe("direct GitHub account grants", () => {
           expect((await renewCredential(hub.credentials!, renewal, hub.memberships!)).status).toBe("renewed");
         }
         if (change === "expire") vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
+        if (change === "credential expiry") expireCredential(hub, admin.issued);
       } finally {
         release.resolve(Response.json({ id: 9012, login: "new-account", type: "User" }));
         await request;

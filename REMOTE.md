@@ -838,6 +838,12 @@ It reveals no workspace UUID, name, account, member or credential. A failed
 read or an older hub is never reported as unclaimed by `ub auth login`.
 
 Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
+Each device credential lasts 30 days from its stored `issued_at` in epoch
+milliseconds. At that age the hub refuses room admission, management requests
+and renewal, and closes and fences rooms already admitted under it. Management
+and renewal answer `sign-in-required`. There is no grace period: run
+`ub auth login` again. Expired rows remain as device history. Root-secret
+loopback admission and the separate 24-hour hub browser sessions stay unchanged.
 The device creates a fresh Ed25519 key pair before each sign-in or renewal and
 keeps its private key in its owner-only credential store. Sign-in start,
 collection and cancellation carry the same `publicKey`; no sign-in reply
@@ -866,8 +872,12 @@ Renewal needs no GitHub approval or GitHub connection. It retires the presented
 credential and returns `renewed` with `credential: {record, workspaceNames?}` once, for the
 same principal and device and its current memberships in active workspaces,
 including none. Suspended workspaces stay out of issued snapshots.
+Remote clients renew once the stored `issuedAt` is 15 days old, including
+long-running MCP and `ub open` processes that stay connected. This age-triggered
+renewal is unconditional even when available workspaces have not changed.
 It grants no membership. Retirement closes and fences any rooms admitted under
-the old credential on a remote hub. The hub stores only each credential's public
+the old credential on a remote hub, so the device's open rooms reconnect once
+per renewal. The hub stores only each credential's public
 key; a database or backup copy cannot sign room tokens or management proofs.
 Both a `complete` sign-in collection and a `renewed` reply can include names
 from the issued workspaces' hub `_settings` rooms. Loaded rooms supply their
@@ -882,11 +892,12 @@ until then, and promotion initially shows the UUID alone. Conditional renewal
 with unchanged available workspaces still returns only `{status: "unchanged"}`.
 A fresh, valid renewal proof under an already-replaced credential revokes every
 credential for that principal and device, closes their rooms, logs the reuse
-without key or token material, and returns `already-replaced`. A replay of an
+without key or token material, and returns `already-replaced`, regardless of
+that credential's age. A replay of an
 already-spent proof revokes nothing. Room and management requests using a
 replaced credential are refused and revoke nothing, so a process holding a
 token minted just before another process renewed cannot sign the device out.
-Unknown, revoked or unverifiable credentials return `sign-in-required`, revealing
+Unknown, revoked, expired or unverifiable credentials return `sign-in-required`, revealing
 no identity or workspace. If the replacement answer is lost, sign in again:
 the credential cannot be collected a second time.
 Malformed requests return `invalid-request`, version skew returns
@@ -1046,7 +1057,9 @@ credential naming no workspace. Workspace admins have no authority over
 another person's devices. Device rows contain `deviceId`, `signedInAt`
 (epoch milliseconds of that device's sign-in, preserved through renewal),
 `workspaces` (its current credential's limits), and `current` (whether it is
-making the request). Only devices with a current credential appear.
+making the request). Only devices with a current, unexpired credential appear
+in `list-devices`, Settings → Devices and `ub auth logout --all-devices`.
+Expired credentials remain as history and are omitted from these lists.
 Revocation retires every credential of that device, including a replacement
 from a racing renewal. Its other devices keep working. Revoking the requesting
 device succeeds, then its future proofs are refused. An authorized retry

@@ -1,7 +1,7 @@
 /** Remote clients resume device sync after a later login or grant, keeping local work. */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readHubLogins, writeHubLogin } from "@uberblick/mcp-server/auth-store";
-import { MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, MAX_TOKEN_LIFETIME_SECONDS } from "@uberblick/schema/token";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { getMeta, roomForDoc } from "@uberblick/schema";
 import { resolveMcpConfig } from "../src/config.js";
@@ -13,6 +13,40 @@ import { testConfig, waitUntil, WORKSPACE } from "./helpers.js";
 afterEach(closeDeviceSync);
 
 describe("stored-login sync", () => {
+  it("renews idle connected processes at half-life and keeps their edits syncing", async () => {
+    const fixture = await hub();
+    fixture.grant(WORKSPACE);
+    const env = environment();
+    const login = fixture.issue({ workspaces: [WORKSPACE] });
+    await writeHubLogin(fixture.origin, login, env);
+    let now = login.credential.record.issuedAt + DEVICE_CREDENTIAL_LIFETIME_MS / 2 - 250;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const [first, second] = await Promise.all([client(config(fixture, env)), client(config(fixture, env))]);
+      await Promise.all([
+        first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+        second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+      ]).then(results => expect(results).toMatchObject([{ caughtUp: true }, { caughtUp: true }]));
+      expect(fixture.renewalCount).toBe(0);
+      now += 500;
+      await waitUntil("connected processes to renew their idle credential", () =>
+        readHubLogins(env).logins[fixture.origin]?.credential.record.id !== login.credential.record.id);
+      const renewedId = readHubLogins(env).logins[fixture.origin]!.credential.record.id;
+      await waitUntil("both idle processes to reconnect with their renewed credential", () =>
+        new Set(fixture.authentications.filter(({ claims }) => claims?.kid === renewedId).map(({ claims }) => claims!.sub)).size === 2 &&
+        first.instance.replicas.sync.state().status === "connected" &&
+        second.instance.replicas.sync.state().status === "connected");
+      await Promise.all([
+        first.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+        second.instance.replicas.waitForSettled({ deadline: performance.now() + 70_000 }),
+      ]).then(results => expect(results).toMatchObject([{ caughtUp: true }, { caughtUp: true }]));
+      expect(fixture.renewalCount).toBe(1);
+      const written = await second.ok("create_doc", { title: "After idle renewal", description: "No user action or reconnect trigger." });
+      await waitUntil("the renewed process to sync edits", () =>
+        fixture.readRoom(roomForDoc(WORKSPACE, written.uuid), getMeta)?.title === "After idle renewal");
+    } finally { clock.mockRestore(); }
+  });
+
   it("discovers device admission through a loopback proxy and resumes pending edits after login", async () => {
     const fixture = await hub();
     fixture.grant(WORKSPACE);

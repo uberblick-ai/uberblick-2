@@ -8,7 +8,7 @@ import type {
   onAuthenticatePayload,
 } from "@hocuspocus/server";
 import { isRoomNameWithinBounds, parseRoom, settingsRoom } from "@uberblick/schema";
-import type { CredentialRegistry } from "./credentials.js";
+import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubAdminRegistry } from "./hub-admins.js";
@@ -36,6 +36,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
   // Loopback and ub open use their separate local admission paths.
   private readonly instances = new Set<Hocuspocus<CredentialContext>>();
   private readonly connections = new Set<Connection<CredentialContext>>();
+  private readonly expiryTimers = new Map<Connection<CredentialContext>, ReturnType<typeof setTimeout>>();
   private readonly unsubscribe: () => void;
 
   constructor(
@@ -107,6 +108,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     if (record === null || record.revokedAt !== null || record.replacedAt !== null) {
       return refuse(record !== null && record.replacedAt !== null ? "replaced-credential" : "revoked-credential");
     }
+    if (this.registry.isExpired(record)) return refuse("expired-credential");
     const workspace = workspaceOf(documentName);
     if (workspace === null || workspace !== verified.claims.workspace) {
       return refuse("workspace-mismatch");
@@ -158,6 +160,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
 
   onDestroy = async (): Promise<void> => {
     this.unsubscribe();
+    for (const timer of this.expiryTimers.values()) clearTimeout(timer);
+    this.expiryTimers.clear();
     this.instances.clear();
     this.connections.clear();
   };
@@ -199,13 +203,8 @@ export class CredentialAdmission implements Extension<CredentialContext> {
     const context = connection.context;
     const record = this.registry.get(context.credentialId);
     const workspace = workspaceOf(room);
-    const cause = record === null
-      ? "unknown-credential"
-      : record.revokedAt !== null
-        ? "revoked-credential"
-        : record.replacedAt !== null
-          ? "replaced-credential"
-        : workspace === null ||
+    const cause = this.credentialFailure(record) ??
+      (record === null || workspace === null ||
               workspace !== context.workspace ||
               !record.workspaces.includes(workspace)
           ? "workspace-mismatch"
@@ -215,7 +214,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
               ? "workspace-suspended"
             : !context.authorization.active
               ? "access-ended"
-              : null;
+              : null);
     if (cause !== null) {
       context.authorization.active = false;
       connection.readOnly = true;
@@ -223,10 +222,36 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.options.log({ event: "hub.auth.rejected", cause });
       throw new CredentialRefusal();
     }
+    if (!this.expiryTimers.has(connection) && record !== null) {
+      this.scheduleExpiry(connection, record);
+    }
     if (room === settingsRoom(context.workspace)) {
       connection.readOnly = context.authorization.readOnly ||
         this.memberships.roleFor(context.workspace, context.principalId) !== "admin";
     }
+  }
+
+  private credentialFailure(record: CredentialRecord | null): string | null {
+    if (record === null) return "unknown-credential";
+    if (record.revokedAt !== null) return "revoked-credential";
+    if (record.replacedAt !== null) return "replaced-credential";
+    return this.registry.isExpired(record) ? "expired-credential" : null;
+  }
+
+  private scheduleExpiry(connection: Connection<CredentialContext>, record: CredentialRecord): void {
+    // Thirty days exceeds Node's maximum timeout. Re-read the hub clock at
+    // each bounded wake-up, including after the clock moves backwards.
+    const delay = Math.min(Math.max(0, this.registry.remainingLifetime(record)), 2_147_483_647);
+    const timer = setTimeout(() => {
+      this.expiryTimers.delete(connection);
+      if (this.registry.isExpired(record)) {
+        this.closeWhere(context => context.credentialId === record.id);
+      } else {
+        this.scheduleExpiry(connection, record);
+      }
+    }, delay);
+    timer.unref();
+    this.expiryTimers.set(connection, timer);
   }
 
   private track(connection: Connection<CredentialContext>): void {
@@ -237,6 +262,9 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       // Keep its apply fence reachable until Hocuspocus finishes that loop.
       void connection.waitForPendingMessages().then(() => {
         this.connections.delete(connection);
+        const timer = this.expiryTimers.get(connection);
+        if (timer !== undefined) clearTimeout(timer);
+        this.expiryTimers.delete(connection);
       });
     };
     if (connection.document.hasConnection(connection)) {

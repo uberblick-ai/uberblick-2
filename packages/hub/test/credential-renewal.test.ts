@@ -7,7 +7,7 @@ import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
-import { MAX_TOKEN_LIFETIME_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, MAX_TOKEN_LIFETIME_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const PRINCIPAL = "person";
@@ -21,9 +21,9 @@ function database(path = ":memory:"): HubDatabase {
   return opened;
 }
 
-function registry(path = ":memory:") {
+function registry(path = ":memory:", now?: () => number) {
   const db = database(path);
-  return { db, store: new CredentialRegistry(db), memberships: new MembershipRegistry(db) };
+  return { db, store: new CredentialRegistry(db, undefined, undefined, now), memberships: new MembershipRegistry(db) };
 }
 
 function issue(store: CredentialRegistry, workspaces: string[] = [WORKSPACE]): IssuedCredential {
@@ -84,6 +84,44 @@ afterEach(() => {
 });
 
 describe("device credential renewal", () => {
+  it.each(["before verification", "during verification"] as const)("refuses expiry %s without issuing or retiring a credential", async when => {
+    let now = Date.now();
+    const { db, store, memberships } = registry(":memory:", () => now);
+    const original = issue(store);
+    now += DEVICE_CREDENTIAL_LIFETIME_MS - 1;
+    if (when === "before verification") now += 1;
+    const request = await proof(original, { iat: Math.floor(now / 1000) });
+    const before = states(db);
+    if (when === "before verification") {
+      expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
+    } else {
+      const barrier = holdVerification();
+      const renewing = renewCredential(store, request, memberships);
+      await barrier.reached;
+      now += 1;
+      barrier.release();
+      expect(await renewing).toEqual({ status: "sign-in-required" });
+    }
+    expect(states(db)).toEqual(before);
+    expect(store.get(original.record.id)).toEqual(original.record);
+  });
+
+  it("renews just before expiry and still revokes reuse from a replaced credential older than thirty days", async () => {
+    let now = Date.now();
+    const { store, memberships } = registry(":memory:", () => now);
+    const original = issue(store);
+    now += DEVICE_CREDENTIAL_LIFETIME_MS - 1;
+    const request = await proof(original, { iat: Math.floor(now / 1000) });
+    const renewed = replacement(await renewCredential(store, request, memberships));
+    now += 1_000;
+    expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
+    expect(store.get(renewed.record.id)?.revokedAt).toBeNull();
+    const fresh = await proof(original, { iat: Math.floor(now / 1000) });
+    expect(await renewCredential(store, fresh, memberships)).toEqual({ status: "already-replaced" });
+    expect(store.get(original.record.id)?.revokedAt).toBe(now);
+    expect(store.get(renewed.record.id)?.revokedAt).toBe(now);
+  });
+
   it("omits suspended workspaces once, polls without retiring healthy rooms, and rediscovers restored access", async () => {
     const { db, store, memberships } = registry();
     const admins = new HubAdminRegistry(db);
