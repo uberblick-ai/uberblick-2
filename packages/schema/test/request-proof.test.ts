@@ -5,8 +5,10 @@ import type {
   RequestProofRequest,
 } from "../src/token.js";
 import {
+  CLOCK_SKEW_SECONDS,
   MAX_TOKEN_LENGTH,
   MAX_TOKEN_LIFETIME_SECONDS,
+  REQUEST_PROOF_LIFETIME_SECONDS,
   clampToken,
   importCredentialKey,
   importRootSecret,
@@ -99,6 +101,18 @@ describe("credential request proofs", () => {
       expect(await verifyToken(key, proof)).toBeNull();
       expect(await inspectRequestProof(key, room, action))
         .toHaveProperty("failure", "unsupported-claims");
+    }
+  });
+
+  it("distinguishes independently minted same-second requests while accepting proofs without a nonce", async () => {
+    const action: RequestAction = { operation: "remove-member", workspaceId: WORKSPACE, principalId: "principal" };
+    const expected = { typ: "request", kid: KID, ...action, iat: NOW, exp: NOW + 60 };
+    const first = await mintRequestProof(key, request(action));
+    const second = await mintRequestProof(key, request(action));
+
+    expect(first).not.toBe(second);
+    for (const proof of [first, second, await forge(expected)]) {
+      expect(await inspectRequestProof(key, proof, action)).toEqual(expected);
     }
   });
 
@@ -236,7 +250,8 @@ describe("credential request proofs", () => {
       .toEqual(expected);
     const proof = await mintRequestProof(key, request(metadata));
     expect(await inspectRequestProof(key, proof, "renew-credential")).toEqual(expected);
-    expect(JSON.parse(Buffer.from(proof.split(".")[0]!, "base64url").toString())).toEqual(expected);
+    expect(JSON.parse(Buffer.from(proof.split(".")[0]!, "base64url").toString()))
+      .toEqual({ ...expected, nonce: expect.any(String) });
   });
 
   it("rejects another device's signature and the shared root signature without reflecting claims or key material", async () => {
@@ -285,23 +300,30 @@ describe("credential request proofs", () => {
       { kid: null }, { kid: "not-a-uuid" }, { operation: "unknown-operation" },
       { iat: -1 }, { iat: 1.5 }, { iat: Number.MAX_SAFE_INTEGER },
       { lifetimeSeconds: 0 }, { lifetimeSeconds: 1.5 },
+      { lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS + 1 },
+      { lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS },
       { lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS + 1 },
     ]) {
       await expect(mintRequestProof(key, request(changed))).rejects.toThrow(/mintRequestProof/);
     }
   });
 
-  it("applies the existing hub clock and lifetime ceiling after verifying the proof", async () => {
-    for (const [iat, exp, expected] of [
-      [NOW - 60, NOW - 1, "expired"],
-      [NOW + 61, NOW + 121, "not-yet-issued"],
-      [NOW, NOW + MAX_TOKEN_LIFETIME_SECONDS + 1, "lifetime-too-long"],
-      [NOW, NOW + 60, null],
-    ] as const) {
-      const proof = await forge({ typ: "request", kid: KID, operation: "renew-credential", iat, exp });
-      const inspected = await inspectRequestProof(key, proof, "renew-credential");
-      if ("failure" in inspected) throw new Error("proof did not verify");
-      expect(clampToken(inspected, NOW)).toBe(expected);
+  it("caps every request proof at 60 seconds while preserving the clock-skew and expiry rules", async () => {
+    for (const action of ACTIONS) {
+      for (const [iat, exp, expected] of [
+        [NOW - 60, NOW - 1, "expired"],
+        [NOW - 60, NOW, null],
+        [NOW + CLOCK_SKEW_SECONDS, NOW + CLOCK_SKEW_SECONDS + 60, null],
+        [NOW + CLOCK_SKEW_SECONDS + 1, NOW + CLOCK_SKEW_SECONDS + 61, "not-yet-issued"],
+        [NOW, NOW + REQUEST_PROOF_LIFETIME_SECONDS + 1, "lifetime-too-long"],
+        [NOW, NOW + MAX_TOKEN_LIFETIME_SECONDS, "lifetime-too-long"],
+        [NOW, NOW + REQUEST_PROOF_LIFETIME_SECONDS, null],
+      ] as const) {
+        const proof = await forge({ typ: "request", kid: KID, ...action, iat, exp });
+        const inspected = await inspectRequestProof(key, proof, action);
+        if ("failure" in inspected) throw new Error("proof did not verify");
+        expect(clampToken(inspected, NOW)).toBe(expected);
+      }
     }
   });
 });

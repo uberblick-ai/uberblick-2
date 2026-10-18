@@ -133,7 +133,7 @@ describe("public credential renewal", () => {
     } });
     expect(renewed.result.credential.record.id).not.toBe(issued.record.id);
     const replay = await post(hub, envelope(proof));
-    expect(replay).toEqual({ code: 401, result: { status: "already-replaced" } });
+    expect(replay).toEqual({ code: 401, result: { status: "sign-in-required" } });
     expect(await post(hub, envelope("github-token")))
       .toEqual({ code: 401, result: { status: "sign-in-required" } });
     expect(github).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ describe("public credential renewal", () => {
   it("lets at most one concurrent HTTP exchange succeed", async () => {
     const { hub, proof } = await rig();
     const results = await Promise.all([post(hub, envelope(proof)), post(hub, envelope(proof))]);
-    expect(results.map((reply) => reply.result.status).sort()).toEqual(["already-replaced", "renewed"]);
+    expect(results.map((reply) => reply.result.status).sort()).toEqual(["renewed", "sign-in-required"]);
   });
 
   it("uses sign-in's not-configured refusal when no sign-in is configured", async () => {
