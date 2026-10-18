@@ -32,9 +32,9 @@ dashboard, are a maintainer step; no token lives in the repository:
 | Setting | Value |
 | --- | --- |
 | Production branch | `main` |
-| Build command | `python3 site/build.py` |
-| Build output directory | `site/out` |
-| Build watch paths | `site/*` |
+| Root directory | `site`, so Cloudflare's framework detection does not run against the pnpm workspace at the repository root, which it refuses to build |
+| Build command | `python3 build.py`, relative to the root directory |
+| Build output directory | `out`, relative to the root directory; a root directory also limits builds to pushes that change it |
 | Environment variable `SITE_URL` | the origin the project serves, for example `https://next.uberblick.ai`; omitted, the canonical links name `https://uberblick.ai` |
 | Environment variable `SITE_NOINDEX` | set to `1` on a host search engines should not index |
 | Custom domain | the host name; Cloudflare adds the DNS record when the zone is on Cloudflare, otherwise add a CNAME to the project's `pages.dev` host |
