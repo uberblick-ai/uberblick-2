@@ -1058,7 +1058,7 @@ another person's devices. Device rows contain `deviceId`, `signedInAt`
 (epoch milliseconds of that device's sign-in, preserved through renewal),
 `workspaces` (its current credential's limits), and `current` (whether it is
 making the request). Only devices with a current, unexpired credential appear
-in `list-devices`, Settings → Devices and `ub auth logout --all-devices`.
+in `list-devices`, user menu → Devices and `ub auth logout --all-devices`.
 Expired credentials remain as history and are omitted from these lists.
 Revocation retires every credential of that device, including a replacement
 from a racing renewal. Its other devices keep working. Revoking the requesting
@@ -1631,8 +1631,8 @@ workspace member removals and hub-admin removals cannot be determined and
 proceeds without asking. Both this warning and a non-empty list print the
 steps to restore the access restrictions after starting the hub:
 
-- Each account revokes its own lost devices again through Settings → User →
-  Devices or `ub auth logout --all-devices <hub>`.
+- Each account revokes its own lost devices again through user menu → Devices
+  or `ub auth logout --all-devices <hub>`.
 - Workspace admins remove members again through `ub workspace member remove`
   or Workspace settings → Members.
 - Hub admins remove hub admins again through Hub → Admins.

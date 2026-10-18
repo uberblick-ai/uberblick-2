@@ -205,8 +205,8 @@ test("local-only status answers leave the readings and prose in place", async ({
       await page.getByRole("button", { name: "Show document list", exact: true }).focus();
       await page.keyboard.press("Enter");
     }
-    const settings = page.getByRole("button", { name: "Settings", exact: true });
-    await settings.click();
+    await page.getByTestId("account-menu").click();
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
     await expect(page.locator(".ub-status")).toHaveCount(0);
     await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
     await page.close();

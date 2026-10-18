@@ -98,13 +98,13 @@ type SidebarProps = {
   onCreate: () => void;
   /** Navigate to the All docs listing. */
   onOpenAll: () => void;
-  /** Enter workspace settings. Like every selection, this is navigation. */
+  /** Enter a settings page. Like every selection, this is navigation. */
   onOpenSettings: (page: SettingsPage) => void;
   /** Leave settings for the workspace's fixed list address. */
   onBackToWorkspace: () => void;
   /** Whether that listing is what the address currently names. */
   allOpen: boolean;
-  /** Whether the address names workspace settings. */
+  /** Whether the address names either settings area. */
   settingsOpen: boolean;
   /** The selected settings destination, when settings is open. */
   settingsPage: SettingsPage | null;
@@ -204,16 +204,20 @@ function SidebarContent({
     () => new Map(stubs.map((entry) => [entry.uuid, entry])),
     [stubs],
   );
-  const shownMode = useRef(settingsOpen);
+  const personalSettings = settingsPage === "preferences" || settingsPage === "devices";
+  const settingsArea = settingsOpen ? personalSettings ? "personal" : "workspace" : null;
+  const shownMode = useRef(settingsArea);
   useEffect(() => {
-    if (shownMode.current === settingsOpen) return;
-    shownMode.current = settingsOpen;
-    sidebarRoot.current
-      ?.querySelector<HTMLElement>(
-        settingsOpen ? ".ub-settings-back" : ".ub-settings-entry",
-      )
-      ?.focus();
-  }, [settingsOpen, sidebarRoot]);
+    if (shownMode.current === settingsArea) return;
+    const previous = shownMode.current;
+    shownMode.current = settingsArea;
+    const root = sidebarRoot.current;
+    const target = root?.querySelector<HTMLElement>(settingsArea !== null
+      ? ".ub-settings-back"
+      : previous === "personal" ? '[data-testid="account-menu"]' : ".ub-settings-entry")
+      ?? root?.querySelector<HTMLElement>(".ub-all-open-entry");
+    target?.focus();
+  }, [settingsArea, sidebarRoot]);
 
   const addGroup = (): void => {
     if (ydoc === null || !canWriteSidebar()) return;
@@ -347,6 +351,7 @@ function SidebarContent({
           workspaceLabel={workspace === null ? "workspace" : workspaceLabel(workspace, workspaceNames ?? new Map(), workspaces)}
           active={settingsOpen && !collapsed}
           page={settingsPage}
+          personal={personalSettings}
           hubAdmin={hubAdmin}
           workspaceAdmin={workspaceAdmin}
           devicesAvailable={devicesAvailable}
@@ -364,15 +369,15 @@ function SidebarContent({
             <span>{reading.detail === null ? "Offline" : reading.word.charAt(0).toUpperCase() + reading.word.slice(1)}</span>
           </div>
         )}
-        {workspace !== null && !settingsOpen && (
+        {workspace !== null && (workspaceAdmin || hubAdmin) && settingsArea !== "workspace" && (
           <button
             type="button"
             className={`ub-settings-entry ${SIDEBAR_ROW_CLASSES} w-full`}
             data-swap-focus
-            onClick={() => onOpenSettings(workspaceAdmin ? "general" : "preferences")}
+            onClick={() => onOpenSettings(workspaceAdmin ? "general" : "hub-admins")}
           >
             <GearIcon />
-            Settings
+            Workspace settings
           </button>
         )}
         <UserMenu key={settingsOpen ? settingsPage : "documents"} account={account} active={!collapsed}
@@ -389,6 +394,7 @@ function SettingsNavigation({
   workspaceLabel: label,
   active,
   page,
+  personal,
   hubAdmin,
   workspaceAdmin,
   devicesAvailable,
@@ -398,6 +404,7 @@ function SettingsNavigation({
   workspaceLabel: string;
   active: boolean;
   page: SettingsPage | null;
+  personal: boolean;
   hubAdmin: boolean;
   workspaceAdmin: boolean;
   devicesAvailable: boolean;
@@ -407,7 +414,7 @@ function SettingsNavigation({
   return (
     <nav
       className={`${SIDEBAR_PANE_CLASSES} ub-settings-sidebar z-1 [transform:translateX(100%)] opacity-0 group-data-[mode=settings]/sidebar:[transform:translateX(0)] group-data-[mode=settings]/sidebar:opacity-100`}
-      aria-label="Settings"
+      aria-label={personal ? "Personal settings" : "Workspace settings"}
       aria-hidden={!active}
       inert={!active}
     >
@@ -427,7 +434,7 @@ function SettingsNavigation({
         </button>
       </SidebarHeader>
       <SidebarScrollContent className="px-2 pb-2 [&>*]:shrink-0">
-        {workspaceAdmin && <section className="ub-nav ub-settings-nav" aria-label="Workspace">
+        {!personal && workspaceAdmin && <section className="ub-nav ub-settings-nav" aria-label="Workspace">
           <p className="ub-nav-label">Workspace</p>
           <ul>
             <li>
@@ -465,7 +472,7 @@ function SettingsNavigation({
             </li>
           </ul>
         </section>}
-        <section className="ub-nav ub-settings-nav" aria-label="User">
+        {personal && <section className="ub-nav ub-settings-nav" aria-label="User">
           <p className="ub-nav-label">User</p>
           <ul>
             <li><button type="button" className={SIDEBAR_NAV_CLASSES}
@@ -475,8 +482,8 @@ function SettingsNavigation({
               aria-current={page === "devices" ? "page" : undefined}
               onClick={() => onSelect("devices")}><DevicesIcon />Devices</button></li>}
           </ul>
-        </section>
-        {hubAdmin && <section className="ub-nav ub-settings-nav" aria-label="Hub">
+        </section>}
+        {!personal && hubAdmin && <section className="ub-nav ub-settings-nav" aria-label="Hub">
           <p className="ub-nav-label">Hub</p>
           <ul>
             <li><button type="button" className={SIDEBAR_NAV_CLASSES}

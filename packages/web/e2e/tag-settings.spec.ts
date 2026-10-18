@@ -134,7 +134,7 @@ test("Tags settings is address-selected and its catalog changes converge", async
   await expect(first.getByRole("button", { name: "Retire product" })).toBeFocused();
 
   await first
-    .getByRole("navigation", { name: "Settings" })
+    .getByRole("navigation", { name: "Workspace settings" })
     .getByRole("button", { name: "General" })
     .click();
   await expect(first).toHaveURL(
@@ -237,7 +237,7 @@ test("settings successes use shared notices and preserve native submission focus
   }
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  await page.getByRole("navigation", { name: "Settings" }).getByRole("button", { name: "Tags", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace settings" }).getByRole("button", { name: "Tags", exact: true }).click();
   const field = page.getByLabel("Create a tag");
   const create = page.getByRole("button", { name: "Create", exact: true });
   const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;

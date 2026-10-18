@@ -86,7 +86,8 @@ test("confirm a GitHub account, manage membership, and revoke only your devices"
   await expect(page.getByRole("alert")).toHaveText("The hub refused this change: the last admin cannot be removed or demoted.");
   await expect(members.getByRole("rowheader").filter({ hasText: "browser-person" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Devices", exact: true }).click();
+  await page.getByTestId("account-menu").click();
+  await page.getByRole("menuitem", { name: "Devices", exact: true }).click();
   const devices = page.getByRole("table", { name: "Devices", exact: true });
   await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
   await expect(page.getByText(`Computers signed in to ${new URL(harness().hubUrl).host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();

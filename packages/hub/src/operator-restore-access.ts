@@ -82,7 +82,7 @@ export function restoreAccessChanges(livePath: string, backupPath: string, copyP
 
 export function writeAccessRecovery(writeLine: (line: string) => void): void {
   writeLine("After starting the restored hub:");
-  writeLine("- Each account revokes its own lost devices again through Settings → User → Devices or ub auth logout --all-devices <hub>.");
+  writeLine("- Each account revokes its own lost devices again through user menu → Devices or ub auth logout --all-devices <hub>.");
   writeLine("- Workspace admins remove members again through ub workspace member remove or Workspace settings → Members.");
   writeLine("- Hub admins remove hub admins again through Hub → Admins.");
 }

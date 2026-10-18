@@ -165,10 +165,10 @@ describe("recent devices", () => {
       { id: UNNAMED, signedInAt: "2026-10-18T12:00:00.000Z" },
     ], ORIGIN)).toBe(
       "new device  This computer (11111111), signed in 1 hour ago\n" +
-      "              → revoke in Settings → User → Devices\n" +
+      "              → revoke in user menu → Devices\n" +
       `              → or ub auth logout --all-devices ${ORIGIN}\n` +
       "new device  Unnamed device (22222222), signed in just now\n" +
-      "              → revoke in Settings → User → Devices\n" +
+      "              → revoke in user menu → Devices\n" +
       `              → or ub auth logout --all-devices ${ORIGIN}\n`,
     );
     expect(recentDevicesNotice([], ORIGIN)).toBe("");

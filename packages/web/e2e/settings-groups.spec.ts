@@ -5,8 +5,26 @@ import { activateControl, setupHarness } from "./app-helpers.js";
 
 const WORKSPACE_CONTROLS = "#ub-workspace-name, #ub-main-repository, #ub-new-tag, #ub-github-account";
 
-function navigation(page: Page) {
-  return page.getByRole("navigation", { name: "Settings", exact: true });
+function workspaceNavigation(page: Page) {
+  return page.getByRole("navigation", { name: "Workspace settings", exact: true });
+}
+
+function personalNavigation(page: Page) {
+  return page.getByRole("navigation", { name: "Personal settings", exact: true });
+}
+
+async function openPersonal(page: Page, title: "Preferences" | "Devices"): Promise<void> {
+  await showSidebar(page);
+  const account = page.getByTestId("account-menu");
+  const entry = page.getByRole("menuitem", { name: title, exact: true });
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) {
+    await account.tap();
+    await entry.tap();
+  } else {
+    await account.press("Enter");
+    await entry.press("Enter");
+  }
+  await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
 }
 
 async function showSidebar(page: Page): Promise<void> {
@@ -28,19 +46,17 @@ test.describe("a current workspace and hub admin", () => {
     for (const width of touch ? [834, 600] : [1440]) {
       await page.setViewportSize({ width, height: 900 });
       await showSidebar(page);
-      const nav = navigation(page);
-      await expect(nav.locator(".ub-settings-nav > p")).toHaveText(["Workspace", "User", "Hub"]);
+      const nav = workspaceNavigation(page);
+      await expect(nav.locator(".ub-settings-nav > p")).toHaveText(["Workspace", "Hub"]);
       await expect(nav.locator(".ub-settings-nav > p").first()).toHaveCSS("font-size", "12px");
       await expect(nav.locator(".ub-settings-nav > p").first()).toHaveCSS("text-transform", "none");
       const rows = nav.locator(".ub-settings-nav li > button");
-      await expect(rows).toHaveText(["General", "Tags", "Members", "Preferences", "Devices", "Admins", "Workspaces"]);
+      await expect(rows).toHaveText(["General", "Tags", "Members", "Admins", "Workspaces"]);
       const icons = await rows.locator("svg").evaluateAll((elements) => elements.map((element) => element.innerHTML));
-      expect(icons).toHaveLength(7);
-      expect(new Set(icons).size).toBe(7);
-      await expect(page.locator('[data-slot="sidebar-footer"]').getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
-      for (const title of ["General", "Tags", "Members", "Preferences", "Devices", "Admins", "Workspaces"]) {
+      await expect(page.locator('[data-slot="sidebar-footer"]').getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
+      for (const title of ["General", "Tags", "Members", "Admins", "Workspaces"]) {
         await showSidebar(page);
-        const entry = navigation(page).getByRole("button", { name: title, exact: true });
+        const entry = workspaceNavigation(page).getByRole("button", { name: title, exact: true });
         if (touch) {
           expect((await entry.boundingBox())?.height).toBeGreaterThanOrEqual(44);
           await entry.tap();
@@ -51,15 +67,37 @@ test.describe("a current workspace and hub admin", () => {
         await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
       }
       await showSidebar(page);
-      const back = navigation(page).locator(".ub-settings-back");
+      const back = workspaceNavigation(page).locator(".ub-settings-back");
+      await expect(back).toContainText("Unnamed workspace");
       await expect(back).not.toContainText("Back to");
       expect(await back.locator("svg").evaluate((element) => getComputedStyle(element).color))
         .toBe(await back.evaluate((element) => getComputedStyle(element).color));
       await activateControl(back);
       await expect(page).toHaveURL(new URL(`/${harness().workspace}`, harness().appUrl).href);
       if (touch) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
-      await activateControl(page.getByRole("button", { name: "Settings", exact: true }));
+      else await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toBeFocused();
+      await openPersonal(page, "Preferences");
+      await showSidebar(page);
+      const personal = personalNavigation(page);
+      await expect(personal.locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
+      icons.push(...await personal.locator(".ub-settings-nav li > button svg").evaluateAll((elements) => elements.map((element) => element.innerHTML)));
+      expect(icons).toHaveLength(7);
+      expect(new Set(icons).size).toBe(7);
+      const workspaceEntry = page.getByRole("button", { name: "Workspace settings", exact: true });
+      await expect(workspaceEntry).toBeVisible();
+      if (!touch) await expect(personal.locator(".ub-settings-back")).toBeFocused();
+      await activateControl(personal.getByRole("button", { name: "Devices", exact: true }));
+      await expect(page.getByRole("heading", { level: 1, name: "Devices", exact: true })).toBeVisible();
+      await showSidebar(page);
+      await activateControl(personal.locator(".ub-settings-back"));
+      await expect(page).toHaveURL(new URL(`/${harness().workspace}`, harness().appUrl).href);
+      if (touch) await activateControl(page.getByRole("button", { name: "Show document list", exact: true }));
+      else await expect(page.getByTestId("account-menu")).toBeFocused();
+      await openPersonal(page, "Devices");
+      await showSidebar(page);
+      await activateControl(workspaceEntry);
       await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+      if (!touch) await expect(workspaceNavigation(page).locator(".ub-settings-back")).toBeFocused();
     }
   });
 
@@ -82,14 +120,14 @@ test.describe("a current workspace and hub admin", () => {
         if (visit === "reload") { hold = true; await page.reload(); }
         await expect(page.getByText("Reading workspace permissions…", { exact: true })).toBeVisible();
         await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
-        await expect(navigation(page).getByRole("region", { name: "Workspace", exact: true })).toHaveCount(0);
+        await expect(workspaceNavigation(page).getByRole("region", { name: "Workspace", exact: true })).toHaveCount(0);
         await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
         await expect.poll(() => pending.length).toBeGreaterThan(0);
         hold = false;
         for (const route of pending.splice(0)) await route.continue();
         await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
         await expect(page).toHaveURL(new URL(path, harness().appUrl).href);
-        await expect(navigation(page).getByRole("region", { name: "Workspace", exact: true })).toBeVisible();
+        await expect(workspaceNavigation(page).getByRole("region", { name: "Workspace", exact: true })).toBeVisible();
       }
     });
   }
@@ -110,7 +148,7 @@ test.describe("a current workspace and hub admin", () => {
     role = "member";
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
-    await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User", "Hub"]);
+    await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
     await page.goto(new URL(`/${harness().workspace}/settings/tags`, harness().appUrl).href);
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
     await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
@@ -118,13 +156,15 @@ test.describe("a current workspace and hub admin", () => {
 
   test("signing this computer out removes Workspace, Devices and Hub while the page stays open", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`);
-    await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace", "User", "Hub"]);
-    await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+    await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace", "Hub"]);
+    await page.getByTestId("account-menu").click();
+    await expect(page.getByRole("menuitem", { name: "Devices", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
     try {
       harness().setStoredLogin(false);
       await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-      await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
-      await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
+      await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences"]);
+      await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
       await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
       await page.getByTestId("account-menu").click();
       await expect(page.getByRole("menuitem")).toHaveText(["Preferences"]);
@@ -139,8 +179,8 @@ test.describe("a current workspace and hub admin", () => {
       await page.reload();
       await expect(page.locator(".ub-rebound-notice")).toBeVisible();
       await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-      await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
-      await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
+      await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences"]);
+      await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
       await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
     } finally { harness().rebindProject(harness().hubUrl); }
   });
@@ -163,8 +203,8 @@ test.describe("a current workspace and hub admin", () => {
       },
     });
     await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-    await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
-    await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
+    await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences"]);
+    await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
     await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
   });
 
@@ -181,8 +221,7 @@ test.describe("a current workspace and hub admin", () => {
       });
       try {
         await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-        await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
-        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+        await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
         await page.getByTestId("account-menu").click();
         await expect(page.getByRole("menuitem")).toHaveText(["Preferences", "Devices"]);
         await page.getByRole("menuitem", { name: "Devices", exact: true }).click();
@@ -192,10 +231,9 @@ test.describe("a current workspace and hub admin", () => {
           await expect(page.getByText("Reading devices from the hub…", { exact: true })).toBeVisible();
         }
         await expect(page.getByRole("alert").filter({ hasText: "The hub cannot be reached." })).toBeVisible();
-        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+        await expect(personalNavigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
         harness().setStoredLogin(false);
-        await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
-        await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
+        await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences"]);
         await page.getByTestId("account-menu").click();
         await expect(page.getByRole("menuitem")).toHaveText(["Preferences"]);
       } finally {
@@ -217,30 +255,75 @@ test.describe("a current workspace and hub admin", () => {
         },
       });
       await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-      await expect(navigation(page).getByRole("region", { name: "Workspace", exact: true })).toHaveCount(0);
+      await expect(personalNavigation(page).getByRole("region", { name: "Workspace", exact: true })).toHaveCount(0);
       await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
     });
   }
 });
 
 for (const role of ["member", "none"] as const) {
+  test.describe(`a hub administrator with workspace role ${role}`, () => {
+    const { harness, openApp } = setupHarness({ accessRole: role, hubAdmin: true });
+    test("confirms hub authority independently, defaults to Admins and keeps personal pages separate", async ({ browser }) => {
+      let hold = true;
+      const pending: Route[] = [];
+      const page = await openApp(browser, `/${harness().workspace}`, {
+        beforeNavigate: async (opening) => {
+          await opening.route("**/api/access", (route) => {
+            const action = route.request().postDataJSON() as { operation: string };
+            if (hold && action.operation === "own-hub-role") { pending.push(route); return; }
+            return route.continue();
+          });
+        },
+      });
+      try {
+        const entry = page.getByRole("button", { name: "Workspace settings", exact: true });
+        await expect.poll(() => pending.length).toBeGreaterThan(0);
+        await expect(entry).toHaveCount(0);
+        await openPersonal(page, "Preferences");
+        await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
+        await expect(entry).toHaveCount(0);
+        hold = false;
+        for (const route of pending.splice(0)) await route.continue().catch(() => {});
+        await expect(entry).toBeVisible();
+        await entry.click();
+        await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings/hub-admins`, harness().appUrl).href);
+        await expect(page.getByRole("table", { name: "Hub admins", exact: true })).toBeVisible();
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Hub"]);
+        await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Admins", "Workspaces"]);
+        await expect(entry).toHaveCount(0);
+        await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
+        await openPersonal(page, "Devices");
+        await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
+        await expect(entry).toBeVisible();
+      } finally {
+        hold = false;
+        for (const route of pending) await route.abort().catch(() => {});
+      }
+    });
+  });
+
   test.describe(`a signed-in account with ${role === "none" ? "no workspace membership" : "a member role"} and no hub role`, () => {
     const { harness, openApp } = setupHarness({ accessRole: role });
-    test("shows User alone, defaults Settings to Preferences and keeps own Devices", async ({ browser }) => {
+    test("hides Workspace settings, opens personal pages from the user menu and keeps own Devices", async ({ browser }) => {
       const page = await openApp(browser, `/${harness().workspace}`);
       const account = page.getByTestId("account-menu");
       await expect(account).toContainText(role === "member" ? "@browser-person" : "Account unavailable");
-      await page.getByRole("button", { name: "Settings", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
-      await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["User"]);
-      await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
+      await openPersonal(page, "Preferences");
+      await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences", "Devices"]);
+      await expect(page.getByRole("navigation", { name: "Settings", exact: true })).toHaveCount(0);
+      await personalNavigation(page).locator(".ub-settings-back").click();
+      await expect(page).toHaveURL(new URL(`/${harness().workspace}`, harness().appUrl).href);
+      await expect(account).toBeFocused();
+      await openPersonal(page, "Devices");
       for (const suffix of ["", "/tags", "/members"]) {
         await page.goto(new URL(`/${harness().workspace}/settings${suffix}`, harness().appUrl).href);
         await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
         await expect(page).toHaveURL(new URL(`/${harness().workspace}/settings/preferences`, harness().appUrl).href);
         await expect(page.locator(WORKSPACE_CONTROLS)).toHaveCount(0);
       }
-      await navigation(page).getByRole("button", { name: "Devices", exact: true }).click();
+      await personalNavigation(page).getByRole("button", { name: "Devices", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Devices", exact: true })).toBeVisible();
       const host = new URL(harness().hubUrl).host;
       await expect(page.getByText(`Computers signed in to ${host} as @browser-person. Revoking one stops its sync; its downloaded documents stay.`, { exact: true })).toBeVisible();
@@ -259,13 +342,15 @@ test.describe("a local workspace without roles", () => {
   test("always offers Workspace and Preferences while stored hub login grants no Devices or Hub group", async ({ browser }) => {
     const page = await openApp(browser, `/${harness().workspace}/settings`);
     await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
-    await expect(navigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace", "User"]);
-    await expect(navigation(page).getByRole("button", { name: "Devices", exact: true })).toHaveCount(0);
-    await expect(navigation(page).getByRole("button", { name: "Admins", exact: true })).toHaveCount(0);
+    await expect(workspaceNavigation(page).locator(".ub-settings-nav > p")).toHaveText(["Workspace"]);
+    await expect(workspaceNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["General", "Tags", "Members"]);
     await page.getByTestId("account-menu").click();
     await expect(page.getByRole("menuitem")).toHaveText(["Preferences"]);
-    await page.keyboard.press("Escape");
-    await navigation(page).getByRole("button", { name: "Tags", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
+    await expect(personalNavigation(page).locator(".ub-settings-nav li > button")).toHaveText(["Preferences"]);
+    await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
+    await workspaceNavigation(page).getByRole("button", { name: "Tags", exact: true }).click();
     await expect(page.locator("#ub-new-tag")).toBeEnabled();
   });
 });
