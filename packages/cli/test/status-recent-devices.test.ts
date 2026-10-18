@@ -58,7 +58,7 @@ it.each(["headers", "body"])("keeps an unavailable device list silent and within
     credentials: { hubLogins: { [server.origin]: fixture() } } });
   const before = readFileSync(credentialPath(box));
   const started = performance.now();
-  const json = await runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100" });
+  const json = await runInProcess(["status", "--json"], box, { UB_TEST_MAX_WAIT_MS: "100.5" });
   expect(performance.now() - started).toBeLessThan(1_000);
   expect(requests).toBe(1);
   expect(json.status, json.stderr).toBe(0);

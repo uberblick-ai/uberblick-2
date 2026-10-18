@@ -155,7 +155,7 @@ describe("ub open: sharing through the upstream hub", () => {
       for (const handler of handlers) handler.call(hub.server.httpServer, request, response);
     });
     const started = Date.now();
-    const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1" });
+    const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1", UB_TEST_MAX_WAIT_MS: "400.5" });
     try {
       expect(requested).toBe(true);
       expect(Date.now() - started).toBeLessThan(5_000);

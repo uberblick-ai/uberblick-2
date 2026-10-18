@@ -143,7 +143,7 @@ export async function statusReport(
     readSyncStatus(config, options.workspaceStatus === true
       ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined),
     options.workspaceStatus === true || config.deviceLogin === undefined ? null
-      : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(config.connectTimeoutMs)),
+      : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
   ]);
   // Read the stored account without login or renewal, even after a hub refusal.
   const deviceLogin = config.deviceLogin === undefined &&

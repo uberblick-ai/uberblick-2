@@ -1071,7 +1071,7 @@ async function openStartupReadings(
   return await Promise.all([
     sync === null ? null : waitForOpenHubState(sync, connectTimeoutMs),
     !(sync?.deviceAuthenticated() ?? deviceHub) || connectTimeoutMs <= 0 ? null
-      : requestRecentDevices(binding, AbortSignal.timeout(connectTimeoutMs)),
+      : requestRecentDevices(binding, AbortSignal.timeout(Math.floor(connectTimeoutMs))),
   ]);
 }
 
