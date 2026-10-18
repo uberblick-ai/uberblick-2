@@ -134,11 +134,14 @@ describe("the compact Decisions block", () => {
     const section = within(view.container).getByRole("region", { name: "Decisions" });
     section.scrollIntoView = scroll;
     const link = within(view.container).getByRole("link", { name: "1 decision in force" });
+    expect(link.textContent).toBe("1 decision in force");
     expect(link.getAttribute("href")).toBe(`#${ID}`);
     expect(fireEvent.click(link)).toBe(false);
     expect(scroll).toHaveBeenCalledWith({ block: "start" });
     expect(document.activeElement).toBe(section);
-    expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+      expect(fireEvent.click(link, { [modifier]: true })).toBe(true);
+    }
     expect(scroll).toHaveBeenCalledOnce();
   });
 });

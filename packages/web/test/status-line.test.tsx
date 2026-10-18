@@ -90,6 +90,29 @@ describe("the edited row", () => {
       key: "clipboard", message: "Couldn't copy the revision. Try again in a browser with clipboard access.", severity: "error",
     });
   });
+
+  it("separates a visible decisions link from preceding status text without a leading or orphan dot", () => {
+    const current = fixture();
+    const stamp = Date.now() - 120_000;
+    const link = <a href="#decisions">1 decision in force</a>;
+    const view = render(<StatusLine connection={current.connection} presence={[]} lastUpdated={stamp} statusLink={link} />);
+    const text = () => view.container.querySelector(".ub-status-left")?.textContent;
+    expect(text()).toBe("Edited 2 minutes ago · 1 decision in force");
+    expect(within(view.container).getByRole("link", { name: "1 decision in force" }).textContent).toBe("1 decision in force");
+    for (const lastUpdated of [undefined, Number.NaN]) {
+      view.rerender(<StatusLine connection={current.connection} presence={[]} lastUpdated={lastUpdated} statusLink={link} />);
+      expect(text()).toBe("1 decision in force");
+    }
+    current.change({ connected: false, synced: false, writable: false });
+    settle();
+    expect(text()).toBe("not saved · 1 decision in force");
+    current.change({ connected: true, synced: true, writable: true });
+    settle();
+    for (const statusLink of [undefined, null, false]) {
+      view.rerender(<StatusLine connection={current.connection} presence={[]} lastUpdated={stamp} statusLink={statusLink} />);
+      expect(text()).toBe("Edited 2 minutes ago");
+    }
+  });
 });
 
 describe("hub status", () => {

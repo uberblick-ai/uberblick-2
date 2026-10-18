@@ -420,6 +420,8 @@ export function StatusLine({
           {refusal !== null && <span className="ub-status-word">{refusal}</span>}
           {unsaved && <span className="ub-not-saved">not saved</span>}
           {offline && <span className="ub-status-offline">Offline. Changes are saved on this device.</span>}
+          {Boolean(statusLink) && (updatedReading !== null || refusal !== null || unsaved || offline) &&
+            <span className="ub-status-separator" aria-hidden="true"> · </span>}
           {statusLink}
         </div>
         {/*
