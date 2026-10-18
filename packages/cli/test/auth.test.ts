@@ -6,11 +6,11 @@ import {
   statSync, writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { hostname } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticationOrigin } from "../src/auth.js";
 import { resolveConfig } from "../src/config.js";
 import { parseJoinTarget } from "../src/remote.js";
@@ -22,8 +22,15 @@ import {
   readStore, rig, savedLogin,
 } from "./auth-fixtures.js";
 
+let originalDirectory: string;
+beforeAll(() => {
+  originalDirectory = process.cwd();
+  process.chdir(tmpdir());
+});
 afterEach(cleanUp);
-afterAll(removeTempDirs);
+afterAll(() => {
+  try { removeTempDirs(); } finally { process.chdir(originalDirectory); }
+});
 
 describe("ub auth local selection and command surface", () => {
   beforeEach(() => {

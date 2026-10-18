@@ -1,16 +1,24 @@
 /** Login checks the existing credential-free version reply before starting sign-in. */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { protocolSkew, SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   assertPublicOnly, cleanUp, credentialPath, fixture, privateDeviceRows, rig, savedLogin, serve,
 } from "./auth-fixtures.js";
 import { removeTempDirs, sandbox, UB_BIN, waitUntil, type Run } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
+let originalDirectory: string;
+beforeAll(() => {
+  originalDirectory = process.cwd();
+  process.chdir(tmpdir());
+});
 afterEach(cleanUp);
-afterAll(removeTempDirs);
+afterAll(() => {
+  try { removeTempDirs(); } finally { process.chdir(originalDirectory); }
+});
 
 describe("CLI sign-in checks sync protocol compatibility", () => {
   it.each([SYNC_PROTOCOL_VERSION - 1, SYNC_PROTOCOL_VERSION + 1])(

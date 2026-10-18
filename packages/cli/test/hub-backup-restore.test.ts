@@ -40,13 +40,20 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import { requestOperator } from "../../hub/src/operator-client.js";
 import { getWorkspaceName, setWorkspaceName } from "@uberblick/schema";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { REPO_ROOT } from "./helpers.js";
 
 const directories: string[] = [];
+let originalDirectory: string;
+beforeAll(() => {
+  originalDirectory = process.cwd();
+  process.chdir(tmpdir());
+});
 afterAll(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  try {
+    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  } finally { process.chdir(originalDirectory); }
 });
 
 /**
