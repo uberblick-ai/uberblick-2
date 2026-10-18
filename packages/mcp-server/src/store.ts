@@ -323,6 +323,45 @@ export function readWorkspaceName(databasePath: string, workspaceId: string): st
   }
 }
 
+function readLastSync(db: DatabaseSync): number | null {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'last_sync_at'").get();
+  if (row === undefined) return null;
+  const timestamp = Number(row.value);
+  if (!Number.isSafeInteger(timestamp) || Number.isNaN(new Date(timestamp).getTime())) {
+    throw new Error("invalid last_sync_at timestamp");
+  }
+  return timestamp;
+}
+
+/** Read durable sync facts without creating, migrating or repairing a replica. */
+export function readStoredSyncStatus(databasePath: string, workspaceId: string): {
+  pendingRooms: PendingRoom[]; lastSync: number | null; logEntries: number;
+} {
+  if (!existsSync(databasePath)) return { pendingRooms: [], lastSync: null, logEntries: 0 };
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    return transactional(db, () => {
+      const tables = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all().map(row => row.name));
+      const owner = tables.has("meta") ? db.prepare("SELECT value FROM meta WHERE key = 'workspace'").get() : undefined;
+      if (owner !== undefined && owner.value !== workspaceId) {
+        throw new Error("The database belongs to a different workspace; unset UBERBLICK_DB to use the per-workspace replica.");
+      }
+      const columns = db.prepare("SELECT name FROM pragma_table_info('pending_rooms')").all();
+      const pendingRooms = columns.length === 0 ? [] : db.prepare(columns.some(column => column.name === "seq")
+        ? "SELECT room, seq FROM pending_rooms ORDER BY room"
+        : "SELECT p.room, COALESCE((SELECT MAX(u.seq) FROM updates u WHERE u.room = p.room), " +
+          "(SELECT s.through_seq FROM snapshots s WHERE s.room = p.room), 0) AS seq FROM pending_rooms p ORDER BY p.room"
+      ).all() as { room: string; seq: number }[];
+      const count = tables.has("updates") ? db.prepare("SELECT COUNT(*) AS n FROM updates").get() as { n: number } : { n: 0 };
+      return {
+        pendingRooms: pendingRooms.map(({ room, seq }) => ({ room, seq })),
+        lastSync: tables.has("meta") ? readLastSync(db) : null,
+        logEntries: count.n,
+      };
+    })();
+  } finally { db.close(); }
+}
+
 export class WorkspaceRemovedError extends Error {
   constructor() {
     super("The workspace was removed from this computer. Restart the MCP server to open a new copy.");
@@ -860,18 +899,7 @@ export class MirrorStore {
 
   /** Last caught-up time on this machine, or null for a replica predating it. */
   readLastSync(): number | null {
-    const row = this.db
-      .prepare("SELECT value FROM meta WHERE key = 'last_sync_at'")
-      .get() as { value: string } | undefined;
-    if (row === undefined) return null;
-    const timestamp = Number(row.value);
-    if (
-      !Number.isSafeInteger(timestamp) ||
-      Number.isNaN(new Date(timestamp).getTime())
-    ) {
-      throw new Error("invalid last_sync_at timestamp");
-    }
-    return timestamp;
+    return readLastSync(this.db);
   }
 
   /**

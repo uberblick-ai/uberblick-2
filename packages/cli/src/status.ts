@@ -4,7 +4,7 @@ import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
-import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readWorkspaceName } from "@uberblick/mcp-server";
+import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredSyncStatus, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
@@ -151,13 +151,15 @@ export async function statusReport(
     bindingProblem = error;
   }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
+  const stored = bindingProblem === undefined ? undefined : readStoredSyncStatus(config.databasePath, config.workspaceId);
   let caughtUp = false;
   const [sync, recentDevices] = await Promise.all([
-    bindingProblem === undefined ? readSyncStatus(config, options.workspaceStatus === true
+    stored === undefined ? readSyncStatus(config, options.workspaceStatus === true
       ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined) : {
       hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
-      rooms: [], unsyncedChanges: 0, pendingRooms: [], lastSync: null,
-      inFlightUpdates: 0, logEntries: 0, persistence: null,
+      rooms: [], unsyncedChanges: stored.pendingRooms.length, pendingRooms: stored.pendingRooms,
+      lastSync: stored.lastSync === null ? null : new Date(stored.lastSync).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      inFlightUpdates: 0, logEntries: stored.logEntries, persistence: null,
     } satisfies Partial<SyncStatus>,
     bindingProblem !== undefined || options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
@@ -198,7 +200,7 @@ export async function statusReport(
       rooms: sync.rooms,
       unsyncedChanges: sync.unsyncedChanges,
       pendingRooms: sync.pendingRooms,
-      lastSync: resolved.binding.hubUrl === null ? null : sync.lastSync,
+      lastSync: resolved.binding.hubUrl === null && bindingProblem === undefined ? null : sync.lastSync,
       inFlightUpdates: sync.inFlightUpdates,
       logEntries: sync.logEntries,
       persistence: sync.persistence,
@@ -267,6 +269,7 @@ export function shortStatusReport(
   report: StatusReport, workspaceName: string | null = null, recentDevices: RecentDevice[] | null = null,
 ): ShortStatusReport {
   const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
+  const local = origin === null && report.bindingProblem === undefined;
   const hub = report.hub;
   const state = connectionState(report);
   // The shared formatter validates the locally recorded evidence. Neither the
@@ -319,15 +322,15 @@ export function shortStatusReport(
       cause: recorded ? hub.cause ?? null : null,
       detail: recorded ? hub.detail ?? null : null,
     },
-    pending: { count: origin === null ? 0 : report.unsyncedChanges },
-    lastSync: origin === null ? null : report.lastSync,
+    pending: { count: local ? 0 : report.unsyncedChanges },
+    lastSync: local ? null : report.lastSync,
     recentDevices: origin === null ? null : recentDevices,
     problems,
   };
 }
 
 function connectionText(report: StatusReport): string {
-  if (report.bindingProblem !== undefined) return report.bindingProblem.reason;
+  if (report.bindingProblem !== undefined) return "refused: workspace hub mismatch";
   if (report.hubTransportProblem !== undefined) return report.hubTransportProblem.reason;
   const hub = report.hub;
   switch (hub.status) {
@@ -381,12 +384,12 @@ export function renderStatus(
   } else if (accountOrigin !== undefined) {
     text += field("account", `not signed in to ${short.hub}`);
   }
-  if (short.hub !== null) {
+  if (short.hub !== null || report.bindingProblem !== undefined) {
     text += field("connection", connectionText(report));
     text += field("pending", short.pending.count === 0
       ? "none" : `${plural(short.pending.count, "change")} not yet on the hub`);
     text += field("last sync", lastSyncAge(short.lastSync));
-    text += recentDevicesNotice(recentDevices, short.hub);
+    if (short.hub !== null) text += recentDevicesNotice(recentDevices, short.hub);
   }
   if (short.problems.length === 0) return text + field("problems", "none");
   for (const [index, problem] of short.problems.entries()) {
@@ -394,7 +397,7 @@ export function renderStatus(
       ? `hub unreachable: ${UNREACHABLE_CAUSES[short.connection.cause]}`
       : PROBLEM_PHRASES[problem.name] ?? "sync refused";
     text += field(index === 0 ? "problems" : "", phrase);
-    text += `              → ${problem.fix}\n`;
+    text += `              → ${problem.fix.replace(/\n/g, "\n                ")}\n`;
   }
   return text;
 }

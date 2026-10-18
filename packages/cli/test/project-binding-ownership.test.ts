@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { findProjectConfig, resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -84,7 +84,7 @@ describe.skipIf(process.getuid === undefined)("project binding ownership", () =>
 
   it("use writes the discovered owned parent instead of replacing an ignored child", async () => {
     const box = sandbox({ projectBinding: { workspaceId: first, hubUrl: null } });
-    await rememberWorkspaceBinding({ workspaceId: second, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: second, hubUrl: null }, box.env);
     const child = join(box.cwd, "nested");
     mkdirSync(child);
     const ignored = join(child, ".uberblick.json");

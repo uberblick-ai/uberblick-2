@@ -1,13 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { defaultWorkspaceDatabasePath } from "@uberblick/mcp-server";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { DEAD_HUB_URL, removeTempDirs, runUbAsync, sandbox } from "./helpers.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { parseJoinTarget } from "@uberblick/mcp-server/remote-url";
+import * as Y from "yjs";
 
 const WORKSPACE = "2f1f3b7a-c48d-4cb8-bc74-7c585ed5c365";
 const DOCUMENT = "ed00f579-a232-45fe-af61-9dc0a0500cdf";
@@ -73,7 +75,7 @@ describe("passive commands preserve this machine's workspace hub", () => {
           projectBinding: { workspaceId: WORKSPACE, hubUrl: source === "project" ? trap.url : recorded },
           credentials: { signingSecret: "binding-guard-test-secret" },
         });
-        await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recorded }, box.env);
+        await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recorded }, box.env);
         const databaseBefore = replica(box);
         const registryBefore = readFileSync(workspaceRegistryPath(box.env));
         const bindingPath = join(box.cwd, ".uberblick.json");
@@ -89,6 +91,8 @@ describe("passive commands preserve this machine's workspace hub", () => {
         expect(recovery, output).not.toBeNull();
         expect(parseJoinTarget(recovery![1]!)).toEqual({ endpoint: trap.url, workspace: WORKSPACE });
         expect(output).toMatch(/upload|offer.*content/i);
+        expect(output).toContain("hub you trust");
+        expect(output).toContain("This destination comes from");
         if (source === "environment") expect(output).toContain("env -u UB_WORKSPACE_ID -u UB_HUB_URL");
         expect(trap.connections()).toBe(0);
         expect(readFileSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toEqual(databaseBefore);
@@ -99,7 +103,7 @@ describe("passive commands preserve this machine's workspace hub", () => {
 
     it.each(["project", "environment"])(`${command.name} refuses a %s local destination and gives restore guidance`, async source => {
       const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: source === "project" ? null : RECORDED_HUB } });
-      await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
+      await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
       const databaseBefore = replica(box);
       const registryBefore = readFileSync(workspaceRegistryPath(box.env));
       const extraEnv = source === "environment" ? { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" } : {};
@@ -128,6 +132,87 @@ describe("passive commands preserve this machine's workspace hub", () => {
       } finally { await trap.close(); }
     });
   }
+});
+
+describe("status of a mismatched replica", () => {
+  it.each([
+    { source: "project", local: false },
+    { source: "environment", local: false },
+    { source: "project", local: true },
+    { source: "environment", local: true },
+  ])("reads durable pending and last sync for $source (local destination=$local) without dialing or writing", async ({ source, local }) => {
+    const trap = await hubTrap();
+    try {
+      const destination = local ? null : trap.url;
+      const box = sandbox({
+        projectBinding: { workspaceId: WORKSPACE, hubUrl: source === "project" ? destination : RECORDED_HUB },
+        credentials: { signingSecret: "mismatch-pending-test-secret" },
+      });
+      await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
+      const path = source === "environment" ? join(box.cwd, "custom.sqlite") : defaultWorkspaceDatabasePath(WORKSPACE, box.env);
+      const store = new MirrorStore(path, WORKSPACE);
+      const doc = new Y.Doc();
+      try {
+        doc.getText("offline").insert(0, "Unacknowledged work");
+        store.appendUpdate(`${WORKSPACE}/${DOCUMENT}`, Y.encodeStateAsUpdate(doc), "local");
+        store.recordLastSync(Date.parse("2026-10-05T19:58:12Z"));
+      } finally { doc.destroy(); store.close(); }
+      const registryPath = workspaceRegistryPath(box.env);
+      const bindingPath = join(box.cwd, ".uberblick.json");
+      const before = [path, registryPath, bindingPath].map(file => readFileSync(file));
+      const extraEnv = source === "environment" ? {
+        UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: destination ?? "local", UBERBLICK_DB: path,
+      } : {};
+      const json = await runUbAsync(["status", "--json"], box, extraEnv);
+      mismatch(json, "status");
+      expect(JSON.parse(json.stdout)).toMatchObject({ pending: { count: 1 }, lastSync: "2026-10-05T19:58:12Z" });
+      const text = await runUbAsync(["status"], box, extraEnv);
+      expect(text.status, text.output).toBe(0);
+      expect(text.stdout).toContain("connection  refused: workspace hub mismatch\n");
+      expect(text.stdout).toContain("pending     1 change not yet on the hub\n");
+      expect(text.stdout).not.toContain("last sync   never");
+      expect(text.stdout.match(/belongs to/g)).toHaveLength(1);
+      if (!local) {
+        expect(text.stdout).toMatch(/\n {18}(?:env .* )?ub workspace use /);
+        expect(text.stdout).toContain("\n                This destination comes from");
+      }
+      expect(trap.connections()).toBe(0);
+      expect([path, registryPath, bindingPath].map(file => readFileSync(file))).toEqual(before);
+    } finally { await trap.close(); }
+  });
+
+  it("reports a mismatch with no replica without creating one", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
+    const run = await runUbAsync(["status", "--json"], box);
+    mismatch(run, "status");
+    expect(JSON.parse(run.stdout)).toMatchObject({ pending: { count: 0 }, lastSync: null });
+    expect(existsSync(defaultWorkspaceDatabasePath(WORKSPACE, box.env))).toBe(false);
+  });
+
+  it("reads legacy pending flags without migrating or claiming the replica", async () => {
+    const trap = await hubTrap();
+    try {
+      const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: trap.url } });
+      await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
+      const path = defaultWorkspaceDatabasePath(WORKSPACE, box.env);
+      const store = new MirrorStore(path, WORKSPACE);
+      const doc = new Y.Doc();
+      try {
+        doc.getText("legacy").insert(0, "Pending before the watermark schema");
+        store.appendUpdate(`${WORKSPACE}/${DOCUMENT}`, Y.encodeStateAsUpdate(doc), "local");
+      } finally { doc.destroy(); store.close(); }
+      const database = new DatabaseSync(path);
+      try { database.exec("ALTER TABLE pending_rooms DROP COLUMN seq; DROP TABLE meta;"); }
+      finally { database.close(); }
+      const before = readFileSync(path);
+      const run = await runUbAsync(["status", "--json"], box);
+      mismatch(run, "status");
+      expect(JSON.parse(run.stdout)).toMatchObject({ pending: { count: 1 }, lastSync: null });
+      expect(trap.connections()).toBe(0);
+      expect(readFileSync(path)).toEqual(before);
+    } finally { await trap.close(); }
+  });
 });
 
 describe("first workspace registration", () => {
@@ -185,7 +270,7 @@ describe("first workspace registration", () => {
   it.each(["https://RECORDED.example.test:443", "wss://RECORDED.example.test:443/ws"])(
     "accepts equivalent hub spelling %s without changing the existing record", async hubUrl => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: RECORDED_HUB }, box.env);
     const before = readFileSync(workspaceRegistryPath(box.env));
     const run = await runUbAsync(["status", "--json"], box);
     expect(run.status, run.output).toBe(0);

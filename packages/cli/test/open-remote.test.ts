@@ -30,7 +30,7 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { pointAt, runUbAsync, sleep, waitUntil, WAIT_TIMEOUT_MS } from "./helpers.js";
 import {
   FIRST_REMOTE,
@@ -233,7 +233,7 @@ describe("ub open: sharing through the upstream hub", () => {
     await writeHubLogin(origin, { identity: person, credential: {
       record, key: Buffer.from(issued.keyBytes).toString("base64url"),
     } }, box.env);
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: `ws://${host}:${hub.port}` }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: `ws://${host}:${hub.port}` }, box.env);
     storeWorkspaceName(resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }), "Product intent");
     await hub.stop();
 
@@ -799,7 +799,7 @@ describe("ub open: sharing through the upstream hub", () => {
 
   it("searches the shared store while the hub is unreachable and returns every ranked UUID", async () => {
     const { box, env } = configured();
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: FIRST_REMOTE }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: FIRST_REMOTE }, box.env);
     // The existing replica cached its vocabulary before the hub became unreachable.
     const cached = openWorkspaceReplicas(resolveMcpConfig({ ...box.env, ...env, WORKSPACE_ID: WORKSPACE }), { hubFree: true });
     try { createTagCatalogEntry(cached.replicas.settings().doc, "mcp"); }

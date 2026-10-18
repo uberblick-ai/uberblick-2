@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
-import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { DEAD_HUB_URL, UB_BIN, WAIT_TIMEOUT_MS, removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox } from "./helpers.js";
 import type { Sandbox } from "./helpers.js";
 
@@ -196,7 +196,7 @@ describe("ub mcp serve", () => {
 
   it("refuses a complete local environment binding for a recorded hub", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, box.env);
     const run = runUb(["mcp", "serve"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     expect(run.status, run.output).toBe(1);
     expect(run.stdout).toBe("");
@@ -215,7 +215,7 @@ describe("ub mcp serve", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
       credentials: hubUrl === null ? undefined : { signingSecret: "cli-manual-override-secret" },
     });
-    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
     const session = await connect(box, { UB_WORKSPACE_ID: selected });
     try {
       const result = await session.client.callTool({ name: "sync_status", arguments: {} });
@@ -234,7 +234,7 @@ describe("ub mcp serve", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: recordedHub },
       ...(recordedHub === null ? {} : { credentials: { signingSecret: "cli-stale-lock-secret" } }),
     });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
     const lock = join(box.configHome, "uberblick", ".init.lock");
     writeFileSync(lock, "999999\n");
     const session = await connect(box);

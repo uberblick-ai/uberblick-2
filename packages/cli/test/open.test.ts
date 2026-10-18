@@ -30,7 +30,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { probePort } from "../src/probes.js";
-import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { UB_BIN, pointAt, runUbAsync, sandbox, unboundSandbox, sleep } from "./helpers.js";
 import {
   BANNER,
@@ -108,7 +108,7 @@ describe("ub open", () => {
   it("refuses a project's hub when this machine records the workspace as local", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
     const refused = await openFails(box, ["--port", String(await freePort())], env);
     expect(refused.status).toBe(1);
     expect(refused.output).toContain(WORKSPACE);
@@ -707,7 +707,7 @@ it("opens a newly created local workspace in the browser without login or promot
 it.each([false, true])("uses the served database's workspace name beside its external hub address (verbose %s)", async verbose => {
   const { box, env } = configured();
   const hubUrl = "wss://named.example.ts.net/ws";
-  await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+  await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
   const selected = { ...box.env, WORKSPACE_ID: WORKSPACE };
   storeWorkspaceName(resolveMcpConfig(selected), "Default replica");
   const databasePath = join(box.cwd, "named-serving.sqlite");

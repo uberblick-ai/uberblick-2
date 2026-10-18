@@ -94,7 +94,8 @@ export class WorkspaceBindingMismatch extends Error {
         ? "Moving a hub workspace to local isn't supported yet. Restore the recorded selection: unset UB_WORKSPACE_ID UB_HUB_URL"
         : `Moving a hub workspace to local isn't supported yet. Restore the recorded selection: ub workspace use ${id}`
       : `To move this machine's copy, run:\n  ${clear}ub workspace use '${destination.replace(/'/g, "'\\''")}/${id}'\n` +
-        "This can upload this copy's content to that hub; only move a copy you trust. Re-fetch an untrusted copy on a clean machine instead.";
+        `This destination comes from ${origin}. Moving can upload this copy's content; only move a copy you trust to a hub you trust. ` +
+        "Re-fetch an untrusted copy on a clean machine instead.";
     super(`${reason} ${fix}`);
     this.reason = reason;
     this.fix = fix;
@@ -192,14 +193,4 @@ export function rememberWorkspaceBindings(
   replaceWorkspace?: string,
 ): void {
   withWorkspaceBindings(bindings, () => {}, env, replaceWorkspace);
-}
-
-/** Serving paths hold no binding lock, so serialize their first registration here. */
-export async function rememberWorkspaceBinding(binding: ProjectBinding, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  // Passive serving preserves every existing record, including a differing hub.
-  // An atomic registry publication makes this read safe without taking the lock.
-  if (readWorkspaceHub(binding.workspaceId, env) !== undefined) return;
-  const lock = await acquireInitLock(env);
-  try { rememberWorkspaceBindings([binding], env); }
-  finally { lock.release(); }
 }

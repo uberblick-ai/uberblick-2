@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterAll, expect, it } from "vitest";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -19,7 +19,7 @@ it("reports up to date after a real hub acknowledges the named local changes", a
   });
   try {
     const hubUrl = `ws://127.0.0.1:${hub.port}`;
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Synced notes");
     writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE, hubUrl }));
     const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret, UB_TEST_MAX_WAIT_MS: "5000" });

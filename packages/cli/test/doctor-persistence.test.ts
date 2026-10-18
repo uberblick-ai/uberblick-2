@@ -34,7 +34,7 @@ import * as Y from "yjs";
 import { MirrorStore } from "../../mcp-server/src/store.js";
 import type { Check, DoctorReport } from "../src/doctor.js";
 import { statusReport } from "../src/status.js";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
@@ -512,7 +512,7 @@ describe("ub doctor observational database reading", () => {
     });
     const hub = await seededHub(box);
     const hubUrl = `ws://127.0.0.1:${hub.port}`;
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
     pointAt(box, hubUrl);
     const databasePath = join(box.cwd, "refusing.sqlite");
     emptyStore(databasePath);

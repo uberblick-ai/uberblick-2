@@ -5,7 +5,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { publishOwnerOnly } from "@uberblick/mcp-server/safe-write";
 import { acquireInitLock } from "../src/init-lock.js";
 import { writeProjectBinding } from "../src/project-binding.js";
-import { readWorkspaceHub, rememberWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -38,24 +38,11 @@ function customReplica(box: Sandbox, id: string): string {
 }
 
 describe("workspace record failure boundaries", () => {
-  it.each([null, "wss://recorded.example.test/ws"])("passive registration preserves an existing %s record without waiting on a writer", async (hubUrl) => {
-    const box = sandbox();
-    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl }, box.env);
-    const registry = workspaceRegistryPath(box.env);
-    const before = readFileSync(registry);
-    const lock = await acquireInitLock(box.env);
-    try {
-      await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: "wss://serving.example.test/ws" }, box.env);
-      expect(readFileSync(registry)).toEqual(before);
-      expect(readWorkspaceHub(selected, box.env)).toBe(hubUrl);
-    } finally { lock.release(); }
-  });
-
   it("passive registration cannot attach an existing unrecorded replica to a hub", async () => {
     const box = sandbox();
     const database = replica(box, selected);
     const before = readFileSync(database);
-    await expect(rememberWorkspaceBinding({ workspaceId: selected, hubUrl: "wss://binding.example.test/ws" }, box.env))
+    await expect(ensureWorkspaceBinding({ workspaceId: selected, hubUrl: "wss://binding.example.test/ws" }, box.env))
       .rejects.toThrow("existing replica with no hub record");
     expect(readWorkspaceHub(selected, box.env)).toBeUndefined();
     expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
@@ -74,7 +61,7 @@ describe("workspace record failure boundaries", () => {
     } });
     const database = replica(box, which === "previous" ? previous : selected);
     const databaseBefore = readFileSync(database);
-    await rememberWorkspaceBinding({ workspaceId: which === "previous" ? selected : previous, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: which === "previous" ? selected : previous, hubUrl: null }, box.env);
     const registry = workspaceRegistryPath(box.env);
     const registryBefore = readFileSync(registry);
     const path = join(box.cwd, ".uberblick.json");
@@ -107,7 +94,7 @@ describe("workspace record failure boundaries", () => {
   it("a selected workspace's custom replica does not make a previous workspace an existing replica", async () => {
     const previousHub = "wss://previous.example.test/ws";
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: previousHub } });
-    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
     const database = customReplica(box, selected);
     const databaseBefore = readFileSync(database);
     const binding = { workspaceId: selected, hubUrl: null };
@@ -123,7 +110,7 @@ describe("workspace record failure boundaries", () => {
 
   it("refuses to register a previous unknown remote workspace that owns the custom replica", async () => {
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: "wss://previous.example.test/ws" } });
-    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
     const database = customReplica(box, previous);
     const databaseBefore = readFileSync(database);
     const registry = workspaceRegistryPath(box.env);
@@ -147,7 +134,7 @@ describe("workspace record failure boundaries", () => {
         workspaceId: selected,
         hubUrl: oldHub === undefined ? "wss://binding.example.test/ws" : oldHub,
       } });
-      if (oldHub !== undefined) await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: oldHub }, box.env);
+      if (oldHub !== undefined) await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: oldHub }, box.env);
       const database = replica(box, selected);
       const before = readFileSync(database);
       const target = { workspaceId: selected, hubUrl: "wss://moved.example.test/ws" };
@@ -163,7 +150,7 @@ describe("workspace record failure boundaries", () => {
 
   it.each([false, true])("failed binding publication restores records exactly (existing registry: %s)", async (existing) => {
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: "wss://previous.example.test/ws" } });
-    if (existing) await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    if (existing) await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
     const registry = workspaceRegistryPath(box.env);
     const original = existing ? readFileSync(registry) : null;
     const path = join(box.cwd, ".uberblick.json");
@@ -185,7 +172,7 @@ describe("workspace record failure boundaries", () => {
 
   it("failed registry publication leaves the project and prior records untouched", async () => {
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: null } });
-    await rememberWorkspaceBinding({ workspaceId: previous, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: previous, hubUrl: null }, box.env);
     const registry = workspaceRegistryPath(box.env);
     const recordsBefore = readFileSync(registry);
     const path = join(box.cwd, ".uberblick.json");
@@ -205,7 +192,7 @@ describe("workspace record failure boundaries", () => {
 
   it("refuses corrupt records instead of treating an unknown workspace as local or overwriting settings", async () => {
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: null }, userConfig: { displayName: "operator", future: { retained: true } } });
-    await rememberWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: selected, hubUrl: null }, box.env);
     const registry = workspaceRegistryPath(box.env);
     writeFileSync(registry, "{misplaced-sensitive-value");
     const path = join(box.cwd, ".uberblick.json");
