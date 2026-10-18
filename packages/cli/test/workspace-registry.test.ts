@@ -91,6 +91,45 @@ describe("workspace record failure boundaries", () => {
     expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"))).toEqual({ workspaceId: selected, hubUrl: null });
   });
 
+  it("selecting the same unrecorded replica as local replaces its hub binding without adopting that hub", async () => {
+    const box = sandbox({ projectBinding: { workspaceId: `copied-${selected}`, hubUrl: "wss://binding.example.test/ws" } });
+    const database = replica(box, selected);
+    const before = readFileSync(database);
+    const binding = { workspaceId: selected, hubUrl: null };
+    const lock = await acquireInitLock(box.env);
+    try {
+      writeProjectBinding(binding, { cwd: box.cwd, env: box.env });
+    } finally { lock.release(); }
+    expect(readWorkspaceHub(selected, box.env)).toBeNull();
+    expect(JSON.parse(readFileSync(join(box.cwd, ".uberblick.json"), "utf8"))).toEqual(binding);
+    expect(readFileSync(database)).toEqual(before);
+  });
+
+  it.each([false, true])("failed local fallback publication restores records and the same workspace's hub binding (existing registry: %s)", async (existing) => {
+    const box = sandbox({ projectBinding: { workspaceId: selected, hubUrl: "wss://binding.example.test/ws" } });
+    const database = replica(box, selected);
+    const databaseBefore = readFileSync(database);
+    if (existing) await ensureWorkspaceBinding({ workspaceId: previous, hubUrl: "wss://previous.example.test/ws" }, box.env);
+    const registry = workspaceRegistryPath(box.env);
+    const original = existing ? readFileSync(registry) : null;
+    const path = join(box.cwd, ".uberblick.json");
+    const bindingBefore = readFileSync(path);
+    vi.mocked(publishOwnerOnly).mockImplementation((target, contents, command) => {
+      if (target === path) throw new Error("injected project publication failure");
+      realPublish(target, contents, command);
+    });
+    const lock = await acquireInitLock(box.env);
+    try {
+      expect(() => writeProjectBinding({ workspaceId: selected, hubUrl: null }, { cwd: box.cwd, env: box.env }))
+        .toThrow("injected project publication failure");
+    } finally { lock.release(); }
+    expect(readFileSync(path)).toEqual(bindingBefore);
+    expect(readWorkspaceHub(selected, box.env)).toBeUndefined();
+    if (original === null) expect(existsSync(registry)).toBe(false);
+    else expect(readFileSync(registry)).toEqual(original);
+    expect(readFileSync(database)).toEqual(databaseBefore);
+  });
+
   it("a selected workspace's custom replica does not make a previous workspace an existing replica", async () => {
     const previousHub = "wss://previous.example.test/ws";
     const box = sandbox({ projectBinding: { workspaceId: previous, hubUrl: previousHub } });

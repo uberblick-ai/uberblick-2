@@ -26,7 +26,7 @@ function isFile(path: string): boolean {
   catch { return false; }
 }
 
-/** Freeze destinations to existing replicas with explicit machine knowledge. */
+/** Freeze destinations to existing replicas, treating unrecorded ones as local. */
 export function browserWorkspaces(
   startup: ProjectBinding,
   startupConfig: McpConfig,
@@ -44,8 +44,7 @@ export function browserWorkspaces(
   }]]);
   for (const entry of entries) {
     if (entry.uuid === id || !isFile(entry.databasePath)) continue;
-    const hubUrl = readWorkspaceHub(entry.uuid, env);
-    if (hubUrl === undefined) continue;
+    const hubUrl = readWorkspaceHub(entry.uuid, env) ?? null;
     let browserKey: string;
     try { browserKey = localBrowserKey(entry.uuid, env); }
     catch (error) {

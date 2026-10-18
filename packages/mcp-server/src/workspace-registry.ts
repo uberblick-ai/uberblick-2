@@ -40,7 +40,7 @@ function readRegistry(env: NodeJS.ProcessEnv): { path: string; text: string | nu
   }
 }
 
-/** Undefined means unknown; it must never be interpreted as local. */
+/** Undefined means no record; callers must check for an existing replica before using a hub selection. */
 export function readWorkspaceHub(id: string, env: NodeJS.ProcessEnv = process.env): string | null | undefined {
   return readRegistry(env).hubs[parseWorkspaceId(id).uuid];
 }
@@ -54,7 +54,7 @@ function sameHub(left: string | null, right: string | null): boolean {
     : new URL(normalizeRemoteUrl(left)).href === new URL(normalizeRemoteUrl(right)).href;
 }
 
-function hasReplica(id: string, env: NodeJS.ProcessEnv): boolean {
+export function hasWorkspaceReplica(id: string, env: NodeJS.ProcessEnv = process.env): boolean {
   const uuid = parseWorkspaceId(id).uuid;
   const paths = [defaultWorkspaceDatabasePath(id, env)];
   if (env.UBERBLICK_DB?.trim()) paths.push(env.UBERBLICK_DB.trim());
@@ -112,7 +112,7 @@ export function assertWorkspaceBinding(
   if (recorded !== undefined) {
     if (!sameHub(recorded, binding.hubUrl)) throw new WorkspaceBindingMismatch(binding, recorded, source);
     return true;
-  } else if (binding.hubUrl !== null && hasReplica(binding.workspaceId, env)) {
+  } else if (binding.hubUrl !== null && hasWorkspaceReplica(binding.workspaceId, env)) {
     throw new WorkspaceBindingMismatch(binding, undefined, source);
   }
   return false;
@@ -160,7 +160,7 @@ export function withWorkspaceBindings<T>(
   for (const binding of bindings) {
     const id = parseWorkspaceId(binding.workspaceId).uuid;
     const hub = binding.hubUrl === null ? null : normalizeRemoteUrl(binding.hubUrl);
-    if (hubs[id] === undefined && id !== replace && hub !== null && hasReplica(id, env)) {
+    if (hubs[id] === undefined && id !== replace && hub !== null && hasWorkspaceReplica(id, env)) {
       throw new WorkspaceBindingMismatch(binding, undefined, source);
     }
     if (hubs[id] === undefined || id === replace) {
