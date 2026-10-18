@@ -130,6 +130,15 @@ it.each([
   expect(refused.stderr).toContain(`\n\n${OPEN_HELP}`);
 });
 
+it("documents explicit member grant confirmation for terminals and scripts", async () => {
+  const group = await dispatch(["workspace", "member", "--help"]);
+  expect(group.stdout).toContain("add <github-handle> [--role admin|member] [--yes]");
+  const add = await dispatch(["workspace", "member", "add", "--help"]);
+  const help = add.stdout.replace(/\s+/g, " ");
+  expect(help).toContain("--yes confirms the grant without a prompt and is required without a terminal");
+  expect(help).toContain("Only y or yes grants access; the default is no");
+});
+
 it.each(["0", "65536", "1.5", "invalid"])("refuses invalid explicit web port %s", async (port) => {
   const refused = await dispatch(["open", "--port", port]);
   expect(refused.status).toBe(2);

@@ -96,8 +96,9 @@ describe("workspace member selection and usage", () => {
       expect(run.stdout).toContain(`ub workspace member${command.length === 0 ? "" : ` ${command[0]}`}`);
       expect(run.stderr).toBe("");
     }
-    for (const args of [["unknown"], ["constructor"], ["toString"], ["__proto__"], ["add"], ["add", LOGIN, "--yes"], ["add", LOGIN, "--role", "owner"],
-      ["add", ACCOUNT, "--hub", remote.origin], ["list", "extra"], ["role", LOGIN], ["role", LOGIN, "owner"], ["remove"]]) {
+    for (const args of [["unknown"], ["constructor"], ["toString"], ["__proto__"], ["add"], ["add", LOGIN, "--role", "owner"],
+      ["add", ACCOUNT, "--hub", remote.origin], ["list", "extra"], ["role", LOGIN], ["role", LOGIN, "owner"], ["remove"],
+      ["role", LOGIN, "admin", "--yes"], ["remove", LOGIN, "--yes"]]) {
       const run = await runInProcess(["workspace", "member", ...args], remote.box);
       expect(run.status, run.output).toBe(2);
       expect(run.stdout).toBe("");
@@ -142,6 +143,28 @@ describe("workspace member selection and usage", () => {
 });
 
 describe("confirmed grants", () => {
+  it.each([
+    ["terminal", undefined], ["terminal", "admin"],
+    ["non-terminal", undefined], ["non-terminal", "admin"],
+  ] as const)("accepts --yes with %s stdin and role %s without prompting", async (stdin, role) => {
+    const remote = await administrator();
+    const original = binding(remote.box);
+    const args = ["add", LOGIN.toLowerCase(), "--yes", ...(role ? ["--role", role] : [])];
+    const run = stdin === "terminal" ? await terminal(remote, args, "no")
+      : await runInProcess(["workspace", "member", ...args], remote.box);
+    expect(run.status, run.output).toBe(0);
+    expect(run.stderr).toBe("");
+    expect(run.stdout).toContain(`added "${LOGIN}" (GitHub account ${ACCOUNT}) as ${role ?? "member"}`);
+    expect(actions(remote, "resolve-account")).toEqual([{ operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: LOGIN.toLowerCase() }]);
+    expect(actions(remote, "grant-member")).toEqual([{ operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: ACCOUNT, role: role ?? "member" }]);
+    const target = remote.hub.principals!.getByGithubAccountId(ACCOUNT)!;
+    expect(remote.hub.memberships!.roleFor(WORKSPACE, target.id)).toBe(role ?? "member");
+    expect(binding(remote.box)).toBe(original);
+    expect(remote.requests.filter(request => request.path.startsWith("/auth/github/"))).toEqual([]);
+    expect(remote.github.calls.filter(url => url.includes("github.com/login/"))).toEqual([]);
+    publicOutput(run, remote);
+  });
+
   it.each([undefined, "admin"] as const)("confirms the resolved account ID and grants role %s", async role => {
     const remote = await administrator();
     const original = binding(remote.box);
@@ -183,10 +206,12 @@ describe("confirmed grants", () => {
     publicOutput(run, remote);
   });
 
-  it.each(["admin", "member"] as const)("reports an existing %s without changing its role", async role => {
+  it.each([
+    ["admin", false], ["member", false], ["admin", true], ["member", true],
+  ] as const)("reports an existing %s without changing its role (yes: %s)", async (role, yes) => {
     const remote = await administrator();
     const target = member(remote, ACCOUNT, LOGIN, role);
-    const run = await runInProcess(["workspace", "member", "add", LOGIN, "--role", role === "admin" ? "member" : "admin"], remote.box);
+    const run = await runInProcess(["workspace", "member", "add", LOGIN, "--role", role === "admin" ? "member" : "admin", ...(yes ? ["--yes"] : [])], remote.box);
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toMatch(/already.*member/i);
     expect(run.stdout).toContain(role);
@@ -237,7 +262,7 @@ describe("confirmed grants", () => {
       remote.github.lookupHook = url => url.includes("/users/") && failingPhase === "grant"
         ? Response.json({ id: Number(ACCOUNT), login: LOGIN, type: "User" })
         : Response.json(body, { status });
-      const run = await terminal(remote, ["add", LOGIN], "yes");
+      const run = await runInProcess(["workspace", "member", "add", LOGIN, "--yes"], remote.box);
       expect(run.status, run.output).toBe(1);
       expect(run.stderr).toMatch(message);
       expect(remote.hub.principals!.getByGithubAccountId(ACCOUNT)).toBeNull();
