@@ -45,7 +45,7 @@ it.each([
 ])("serializes a safe secure-address fix: %j", (endpoint, fix) => {
   const problem = hubTransportProblem(endpoint, {});
   expect(problem?.fix).toBe(fix);
-  expect(problem?.fix).not.toMatch(/[\u0000-\u001f\u007f]/);
+  expect(Array.from(problem?.fix ?? "", character => character.charCodeAt(0)).every(code => code >= 32 && code !== 127)).toBe(true);
 });
 
 it.each(["ws://private-secret@hub.example", "http://hub.example/?private-secret", "ws://hub.example/#private-secret", "ftp://private-secret"])(
