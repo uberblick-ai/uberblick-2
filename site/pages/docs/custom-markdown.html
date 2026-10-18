@@ -42,9 +42,13 @@ dialog Archive “Release plan 0.5”?
 {
   &quot;version&quot;: 1,
   &quot;type&quot;: &quot;line&quot;,
-  &quot;collection&quot;: &quot;deliveries&quot;,
+  &quot;title&quot;: &quot;Pull requests per day&quot;,
+  &quot;collection&quot;: &quot;pull_requests&quot;,
   &quot;x&quot;: {&quot;field&quot;: &quot;day&quot;, &quot;type&quot;: &quot;date&quot;},
-  &quot;y&quot;: [{&quot;field&quot;: &quot;count&quot;, &quot;label&quot;: &quot;Deliveries&quot;}]
+  &quot;y&quot;: [
+    {&quot;field&quot;: &quot;opened&quot;, &quot;label&quot;: &quot;Opened&quot;},
+    {&quot;field&quot;: &quot;merged&quot;, &quot;label&quot;: &quot;Merged&quot;}
+  ]
 }
 ```">Copy</button></div>
   <div class="panel" role="tabpanel" id="p-chart-v" aria-labelledby="t-chart-v"><img class="l" src="/img/blocks/chart-light.png" alt="The chart block as the editor shows it" loading="lazy"><img class="d" src="/img/blocks/chart-dark.png" alt="" loading="lazy"></div>
@@ -52,9 +56,13 @@ dialog Archive “Release plan 0.5”?
 {
   &quot;version&quot;: 1,
   &quot;type&quot;: &quot;line&quot;,
-  &quot;collection&quot;: &quot;deliveries&quot;,
+  &quot;title&quot;: &quot;Pull requests per day&quot;,
+  &quot;collection&quot;: &quot;pull_requests&quot;,
   &quot;x&quot;: {&quot;field&quot;: &quot;day&quot;, &quot;type&quot;: &quot;date&quot;},
-  &quot;y&quot;: [{&quot;field&quot;: &quot;count&quot;, &quot;label&quot;: &quot;Deliveries&quot;}]
+  &quot;y&quot;: [
+    {&quot;field&quot;: &quot;opened&quot;, &quot;label&quot;: &quot;Opened&quot;},
+    {&quot;field&quot;: &quot;merged&quot;, &quot;label&quot;: &quot;Merged&quot;}
+  ]
 }
 ```</pre></div></div>
   <p>A line chart takes one x field, a number or a date, and one to eight numeric y series with optional labels and units. <code>layout: "panels"</code> draws one small chart per series; <code>missing</code> decides whether a gap breaks or bridges a line. The same block with <code>"type":"table"</code> and up to thirty <code>columns</code>, each with a field and a text, number, date or link format, is a data table with sorting. Both omit records that fail the collection's schema and say how many they left out.</p>
