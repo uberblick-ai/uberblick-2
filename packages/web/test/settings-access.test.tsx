@@ -12,7 +12,7 @@ import { SERVING_STATUS_POLL_MS, SERVING_STATUS_TIMEOUT_MS } from "../src/ui/sta
 const WORKSPACE = "53f04353-622b-4b14-8d71-366193d43c74";
 const SERVING: LocalServing = { workspace: WORKSPACE, remoteHubUrl: "ws://bound.example", rebound: false };
 const api = vi.fn<(action: AccessAction, signal: AbortSignal) => Promise<AccessAnswer>>();
-const login = vi.fn<(signal: AbortSignal) => Promise<AccountIdentity>>().mockResolvedValue({ state: "signed-in", handle: "my-login" });
+const login = vi.fn<(signal: AbortSignal) => Promise<AccountIdentity>>().mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "1234" });
 vi.mock("../src/shell/workspace-access.js", () => ({ createWorkspaceAccessClient: () => api }));
 vi.mock("../src/shell/account.js", () => ({ createDeviceLoginClient: () => login }));
 
@@ -39,7 +39,7 @@ describe("independent settings permissions", () => {
   afterEach(() => {
     vi.clearAllMocks(); vi.useRealTimers();
     vi.unstubAllGlobals();
-    login.mockResolvedValue({ state: "signed-in", handle: "my-login" });
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "1234" });
   });
 
   it("keeps a stored login's Devices available on a cold offline load, then removes it on logout", async () => {
@@ -226,7 +226,7 @@ describe("independent settings permissions", () => {
     const second = render(<Reading />);
     await flush();
     expect(value(second)).toEqual({ admin: false, pending: true, devices: false });
-    await act(async () => finishLogin?.({ state: "signed-in", handle: "my-login" }));
+    await act(async () => finishLogin?.({ state: "signed-in", handle: "my-login", accountId: "1234" }));
     expect(value(second).admin).toBe(true);
   });
 
@@ -237,10 +237,10 @@ describe("independent settings permissions", () => {
     await flush();
     expect(value(view).admin).toBe(true);
     api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
-    login.mockResolvedValue({ state: "signed-in", handle: "other-login" });
+    login.mockResolvedValue({ state: "signed-in", handle: "other-login", accountId: "5678" });
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(value(view).admin).toBe(false);
-    login.mockResolvedValue({ state: "signed-in", handle: "my-login" });
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "1234" });
     view.rerender(<Reading serving={{ ...SERVING, remoteHubUrl: "ws://other.example" }} />);
     await flush();
     expect(value(view).admin).toBe(false);
@@ -257,6 +257,52 @@ describe("independent settings permissions", () => {
     }));
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(value(view).admin).toBe(false);
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view).admin).toBe(false);
+  });
+
+  it("never lends a remembered admin role to a different account with the same handle", async () => {
+    vi.useFakeTimers();
+    api.mockResolvedValue({ status: "ok", role: "admin", hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view).admin).toBe(true);
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "5678" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view).admin).toBe(false);
+    view.unmount();
+    const reloaded = render(<Reading />);
+    await flush();
+    expect(value(reloaded).admin).toBe(false);
+  });
+
+  it("ignores an old account's delayed admin answer when another account takes the same handle", async () => {
+    vi.useFakeTimers();
+    api.mockResolvedValue({ status: "ok", role: "admin", hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    let finish: ((answer: AccessAnswer) => void) | undefined;
+    api.mockImplementation(async (action) => action.operation === "own-role"
+      ? new Promise((resolve) => { finish = resolve; }) : { status: "hub-down", hub: "https://bound.example" });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(finish).toBeDefined();
+    api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login", accountId: "5678" });
+    await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
+    expect(value(view).admin).toBe(false);
+    await act(async () => finish?.({ status: "ok", role: "admin", hub: "https://bound.example" }));
+    expect(value(view).admin).toBe(false);
+  });
+
+  it("does not remember offline admin authority without a stable account id", async () => {
+    vi.useFakeTimers();
+    login.mockResolvedValue({ state: "signed-in", handle: "my-login" });
+    api.mockResolvedValue({ status: "ok", role: "admin", hub: "https://bound.example" });
+    const view = render(<Reading />);
+    await flush();
+    expect(value(view).admin).toBe(true);
     api.mockResolvedValue({ status: "hub-down", hub: "https://bound.example" });
     await act(async () => vi.advanceTimersByTimeAsync(SERVING_STATUS_POLL_MS));
     expect(value(view).admin).toBe(false);

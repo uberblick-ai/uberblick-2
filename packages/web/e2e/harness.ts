@@ -41,7 +41,7 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
-import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, settingsRoom } from "@uberblick/schema";
+import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -444,6 +444,12 @@ export async function startHarness(options: {
       if (configured.status !== 0) throw new Error("e2e: could not configure the fixture's git display name");
     }
     hub = await createHub(config, accessRole === undefined ? {} : { deviceCredentials: true });
+    // Generic rendering fixtures own their vocabulary; hub clients do not seed it.
+    if (accessRole === undefined) {
+      const catalog = await hub.hocuspocus.openDirectConnection(settingsRoom(workspaceUuid));
+      try { await catalog.transact(document => { seedTagCatalog(document); }); }
+      finally { await catalog.disconnect(); }
+    }
     // Every later start reuses the port the first one was given, so the served
     // HUB_URL keeps pointing at the hub across a restart.
     const port = hub.port;

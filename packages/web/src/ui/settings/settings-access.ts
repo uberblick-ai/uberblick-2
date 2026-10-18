@@ -16,11 +16,11 @@ export function useSettingsAccess(workspace: string | null, serving: LocalServin
   const loginClient = useMemo(() => bound && hub != null && workspace !== null
     ? createDeviceLoginClient(workspace, subject) : null, [bound, hub, subject, workspace]);
   const login = useServingAccount(loginClient);
-  const handle = login.state === "signed-in" ? login.handle : null;
-  const role = useAccessReading(workspace, serving, subject, path, "own-role", handle);
+  const accountId = login.state === "signed-in" ? login.accountId ?? null : null;
+  const role = useAccessReading(workspace, serving, subject, path, "own-role", accountId);
   const refusedLogin = devices.authority?.status === "sign-in-required" || devices.authority?.status === "forbidden";
-  const cacheKey = bound && hub != null && handle !== null
-    ? `uberblick:settings-admin:${JSON.stringify([hub, workspace, handle.toLowerCase()])}` : null;
+  const cacheKey = bound && hub != null && accountId !== null
+    ? `uberblick:settings-admin-account:${JSON.stringify([hub, workspace, accountId])}` : null;
   const storedAdmin = useMemo(() => {
     try { return cacheKey !== null && localStorage.getItem(cacheKey) === "true"; }
     catch { return false; }
@@ -41,7 +41,7 @@ export function useSettingsAccess(workspace: string | null, serving: LocalServin
     (serving.remoteHubUrl === null || role.authority?.status === "local-only")));
   return {
     local,
-    workspaceAdmin: ready && (local || (bound && (role.admin || (handle !== null && offlineAdmin)))),
+    workspaceAdmin: ready && (local || (bound && (role.admin || (accountId !== null && offlineAdmin)))),
     workspacePending: !ready || (bound && !local && (role.authority === null ||
       (role.authority.status === "hub-down" && login.state === "unavailable"))),
     devicesAvailable: ready && bound && !local && !refusedLogin && login.state === "signed-in",
