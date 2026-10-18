@@ -1,4 +1,5 @@
 import { createWorkspaceCommand } from "./workspace-create.js";
+import { forkWorkspaceCommand } from "./workspace-fork.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
 import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
@@ -30,6 +31,7 @@ export const WORKSPACE_HELP = `usage: ub workspace [command]
 commands:
   status                      the workspace in use, its selection, storage and sync
   create <name>               create and select a separate local-only workspace
+  fork                        copy this workspace independently and select the local copy
   promote <hub>               upload, verify and connect this local workspace
   member <command>            grant workspace access and manage members
   list [--json]               workspaces this machine has a database for
@@ -542,6 +544,7 @@ export async function workspaceCommand(
   const [sub, ...rest] = argv;
   if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);
+  if (sub === "fork") return forkWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
   if (sub === "member") return workspaceMemberCommand(rest, io);
   if (sub === "list") {
