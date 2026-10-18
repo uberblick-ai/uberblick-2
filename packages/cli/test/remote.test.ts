@@ -597,7 +597,7 @@ describe("workspace link configuration", () => {
 });
 
 describe("ub workspace use <link>", () => {
-  it("retains both Docker endpoints after logout and selects either with complete environment pins", async () => {
+  it("retains both Docker endpoints after logout while refusing a pin to the previous hub", async () => {
     const box = sandbox({ credentials: { signingSecret: SECRET } });
     const dirs = [join(box.cwd, "first-hub"), join(box.cwd, "second-hub")] as const;
     for (const dir of dirs) mkdirSync(dir);
@@ -617,7 +617,7 @@ describe("ub workspace use <link>", () => {
         expect(JSON.parse(shown.stdout).hub).toBe(hub.origin);
         expect(JSON.parse(shown.stdout).connection.state).toBe("refused");
         expect(JSON.parse(shown.stdout).account).toBeNull();
-        expect(shown.stdout).toContain("ub auth login");
+        expect(shown.stdout).toContain(hub === first ? "workspace-hub-mismatch" : "ub auth login");
         expect(shown.stdout).not.toContain("configured (credentials file)");
       }
       expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: `${second.url}/ws` });
@@ -977,6 +977,10 @@ describe("ub workspace use <link>", () => {
     const joined = await runInProcess(["workspace", "use", localJoinUrl(hub, box, SECRET)], box);
     expect(joined.status, joined.output).toBe(0);
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(url(hub));
+    const status = await runInProcess(["status", "--json"], box);
+    expect(status.status, status.output).toBe(0);
+    expect(JSON.parse(status.stdout).connection.state).toBe("connected");
+    expect(JSON.parse(status.stdout).problems).toEqual([]);
     const selected = await runInProcess(["workspace", "use", WORKSPACE], box);
     expect(selected.status, selected.output).toBe(0);
     expect(readConfigFile(box, "config.json")).toEqual({ workspaceId: WORKSPACE, hubUrl: url(hub) });

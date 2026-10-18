@@ -6,6 +6,7 @@ import { takeHelp } from "./help.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
 import { statusReport, type StatusReport } from "./status.js";
+import { NO_BINDING } from "./project-binding.js";
 
 export const WORKSPACE_STATUS_HELP = `usage: ub workspace status
 
@@ -25,6 +26,7 @@ function plural(count: number, noun: string): string {
 }
 
 function syncSummary(report: StatusReport, caughtUp: boolean): string {
+  if (report.bindingProblem !== undefined) return `${report.bindingProblem.reason} ${report.bindingProblem.fix}`;
   if (report.persistence !== null) return "local persistence failed — run ub doctor";
   if (report.binding.hubUrl === null) return "local only, no hub sync";
   if (caughtUp) return "up to date";
@@ -51,7 +53,7 @@ export function renderWorkspaceStatus(
   let text = field("workspace", name ?? report.workspace);
   text += field("id", report.workspaceUuid);
   text += field("hub", report.binding.hubUrl ?? "local (this computer)");
-  if (report.binding.hubUrl !== null) {
+  if (report.binding.hubUrl !== null && report.bindingProblem === undefined) {
     text += field("account", report.account === null
       ? `not signed in, run ub auth login ${accountOrigin ?? authenticationOrigin(report.binding.hubUrl)}`
       : `@${displayUsername(report.account.login)} (GitHub)`);
@@ -74,7 +76,8 @@ export async function workspaceStatusCommand(argv: string[], io: Io = processIo)
     await statusReport({ workspaceStatus: true });
   for (const warning of warnings) io.err(`ub: warning: ${warning}\n`);
   if (report.binding === null) {
-    io.err("ub workspace status: No workspace selected. Run `ub workspace create <name>` to create one.\n");
+    io.err(`ub workspace status: ${report.message === NO_BINDING
+      ? "No workspace selected. Run `ub workspace create <name>` to create one." : report.message}\n`);
     return 1;
   }
   io.out(renderWorkspaceStatus(report, workspaceName ?? null, caughtUp === true, accountOrigin));

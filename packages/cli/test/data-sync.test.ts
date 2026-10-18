@@ -8,6 +8,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createHub, silentLogger, type Hub } from "@uberblick/hub";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, pointAt, removeTempDirs, runUbAsync, sandbox, type Sandbox } from "./helpers.js";
+import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 
 const WORKSPACE = "c4ee1905-90e4-42df-8a4c-ed6ce9cbe531";
 const SECRET = "data-sync-test-secret";
@@ -167,6 +168,7 @@ describe("ub data process synchronization", () => {
     hubs.push(hub);
     const url = `ws://127.0.0.1:${hub.port}`;
     pointAt(box, url);
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: url }, box.env);
     const session = await connect(box, { HUB_URL: url, HUB_AUTH_TOKEN: SECRET });
     const uuid = await document(session);
     const path = operationsFile(box, "synced.json", [{
@@ -190,6 +192,7 @@ describe("ub data process synchronization", () => {
       projectBinding: { workspaceId: WORKSPACE, hubUrl: null },
       userConfig: { hubAdmissions: { [DEAD_HUB_URL]: "device" } },
     });
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, box.env);
     const session = await connect(box);
     const uuid = await document(session);
     await session.ok("update_data", {

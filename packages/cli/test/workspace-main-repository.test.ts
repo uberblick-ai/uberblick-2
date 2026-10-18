@@ -84,9 +84,9 @@ it.each(["admin", "member", "signed-out", "hub-down"] as const)(
       writeFileSync(join(box.configHome, "uberblick", "credentials.json"), "{}");
     }
     if (authority === "hub-down") remote.controls.onManagement = () => ({ status: 503, result: { status: "failed" } });
+    rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: remote.origin }], box.env);
     const local = createMcpServer({ ...resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), authSecret: null });
     await local.close();
-    rememberWorkspaceBindings([{ workspaceId: WORKSPACE, hubUrl: remote.origin }], box.env);
     gitOrigin(box, "https://github.com/acme/notes.git");
     const result = await runInProcess(["workspace", "use", WORKSPACE, "--json"], box);
     expect(result.status, result.output).toBe(0);

@@ -194,16 +194,19 @@ describe("ub mcp serve", () => {
     } finally { await session.close(); }
   });
 
-  it("serves a complete environment binding without replacing a different recorded hub", async () => {
+  it("refuses a complete local environment binding for a recorded hub", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
     await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, box.env);
-    const session = await connect(box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
-    try {
-      const result = await session.client.callTool({ name: "sync_status", arguments: {} });
-      const content = result.content as { text: string }[];
-      expect(JSON.parse(content[0]!.text).hub.url).toBeNull();
-      expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(DEAD_HUB_URL);
-    } finally { await session.close(); }
+    const run = runUb(["mcp", "serve"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
+    expect(run.status, run.output).toBe(1);
+    expect(run.stdout).toBe("");
+    expect(run.stderr).toContain(WORKSPACE);
+    expect(run.stderr).toContain(DEAD_HUB_URL);
+    expect(run.stderr).toMatch(/local.*(?:not|isn't) supported/is);
+    expect(run.stderr).toContain("UB_WORKSPACE_ID");
+    expect(run.stderr).toContain("UB_HUB_URL");
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(DEAD_HUB_URL);
+    expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
 
   it.each([null, DEAD_HUB_URL])("serves a manual workspace override alone using its recorded hub %s", async (hubUrl) => {
@@ -227,7 +230,10 @@ describe("ub mcp serve", () => {
   });
 
   it.each([null, DEAD_HUB_URL])("starts with an existing %s record even when a stale init lock remains", async (recordedHub) => {
-    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const box = sandbox({
+      projectBinding: { workspaceId: WORKSPACE, hubUrl: recordedHub },
+      ...(recordedHub === null ? {} : { credentials: { signingSecret: "cli-stale-lock-secret" } }),
+    });
     await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: recordedHub }, box.env);
     const lock = join(box.configHome, "uberblick", ".init.lock");
     writeFileSync(lock, "999999\n");

@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
@@ -15,6 +16,7 @@ import { processIo } from "./io.js";
 import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
 import { cliVersion } from "./version.js";
 import { recentDevicesNotice, requestRecentDevices, type RecentDevice } from "./recent-devices.js";
+import { ensureWorkspaceBinding, WorkspaceBindingMismatch } from "./workspace-registry.js";
 
 /** Diagnostic paths contain no credentials or values read from them. */
 export interface StorageReport {
@@ -43,6 +45,7 @@ export interface StatusReport {
   hubUrl: string;
   /** Validated local refusal, kept separate from untrusted hub reasons. */
   hubTransportProblem?: { reason: string; fix: string };
+  bindingProblem?: { reason: string; fix: string };
   /** The account stored on this computer, independent of live hub acceptance. */
   account: { login: string; provider: "github" } | null;
   databasePath: string;
@@ -136,20 +139,31 @@ export async function statusReport(
   if (resolved.binding === null) {
     return { warnings: resolved.warnings, report: {
       version: cliVersion(), workspace: null, binding: null, hubUrl: null,
-      account: null, lastSync: null, projectConfig: null, message: NO_BINDING,
+      account: null, lastSync: null, projectConfig: null, message: resolved.bindingProblem ?? NO_BINDING,
     } };
   }
   const config = resolveMcpConfig(resolved.env);
+  let bindingProblem: WorkspaceBindingMismatch | undefined;
+  try {
+    await ensureWorkspaceBinding(resolved.binding, resolved.env, resolved.paths.projectConfig ?? "environment");
+  } catch (error) {
+    if (!(error instanceof WorkspaceBindingMismatch)) throw error;
+    bindingProblem = error;
+  }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
   let caughtUp = false;
   const [sync, recentDevices] = await Promise.all([
-    readSyncStatus(config, options.workspaceStatus === true
-      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined),
-    options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
+    bindingProblem === undefined ? readSyncStatus(config, options.workspaceStatus === true
+      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined) : {
+      hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
+      rooms: [], unsyncedChanges: 0, pendingRooms: [], lastSync: null,
+      inFlightUpdates: 0, logEntries: 0, persistence: null,
+    } satisfies Partial<SyncStatus>,
+    bindingProblem !== undefined || options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
   ]);
   // Read the stored account without login or renewal, even after a hub refusal.
-  const deviceLogin = config.deviceLogin === undefined &&
+  const deviceLogin = bindingProblem !== undefined || config.deviceLogin === undefined &&
     !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
     ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
@@ -167,6 +181,7 @@ export async function statusReport(
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
       ...(transport === null ? {} : { hubTransportProblem: transport }),
+      ...(bindingProblem === undefined ? {} : { bindingProblem: { reason: bindingProblem.reason, fix: bindingProblem.fix } }),
       account: accountOrigin !== undefined && deviceLogin?.status === "ready"
         ? { login: deviceLogin.login.identity.githubUsername, provider: "github" } : null,
       databasePath: config.databasePath,
@@ -242,7 +257,7 @@ function olderHub(hub: SyncStatus["hub"]): boolean {
 }
 
 function connectionState(report: StatusReport): NonNullable<ShortStatusReport["connection"]>["state"] {
-  if (report.hubTransportProblem !== undefined) return "refused";
+  if (report.bindingProblem !== undefined || report.hubTransportProblem !== undefined) return "refused";
   if (report.hub.status === "connected") return "connected";
   if (report.hub.status === "auth-failed" || report.hub.status === "update-required") return "refused";
   return "failed";
@@ -258,7 +273,9 @@ export function shortStatusReport(
   // raw reason nor malformed detail can reach text or JSON.
   const recorded = state !== "connected" && formatHubFailure(hub) !== undefined;
   const problems: ShortStatusReport["problems"] = [];
-  if (origin !== null) {
+  if (report.bindingProblem !== undefined) {
+    problems.push({ name: "workspace-hub-mismatch", fix: `${report.bindingProblem.reason} ${report.bindingProblem.fix}` });
+  } else if (origin !== null) {
     if (report.hubTransportProblem !== undefined) {
       problems.push({ name: "insecure-hub", fix: report.hubTransportProblem.fix });
     } else switch (hub.status) {
@@ -297,7 +314,7 @@ export function shortStatusReport(
     workspace: { id: report.workspaceUuid, name: workspaceName },
     hub: origin,
     account: origin === null ? null : report.account,
-    connection: origin === null ? null : {
+    connection: origin === null && report.bindingProblem === undefined ? null : {
       state,
       cause: recorded ? hub.cause ?? null : null,
       detail: recorded ? hub.detail ?? null : null,
@@ -310,6 +327,7 @@ export function shortStatusReport(
 }
 
 function connectionText(report: StatusReport): string {
+  if (report.bindingProblem !== undefined) return report.bindingProblem.reason;
   if (report.hubTransportProblem !== undefined) return report.hubTransportProblem.reason;
   const hub = report.hub;
   switch (hub.status) {
@@ -323,6 +341,7 @@ function connectionText(report: StatusReport): string {
 }
 
 const PROBLEM_PHRASES: Record<string, string> = {
+  "workspace-hub-mismatch": "workspace hub does not match this machine",
   "insecure-hub": "unencrypted hub connection refused",
   "hub-unreachable": "hub unreachable",
   "not-signed-in": "not signed in",
@@ -421,7 +440,7 @@ export async function statusCommand(
     io.err(`ub: warning: ${warning}\n`);
   }
   if (report.binding === null) {
-    io.err("no .uberblick.json here or in any parent directory\n" +
+    io.err(`${report.message === NO_BINDING ? "no .uberblick.json here or in any parent directory" : report.message}\n` +
       "  → ub workspace create <name>, or ub workspace use <link|id>\n");
     return 1;
   }

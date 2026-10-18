@@ -126,8 +126,8 @@ function selectHub(hub: string | undefined): Selection | SelectionFailure {
   const binding = resolved?.binding;
   const selected = hub ?? binding?.hubUrl ?? undefined;
   if (selected === undefined) {
-    return { outcome: "no-hub", exitCode: 1,
-      guidance: "no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`." };
+    return { outcome: resolved?.bindingProblem === undefined ? "no-hub" : "binding-invalid", exitCode: 1,
+      guidance: resolved?.bindingProblem ?? "no hub given and none bound. Local-only work needs no login. Give a hub to `ub auth login <hub>`." };
   }
   let origin: string;
   let endpoint: string;

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createHub, silentLogger } from "@uberblick/hub";
 import { resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import { afterAll, expect, it } from "vitest";
+import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -13,12 +14,14 @@ const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
 it("reports up to date after a real hub acknowledges the named local changes", async () => {
   const secret = "synthetic-status-hub-secret";
   const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
-  storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Synced notes");
   const hub = await createHub({
     authSecret: secret, port: 0, databasePath: join(box.cwd, "hub.sqlite"), log: silentLogger,
   });
   try {
-    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE, hubUrl: `ws://127.0.0.1:${hub.port}` }));
+    const hubUrl = `ws://127.0.0.1:${hub.port}`;
+    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+    storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Synced notes");
+    writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ workspaceId: WORKSPACE, hubUrl }));
     const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: secret, UB_TEST_MAX_WAIT_MS: "5000" });
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain("workspace  Synced notes\n");

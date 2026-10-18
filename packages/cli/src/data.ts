@@ -4,10 +4,10 @@ import { openWorkspaceReplicas, readWorkspaceData, updateWorkspaceData, Workspac
 import { canonicalDocumentUuid, parseWorkspaceId } from "@uberblick/schema";
 import type { DataCollectionChange, DocData } from "@uberblick/schema";
 import { resolveMcpConfig } from "./budget.js";
-import { resolveConfig } from "./config.js";
+import { requireBinding, resolveConfig } from "./config.js";
 import type { Io } from "./io.js";
 import { processIo } from "./io.js";
-import { NO_BINDING } from "./project-binding.js";
+import { ensureWorkspaceBinding } from "./workspace-registry.js";
 
 export const DATA_GET_OPTIONS = { out: { type: "string" } } as const;
 export const DATA_UPDATE_OPTIONS = {
@@ -141,12 +141,13 @@ export async function dataCommand(argv: string[], io: Io = processIo): Promise<n
   let saved: "synced" | "local" | "unconfirmed" | undefined;
   try {
     const resolved = resolveConfig();
-    if (resolved.binding === null) throw new Error(NO_BINDING);
+    const binding = requireBinding(resolved);
     const config = resolveMcpConfig(resolved.env);
     const uuid = documentUuid(command.doc, config.workspaceId);
     const operations = command.command === "update" ? readOperations(command.file) : undefined;
     for (const warning of resolved.warnings) io.err(`ub: warning: ${warning}\n`);
-    const instance = openWorkspaceReplicas(config, { publishOwnPresence: false, hubFree: resolved.binding.hubUrl === null });
+    await ensureWorkspaceBinding(binding, resolved.env, resolved.paths.projectConfig ?? "environment");
+    const instance = openWorkspaceReplicas(config, { publishOwnPresence: false, hubFree: binding.hubUrl === null });
     try {
       if (command.command === "get") {
         const data = await readWorkspaceData(instance.replicas, uuid);

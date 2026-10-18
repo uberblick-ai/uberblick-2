@@ -344,7 +344,7 @@ export async function useRemoteWorkspace(
     const inForce = after.env.WORKSPACE_ID?.trim();
     if (inForce !== flags.workspace || after.binding?.hubUrl !== flags.endpoint) {
       io.err(
-        `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${inForce ?? "no workspace"} at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written — that is the workspace in force here.\n`,
+        `ub: warning: ${ORIGIN_LABELS[after.origins.workspace]} sets ${inForce ?? "no workspace"} at ${after.binding?.hubUrl ?? "local-only"}, which takes precedence over the binding just written. Commands refuse a hub that differs from this machine's record; unset UB_WORKSPACE_ID and UB_HUB_URL to follow the project binding.\n`,
       );
     }
     return 0;
