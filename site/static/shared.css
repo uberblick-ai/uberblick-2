@@ -108,13 +108,7 @@ img { max-width: 100%; display: block }
 .steps b { font-weight: 600; display: block }
 .small { font-size: 13px; color: var(--muted) }
 
-/* Question cards, directory lists, change lists, link columns. */
-.qcards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px }
-.qcard { border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; display: grid; gap: 8px; align-content: start; min-width: 0 }
-.qcard .lab { font-family: var(--mono); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted) }
-.qcard h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; text-wrap: balance }
-.links { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px }
-.links li { display: flex; gap: 10px; align-items: baseline; min-width: 0 }
+/* Directory lists, change lists, link columns. */
 .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; flex-shrink: 0 }
 .dir { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line) }
 .dir a { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 4px 20px; padding: 12px 10px; border-bottom: 1px solid var(--line); align-items: baseline; color: var(--fg); text-decoration: none }
@@ -183,7 +177,7 @@ td code { white-space: nowrap }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }
   .stat:nth-child(3) { padding-left: 0; border-left: 0 }
   .stat:nth-child(n+3) { border-top: 1px solid var(--line) }
-  .qcards, .cols { grid-template-columns: minmax(0, 1fr) }
+  .cols { grid-template-columns: minmax(0, 1fr) }
   .changes li { grid-template-columns: 110px minmax(0, 1fr) }
   .changes li > span:last-child { grid-column: 1 / -1 }
 }

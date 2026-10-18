@@ -117,7 +117,7 @@ SIDE = [
     ('Agents', [('/docs/agents', 'Agents over MCP'), ('/docs/decisions', 'Decisions')]),
     ('Sharing', [('/docs/hub', 'Run a hub'), ('/docs/access', 'Access and membership')]),
     ('Reference', [('/docs/cli', 'CLI reference'), ('/docs/configuration', 'Configuration'), ('/docs/custom-markdown', 'Custom Markdown'), ('/docs/mcp', 'MCP reference')]),
-    (None, [('/#usecases', 'Use cases'), ('/compare', 'Compare')]),
+    (None, [('/compare', 'Which tool fits your team?')]),
 ]
 
 
