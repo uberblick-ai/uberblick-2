@@ -4,7 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { columnResizingPluginKey } from "@tiptap/pm/tables";
 import * as Y from "yjs";
 import { undo } from "y-prosemirror";
-import { appendBlock, createAnnotation, getBlocks, getBlocksFragment, initDoc, tableCellText, tableRows } from "@uberblick/schema";
+import { appendBlock, createAnnotation, deleteBlock, getBlocks, getBlocksFragment, initDoc, tableCellText, tableRows } from "@uberblick/schema";
 import { createUberblickEditor } from "../src/editor/create-editor.js";
 import { findForeignBlocks } from "../src/editor/palette.js";
 import { isOrdinaryTable } from "../src/editor/table.js";
@@ -109,6 +109,43 @@ describe("table column resizing", () => {
       finishDrag(240);
       expect(widths(f.table)).toEqual([[[240], [220]], [[240], [220]]]);
     } finally { finishDrag(180); editor.destroy(); f.ydoc.destroy(); }
+  });
+
+  it.each(["removed", "ragged"] as const)("cancels a drag when a collaborator leaves its table %s", (change) => {
+    const f = fixture();
+    appendBlock(f.ydoc, { type: "paragraph", text: "tail" });
+    const remote = new Y.Doc();
+    Y.applyUpdate(remote, Y.encodeStateAsUpdate(f.ydoc));
+    const { editor } = mountEditor(f.ydoc);
+    const errors: ErrorEvent[] = [];
+    const onError = (event: ErrorEvent): void => { errors.push(event); event.preventDefault(); };
+    window.addEventListener("error", onError);
+    try {
+      startDrag(editor);
+      moveDrag(300);
+      if (change === "removed") deleteBlock(remote, f.id);
+      else ((getBlocksFragment(remote).get(0) as Y.XmlElement).get(1) as Y.XmlElement).delete(1, 1);
+      Y.applyUpdate(f.ydoc, Y.encodeStateAsUpdate(remote));
+      expect(columnResizingPluginKey.getState(editor.state)?.activeHandle).toBe(-1);
+      expect(columnResizingPluginKey.getState(editor.state)?.dragging).toBeFalsy();
+      expect(editor.view.dom.querySelector(".column-resize-handle")).toBeNull();
+      const before = getBlocks(f.ydoc);
+      let writes = 0;
+      f.ydoc.on("update", () => { writes += 1; });
+      expect(() => finishDrag(300)).not.toThrow();
+      expect(errors).toEqual([]);
+      expect(writes).toBe(0);
+      expect(getBlocks(f.ydoc)).toEqual(before);
+      editor.commands.setTextSelection(editor.state.doc.content.size - editor.state.doc.lastChild!.nodeSize + 1);
+      editor.view.dispatch(editor.state.tr.insertText("kept "));
+      expect(getBlocks(f.ydoc).at(-1)?.text).toBe("kept tail");
+      expect(writes).toBe(1);
+      if (change === "ragged") expect(widths(f.table)).toEqual([[[180], [220]], [[180]]]);
+    } finally {
+      finishDrag(180);
+      window.removeEventListener("error", onError);
+      editor.destroy(); f.ydoc.destroy(); remote.destroy();
+    }
   });
 
   it("keeps a resize in its own undo step and preserves collaborator edits on both clients", () => {

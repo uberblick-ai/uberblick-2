@@ -69,7 +69,8 @@ function tableResizing(editor: Editor, options: TableOptions): Plugin {
       ...state,
       apply(tr, previous, oldState, newState) {
         const next = state.apply(tr, previous, oldState, newState);
-        return canResize(newState, next.activeHandle) ? next : new ResizeState(-1, false);
+        return canResize(newState, next.activeHandle) && !(next.activeHandle < 0 && next.dragging)
+          ? next : new ResizeState(-1, false);
       },
     },
     props: {
