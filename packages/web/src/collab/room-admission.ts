@@ -47,12 +47,13 @@ export class RoomAdmission {
 
 /**
  * The provider's public token and send seams pace every attach and reconnect.
- * Updates and awareness wait behind the token too: a first frame of any kind
- * makes the hub count the room. A stale async token cannot open a later socket.
+ * Only authentication and detach can precede the hub's room authentication.
+ * A stale async token cannot open a later socket.
  */
 export class PacedRoomProvider extends HocuspocusProvider {
   private ticket: Ticket | null = null;
   private tokenTicket: Ticket | null = null;
+  private authenticatedTicket: Ticket | null = null;
   private tokenSent = false;
 
   constructor(
@@ -67,6 +68,7 @@ export class PacedRoomProvider extends HocuspocusProvider {
       // A replacement provider can receive the old provider's detach echo.
       // It is not this provider losing its socket or its admission.
       if (event?.reason !== "provider_initiated") this.cancel();
+      else this.isAuthenticated = this.hasAuthenticated;
     });
   }
 
@@ -79,7 +81,9 @@ export class PacedRoomProvider extends HocuspocusProvider {
     this.ticket?.finish();
     this.ticket = null;
     this.tokenTicket = null;
+    this.authenticatedTicket = null;
     this.tokenSent = false;
+    this.isAuthenticated = false;
   }
 
   override async onOpen(event: Parameters<HocuspocusProvider["onOpen"]>[0]): Promise<void> {
@@ -90,7 +94,6 @@ export class PacedRoomProvider extends HocuspocusProvider {
     if (await ticket.ready && this.ticket === ticket && this.isAttached && this.socketOpen()) {
       this.emit("open", { event });
       await this.sendToken();
-      if (this.ticket === ticket) this.startSync();
     } else {
       ticket.finish();
     }
@@ -113,7 +116,45 @@ export class PacedRoomProvider extends HocuspocusProvider {
   }
 
   override startSync(): void {
-    if (this.tokenSent && this.canSync() && this.socketOpen()) super.startSync();
+    if (this.hasAuthenticated && this.canSync()) super.startSync();
+  }
+
+  get hasAuthenticated(): boolean {
+    return this.authenticatedTicket !== null && this.authenticatedTicket === this.ticket &&
+      this.tokenSent && this.isAttached && this.socketOpen();
+  }
+
+  override authenticatedHandler(scope: string): void {
+    if (this.hasAuthenticated) return;
+    if (!this.tokenSent || this.ticket === null || !this.isAttached || !this.socketOpen()) return;
+    this.authenticatedTicket = this.ticket;
+    super.authenticatedHandler(scope);
+    this.startSync();
+  }
+
+  override permissionDeniedHandler(reason: string): void {
+    super.permissionDeniedHandler(reason);
+    this.cancel();
+  }
+
+  override onMessage(event: MessageEvent): void {
+    if (!this.isAttached || !this.socketOpen()) return;
+    if (!this.hasAuthenticated) {
+      // Read only the frame header. Payload decoding remains Hocuspocus's job.
+      const bytes = new Uint8Array(event.data);
+      let roomLength = 0;
+      let offset = 0;
+      for (; offset < 5 && offset < bytes.length; offset += 1) {
+        const byte = bytes[offset];
+        if (byte === undefined) return;
+        roomLength += (byte & 0x7f) * 2 ** (offset * 7);
+        if (byte < 0x80) break;
+      }
+      if (offset >= 5 || offset >= bytes.length) return;
+      const type = bytes[offset + 1 + roomLength];
+      if (type !== MessageType.Auth && type !== MessageType.CLOSE) return;
+    }
+    super.onMessage(event);
   }
 
   override send(
@@ -124,7 +165,7 @@ export class PacedRoomProvider extends HocuspocusProvider {
     const type = new Message().type;
     // Sync replies have no type on their message wrapper; gate them too.
     if (!this.canSync() && type !== MessageType.Auth && type !== MessageType.CLOSE) return;
-    if (this.tokenSent) {
+    if (this.hasAuthenticated) {
       // An older onOpen continuation returns the empty sentinel after a flap.
       if (args.token === "") return;
       super.send(Message, args);

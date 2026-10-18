@@ -249,7 +249,7 @@ async function seedDocument(tab: Tab, uuid: string): Promise<void> {
   );
 }
 
-it("keeps a room on a live socket read-only until its token is admitted", async () => {
+it("keeps a new room on a live socket read-only until it authenticates", async () => {
   const hub = await startHub(0, databasePath());
   const firstUuid = randomUUID();
   const first = await openTab(`${WORKSPACE}/${firstUuid}`, hub.port);
@@ -260,13 +260,11 @@ it("keeps a room on a live socket read-only until its token is admitted", async 
   expect(second.history[0]).toMatchObject({
     hasReceivedServerState: false,
     hasAnswered: false,
+    writable: false,
   });
   await waitFor("the second room's token to be admitted", () =>
     second.latest().writable,
   );
-  expect(
-    second.history.slice(1).some(({ connected, writable }) => connected && !writable),
-  ).toBe(true);
   await waitFor("the second room's server answer", () => second.latest().hasAnswered);
   expect(second.latest().hasReceivedServerState).toBe(true);
 }, TEST_TIMEOUT_MS);
@@ -387,7 +385,7 @@ it("keeps a store-refused room read-only across reacquire without dropping peers
   expect(other.latest().writable).toBe(true);
 }, TEST_TIMEOUT_MS);
 
-it.each(["close", "authenticationFailed"] as const)("stops only the deleted room after a %s refusal", async (event) => {
+it("stops only the deleted room after an authenticated room-local refusal without authoring directory marks", async () => {
   const hub = await startHub(0, databasePath());
   const uuid = randomUUID();
   const room = `${WORKSPACE}/${uuid}`;
@@ -399,12 +397,8 @@ it.each(["close", "authenticationFailed"] as const)("stops only the deleted room
   teardown.push(() => sharedSocket(tab.connection).destroy());
   await seedDocument(tab, uuid);
   await seedDocument(other, otherUuid);
-  if (event === "close") closeRoom(hub, room, DOC_DELETED_REASON);
-  else {
-    const events = tab.connection.provider as unknown as {
-      emit(event: "authenticationFailed", payload: { reason: string }): void;
-    };
-    events.emit("authenticationFailed", { reason: DOC_DELETED_REASON });
+  for (const connection of hub.hocuspocus.documents.get(room)!.getConnections()) {
+    connection.send(wireFrame(room, MessageType.Auth, 1, ...wireString(DOC_DELETED_REASON)));
   }
 
   await waitFor("the deleted room to detach", () => tab.latest().deleted === true);
@@ -412,12 +406,147 @@ it.each(["close", "authenticationFailed"] as const)("stops only the deleted room
   expect(tab.latest().storeRefused).toBe(false);
   expect(tab.latest().writable).toBe(false);
   expect(tab.connection.provider.isAttached).toBe(false);
-  expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(true);
+  expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(false);
   await expectLiveWrite(other, hub.port, otherRoom, "unrelated room after deletion");
   tab.release();
   const reopened = await openTab(room, hub.port);
   expect(reopened.latest().deleted).toBe(true);
   expect(reopened.connection.provider.isAttached).toBe(false);
+  directory.release();
+  const laterDirectory = await openTab(directoryRoom(WORKSPACE), hub.port);
+  await waitFor("the reopened directory to sync", () => laterDirectory.latest().synced);
+  expect(isDirectoryEntryDeleted(laterDirectory.connection.ydoc, uuid)).toBe(false);
+}, TEST_TIMEOUT_MS);
+
+function wireUint(value: number): number[] {
+  const bytes: number[] = [];
+  do {
+    const byte = value & 0x7f;
+    value = Math.floor(value / 128);
+    bytes.push(byte | (value === 0 ? 0 : 0x80));
+  } while (value > 0);
+  return bytes;
+}
+
+function wireString(value: string): number[] {
+  const bytes = Buffer.from(value);
+  return [...wireUint(bytes.length), ...bytes];
+}
+
+function wireFrame(room: string, ...payload: number[]): Uint8Array {
+  return Uint8Array.from([...wireString(room), ...payload]);
+}
+
+/** Real transport with application messages held: the endpoint never authenticates itself. */
+async function unauthenticatedEndpoint() {
+  const hub = await startHub(0, databasePath());
+  type Socket = Parameters<typeof hub.hocuspocus.handleConnection>[0];
+  const sockets: Socket[] = [];
+  const frames: Uint8Array[][] = [];
+  const handleConnection = hub.hocuspocus.handleConnection.bind(hub.hocuspocus);
+  vi.spyOn(hub.hocuspocus, "handleConnection").mockImplementation((...args) => {
+    const connection = handleConnection(...args);
+    const received: Uint8Array[] = [];
+    sockets.push(args[0]);
+    frames.push(received);
+    vi.spyOn(connection, "handleMessage").mockImplementation((data) => { received.push(data); });
+    return connection;
+  });
+  return { hub, sockets, frames };
+}
+
+function roomFrameTypes(frames: Uint8Array[], room: string): number[] {
+  const prefix = Buffer.from(wireString(room));
+  return frames.filter((frame) => Buffer.from(frame.subarray(0, prefix.length)).equals(prefix))
+    .map((frame) => frame[prefix.length]!);
+}
+
+it("ignores inbound sync and sends only auth until each room authenticates again on the current socket", async () => {
+  const endpoint = await unauthenticatedEndpoint();
+  const uuid = randomUUID();
+  const room = `${WORKSPACE}/${uuid}`;
+  const tab = await openTab(room, endpoint.hub.port);
+  const otherRoom = `${WORKSPACE}/${randomUUID()}`;
+  const other = await openTab(otherRoom, endpoint.hub.port);
+  const directory = await openTab(directoryRoom(WORKSPACE), endpoint.hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await waitFor("both rooms' initial auth frames", () => endpoint.frames.length === 1 &&
+    roomFrameTypes(endpoint.frames[0]!, room).includes(MessageType.Auth) &&
+    roomFrameTypes(endpoint.frames[0]!, otherRoom).includes(MessageType.Auth));
+  initDoc(tab.connection.ydoc, { uuid, title: "Retained local copy" });
+  insertBlock(tab.connection.ydoc, null, { type: "paragraph", text: "local pending edit" });
+  const before = Y.encodeStateAsUpdate(tab.connection.ydoc);
+  const remote = new Y.Doc();
+  initDoc(remote, { uuid, title: "Untrusted title" });
+  const update = Y.encodeStateAsUpdate(remote);
+  remote.destroy();
+  const inject = (socket: typeof endpoint.sockets[number]): void => {
+    socket.send(wireFrame(room, MessageType.Sync, 0, 1, 0));
+    socket.send(wireFrame(room, MessageType.Sync, 1, ...wireUint(update.length), ...update));
+    socket.send(wireFrame(room, MessageType.Sync, 2, ...wireUint(update.length), ...update));
+    socket.send(wireFrame(room, MessageType.QueryAwareness));
+    socket.send(wireFrame(room, MessageType.SyncStatus, 1));
+  };
+  inject(endpoint.sockets[0]!);
+  endpoint.sockets[0]!.send(wireFrame(otherRoom, MessageType.Auth, 2, ...wireString("read-write")));
+  await waitFor("the other room's sync to start", () =>
+    roomFrameTypes(endpoint.frames[0]!, otherRoom).includes(MessageType.Sync));
+  await sleep(50);
+  expect(Y.encodeStateAsUpdate(tab.connection.ydoc)).toEqual(before);
+  expect(roomFrameTypes(endpoint.frames[0]!, room)).toEqual([MessageType.Auth]);
+  expect(tab.latest().hasReceivedServerState).toBe(false);
+  expect(tab.latest().writable).toBe(false);
+
+  endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 2, ...wireString("read-write")));
+  await waitFor("the authenticated room's sync", () =>
+    roomFrameTypes(endpoint.frames[0]!, room).includes(MessageType.Sync));
+  const syncFrames = roomFrameTypes(endpoint.frames[0]!, room).filter((type) => type === MessageType.Sync).length;
+  endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 2, ...wireString("read-write")));
+  await sleep(50);
+  expect(roomFrameTypes(endpoint.frames[0]!, room).filter((type) => type === MessageType.Sync)).toHaveLength(syncFrames);
+
+  endpoint.sockets[0]!.close(1000, DOC_DELETED_REASON);
+  await waitFor("fresh auth on the replacement socket", () => endpoint.frames.length === 2 &&
+    roomFrameTypes(endpoint.frames[1]!, room).includes(MessageType.Auth));
+  inject(endpoint.sockets[1]!);
+  await sleep(50);
+  expect(Y.encodeStateAsUpdate(tab.connection.ydoc)).toEqual(before);
+  expect(roomFrameTypes(endpoint.frames[1]!, room)).toEqual([MessageType.Auth]);
+  expect(tab.latest().writable).toBe(false);
+  expect(tab.latest().deleted).toBe(false);
+  expect(other.connection.provider.isAttached).toBe(true);
+  endpoint.sockets[1]!.send(wireFrame(room, MessageType.Auth, 1, ...wireString(DOC_DELETED_REASON)));
+  await waitFor("the unauthenticated refused room to detach", () => !tab.connection.provider.isAttached);
+  expect(tab.latest().deleted).toBe(false);
+  expect(tab.latest().writable).toBe(false);
+  expect(Y.encodeStateAsUpdate(tab.connection.ydoc)).toEqual(before);
+  expect(other.connection.provider.isAttached).toBe(true);
+  expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(false);
+}, TEST_TIMEOUT_MS);
+
+it.each([false, true])("a doc-deleted room CLOSE only detaches that room (authenticated: %s)", async (authenticated) => {
+  const endpoint = await unauthenticatedEndpoint();
+  const uuid = randomUUID();
+  const room = `${WORKSPACE}/${uuid}`;
+  const tab = await openTab(room, endpoint.hub.port);
+  const other = await openTab(`${WORKSPACE}/${randomUUID()}`, endpoint.hub.port);
+  const directory = await openTab(directoryRoom(WORKSPACE), endpoint.hub.port);
+  teardown.push(() => sharedSocket(tab.connection).destroy());
+  await waitFor("the room auth frame", () => endpoint.frames.length === 1 &&
+    roomFrameTypes(endpoint.frames[0]!, room).includes(MessageType.Auth));
+  initDoc(tab.connection.ydoc, { uuid, title: "Keep this copy" });
+  if (authenticated) {
+    endpoint.sockets[0]!.send(wireFrame(room, MessageType.Auth, 2, ...wireString("read-write")));
+    await waitFor("room authentication", () => tab.latest().writable);
+  }
+  endpoint.sockets[0]!.send(wireFrame(room, MessageType.CLOSE, ...wireString(DOC_DELETED_REASON)));
+  await waitFor("the closed room to detach", () => !tab.connection.provider.isAttached);
+  expect(tab.latest().deleted).toBe(false);
+  expect(tab.connection.ydoc.getMap("meta").get("title")).toBe("Keep this copy");
+  expect(other.connection.provider.isAttached).toBe(true);
+  expect(directory.connection.provider.isAttached).toBe(true);
+  expect(endpoint.frames).toHaveLength(1);
+  expect(isDirectoryEntryDeleted(directory.connection.ydoc, uuid)).toBe(false);
 }, TEST_TIMEOUT_MS);
 
 it("detaches an open room when its directory deletion arrives and scrubs late metadata", async () => {
