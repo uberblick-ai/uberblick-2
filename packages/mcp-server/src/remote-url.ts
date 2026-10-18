@@ -98,6 +98,28 @@ export function normalizeRemoteUrl(value: string): string {
   return url.invented ? formatRemoteUrl(url) : url.text;
 }
 
+/** Validate before composing a diagnostic, without changing stored origins. */
+export function hubTransportProblem(
+  endpoint: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { reason: string; fix: string } | null {
+  const normalized = normalizeRemoteUrl(endpoint);
+  const url = new URL(normalized);
+  if (url.protocol === "wss:" || isLoopbackHost(url.hostname)) return null;
+  const authority = `${url.hostname}:${url.port || "80"}`;
+  if (env.UB_INSECURE_HUBS?.split(",").some(entry => entry.trim() === authority)) return null;
+  const secure = endpoint.trim().replace(/^http:/i, "https:").replace(/^ws:/i, "wss:");
+  return {
+    reason: "refusing an unencrypted connection to a hub on another computer",
+    fix: `use ${secure}`,
+  };
+}
+
+export function assertHubTransport(endpoint: string, env: NodeJS.ProcessEnv = process.env): void {
+  const problem = hubTransportProblem(endpoint, env);
+  if (problem !== null) throw new Error(`${problem.reason}; ${problem.fix}`);
+}
+
 /**
  * Read the schema-validated workspace id from the last path segment, retaining
  * its decorated spelling. Use the shared endpoint validation and never echo

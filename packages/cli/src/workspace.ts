@@ -1,6 +1,7 @@
 import { createWorkspaceCommand } from "./workspace-create.js";
 import { promoteWorkspaceCommand } from "./workspace-promote.js";
 import { parseJoinTarget, useRemoteWorkspace } from "./remote.js";
+import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
 import { displayWorkspaceHub, useBindingLines } from "./workspace-use-output.js";
 
 import { readdirSync, rmSync } from "node:fs";
@@ -430,7 +431,10 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
 
   if (raw.includes("/")) {
     let target: ReturnType<typeof parseJoinTarget>;
-    try { target = parseJoinTarget(raw); }
+    try {
+      target = parseJoinTarget(raw);
+      assertHubTransport(raw);
+    }
     catch (error) {
       // The URL parser deliberately does not echo potentially secret operands.
       io.err(`ub workspace use: ${error instanceof Error ? error.message : String(error)}\nusage: ub workspace use <link|id> [--verbose] [--json]\nRun again: ub workspace use <link>\n`);

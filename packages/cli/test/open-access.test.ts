@@ -68,6 +68,21 @@ function storedLogin(handle: string): StoredHubLogin {
 describe("ub open: Devices identity projection", () => {
   const origin = "https://devices-hub.example";
 
+  it.each([false, true])("sends no credential or empty proof to an unencrypted remote hub (stored login=%s)", async stored => {
+    const { box } = configured();
+    const endpoint = "ws://devices-hub.example:1234/proxy/ws";
+    const origin = "http://devices-hub.example:1234";
+    if (stored) await writeHubLogin(origin, storedLogin("account-person"), box.env);
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", role: "admin" }));
+    const binding = { workspaceId: WORKSPACE, hubUrl: endpoint, env: { ...box.env, UB_INSECURE_HUBS: "another-hub:1234" } };
+    expect(await requestAccess(binding, { operation: "own-role", workspaceId: WORKSPACE }, new AbortController().signal))
+      .toEqual({ status: 503, body: { status: "hub-down", hub: origin } });
+    expect(fetch).not.toHaveBeenCalled();
+    binding.env.UB_INSECURE_HUBS = "devices-hub.example:1234";
+    expect((await requestAccess(binding, { operation: "own-role", workspaceId: WORKSPACE }, new AbortController().signal)).status).toBe(200);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("uses the login that answers after credential recovery replaces the first login", async () => {
     const { box } = configured();
     const original = storedLogin("original-person");

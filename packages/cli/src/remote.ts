@@ -17,6 +17,7 @@ import type {
   McpConfig,
 } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
+import { assertHubTransport } from "@uberblick/mcp-server/remote-url";
 export { normalizeRemoteUrl, parseJoinTarget } from "@uberblick/mcp-server/remote-url";
 import { bridgeConfig, resolveMcpConfig } from "./budget.js";
 import {
@@ -227,6 +228,11 @@ export async function useRemoteWorkspace(
   io: Io,
   options: WorkspaceUseOptions,
 ): Promise<number> {
+  try { assertHubTransport(flags.endpoint); }
+  catch (error) {
+    io.err(`ub workspace use: ${error instanceof Error ? error.message : "invalid hub"}\n`);
+    return 2;
+  }
   const resolved = resolveConfig();
   // Resolve the target's admission, rather than inheriting the current project's
   // mode. In particular, a recorded Docker endpoint must never use a local secret.

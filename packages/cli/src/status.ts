@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
-import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
@@ -40,6 +40,8 @@ export interface StatusReport {
   workspaceUuid: string;
   /** Configured endpoint, even when absent credentials make `hub.url` null. */
   hubUrl: string;
+  /** Validated local refusal, kept separate from untrusted hub reasons. */
+  hubTransportProblem?: { reason: string; fix: string };
   /** The account stored on this computer, independent of live hub acceptance. */
   account: { login: string; provider: "github" } | null;
   databasePath: string;
@@ -136,6 +138,7 @@ export async function statusReport(
     } };
   }
   const config = resolveMcpConfig(resolved.env);
+  const transport = hubTransportProblem(config.hubUrl, resolved.env);
   let caughtUp = false;
   const sync = await readSyncStatus(config, options.workspaceStatus === true
     ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined);
@@ -156,6 +159,7 @@ export async function statusReport(
       workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
+      ...(transport === null ? {} : { hubTransportProblem: transport }),
       account: accountOrigin !== undefined && deviceLogin?.status === "ready"
         ? { login: deviceLogin.login.identity.githubUsername, provider: "github" } : null,
       databasePath: config.databasePath,
@@ -229,17 +233,25 @@ function olderHub(hub: SyncStatus["hub"]): boolean {
   return hub.hubProtocolVersion !== undefined && hub.hubProtocolVersion < hub.protocolVersion;
 }
 
+function connectionState(report: StatusReport): NonNullable<ShortStatusReport["connection"]>["state"] {
+  if (report.hubTransportProblem !== undefined) return "refused";
+  if (report.hub.status === "connected") return "connected";
+  if (report.hub.status === "auth-failed" || report.hub.status === "update-required") return "refused";
+  return "failed";
+}
+
 export function shortStatusReport(report: StatusReport, workspaceName: string | null = null): ShortStatusReport {
   const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
   const hub = report.hub;
-  const state = hub.status === "connected" ? "connected"
-    : hub.status === "auth-failed" || hub.status === "update-required" ? "refused" : "failed";
+  const state = connectionState(report);
   // The shared formatter validates the locally recorded evidence. Neither the
   // raw reason nor malformed detail can reach text or JSON.
   const recorded = state !== "connected" && formatHubFailure(hub) !== undefined;
   const problems: ShortStatusReport["problems"] = [];
   if (origin !== null) {
-    switch (hub.status) {
+    if (report.hubTransportProblem !== undefined) {
+      problems.push({ name: "insecure-hub", fix: report.hubTransportProblem.fix });
+    } else switch (hub.status) {
       case "hub-down":
         problems.push({ name: "hub-unreachable", fix: "check DNS, network or VPN; ub doctor for details" });
         break;
@@ -287,6 +299,7 @@ export function shortStatusReport(report: StatusReport, workspaceName: string | 
 }
 
 function connectionText(report: StatusReport): string {
+  if (report.hubTransportProblem !== undefined) return report.hubTransportProblem.reason;
   const hub = report.hub;
   switch (hub.status) {
     case "connected": return "connected";
@@ -299,6 +312,7 @@ function connectionText(report: StatusReport): string {
 }
 
 const PROBLEM_PHRASES: Record<string, string> = {
+  "insecure-hub": "unencrypted hub connection refused",
   "hub-unreachable": "hub unreachable",
   "not-signed-in": "not signed in",
   "no-workspace-access": "no workspace access",

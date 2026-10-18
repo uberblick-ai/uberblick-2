@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as mcpServer from "@uberblick/mcp-server";
 import { defaultWorkspaceDatabasePath, resolveMcpConfig } from "@uberblick/mcp-server";
 import { isTagCatalogSeeded, setWorkspaceName, settingsRoom } from "@uberblick/schema";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -349,6 +349,29 @@ describe("the last hub sync in ub status", () => {
 });
 
 describe("the real project's short report", () => {
+  it.each([false, true])("reports the secure fix for a retained cleartext binding (stored login=%s)", async stored => {
+    const hubUrl = "ws://0.0.0.0:1234/proxy/ws";
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl },
+      ...(stored ? { credentials: { hubLogins: { "http://0.0.0.0:1234": fixture([WORKSPACE]) } } } : {}),
+    });
+    const path = join(box.cwd, ".uberblick.json");
+    const before = readFileSync(path, "utf8");
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const run = await runInProcess(["status", "--json"], box, { UB_INSECURE_HUBS: "another-hub:1234" });
+      expect(run.status, run.stderr).toBe(0);
+      expect(JSON.parse(run.stdout)).toMatchObject({
+        hub: "http://0.0.0.0:1234", connection: { state: "refused", cause: null, detail: null },
+        problems: [{ name: "insecure-hub", fix: "use wss://0.0.0.0:1234/proxy/ws" }],
+      });
+      const text = await runInProcess(["status"], box, { UB_INSECURE_HUBS: "another-hub:1234" });
+      expect(text.stdout).toContain("unencrypted connection");
+      expect(text.stdout).toContain("use wss://0.0.0.0:1234/proxy/ws");
+      expect(fetch).not.toHaveBeenCalled();
+      expect(readFileSync(path, "utf8")).toBe(before);
+    } finally { fetch.mockRestore(); }
+  });
+
   it.each([false, true])("prints only the stderr hint with no binding (json=%s)", async (json) => {
     const box = unboundSandbox();
     const run = await runInProcess(json ? ["status", "--json"] : ["status"], box);

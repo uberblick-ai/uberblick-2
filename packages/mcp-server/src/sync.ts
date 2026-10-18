@@ -21,7 +21,7 @@ import {
 } from "@uberblick/schema/protocol";
 import { ensureDeviceLogin, readDeviceLogin, type DeviceLoginFailure } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
-import { isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
+import { hubTransportProblem, isLoopbackEndpoint } from "@uberblick/mcp-server/remote-url";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import type { McpConfig } from "./config.js";
@@ -355,6 +355,7 @@ export class HubSync {
   private quarantined = false;
 
   private destroyed = false;
+  private readonly transportProblem: { reason: string; fix: string } | null;
   private closing: Promise<void> | null = null;
 
   /** See {@link HubSyncOptions.silent}. */
@@ -399,6 +400,9 @@ export class HubSync {
     }
     const backoff = socketBackoff(config.reconnectMaxDelayMs);
     this.reconnectDelayMs = backoff.delay;
+
+    this.transportProblem = hubTransportProblem(config.hubUrl, config.authEnv ?? config.deviceLogin?.env);
+    if (this.transportProblem !== null) return;
 
     if (config.deviceLogin !== undefined) {
       const stored = readDeviceLogin(config.hubUrl, config.workspaceId, config.deviceLogin.env);
@@ -984,6 +988,10 @@ export class HubSync {
           "keep an unlogged change from reaching other clients",
       };
     }
+    if (this.transportProblem !== null) return {
+      status: "hub-down", url: this.config.hubUrl, recoveryClass: "manual",
+      reason: `${this.transportProblem.reason}; ${this.transportProblem.fix}`,
+    };
     if (!this.enabled) {
       return {
         status: "disabled",

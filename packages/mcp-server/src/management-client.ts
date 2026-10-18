@@ -5,6 +5,7 @@ import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
 import { SYNC_PROTOCOL_VERSION, readProtocolMismatch } from "@uberblick/schema/protocol";
 import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS, type RequestAction } from "@uberblick/schema/token";
+import { assertHubTransport } from "./remote-url.js";
 
 export type ManagementAction = Exclude<RequestAction, { operation: "renew-credential" }>;
 export interface ManagementReply { status: number; body: Record<string, unknown> }
@@ -20,9 +21,10 @@ export async function manageRequest(
   origin: string,
   action: ManagementAction,
   login: StoredHubLogin | null,
-  options: { signal?: AbortSignal; maxResponseBytes?: number } = {},
+  options: { signal?: AbortSignal; maxResponseBytes?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<ManagementReply> {
   options.signal?.throwIfAborted();
+  assertHubTransport(origin, options.env);
   // Credential-free requests diagnose sign-in/protocol state without management authority.
   const token = login === null ? "" : await mintRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), {
     ...action, kid: login.credential.record.id, lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,

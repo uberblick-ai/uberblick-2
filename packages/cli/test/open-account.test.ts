@@ -30,6 +30,18 @@ async function rig() {
 afterEach(async () => { vi.restoreAllMocks(); await cleanUp(); });
 
 describe("ub open: account projection", () => {
+  it("sends no account proof to an unencrypted remote hub and forwards its exact environment opt-in", async () => {
+    const { box } = configured();
+    const origin = "http://account-hub.example:1234";
+    await writeHubLogin(origin, login(), box.env);
+    const binding = { workspaceId: WORKSPACE, hubUrl: `${origin}/proxy/ws`, env: { ...box.env, UB_INSECURE_HUBS: "another-hub:1234" } };
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", role: "admin" }));
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "unavailable" });
+    expect(fetch).not.toHaveBeenCalled();
+    binding.env.UB_INSECURE_HUBS = "account-hub.example:1234";
+    expect(await requestAccount(binding, () => null, new AbortController().signal)).toEqual({ state: "signed-in", handle: "account-person" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
   it("reads only the bound hub's stored public login without membership or a hub request", async () => {
     const { box, stored, binding } = await rig();
     const accountScoped = { ...stored, credential: { ...stored.credential, record: { ...stored.credential.record, workspaces: [] } } };

@@ -363,7 +363,7 @@ describe("ub doctor", () => {
       ...(host === "ws://127.0.0.1" ? { userConfig: { hubAdmissions: { [endpoint]: "device" } } } : {}),
       credentials: { signingSecret: SECRET } });
     const dial = vi.spyOn(probes, "probeHubState");
-    const { checks } = await doctor(box, { PORT: "invalid" });
+    const { checks } = await doctor(box, { PORT: "invalid", UB_INSECURE_HUBS: new URL(endpoint).host });
     expect(check(checks, "login")).toEqual({ name: "login", status: "fail",
       reason: `not signed in to ${authenticationOrigin(endpoint)}`, fix: `ub auth login ${authenticationOrigin(endpoint)}` });
     expect(check(checks, "hub").status).toBe("skipped");
@@ -376,6 +376,32 @@ describe("ub doctor", () => {
     expect(probes.probePort).toHaveBeenCalledExactlyOnceWith(open.WEB_HOST, open.DEFAULT_WEB_PORT);
   });
 
+  it.each([false, true])("refuses unencrypted remote hubs before hub or clock probes (stored login=%s)", async stored => {
+    const server = await silentServer();
+    const endpoint = `ws://0.0.0.0:${server.port}/proxy/ws`;
+    const box = stored ? deviceBox(endpoint)
+      : sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint } });
+    const dial = vi.spyOn(probes, "probeHubState");
+    const clock = vi.spyOn(probes, "probeHubClock");
+    const { checks } = await doctor(box, { UB_INSECURE_HUBS: `another-hub:${server.port}` });
+    expect(check(checks, "hub")).toEqual({ name: "hub", status: "fail",
+      reason: "refusing an unencrypted connection to a hub on another computer",
+      fix: `use wss://0.0.0.0:${server.port}/proxy/ws` });
+    expect(check(checks, "clock").status).toBe("skipped");
+    expect(dial).not.toHaveBeenCalled();
+    expect(clock).not.toHaveBeenCalled();
+    expect(server.clockRequests).toBe(0);
+  });
+
+  it("the direct clock probe refuses cleartext before HTTP and honors only the named opt-in", async () => {
+    const server = await silentServer();
+    const endpoint = `ws://0.0.0.0:${server.port}`;
+    expect(await probes.probeHubClock(endpoint, 2_000, {})).toBeNull();
+    expect(server.clockRequests).toBe(0);
+    expect(await probes.probeHubClock(endpoint, 2_000, { UB_INSECURE_HUBS: `0.0.0.0:${server.port}` })).toEqual(expect.any(Number));
+    expect(server.clockRequests).toBe(1);
+  });
+
   it.each(["ws://0.0.0.0", "ws://127.0.0.1"])("passes stored login and real device admission through %s", async host => {
     const remote = await startDeviceSyncHub({ directory: sandbox().cwd });
     deviceHubs.push(remote);
@@ -385,7 +411,7 @@ describe("ub doctor", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
       ...(host === "ws://127.0.0.1" ? { userConfig: { hubAdmissions: { [endpoint]: "device" } } } : {}),
       credentials: { signingSecret: SECRET, hubLogins: { [authenticationOrigin(endpoint)]: login } } });
-    const { report, checks } = await doctor(box);
+    const { report, checks } = await doctor(box, { UB_INSECURE_HUBS: new URL(endpoint).host });
     expect(check(checks, "login")).toEqual({ name: "login", status: "pass",
       reason: `${login.identity.githubUsername} on ${authenticationOrigin(endpoint)}`, fix: null });
     expect(check(checks, "hub")).toEqual({ name: "hub", status: "pass",
@@ -457,7 +483,7 @@ describe("ub doctor", () => {
     "names the authentication origin for every device hub line at %s", async endpoint => {
       vi.spyOn(probes, "probeHubState").mockResolvedValue({ status: "connected", url: endpoint, protocolVersion: SYNC_PROTOCOL_VERSION });
       vi.spyOn(probes, "probeHubClock").mockResolvedValue(-240);
-      const { report, checks } = await doctor(deviceBox(endpoint));
+      const { report, checks } = await doctor(deviceBox(endpoint), { UB_INSECURE_HUBS: new URL(endpoint).host });
       const origin = authenticationOrigin(endpoint);
       expect(check(checks, "login").reason).toBe(`doctor-person on ${origin}`);
       expect(check(checks, "hub").reason).toBe(`connected to ${origin}; doctor-person has access`);

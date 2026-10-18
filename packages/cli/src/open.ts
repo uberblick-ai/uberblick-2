@@ -17,7 +17,7 @@ import {
 } from "@uberblick/schema/protocol";
 import { clampToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
-import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   DIRECTORY_SUFFIX,
@@ -896,6 +896,10 @@ async function ensureHub(
   }
   // Preserve the scheme and explicit port for the startup eligibility check.
   const parsed = new URL(hubUrl);
+  const transport = hubTransportProblem(hubUrl, resolved);
+  if (transport !== null) {
+    return { started: null, note: `${transport.reason}; ${transport.fix}`, showNote: true };
+  }
   const workspace = trimmed(resolved.WORKSPACE_ID);
   const displayHub = isLocalHost(endpoint.host) ? hubUrl : displayWorkspaceHub(hubUrl);
   const signInRequired = workspace !== null && readDeviceLogin(hubUrl, workspace, resolved).status === "sign-in-required";
@@ -1038,6 +1042,7 @@ interface EngineMonitor {
 }
 
 function openHubSource(engine: UberblickMcpEngine, hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean) {
+  if (hubTransportProblem(hubUrl, env) !== null) return null;
   const sync = engine.replicas.sync;
   return {
     state: (): HubState => {
@@ -1055,6 +1060,7 @@ function openHubSource(engine: UberblickMcpEngine, hubUrl: string, env: NodeJS.P
 }
 
 function missingHubLogin(hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean): boolean {
+  if (hubTransportProblem(hubUrl, env) !== null) return false;
   const workspace = trimmed(env.WORKSPACE_ID);
   return workspace !== null && deviceHub &&
     readDeviceLogin(hubUrl, workspace, env).status === "sign-in-required";
@@ -1372,13 +1378,14 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     return await foreground.shutdown(1);
   }
   const deviceHub = sync?.deviceAuthenticated() ?? hubDeviceAuthenticated;
+  const transport = hubTransportProblem(hubUrl, env);
   const hubSignInRequired = missingHubLogin(hubUrl, env, deviceHub);
   const unreachable = !hubSignInRequired && hubState?.status === "hub-down";
   io.out(openBanner({
     url, verbose: options.verbose, secretCreated: initial.secretCreated,
     binding: projectBinding, databasePath: owned.engine?.replicas.config.databasePath,
     hubNote, signInRequired: hubSignInRequired, showHubNote,
-    deviceHub, hubUrl, hubState,
+    deviceHub, hubUrl, hubState, transportProblem: transport,
   }));
   if (sync !== null) {
     owned.hubMonitor = monitorOpenHub(sync, displayWorkspaceHub(hubUrl), text => io.err(text), {
