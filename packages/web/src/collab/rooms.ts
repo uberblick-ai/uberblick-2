@@ -20,6 +20,7 @@ import {
   listDeletedDirectoryUuids,
   parseRoom,
   roomForDoc,
+  SETTINGS_SUFFIX,
 } from "@uberblick/schema";
 import {
   isDocDeletedReason,
@@ -29,6 +30,7 @@ import {
 } from "@uberblick/schema/protocol";
 import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig } from "../config.js";
 import { getSetting, subscribeSettings } from "../settings.js";
+import { notifyTransient } from "../notifications.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
@@ -320,6 +322,7 @@ interface Entry {
   presenceRefs: number;
   refs: number;
   haltDeleted: () => void;
+  replacements: Set<(connection: RoomConnection) => void>;
 }
 
 const entries = new Map<string, Entry>();
@@ -348,13 +351,29 @@ function watchDirectoryDeletion(ydoc: Y.Doc, workspaceId: string): void {
   }
 }
 
+function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => void {
+  let notified = false;
+  return ({ payload }) => {
+    if (uuid !== SETTINGS_SUFFIX || notified) return;
+    let notice: unknown;
+    try { notice = JSON.parse(payload); }
+    catch { return; }
+    if (notice === null || typeof notice !== "object" || !("type" in notice) ||
+      notice.type !== "settings-reset" || !("message" in notice) || typeof notice.message !== "string") return;
+    notified = true;
+    notifyTransient({ key: "workspace-settings-refused", message: notice.message, severity: "error" });
+  };
+}
+
 function openRoom(room: string, identity: AwarenessUser): Entry {
   const ydoc = new Y.Doc();
   const socket = sharedSocket();
+  const parsed = parseRoom(room);
   const provider = new PacedRoomProvider(admission, {
     name: room,
     document: ydoc,
     websocketProvider: socket,
+    sessionAwareness: parsed.uuid === SETTINGS_SUFFIX,
     // Async callable form: re-minted on every (re)connect.
     token: () => hubToken(room, identity),
   });
@@ -363,7 +382,6 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   // sockets it owns. destroy() detaches without destroying the shared socket.
   // Keep terminally refused rooms detached; they still expose their status.
   const storeRefused = storeRefusedRooms.has(room);
-  const parsed = parseRoom(room);
   const directory = entries.get(directoryRoom(parsed.workspaceId));
   const deleted = deletedRooms.has(room) ||
     (directory !== undefined && isDirectoryEntryDeleted(directory.connection.ydoc, parsed.uuid));
@@ -496,12 +514,18 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   provider.on("unsyncedChanges", refresh);
   provider.on("close", refresh);
 
+  provider.on("stateless", settingsRefusalNotifier(parsed.uuid));
+
   provider.on("close", (event: { event?: { reason?: string } }) => {
     // Unsolicited document CLOSE resets sync but leaves the socket up; only a
     // socket open makes that provider rejoin. provider_initiated is our detach
     // echo (navigation/remount) and must not churn the shared socket.
     const reason = event?.event?.reason;
     if (reason === "provider_initiated") return;
+    if (reason === "uberblick:settings-reset" && parsed.uuid === SETTINGS_SUFFIX) {
+      replaceSettingsRoom(room, identity, connection);
+      return;
+    }
     if (reason !== undefined && isDocDeletedReason(reason)) {
       rememberDeletedRoom(room);
       return;
@@ -542,11 +566,27 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
     },
   };
 
-  if (parsed.isDirectory) {
-    watchDirectoryDeletion(ydoc, parsed.workspaceId);
-  }
+  if (parsed.isDirectory) watchDirectoryDeletion(ydoc, parsed.workspaceId);
 
-  return { connection, listeners, startPresence, stopPresence, haltDeleted, presenceRefs: 0, refs: 0 };
+  return { connection, listeners, startPresence, stopPresence, haltDeleted, replacements: new Set(), presenceRefs: 0, refs: 0 };
+}
+
+/** A refused replica's clocks must never join its authoritative replacement. */
+function replaceSettingsRoom(room: string, identity: AwarenessUser, previous: RoomConnection): void {
+  const held = entries.get(room);
+  if (held === undefined || held.connection !== previous) return;
+  held.stopPresence(false);
+  previous.provider.destroy();
+  previous.ydoc.destroy();
+  held.listeners.clear();
+  const next = openRoom(room, identity);
+  held.connection = next.connection;
+  held.listeners = next.listeners;
+  held.startPresence = next.startPresence;
+  held.stopPresence = next.stopPresence;
+  held.haltDeleted = next.haltDeleted;
+  if (held.presenceRefs > 0) held.startPresence();
+  for (const replacement of held.replacements) replacement(next.connection);
 }
 
 /**
@@ -557,7 +597,7 @@ export function acquireRoom(
   room: string,
   identity: AwarenessUser,
   { presence = true }: { presence?: boolean } = {},
-): { connection: RoomConnection; release: () => void } {
+): { connection: RoomConnection; release: () => void; onReplace?: (listener: (connection: RoomConnection) => void) => () => void } {
   let entry = entries.get(room);
   if (entry === undefined) {
     entry = openRoom(room, identity);
@@ -568,7 +608,11 @@ export function acquireRoom(
   const held = entry;
   let released = false;
   return {
-    connection: held.connection,
+    get connection() { return held.connection; },
+    onReplace(listener) {
+      held.replacements.add(listener);
+      return () => held.replacements.delete(listener);
+    },
     release: () => {
       if (released) return;
       released = true;
@@ -577,6 +621,7 @@ export function acquireRoom(
       if (held.refs > 0) return;
       entries.delete(room);
       held.listeners.clear();
+      held.replacements.clear();
       held.connection.provider.destroy();
       held.connection.ydoc.destroy();
       // Cancel deferred repair once no room holds the socket.

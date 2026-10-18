@@ -130,10 +130,11 @@ async function mount(
   return mounted.container;
 }
 
-async function mountTags(connection: RoomConnection | null): Promise<HTMLElement> {
+async function mountTags(connection: RoomConnection | null, local = true): Promise<HTMLElement> {
   mounted = await renderSettled(
     <WorkspaceSettings
       admin={true}
+      local={local}
       page="tags"
       workspace={WORKSPACE}
       endpoint={ENDPOINT}
@@ -486,6 +487,18 @@ it("waits for server state, seeds once, and keeps a retired-only reading offline
   expect(listTagCatalog(room.connection.ydoc)).toHaveLength(EXAMPLE_TAGS.length);
   expect(listTagCatalog(room.connection.ydoc).every((entry) => entry.state === "retired"))
     .toBe(true);
+});
+
+it("lets an admin curate an unseeded hub catalog without creating example tags", async () => {
+  const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
+  const host = await mountTags(room.connection, false);
+  expect(listTagCatalog(room.connection.ydoc)).toEqual([]);
+  const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
+  expect(input.disabled).toBe(false);
+  act(() => typeInto(input, "product"));
+  act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).click());
+  expect(listTagCatalog(room.connection.ydoc)).toEqual([expect.objectContaining({ name: "product", state: "active" })]);
+  room.connection.ydoc.destroy();
 });
 
 it("validates unique names and converges create, retire, and restore with a peer", async () => {

@@ -150,6 +150,9 @@ export async function startDeviceSyncHub(options: {
     removeMembership(workspaceId: string, memberId = principalId): void {
       memberships.remove({ workspaceId, principalId: memberId, actorPrincipalId: adminId });
     },
+    changeRole(workspaceId: string, role: "admin" | "member", memberId = principalId): void {
+      memberships.changeRole({ workspaceId, principalId: memberId, actorPrincipalId: adminId, role });
+    },
     revoke(credentialId: string): void { credentials.revoke(credentialId); },
     setWorkspaceStatus(workspaceId: string, status: "active" | "suspended"): void {
       admins.setWorkspaceStatus(adminId, workspaceId, status);

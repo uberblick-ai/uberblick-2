@@ -24,6 +24,14 @@ function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
 
 describe("resolveMcpConfig", () => {
 
+  it("keeps local workspace ownership distinct from sync credentials", () => {
+    expect(resolveMcpConfig(env()).localWorkspace).toBe(true);
+    expect(resolveMcpConfig(env({ UB_HUB_URL: "local", HUB_AUTH_TOKEN: "local-serving-secret" })).localWorkspace).toBe(true);
+    expect(resolveMcpConfig(env({ HUB_URL: "ws://localhost:1234" })).localWorkspace).toBe(false);
+    expect(resolveMcpConfig(env({ UB_HUB_URL: "ws://localhost:1234", HUB_URL: "ws://localhost:1234" })).localWorkspace).toBe(false);
+    expect(bridgeConfig(resolveMcpConfig(env()), { hubUrl: "ws://localhost:1234" }).localWorkspace).toBe(false);
+  });
+
   it("selects the stored origin login for a loopback proxy and keeps other local hubs separate", async () => {
     const directory = mkdtempSync(join(tmpdir(), "loopback-device-config-"));
     const authEnv = env({ XDG_CONFIG_HOME: directory, HUB_AUTH_TOKEN: "local-only-secret" });

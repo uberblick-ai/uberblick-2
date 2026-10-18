@@ -44,6 +44,18 @@ function enableWal(db: DatabaseSync): void {
 /** Both origins are logged; only local updates also raise the pending watermark. */
 export type UpdateOrigin = "local" | "remote";
 
+export class SettingsResetError extends Error {
+  constructor() {
+    super("Workspace settings were replaced after the hub refused a change.");
+    this.name = "SettingsResetError";
+  }
+}
+
+export interface SettingsReset {
+  seq: number;
+  notice: string;
+}
+
 export interface LoggedUpdate {
   seq: number;
   payload: Uint8Array;
@@ -97,6 +109,8 @@ export interface PendingRoom {
 
 /** One consistent read of a room's log: a snapshot to seed with, then the tail. */
 export interface LogSlice {
+  /** A replacement cannot be merged into an older Yjs replica. */
+  reset?: SettingsReset;
   /**
    * The stored snapshot, when it is ahead of the caller's position — apply it
    * before `updates`. Null when the caller is already past it.
@@ -432,12 +446,14 @@ export class MirrorStore {
     room: string,
     payload: Uint8Array,
     origin: UpdateOrigin,
+    settingsResetSeq?: number,
   ) => number;
 
   private readonly compactTx: (
     room: string,
     state: Uint8Array,
     throughSeq: number,
+    settingsResetSeq?: number,
   ) => boolean;
 
   private readonly readSinceTx: (room: string, seq: number) => LogSlice;
@@ -455,7 +471,7 @@ export class MirrorStore {
   private readonly unindexTx: (uuid: string) => void;
 
   // biome-ignore lint/complexity/noExcessiveLinesPerFunction: This function predates the length limit.
-  constructor(databasePath: string, workspaceId: string) {
+  constructor(databasePath: string, private readonly workspaceId: string) {
     this.databasePath = databasePath;
     // Owner-only: this tree holds the corpus and may later receive credentials.
     const durable = databasePath !== ":memory:";
@@ -638,7 +654,10 @@ export class MirrorStore {
     // together so even SIGKILL leaves offline work discoverable for pushing.
     this.appendTx = transactional(
       this.db,
-      (room: string, payload: Uint8Array, origin: UpdateOrigin): number => {
+      (room: string, payload: Uint8Array, origin: UpdateOrigin, settingsResetSeq?: number): number => {
+        if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
+          throw new SettingsResetError();
+        }
         const info = this.statements.append.run(
           room,
           payload,
@@ -657,7 +676,10 @@ export class MirrorStore {
     // Monotonic upserts leave a snapshot covering the cut even if this write loses.
     this.compactTx = transactional(
       this.db,
-      (room: string, state: Uint8Array, throughSeq: number): boolean => {
+      (room: string, state: Uint8Array, throughSeq: number, settingsResetSeq?: number): boolean => {
+        if (settingsResetSeq !== undefined && settingsResetSeq !== (this.settingsReset()?.seq ?? 0)) {
+          throw new SettingsResetError();
+        }
         const written =
           this.statements.putSnapshot.run(room, state, throughSeq, Date.now())
             .changes > 0;
@@ -675,9 +697,11 @@ export class MirrorStore {
         const ahead = snapshotSeq !== null && snapshotSeq > seq;
         const stored = ahead ? this.snapshot(room) : null;
         const from = stored?.throughSeq ?? seq;
+        const reset = room === settingsRoom(this.workspaceId) ? this.settingsReset() : null;
         return {
           snapshot: stored,
           updates: this.updatesAfter(room, from),
+          ...(reset === null ? {} : { reset }),
         };
       },
     );
@@ -759,9 +783,10 @@ export class MirrorStore {
     room: string,
     payload: Uint8Array,
     origin: UpdateOrigin,
+    settingsResetSeq?: number,
   ): number {
     this.assertWorkspacePresent();
-    const seq = this.appendTx(room, payload, origin);
+    const seq = this.appendTx(room, payload, origin, settingsResetSeq);
     for (const listener of [...this.appendListeners]) {
       try {
         listener();
@@ -772,6 +797,32 @@ export class MirrorStore {
       }
     }
     return seq;
+  }
+
+  settingsReset(): SettingsReset | null {
+    const row = this.db.prepare("SELECT value FROM meta WHERE key = 'settings_reset'").get();
+    return row === undefined ? null : JSON.parse(String(row.value)) as SettingsReset;
+  }
+
+  /** Replace refused history atomically; a monotonic cut fences stale peers. */
+  replaceSettings(state: Uint8Array, notice: string, expectedResetSeq = this.settingsReset()?.seq ?? 0): void {
+    this.assertWorkspacePresent();
+    const room = settingsRoom(this.workspaceId);
+    transactional(this.db, () => {
+      if (expectedResetSeq !== (this.settingsReset()?.seq ?? 0)) throw new SettingsResetError();
+      this.db.prepare("DELETE FROM updates WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
+      this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
+      const info = this.statements.append.run(room, state, "remote", Date.now());
+      const seq = Number(info.lastInsertRowid);
+      this.statements.putSnapshot.run(room, state, seq, Date.now());
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('settings_reset', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+        .run(JSON.stringify({ seq, notice }));
+    })();
+    for (const listener of [...this.appendListeners]) {
+      try { listener(); }
+      catch (error) { log.warn("an update-log append observer failed", error); }
+    }
   }
 
   /**
@@ -872,9 +923,9 @@ export class MirrorStore {
    * Return false if the stored snapshot already covers the cut, retaining its
    * state but still pruning the prefix it covers.
    */
-  compact(room: string, state: Uint8Array, throughSeq: number): boolean {
+  compact(room: string, state: Uint8Array, throughSeq: number, settingsResetSeq?: number): boolean {
     this.assertWorkspacePresent();
-    return this.compactTx(room, state, throughSeq);
+    return this.compactTx(room, state, throughSeq, settingsResetSeq);
   }
 
   updateCount(room: string): number {

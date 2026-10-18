@@ -58,6 +58,7 @@ export function bridgeConfig(
   return {
     ...rest,
     hubUrl,
+    localWorkspace: false,
     authEnv,
     ...(remote ? { deviceLogin: deviceLogin ?? {} }
       : hubUrl === config.hubUrl && deviceLogin !== undefined ? { deviceLogin } : {}),

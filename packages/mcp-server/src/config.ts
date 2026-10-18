@@ -25,6 +25,8 @@ export interface McpConfig {
   workspaceId: string;
   /** Websocket endpoint of the hub (`HUB_URL`). */
   hubUrl: string;
+  /** The selected workspace has no shared hub association, even when served locally. */
+  localWorkspace?: boolean;
   /** Loopback HMAC secret; missing admission credentials leave local tools available. */
   authSecret: string | null;
   /**
@@ -124,6 +126,8 @@ export function resolveMcpConfig(
   return {
     workspaceId,
     hubUrl,
+    localWorkspace: env.UB_HUB_URL === "local" ||
+      (env.UB_HUB_URL === undefined && trimmed(env.HUB_URL) === null),
     authSecret: remote ? null : trimmed(env.HUB_AUTH_TOKEN),
     ...(remote ? { deviceLogin: { env } } : {}),
     authEnv: env,

@@ -41,7 +41,7 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
-import { getBlocks } from "@uberblick/schema";
+import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -179,6 +179,7 @@ export interface Harness {
   readonly access?: { otherDeviceId: string; legacyDeviceId: string; foreignDeviceId: string; deviceName: string };
   /** Remove the browser account's hub role while its devices and memberships stay. */
   removeCurrentHubAdmin(): void;
+  changeCurrentWorkspaceRole(role: "member" | "admin"): void;
   /** Where the browser goes. This run's real `ub open` address. */
   readonly appUrl: string;
   /** Same-origin bundle and socket proxy that bypasses the serving replica. */
@@ -204,6 +205,7 @@ export interface Harness {
   readonly secondHubUrl?: string;
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
+  hubWorkspaceSettings(): { name: string | null; mainRepository: string | null; tags: string[] } | null;
   /** Record upstream admission synchronously across local credential changes. */
   observeHubText(room: string): HubTextHistory;
   /** Verify browser navigation left the project's startup binding untouched. */
@@ -575,10 +577,21 @@ export async function startHarness(options: {
         if (principals === undefined || hubAdmins === undefined) throw new Error("Hub admin fixture is missing");
         hubAdmins.remove(principals.identify("5678", "other-admin").id, principals.identify("1234", "browser-person").id);
       },
+      changeCurrentWorkspaceRole(role) {
+        const { principals, memberships } = hub ?? {};
+        if (principals === undefined || memberships === undefined) throw new Error("Workspace role fixture is missing");
+        memberships.changeRole({ workspaceId: workspaceUuid, actorPrincipalId: principals.identify("5678", "other-admin").id,
+          principalId: principals.identify("1234", "browser-person").id, role });
+      },
       ...(secondHubUrl === undefined ? {} : { secondHubUrl }),
       hubText(room, secondary = false) {
         const document = (secondary ? secondHub : hub)?.hocuspocus.documents.get(room);
         return document === undefined ? null : getBlocks(document).map((block) => block.text).join("\n");
+      },
+      hubWorkspaceSettings() {
+        const document = hub?.hocuspocus.documents.get(settingsRoom(workspaceUuid));
+        return document === undefined ? null : { name: getWorkspaceName(document),
+          mainRepository: getWorkspaceMainRepository(document), tags: listTagCatalog(document).map((tag) => tag.name) };
       },
       observeHubText(room) {
         const document = hub?.hocuspocus.documents.get(room);

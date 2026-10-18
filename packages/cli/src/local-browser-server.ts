@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { WebSocketLike } from "@hocuspocus/server";
 import { OutgoingMessage, Server } from "@hocuspocus/server";
-import { parseRoom } from "@uberblick/schema";
+import { parseRoom, SETTINGS_SUFFIX } from "@uberblick/schema";
 import {
   messageYjsSyncStep1,
   messageYjsSyncStep2,
@@ -109,6 +109,7 @@ const REPLAY_ORIGIN = Object.freeze({
 const REPLAY_RETRY_MS = 25;
 
 export interface LocalRoomSlice {
+  reset?: { seq: number; notice: string };
   snapshot: { state: Uint8Array; throughSeq: number } | null;
   updates: readonly { seq: number; payload: Uint8Array }[];
 }
@@ -127,7 +128,7 @@ export interface LocalBrowserServerConfig {
   /** The caller owns the store; load rooms from its update log. */
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
   /** Commit browser bytes before Hocuspocus applies or acknowledges them. */
-  appendUpdate(room: string, payload: Uint8Array): void;
+  appendUpdate(room: string, payload: Uint8Array, settingsResetSeq?: number): void;
   /** Pair each served room's awareness with its full upstream replica. */
   awarenessForRoom(room: string): Awareness;
   onRequest(request: IncomingMessage, response: ServerResponse): void;
@@ -224,6 +225,7 @@ export async function createLocalBrowserServer(
   const upgradedSockets = new Set<Duplex>();
   const awarenessBridges = new Map<string, () => void>();
   const appliedThrough = new WeakMap<Y.Doc, number>();
+  const settingsGenerations = new WeakMap<Y.Doc, number>();
   const retryRooms = new Set<string>();
 
   const server = new Server<HubContext>({
@@ -275,11 +277,13 @@ export async function createLocalBrowserServer(
 
     async onLoadDocument({ document, documentName }) {
       try {
+        const slice = config.readRoom(documentName, 0);
+        settingsGenerations.set(document, slice.reset?.seq ?? 0);
         appliedThrough.set(
           document,
           applyRoomSlice(
             document,
-            config.readRoom(documentName, 0),
+            slice,
             0,
             LOAD_ORIGIN,
           ),
@@ -309,11 +313,27 @@ export async function createLocalBrowserServer(
       retryRooms.delete(documentName);
     },
 
-    async beforeSync({ connection, documentName, type, payload }) {
+    async beforeUnloadDocument({ document, documentName, instance }) {
+      // A reset may already have admitted a replacement under the same name.
+      if (instance.documents.get(documentName) !== document) return Promise.reject();
+    },
+
+    async beforeSync({ connection, document, documentName, type, payload }) {
       try {
         // Check even read-only handshakes before any stale room state is served.
         config.assertRoomAvailable?.(documentName);
+        if (parseRoom(documentName).uuid === SETTINGS_SUFFIX) {
+          if (server.hocuspocus.documents.get(documentName) !== document) {
+            throw refused("uberblick:settings-reset", "obsolete settings replica");
+          }
+          const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
+          if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
+            resetSettings(documentName, document, reset.notice);
+            throw refused("uberblick:settings-reset", "obsolete settings replica");
+          }
+        }
       } catch (error) {
+        if ((error as { reason?: unknown }).reason === "uberblick:settings-reset") throw error;
         throw refused(refusalReason(error), error);
       }
       if (type === messageYjsSyncStep1 || connection.readOnly) return;
@@ -338,8 +358,16 @@ export async function createLocalBrowserServer(
       try {
         // Raw bytes in, the same raw bytes committed. Decoding above validates
         // replay but is never an excuse to re-encode the client's update.
-        config.appendUpdate(documentName, payload);
+        config.appendUpdate(documentName, payload,
+          parseRoom(documentName).uuid === SETTINGS_SUFFIX ? settingsGenerations.get(document) : undefined);
       } catch (error) {
+        if (parseRoom(documentName).uuid === SETTINGS_SUFFIX) {
+          const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
+          if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
+            resetSettings(documentName, document, reset.notice);
+            throw refused("uberblick:settings-reset", error);
+          }
+        }
         const reason = refusalReason(error);
         log({
           event: "ub-open.store.refused",
@@ -361,6 +389,23 @@ export async function createLocalBrowserServer(
 
   let retryTimer: NodeJS.Timeout | null = null;
   let stopped = false;
+  const resetSettings = (room: string, document: Y.Doc, notice: string): void => {
+    const served = server.hocuspocus.documents.get(room);
+    if (served !== document) return;
+    const connections = served.getConnections();
+    for (const connection of connections) connection.readOnly = true;
+    // Remove first: a replacement admission must load the new generation.
+    server.hocuspocus.documents.delete(room);
+    awarenessBridges.get(room)?.();
+    awarenessBridges.delete(room);
+    appliedThrough.delete(document);
+    retryRooms.delete(room);
+    for (const connection of connections) {
+      connection.sendStateless(JSON.stringify({ type: "settings-reset", message: notice }));
+      connection.close({ code: 1000, reason: "uberblick:settings-reset" });
+    }
+    served.destroy();
+  };
   const refresh = (workspaceId?: string): void => {
     if (stopped) return;
 
@@ -369,11 +414,16 @@ export async function createLocalBrowserServer(
       const afterSeq = appliedThrough.get(document);
       if (afterSeq === undefined) continue;
       try {
+        const slice = config.readRoom(room, afterSeq);
+        if (slice.reset !== undefined && slice.reset.seq !== settingsGenerations.get(document)) {
+          resetSettings(room, document, slice.reset.notice);
+          continue;
+        }
         appliedThrough.set(
           document,
           applyRoomSlice(
             document,
-            config.readRoom(room, afterSeq),
+            slice,
             afterSeq,
             REPLAY_ORIGIN,
           ),

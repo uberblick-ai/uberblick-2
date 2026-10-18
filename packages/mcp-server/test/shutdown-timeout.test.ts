@@ -1,5 +1,6 @@
 /** Shutdown budgets include admitted startup work and credential publication. */
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { setWorkspaceName } from "@uberblick/schema";
 import { expect, it, vi } from "vitest";
 import { createMcpServer } from "../src/server.js";
 import { cleanupTestResources, hubUrl, startHub, testConfig, TEST_SECRET } from "./helpers.js";
@@ -12,6 +13,7 @@ it("uses only the budget left after draining admitted startup work and leaves ti
   const instance = createMcpServer(testConfig({
     authSecret: TEST_SECRET, hubUrl: hubUrl(hub.port), connectTimeoutMs: 30_000, syncTimeoutMs: 30_000,
   }));
+  setWorkspaceName(instance.replicas.settings().doc, "Pending during startup");
   const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
   const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   const waitForQuiet = instance.replicas.sync.waitForQuiet.bind(instance.replicas.sync);

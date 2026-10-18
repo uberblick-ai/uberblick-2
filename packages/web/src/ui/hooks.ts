@@ -79,8 +79,10 @@ export function useRoom(
     }
     const handle = acquireRoom(room, identity);
     setConnection(handle.connection);
+    const stopReplacement = handle.onReplace?.(setConnection);
     return () => {
       setConnection(null);
+      stopReplacement?.();
       handle.release();
     };
   }, [room, identity]);

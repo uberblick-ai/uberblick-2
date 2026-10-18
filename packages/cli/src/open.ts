@@ -1299,8 +1299,8 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
           (collectingServedRooms ?? observedServedRooms).add(room);
           return engineForRoom(room).store.readSince(room, afterSeq);
         },
-        appendUpdate: (room, payload) => {
-          engineForRoom(room).store.appendUpdate(room, payload, "local");
+        appendUpdate: (room, payload, settingsResetSeq) => {
+          engineForRoom(room).store.appendUpdate(room, payload, "local", settingsResetSeq);
         },
         awarenessForRoom: (room) => {
           const engine = engineForRoom(room);

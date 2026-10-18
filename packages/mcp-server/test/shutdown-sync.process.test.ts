@@ -113,7 +113,7 @@ async function startProcess(options: { hubUrl?: string; authSecret?: string } = 
 }
 
 async function offlineStatus(databasePath: string) {
-  const rig = await startServer(testConfig({ databasePath }));
+  const rig = await startServer({ ...testConfig({ databasePath }), localWorkspace: false });
   rigs.push(rig);
   return { rig, status: await rig.ok("sync_status") };
 }

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getWorkspaceName, setWorkspaceName, validateWorkspaceName } from "@uberblick/schema";
+import { EXAMPLE_TAGS, getWorkspaceName, isTagCatalogSeeded, listTagCatalog, retireTagCatalogEntry, setWorkspaceName, validateWorkspaceName } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { SetupReceipts } from "../src/admin-setup.js";
@@ -129,6 +129,9 @@ describe("fresh deployed hub initialization", () => {
       const name = getWorkspaceName(settings);
       expect(name).not.toBeNull();
       expect(validateWorkspaceName(name!)).toBe(name);
+      expect(isTagCatalogSeeded(settings)).toBe(true);
+      expect(listTagCatalog(settings).map(({ id, name }) => ({ id, name }))).toEqual([...EXAMPLE_TAGS]);
+      retireTagCatalogEntry(settings, EXAMPLE_TAGS[0].id);
       setWorkspaceName(settings, "Renamed team workspace");
       first.database.connection.prepare("UPDATE documents SET data = ? WHERE name = ?")
         .run(Y.encodeStateAsUpdate(settings), `${workspaceId}/_settings`);
@@ -144,7 +147,10 @@ describe("fresh deployed hub initialization", () => {
     expect(rows(restarted)).toEqual(before);
     expect(rows(restarted).documents).toHaveLength(1);
     const renamed = storedSettings(restarted, workspaceId);
-    try { expect(getWorkspaceName(renamed)).toBe("Renamed team workspace"); }
+    try {
+      expect(getWorkspaceName(renamed)).toBe("Renamed team workspace");
+      expect(listTagCatalog(renamed).find(tag => tag.id === EXAMPLE_TAGS[0].id)?.state).toBe("retired");
+    }
     finally { renamed.destroy(); }
   });
 
