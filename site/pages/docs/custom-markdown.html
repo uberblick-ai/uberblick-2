@@ -14,7 +14,25 @@
   </section>
 
   <section class="q" id="ablauf"><h2>Ablauf</h2>
-  <p>Flow diagrams are the first thing a team wants in a design doc and the first thing Mermaid gets wrong when an agent writes it: a long grammar, easy to break, hard to diff. <a href="https://github.com/uberblick-ai/ablauf">Ablauf</a> is a smaller text format for flows, short enough that an agent writes it correctly on the first try and plain enough that the source reads as a list of steps. It is early and lives in its own repository; the <code>ablauf</code> block in Uberblick follows the package. Since 0.4.5 Mermaid is gone, so a <code>mermaid</code> fence is an ordinary code block with that language and is never drawn.</p>
+  <p>Flow diagrams are the first thing a team wants in a design doc and the first thing Mermaid gets wrong: the text is fine, the layout is all algorithm, so one added node reshuffles the whole chart and nobody has a handle to grab. <a href="https://github.com/uberblick-ai/ablauf">Ablauf</a> keeps the text, a strict subset of Mermaid's flowchart grammar that every model already writes and that still renders as plain Mermaid anywhere else, and takes the layout out of it: positions live beside the text, keyed by node id, so a node that was placed stays put and only new nodes get placed. It is published as <code>@uberblick/ablauf</code>, pre-1.0; the block in Uberblick follows. Since 0.4.5 Mermaid is gone, so a <code>mermaid</code> fence is an ordinary code block with that language and is never drawn.</p>
+  <div class="tabs ex"><div class="tablist" role="tablist" aria-label="ablauf example"><button role="tab" id="t-ablauf-v" aria-selected="true" aria-controls="p-ablauf-v" type="button">Displayed</button><button role="tab" id="t-ablauf-m" aria-selected="false" aria-controls="p-ablauf-m" type="button">Markdown</button><button class="copy" type="button" data-copy="```ablauf
+flowchart TD
+  edit([Agent calls edit_block]) --&gt; gate{Guidance read?}
+  gate --&gt;|no| refuse[Refused: guidance_required]
+  refuse --&gt; read[Agent reads the pages with get_doc]
+  read --&gt; edit
+  gate --&gt;|yes| write[Edit applied]
+```">Copy</button></div>
+  <div class="panel" role="tabpanel" id="p-ablauf-v" aria-labelledby="t-ablauf-v"><img class="l" src="/img/blocks/ablauf-light.svg" alt="The flow as ablauf draws it: an agent calls edit_block, the server asks whether the guidance was read, no leads to a refusal and to reading the pages, then back to the call; yes applies the edit" loading="lazy"><img class="d" src="/img/blocks/ablauf-dark.svg" alt="" loading="lazy"></div>
+  <div class="panel" role="tabpanel" id="p-ablauf-m" aria-labelledby="t-ablauf-m" hidden><pre>```ablauf
+flowchart TD
+  edit([Agent calls edit_block]) --&gt; gate{Guidance read?}
+  gate --&gt;|no| refuse[Refused: guidance_required]
+  refuse --&gt; read[Agent reads the pages with get_doc]
+  read --&gt; edit
+  gate --&gt;|yes| write[Edit applied]
+```</pre></div></div>
+  <p>Drawn above by the package itself, not yet by the editor.</p>
   </section>
 
   <section class="q" id="wireframe"><h2>Wireframe</h2>
