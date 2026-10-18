@@ -200,7 +200,7 @@ export const toolHelpDetails = {
     "for the changes it made itself, so a document you never edit keeps the stamp its editor wrote. " +
     "Concurrent stamps resolve to the greater value, so a future-skewed clock pins the hint until a later " +
     "stamp exceeds it. It is also deliberately coarse — at most one re-stamp every few minutes of its own " +
-    "edits, immediately on a metadata, cached thread-count or code-check change. Both come from the clock of whichever replica wrote them, " +
+    "edits, immediately on a metadata or cached thread-count change. Recording only a code check leaves updatedAt unchanged. Both come from the clock of whichever replica wrote them, " +
     "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +

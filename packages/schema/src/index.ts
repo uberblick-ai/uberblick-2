@@ -10,6 +10,7 @@ export {
   getMeta,
   getMetaMap,
   initDoc,
+  isCodeCheckOnlyTransaction,
   setCodeCheck,
   setDescription,
   setDiscussion,
