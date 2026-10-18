@@ -52,13 +52,16 @@ describe("ub status", () => {
   });
 
   it("reports an explicitly local-only workspace", () => {
-    const run = runUb(["status"], sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } }));
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: null } });
+    const run = runUb(["status"], box);
     expect(run.status).toBe(0);
     expect(run.stdout).toMatch(WORKSPACE);
     expect(run.stdout).toBe(
       `workspace   ${WORKSPACE}\n` +
       "hub         local, this computer only\n" +
       "account     none needed for a local workspace\n" +
+      `chosen by   project config in ${box.cwd}\n` +
+      `stored in   ${join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`)}\n` +
       "problems    none\n",
     );
   });
@@ -112,11 +115,13 @@ describe("ub status", () => {
 
     const report = JSON.parse(run.stdout);
     expect(Object.keys(report)).toEqual([
-      "workspace", "hub", "account", "connection", "pending", "lastSync", "recentDevices", "problems",
+      "workspace", "hub", "account", "chosenBy", "storedIn", "connection", "pending", "lastSync", "recentDevices", "problems",
     ]);
     expect(report.workspace).toEqual({ id: WORKSPACE, name: null });
     expect(report.hub).toBe("http://127.0.0.1:1");
     expect(report.account).toBeNull();
+    expect(report.chosenBy).toEqual({ source: "project-config", path: join(box.cwd, ".uberblick.json") });
+    expect(report.storedIn).toBe(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`));
     expect(report.connection).toEqual({ state: "failed", cause: null, detail: null });
     expect(report.pending).toEqual({ count: expect.any(Number) });
     expect(report.lastSync).toBeNull();

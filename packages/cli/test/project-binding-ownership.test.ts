@@ -42,7 +42,7 @@ describe.skipIf(process.getuid === undefined)("project binding ownership", () =>
   });
 
   it.each([
-    ["status"], ["workspace", "status"], ["workspace", "list"],
+    ["status"], ["workspace", "list"],
     ["data", "get", first], ["auth", "login"], ["auth", "status"],
     ["mcp", "install", "codex", "--print"], ["doctor", "--json"],
   ])("names the ignored path when %j has no binding left", async (...argv) => {

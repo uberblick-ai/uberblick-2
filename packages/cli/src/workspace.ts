@@ -23,13 +23,11 @@ import type { Io } from "./io.js";
 import { processIo, shellArgument } from "./io.js";
 import { describeFsError } from "./safe-write.js";
 import { ORIGIN_LABELS } from "./status.js";
-import { workspaceStatusCommand } from "./workspace-status.js";
 import { fillMainRepositoryFromOrigin } from "./workspace-main-repository.js";
 
 export const WORKSPACE_HELP = `usage: ub workspace [command]
 
 commands:
-  status                      the workspace in use, its selection, storage and sync
   create <name>               create and select a separate local-only workspace
   fork                        copy this workspace independently and select the local copy
   promote <hub>               upload, verify and connect this local workspace
@@ -71,7 +69,7 @@ interface InForce {
   warnings: string[];
 }
 
-/** Match workspace status's selection and source without opening the database. */
+/** Read the current selection and source without opening the database. */
 function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
   const resolved = resolveConfig(options);
   const configured = resolved.env.WORKSPACE_ID ?? null;
@@ -542,7 +540,6 @@ export async function workspaceCommand(
 ): Promise<number> {
   // Dispatch first so help reaches the leaf; an unknown leaf remains an error.
   const [sub, ...rest] = argv;
-  if (sub === "status") return workspaceStatusCommand(rest, io);
   if (sub === "create") return createWorkspaceCommand(rest, io);
   if (sub === "fork") return forkWorkspaceCommand(rest, io);
   if (sub === "promote") return promoteWorkspaceCommand(rest, io);
