@@ -676,7 +676,7 @@ describe("ub open", () => {
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
       expect(app.stdout()).toContain("hub        refusing an unencrypted connection to a hub on another computer\n");
-      expect(app.stdout()).toContain(`→ use wss://${host}:${port}\n`);
+      expect(app.stdout()).toContain(`→ use wss://${host}:${port}/\n`);
       expect(existsSync(credentials)).toBe(false);
       expect((await probePort("127.0.0.1", port)).state).toBe("free");
       const document = await (await get(`${app.url}uberblick-config.json`)).json() as { hubUrl: string; remoteHubUrl: string };
