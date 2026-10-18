@@ -34,7 +34,7 @@ it("reports recent devices in text and JSON repeatedly without consuming them or
   const text = await runInProcess(["status"], box);
   expect(text.status, text.stderr).toBe(0);
   expect(text.stdout).toContain(`new device  Same name as my laptop (${otherId.slice(0, 8)}), signed in `);
-  expect(text.stdout).toContain("Settings → User → Devices");
+  expect(text.stdout).toContain("user menu → Devices");
   expect(text.stdout).toContain(`ub auth logout --all-devices ${origin}`);
   expect(text.stdout).toContain("problems    none\n");
   expect(text.stdout).not.toContain(login.credential.record.deviceId.slice(0, 8));

@@ -109,7 +109,7 @@ describe("ub open: sharing through the upstream hub", () => {
       const output = app.stdout();
       expect(output).toMatch(new RegExp(`new device  My laptop \\(${namedId.slice(0, 8)}\\), signed in (just now|\\d+ seconds? ago)`));
       expect(output).toMatch(new RegExp(`new device  Unnamed device \\(${unnamedId.slice(0, 8)}\\), signed in (just now|\\d+ seconds? ago)`));
-      expect(output.match(/Settings → User → Devices/g)).toHaveLength(2);
+      expect(output.match(/user menu → Devices/g)).toHaveLength(2);
       expect(output.split(`ub auth logout --all-devices ${origin}`)).toHaveLength(3);
       expect(output).not.toContain(currentId.slice(0, 8));
       expect(output).not.toContain(strangerId.slice(0, 8));

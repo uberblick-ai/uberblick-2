@@ -53,7 +53,7 @@ function signInAge(time: string): string {
 export function recentDevicesNotice(devices: RecentDevice[] | null, origin: string): string {
   return (devices ?? []).map(device =>
     `new device  ${device.name ?? "Unnamed device"} (${device.id.slice(0, 8)}), signed in ${signInAge(device.signedInAt)}\n` +
-    "              → revoke in Settings → User → Devices\n" +
+    "              → revoke in user menu → Devices\n" +
     `              → or ub auth logout --all-devices ${origin}\n`,
   ).join("");
 }

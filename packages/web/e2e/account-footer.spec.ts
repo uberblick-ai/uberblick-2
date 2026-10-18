@@ -27,7 +27,8 @@ for (const scheme of ["light", "dark"] as const) {
         await page.goto(harness().appUrl);
         await showSidebar(page);
         if (mode === "settings") {
-          await page.getByRole("button", { name: "Settings", exact: true }).click();
+          await account(page).click();
+          await page.getByRole("menuitem", { name: "Preferences", exact: true }).click();
           await expect(page.getByRole("heading", { name: "Preferences", exact: true })).toBeVisible();
           await showSidebar(page, true);
         }
@@ -35,7 +36,7 @@ for (const scheme of ["light", "dark"] as const) {
         const footer = page.locator('[data-slot="sidebar-footer"]');
         await expect(account(page)).toContainText(`@${handle}`);
         await expect(account(page)).toBeInViewport({ ratio: 1 });
-        await expect(footer.getByRole("button", { name: "Settings", exact: true })).toHaveCount(mode === "settings" ? 0 : 1);
+        await expect(footer.getByRole("button", { name: "Workspace settings", exact: true })).toHaveCount(0);
         await expect(footer.getByText("Account settings", { exact: true })).toHaveCount(0);
         await account(page).click();
         const menu = page.getByRole("menu");
@@ -84,6 +85,7 @@ for (const scheme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(harness().appUrl);
       await page.getByRole("button", { name: "Show document list", exact: true }).tap();
+      await expect(account(page)).toContainText(`@${handle}`);
       await account(page).tap();
       const menuitem = page.getByRole("menuitem", { name: "Preferences", exact: true });
       expect((await menuitem.boundingBox())?.height).toBeGreaterThanOrEqual(44);

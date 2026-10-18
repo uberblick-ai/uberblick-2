@@ -259,10 +259,10 @@ for (const scheme of ["dark"] as const) {
     await expect(configured).toHaveAttribute("data-highlighted", /.*/);
     expect(await paintedIn(configured, "background-color")).not.toBe(ground);
 
-    // Settings stays in the fixed footer; the switcher only lists workspaces.
+    // Workspace settings stays in the fixed footer; the switcher only lists workspaces.
     await expect(menu.getByRole("menuitem", { name: "New workspace" })).toHaveCount(0);
     await expect(menu.locator('[data-slot="dropdown-menu-separator"]')).toHaveCount(0);
-    await expect(menu.getByRole("menuitem", { name: "Settings" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: "Workspace settings" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     // The account menu uses the same surface from the foot of the column.
@@ -438,7 +438,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   const settings = page.locator(".ub-settings-sidebar");
 
   const settingsEntry = page.getByRole("button", {
-    name: "Settings",
+    name: "Workspace settings",
     exact: true,
   });
   await settingsEntry.click();
@@ -480,7 +480,7 @@ test("settings panes reject the pointer and follow browser history", async ({
   await expect(settingsEntry).toBeFocused();
 
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   await expectNoSidebarMotion(page);
 });
 
@@ -488,7 +488,7 @@ test("the settings drawer retires the outgoing pane and respects reduced motion"
   const page = await openAppearanceApp(browser, "light");
   await page.setViewportSize({ width: 820, height: 832 });
   await page.getByRole("button", { name: "Show document list", exact: true }).click();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "General", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
   await expectPaneRejectsPointer(page.locator(".ub-document-sidebar"));

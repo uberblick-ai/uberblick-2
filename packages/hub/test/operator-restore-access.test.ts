@@ -84,7 +84,7 @@ function revokedPair(options: { wal?: boolean } = {}): { root: string; live: str
 
 function expectRecovery(output: string): void {
   expect(output).toContain("ub auth logout --all-devices <hub>");
-  expect(output).toContain("Settings → User → Devices");
+  expect(output).toContain("user menu → Devices");
   expect(output).toContain("ub workspace member remove");
   expect(output).toContain("Workspace settings → Members");
   expect(output).toContain("Hub → Admins");
