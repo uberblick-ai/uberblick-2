@@ -5,6 +5,7 @@ import type { BrowserSignInCollection, SignInCollection } from "../src/github-si
 import type { HubLogRecord } from "../src/log.js";
 import { createTeamHub, type TeamHub } from "../src/team.js";
 import { createHub } from "../src/server.js";
+import { requestOperator } from "../src/operator-client.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createClient, type TestClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom } from "./helpers.js";
 
@@ -52,7 +53,7 @@ async function rig(path = tempDatabasePath(), port = 0, behindReleaseProxy = fal
   const logs: HubLogRecord[] = [];
   const hub = await createTeamHub({ databasePath: path, address: "127.0.0.1", port, behindReleaseProxy,
     authSecret: TEST_SECRET, github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time },
-    log: line => logs.push(line) }, { deviceCredentials: true, initializeDefaultWorkspace: true });
+    log: line => logs.push(line) }, { deviceCredentials: true, initializeDefaultWorkspace: true, operatorSetup: true });
   hubs.push(hub);
   return { hub, github, logs, path };
 }
@@ -69,14 +70,21 @@ async function post(hub: TeamHub, route: string, body: unknown = {}, headers: Re
   return { code: response.status, result: await response.json() as Record<string, unknown> };
 }
 
-async function start(hub: TeamHub, kind = "browser"): Promise<Attempt> {
-  const response = await post(hub, `${kind}/start`);
+async function claimCode(hub: TeamHub): Promise<string> {
+  const status = await requestOperator(hub.databasePath, "hub-status");
+  const code = (status.info as Record<string, unknown>).claimCode;
+  expect(code).toEqual(expect.any(String));
+  return code as string;
+}
+
+async function start(hub: TeamHub, kind = "browser", code?: string): Promise<Attempt> {
+  const response = await post(hub, `${kind}/start`, code === undefined ? {} : { claimCode: code });
   expect(response).toMatchObject({ code: 200, result: { status: "pending", verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH" } });
   return { requestId: response.result.requestId as string, collectionSecret: response.result.collectionSecret as string };
 }
 
-async function complete(testRig: Awaited<ReturnType<typeof rig>>): Promise<BrowserComplete> {
-  const request = await start(testRig.hub);
+async function complete(testRig: Awaited<ReturnType<typeof rig>>, claim = false): Promise<BrowserComplete> {
+  const request = await start(testRig.hub, "browser", claim ? await claimCode(testRig.hub) : undefined);
   testRig.github.time += 1000;
   const response = await post(testRig.hub, "browser/collect", request);
   expect(response).toMatchObject({ code: 200, result: { status: "complete" } });
@@ -96,11 +104,25 @@ function rows(path: string) {
 function sessionHeaders(token: string) { return { "X-Uberblick-Session": token }; }
 
 describe("browser-only hub identity", () => {
+  it("ordinary sign-in on an unclaimed hub issues only a session and leaves claiming available", async () => {
+    const r = await rig();
+    const code = await claimCode(r.hub);
+    const result = await complete(r);
+    expect(result).not.toHaveProperty("claimedWorkspaceId");
+    expect(result.session.username).toBe("browser-person");
+    expect(rows(r.path).hub_admins).toEqual([]);
+    expect(rows(r.path).hub_memberships).toEqual([]);
+    expect(rows(r.path).hub_credentials).toEqual([]);
+    expect(await claimCode(r.hub)).toBe(code);
+    expect(await (await fetch(`${origin(r.hub)}/auth/claim-state`)).json()).toEqual({ unclaimed: true, canClaim: true });
+  });
+
   it("claims on loopback with one bounded session, no device key and no secret disclosure", async () => {
     const r = await rig();
     expect(await post(r.hub, "browser/session")).toEqual({ code: 401, result: { status: "signed-out" } });
     expect(r.github.starts).toBe(0);
-    const result = await complete(r);
+    const code = await claimCode(r.hub);
+    const result = await complete(r, true);
     expect(result.session).toEqual({ token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), username: "browser-person", expiresAt: r.github.time + BROWSER_SESSION_LIFETIME_MS });
     expect(result.claimedWorkspaceId).toMatch(/^[0-9a-f-]{36}$/);
     expect(Object.keys(result).sort()).toEqual(["claimedWorkspaceId", "session", "status"]);
@@ -113,7 +135,7 @@ describe("browser-only hub identity", () => {
     expect(snapshot.hub_admins).toEqual([{ principal_id: principal.id }]);
     expect(snapshot.hub_memberships).toEqual([{ workspace_id: result.claimedWorkspaceId, principal_id: principal.id, role: "admin" }]);
     expect(r.hub.hubAdmins!.pageAdmins(principal.id).admins[0]?.lastSignedInAt).toBeNull();
-    for (const secret of [GITHUB_TOKEN, "private-device-code", TEST_SECRET]) {
+    for (const secret of [GITHUB_TOKEN, "private-device-code", TEST_SECRET, code]) {
       expect(JSON.stringify({ result, snapshot, logs: r.logs })).not.toContain(secret);
     }
     expect(JSON.stringify({ snapshot, logs: r.logs })).not.toContain(result.session.token);
@@ -123,7 +145,7 @@ describe("browser-only hub identity", () => {
 
   it("later browser sign-ins add no roles and leave CLI device history unchanged", async () => {
     const r = await rig();
-    const cli = await start(r.hub, "github");
+    const cli = await start(r.hub, "github", await claimCode(r.hub));
     r.github.time += 1000;
     const signedCli = (await post(r.hub, "github/collect", cli)).result as unknown as CliComplete;
     const before = rows(r.path);
@@ -141,7 +163,7 @@ describe("browser-only hub identity", () => {
 
   it("refuses browser sessions at room, management and device credential boundaries", async () => {
     const r = await rig();
-    const signed = await complete(r);
+    const signed = await complete(r, true);
     const client = createClient({ port: r.hub.port, room: testRoom(signed.claimedWorkspaceId!), token: signed.session.token, reconnectDelayMs: 60_000 });
     clients.push(client);
     await expect(client.denied).resolves.toBe("device-credential-refused");
@@ -154,6 +176,18 @@ describe("browser-only hub identity", () => {
 });
 
 describe("browser request and flow isolation", () => {
+  it("refuses invalid and closed claim codes before starting GitHub", async () => {
+    const r = await rig();
+    expect(await post(r.hub, "browser/start", { claimCode: "wrong-code" }))
+      .toEqual({ code: 400, result: { status: "claim-code-invalid" } });
+    expect(r.github.starts).toBe(0);
+    const code = await claimCode(r.hub);
+    await complete(r, true);
+    expect(await post(r.hub, "browser/start", { claimCode: code }))
+      .toEqual({ code: 400, result: { status: "claim-code-invalid" } });
+    expect(r.github.starts).toBe(1);
+  });
+
   it("rejects other sites, forms, missing origins and credential headers before starting GitHub", async () => {
     const r = await rig();
     for (const headers of [{ Origin: "" }, { Origin: "null" }, { Origin: "https://other.example" },
@@ -162,7 +196,7 @@ describe("browser request and flow isolation", () => {
       { Authorization: "Bearer anything" }, { "Content-Type": "text/plain" }]) {
       expect(await post(r.hub, "browser/start", {}, headers)).toMatchObject({ code: 400, result: { status: "invalid-request" } });
     }
-    for (const body of [{ deviceName: "computer" }, { origin: origin(r.hub) }, null, [], "text"]) {
+    for (const body of [{ deviceName: "computer" }, { origin: origin(r.hub) }, { claimCode: 1234 }, null, [], "text"]) {
       expect(await post(r.hub, "browser/start", body)).toMatchObject({ code: 400 });
     }
     const preflight = await fetch(`${origin(r.hub)}/auth/browser/sign-out`, { method: "OPTIONS",
@@ -220,7 +254,7 @@ describe("browser request and flow isolation", () => {
 describe("browser session durability and claim atomicity", () => {
   it("keeps sessions across restart, enforces exact expiry and cleans expired rows on another sign-in", async () => {
     const first = await rig();
-    const signed = await complete(first);
+    const signed = await complete(first, true);
     const port = first.hub.port;
     await first.hub.stop();
     const restarted = await rig(first.path, port);
@@ -256,21 +290,25 @@ describe("browser session durability and claim atomicity", () => {
     const before = rows(r.path);
     inspect(r.path, db => db.exec(`CREATE TRIGGER session_failure BEFORE INSERT ON hub_browser_sessions
       BEGIN SELECT RAISE(ABORT, 'injected issuance failure'); END`));
-    const request = await start(r.hub);
+    const request = await start(r.hub, "browser", await claimCode(r.hub));
     r.github.time += 1000;
     expect(await post(r.hub, "browser/collect", request)).toMatchObject({ result: { status: "failed" } });
     expect(rows(r.path)).toEqual(before);
     inspect(r.path, db => db.exec("DROP TRIGGER session_failure"));
     r.github.account = { id: 5678, login: "retry-person" };
-    expect(await complete(r)).toMatchObject({ claimedWorkspaceId: expect.any(String), session: { username: "retry-person" } });
+    expect(await complete(r, true)).toMatchObject({ claimedWorkspaceId: expect.any(String), session: { username: "retry-person" } });
   });
 
-  it.each(["browser", "github"])("lets the first completed %s sign-in win against the other kind", async (winnerKind) => {
+  it.each(["browser", "github"])("lets only the coded %s sign-in claim against the other kind", async (winnerKind) => {
     const r = await rig();
     const loserKind = winnerKind === "browser" ? "github" : "browser";
     const loser = await start(r.hub, loserKind);
     r.github.account = { id: 5678, login: "winner" };
-    const winner = await start(r.hub, winnerKind);
+    const code = await claimCode(r.hub);
+    const winner = await start(r.hub, winnerKind, code);
+    expect(await post(r.hub, `${loserKind}/start`, { claimCode: code }))
+      .toEqual({ code: 400, result: { status: "claim-code-invalid" } });
+    expect(r.github.starts).toBe(2);
     let enter!: () => void;
     let resume!: () => void;
     const entered = new Promise<void>(resolve => { enter = resolve; });
@@ -296,7 +334,8 @@ describe("browser session durability and claim atomicity", () => {
   it.each(["cancel", "expire"])("%s while GitHub identity is in flight prevents claiming and session issuance", async (action) => {
     const r = await rig();
     const before = rows(r.path);
-    const request = await start(r.hub);
+    const code = await claimCode(r.hub);
+    const request = await start(r.hub, "browser", code);
     let enter!: () => void;
     let resume!: () => void;
     const entered = new Promise<void>(resolve => { enter = resolve; });
@@ -310,6 +349,7 @@ describe("browser session durability and claim atomicity", () => {
     resume();
     expect(await collecting).toMatchObject({ result: { status: action === "cancel" ? "abandoned" : "expired" } });
     expect(rows(r.path)).toEqual(before);
+    expect(await claimCode(r.hub)).not.toBe(code);
   });
 });
 

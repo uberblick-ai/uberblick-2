@@ -111,11 +111,11 @@ async function rig(options: { databasePath?: string; configured?: boolean; onGra
   if (directory !== undefined) directories.push(directory);
   const database = new HubDatabase(options.databasePath ?? join(directory!, "hub.sqlite"), () => {});
   database.open();
-  const claims = options.initialize ? new HubClaimState(database) : undefined;
+  const github = new GithubFake();
+  const claims = options.initialize ? new HubClaimState(database, undefined, () => github.time) : undefined;
   const principals = new PrincipalRegistry(database);
   const memberships = new MembershipRegistry(database);
   const credentials = new CredentialRegistry(database);
-  const github = new GithubFake();
   const logs: HubLogRecord[] = [];
   const liveWorkspaces = new Set<string>();
   let control: Awaited<ReturnType<typeof startAdminSetup>>;
@@ -430,7 +430,7 @@ describe("host-only first-admin setup", () => {
     const testRig = await rig({ initialize: true });
     const defaultId = defaultWorkspace(testRig);
     const flow = publicSignIn(testRig);
-    const login = await flow.start();
+    const login = await flow.startClaim(undefined, testRig.claims!.operatorClaimCode());
     if (login.status !== "pending") throw new Error("sign-in did not start");
     testRig.github.account = { id: 5678, login: "host-approver" };
     const setup = await pending(testRig, defaultId);
@@ -456,7 +456,7 @@ describe("host-only first-admin setup", () => {
     testRig.github.pauseIdentity = undefined;
     testRig.github.account = { id: 5678, login: "public-approver" };
     const flow = publicSignIn(testRig);
-    const login = await flow.start();
+    const login = await flow.startClaim(undefined, testRig.claims!.operatorClaimCode());
     if (login.status !== "pending") throw new Error("sign-in did not start");
     testRig.github.time += 1000;
     const result = await flow.collect(login.requestId, login.collectionSecret);

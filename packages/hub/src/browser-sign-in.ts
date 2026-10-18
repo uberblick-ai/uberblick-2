@@ -17,6 +17,27 @@ function browserOrigin(request: IncomingMessage): string | null {
   } catch { return null; }
 }
 
+async function readBody(request: IncomingMessage, path: string): Promise<Record<string, unknown>> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    const bytes = Buffer.from(chunk as Uint8Array);
+    size += bytes.length;
+    if (size > 4096) throw new Error();
+    chunks.push(bytes);
+  }
+  const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
+  const body = value as Record<string, unknown>;
+  if (path.endsWith("/collect") || path.endsWith("/cancel")) {
+    if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" || typeof body.collectionSecret !== "string") throw new Error();
+  } else if (path.endsWith("/start")) {
+    if (Object.keys(body).some(key => key !== "claimCode") ||
+        (body.claimCode !== undefined && typeof body.claimCode !== "string")) throw new Error();
+  } else if (Object.keys(body).length !== 0) throw new Error();
+  return body;
+}
+
 /** Opaque page-held tokens are accepted here only, never by device or room APIs. */
 export async function handleBrowserSignIn(
   signIn: GithubSignIn | undefined, request: IncomingMessage, response: ServerResponse,
@@ -44,28 +65,15 @@ export async function handleBrowserSignIn(
   }
   let body: Record<string, unknown>;
   try {
-    let size = 0;
-    const chunks: Buffer[] = [];
-    for await (const chunk of request) {
-      const bytes = Buffer.from(chunk as Uint8Array);
-      size += bytes.length;
-      if (size > 4096) throw new Error();
-      chunks.push(bytes);
-    }
-    const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    body = value as Record<string, unknown>;
-    if (path.endsWith("/collect") || path.endsWith("/cancel")) {
-      if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" || typeof body.collectionSecret !== "string") throw new Error();
-    } else if (Object.keys(body).length !== 0) throw new Error();
+    body = await readBody(request, path);
   } catch {
     reply(400, { status: "invalid-request" });
     return true;
   }
   try {
     if (path.endsWith("/start")) {
-      const result = await signIn.startBrowser(origin, requestClient(request, behindReleaseProxy));
-      reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : 200, result);
+      const result = await signIn.startBrowser(origin, requestClient(request, behindReleaseProxy), body.claimCode as string | undefined);
+      reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : result.status === "claim-code-invalid" ? 400 : 200, result);
     } else if (path.endsWith("/collect") || path.endsWith("/cancel")) {
       const requestId = body.requestId as string;
       const secret = body.collectionSecret as string;

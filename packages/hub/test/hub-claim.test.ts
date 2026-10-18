@@ -37,8 +37,9 @@ function rig(path = databasePath(), initialize = true) {
   const credentials = new CredentialRegistry(database);
   const receipts = new SetupReceipts(database);
   const hubAdmins = new HubAdminRegistry(database);
-  const claims = initialize ? new HubClaimState(database, hubAdmins) : undefined;
-  return { database, principals, memberships, credentials, receipts, claims, hubAdmins };
+  const clock = { now: () => 1000 };
+  const claims = initialize ? new HubClaimState(database, hubAdmins, () => clock.now()) : undefined;
+  return { database, principals, memberships, credentials, receipts, claims, hubAdmins, clock };
 }
 
 function rows(testRig: ReturnType<typeof rig>) {
@@ -92,21 +93,22 @@ class GithubFake {
 }
 
 function signIn(testRig: ReturnType<typeof rig>, github = new GithubFake()) {
+  testRig.clock.now = () => github.time;
   const flow = new GithubSignIn({ clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time },
     testRig.database, testRig.principals, testRig.credentials, testRig.memberships, silentLogger, testRig.claims);
   flows.push(flow);
   return { flow, github };
 }
 
-async function pending(flow: GithubSignIn) {
-  const request = await flow.start();
+async function pending(flow: GithubSignIn, claimCode?: string) {
+  const request = await flow.startClaim(undefined, claimCode);
   if (request.status !== "pending") throw new Error("sign-in did not start");
   return request;
 }
 
 type Complete = Extract<SignInCollection, { status: "complete" }>;
-async function complete(flow: GithubSignIn, github: GithubFake): Promise<Complete> {
-  const request = await pending(flow);
+async function complete(flow: GithubSignIn, github: GithubFake, claimCode?: string): Promise<Complete> {
+  const request = await pending(flow, claimCode);
   github.time += 1000;
   const result = await flow.collect(request.requestId, request.collectionSecret);
   if (result.status !== "complete") throw new Error(`sign-in ended with ${result.status}`);
@@ -197,14 +199,28 @@ describe("fresh deployed hub initialization", () => {
   });
 });
 
-describe("first-completed GitHub sign-in claim", () => {
+describe("operator-authorized GitHub sign-in claim", () => {
+  it("leaves uncoded sign-ins without roles and the host code available", async () => {
+    const testRig = rig();
+    const { flow, github } = signIn(testRig);
+    const code = testRig.claims!.operatorClaimCode();
+    expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const signed = await complete(flow, github);
+    expect(signed).not.toHaveProperty("claimedWorkspaceId");
+    expect(signed.credential.record.workspaces).toEqual([]);
+    expect(rows(testRig).hub_admins).toEqual([]);
+    expect(rows(testRig).hub_memberships).toEqual([]);
+    expect(testRig.claims!.state(true).unclaimed).toBe(true);
+    expect(testRig.claims!.operatorClaimCode()).toBe(code);
+  });
+
   it("delivers a claimed credential when the workspace settings cannot be decoded", async () => {
     const testRig = rig();
     const workspaceId = defaultWorkspace(testRig);
     testRig.database.connection.prepare("UPDATE documents SET data = ? WHERE name = ?")
       .run(new Uint8Array([255]), `${workspaceId}/_settings`);
     const { flow, github } = signIn(testRig);
-    const collected = await complete(flow, github);
+    const collected = await complete(flow, github, testRig.claims!.operatorClaimCode());
     expect(collected.credential.record.workspaces).toEqual([workspaceId]);
     expect(collected.credential.workspaceNames).toBeUndefined();
     expect(collected.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -216,7 +232,7 @@ describe("first-completed GitHub sign-in claim", () => {
     const testRig = rig();
     const workspaceId = defaultWorkspace(testRig);
     const { flow, github } = signIn(testRig);
-    const claim = await complete(flow, github);
+    const claim = await complete(flow, github, testRig.claims!.operatorClaimCode());
     expect(claim.claimedWorkspaceId).toBe(workspaceId);
     expect(claim.credential.record.workspaces).toEqual([workspaceId]);
     expect(claim.credential.workspaceNames).toEqual({ [workspaceId]: "Default workspace" });
@@ -235,13 +251,16 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
   });
 
-  it("reserves nothing at start and lets a later-started approval complete first", async () => {
+  it("lets only the coded request claim even when an uncoded identity is already in flight", async () => {
     const testRig = rig();
     const workspaceId = defaultWorkspace(testRig);
     const { flow, github } = signIn(testRig);
     const first = await pending(flow);
     github.account = { id: 5678, login: "faster-approver" };
-    const second = await pending(flow);
+    const code = testRig.claims!.operatorClaimCode()!;
+    const second = await pending(flow, code);
+    expect(testRig.claims!.operatorClaimCode()).toBeUndefined();
+    expect(await flow.startClaim(undefined, code)).toEqual({ status: "claim-code-invalid" });
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: true, canClaim: true });
     expect(rows(testRig).hub_memberships).toEqual([]);
     let enter!: () => void;
@@ -268,20 +287,23 @@ describe("first-completed GitHub sign-in claim", () => {
     const before = rows(testRig);
     testRig.database.connection.exec(`CREATE TRIGGER credential_failure BEFORE INSERT ON hub_credentials
       BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END`);
-    const request = await pending(flow);
+    const code = testRig.claims!.operatorClaimCode()!;
+    const request = await pending(flow, code);
     github.time += 1000;
     expect(await flow.collect(request.requestId, request.collectionSecret)).toEqual({ status: "failed" });
     expect(rows(testRig)).toEqual(before);
+    expect(testRig.claims!.operatorClaimCode()).not.toBe(code);
     testRig.database.connection.exec("DROP TRIGGER credential_failure");
     github.account = { id: 5678, login: "successful-approver" };
-    expect(await complete(flow, github)).toMatchObject({ claimedWorkspaceId: defaultWorkspace(testRig), identity: { githubAccountId: "5678" } });
+    expect(await complete(flow, github, testRig.claims!.operatorClaimCode())).toMatchObject({ claimedWorkspaceId: defaultWorkspace(testRig), identity: { githubAccountId: "5678" } });
   });
 
   it("cancel before completion leaves claiming open", async () => {
     const testRig = rig();
     const { flow, github } = signIn(testRig);
     const before = rows(testRig);
-    const request = await pending(flow);
+    const code = testRig.claims!.operatorClaimCode()!;
+    const request = await pending(flow, code);
     let enter!: () => void;
     let resume!: () => void;
     const entered = new Promise<void>((resolve) => { enter = resolve; });
@@ -295,13 +317,14 @@ describe("first-completed GitHub sign-in claim", () => {
     expect(await collecting).toEqual({ status: "abandoned" });
     expect(rows(testRig)).toEqual(before);
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: true, canClaim: true });
+    expect(testRig.claims!.operatorClaimCode()).not.toBe(code);
   });
 
   it("keeps an uncollected response's committed claim after restart and restores access on the account's next login", async () => {
     const first = rig();
     const workspaceId = defaultWorkspace(first);
     const { flow, github } = signIn(first);
-    const request = await pending(flow);
+    const request = await pending(flow, first.claims!.operatorClaimCode());
     github.time += 1000;
     // Completion commits independently of delivery to the machine. Drop its
     // one-time result, then destroy all in-memory approval state by restarting.
@@ -421,5 +444,107 @@ describe("existing deployment without a hub administrator", () => {
       .toEqual({ unclaimed: true, canClaim: true });
     expect(events.some((record) => record.event === "hub.admin.adopted")).toBe(false);
     expect(rig(emptyPath).database.connection.prepare("SELECT * FROM hub_admins").all()).toEqual([]);
+  });
+});
+
+describe("claim reservation lifecycle", () => {
+  it.each(["denied", "provider-failure", "expiry", "stop"])(
+    "rotates a reserved code after %s and lets a new claimant complete", async ending => {
+      const testRig = rig();
+      const github = new GithubFake();
+      const originalFetch = github.fetch;
+      if (ending === "denied" || ending === "provider-failure") github.fetch = async (input, init) => {
+        if (String(input) === "https://github.com/login/oauth/access_token") {
+          return ending === "denied" ? Response.json({ error: "access_denied" })
+            : new Response(null, { status: 503 });
+        }
+        return originalFetch(input, init);
+      };
+      const { flow } = signIn(testRig, github);
+      const before = rows(testRig);
+      const code = testRig.claims!.operatorClaimCode()!;
+      const request = await pending(flow, code);
+      expect(testRig.claims!.operatorClaimCode()).toBeUndefined();
+      if (ending === "stop") flow.stop();
+      else {
+        github.time += ending === "expiry" ? 900_000 : 1000;
+        // Host status must rotate an expired reservation without a collector.
+        if (ending === "expiry") expect(testRig.claims!.operatorClaimCode()).toEqual(expect.any(String));
+        expect(await flow.collect(request.requestId, request.collectionSecret)).toEqual({
+          status: ending === "denied" ? "denied" : ending === "expiry" ? "expired" : "failed",
+        });
+      }
+      expect(rows(testRig)).toEqual(before);
+      const nextCode = testRig.claims!.operatorClaimCode()!;
+      expect(nextCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(nextCode).not.toBe(code);
+      github.fetch = originalFetch;
+      const next = signIn(testRig, github);
+      expect(await next.flow.startClaim(undefined, code)).toEqual({ status: "claim-code-invalid" });
+      expect(await complete(next.flow, github, nextCode)).toMatchObject({ claimedWorkspaceId: defaultWorkspace(testRig) });
+      expect(testRig.claims!.operatorClaimCode()).toBeUndefined();
+    },
+  );
+
+  it.each(["failure", "stop"])("reserves across a delayed upstream start and releases it after %s", async ending => {
+    const testRig = rig();
+    const github = new GithubFake();
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>(accept => { enter = accept; });
+    const resumed = new Promise<void>(accept => { resume = accept; });
+    const code = testRig.claims!.operatorClaimCode()!;
+    const originalFetch = github.fetch;
+    github.fetch = async (input, init) => {
+      enter();
+      await resumed;
+      if (ending === "failure") throw new Error(code);
+      return originalFetch(input, init);
+    };
+    const { flow } = signIn(testRig, github);
+    const before = rows(testRig);
+    const starting = flow.startClaim(undefined, code);
+    try {
+      await entered;
+      expect(testRig.claims!.operatorClaimCode()).toBeUndefined();
+      expect(await flow.startClaim(undefined, code)).toEqual({ status: "claim-code-invalid" });
+      if (ending === "stop") flow.stop();
+    } finally { resume(); }
+    expect(await starting).toEqual({ status: "failed" });
+    expect(rows(testRig)).toEqual(before);
+    expect(testRig.claims!.operatorClaimCode()).toEqual(expect.any(String));
+    expect(testRig.claims!.operatorClaimCode()).not.toBe(code);
+  });
+
+  it("does not let an expired identity read claim or release a replacement reservation", async () => {
+    const testRig = rig();
+    const { flow, github } = signIn(testRig);
+    const firstCode = testRig.claims!.operatorClaimCode()!;
+    const first = await pending(flow, firstCode);
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>(accept => { enter = accept; });
+    const resumed = new Promise<void>(accept => { resume = accept; });
+    github.pauseIdentity = async () => { enter(); await resumed; };
+    github.time += 1000;
+    const collecting = flow.collect(first.requestId, first.collectionSecret);
+    let replacement: Awaited<ReturnType<typeof pending>>;
+    try {
+      await entered;
+      github.time += 900_000;
+      const nextCode = testRig.claims!.operatorClaimCode()!;
+      expect(nextCode).not.toBe(firstCode);
+      github.account = { id: 5678, login: "replacement-claimant" };
+      replacement = await pending(flow, nextCode);
+    } finally { resume(); }
+    expect(await collecting).toEqual({ status: "expired" });
+    expect(rows(testRig).hub_principals).toEqual([]);
+    expect(testRig.claims!.operatorClaimCode()).toBeUndefined();
+    github.pauseIdentity = undefined;
+    github.time += 1000;
+    expect(await flow.collect(replacement.requestId, replacement.collectionSecret)).toMatchObject({
+      status: "complete", claimedWorkspaceId: defaultWorkspace(testRig), identity: { githubAccountId: "5678" },
+    });
+    expect(rows(testRig).hub_principals).toHaveLength(1);
   });
 });

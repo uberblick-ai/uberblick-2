@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { Button } from "../shadcn/button.js";
+import { Input } from "../shadcn/input.js";
 
 export const BROWSER_SESSION_STORAGE_KEY = "uberblick.browser-session";
 export const BROWSER_SESSION_POLL_MS = 15_000;
@@ -14,6 +15,7 @@ interface BrowserSession {
 }
 
 interface Approval {
+  claimRequested: boolean;
   requestId: string;
   collectionSecret: string;
   verificationUri: string;
@@ -25,6 +27,16 @@ interface Approval {
 interface Answer {
   response: Response;
   body: Record<string, unknown>;
+}
+
+function approvalFields(body: Record<string, unknown>, claimRequested: boolean): Approval {
+  if (body.status !== "pending" || typeof body.requestId !== "string" ||
+      typeof body.collectionSecret !== "string" || body.verificationUri !== "https://github.com/login/device" ||
+      typeof body.userCode !== "string" || typeof body.interval !== "number" || body.interval <= 0 ||
+      typeof body.expiresIn !== "number" || body.expiresIn <= 0) throw new Error();
+  return { claimRequested, requestId: body.requestId, collectionSecret: body.collectionSecret,
+    verificationUri: body.verificationUri, userCode: body.userCode, interval: body.interval,
+    expiresAt: Date.now() + body.expiresIn * 1000 };
 }
 
 function storedToken(): string | null {
@@ -84,6 +96,7 @@ function useBrowserSignIn(onClaim: () => void) {
   const [session, setSession] = useState<BrowserSession | null>(null);
   const [approval, setApproval] = useState<Approval | null>(null);
   const [claimedWorkspaceId, setClaimedWorkspaceId] = useState<string | null>(null);
+  const [didNotClaim, setDidNotClaim] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState("");
   const busyRef = useRef(false);
@@ -104,6 +117,7 @@ function useBrowserSignIn(onClaim: () => void) {
     forgetToken(token);
     setSession(null);
     setClaimedWorkspaceId(null);
+    setDidNotClaim(false);
     setError(message);
   }, []);
 
@@ -145,7 +159,7 @@ function useBrowserSignIn(onClaim: () => void) {
 
   useSessionPolling(session, busyRef, checkSession);
 
-  const consumeCollection = useCallback(({ response, body }: Answer): number | null => {
+  const consumeCollection = useCallback(({ response, body }: Answer, claimRequested: boolean): number | null => {
     if (response.ok && body.status === "pending" && typeof body.interval === "number" && body.interval > 0) {
       setError(null);
       return body.interval;
@@ -165,6 +179,7 @@ function useBrowserSignIn(onClaim: () => void) {
         setClaimedWorkspaceId(body.claimedWorkspaceId);
         onClaimRef.current();
       }
+      setDidNotClaim(claimRequested && typeof body.claimedWorkspaceId !== "string");
       return null;
     }
     if (["denied", "expired", "abandoned", "failed", "collected", "unknown-request"].includes(String(body.status))) {
@@ -197,7 +212,7 @@ function useBrowserSignIn(onClaim: () => void) {
           requestId: approval.requestId, collectionSecret: approval.collectionSecret,
         });
         if (!active || !mounted.current) return;
-        const nextInterval = consumeCollection(answer);
+        const nextInterval = consumeCollection(answer, approval.claimRequested);
         if (nextInterval === null) return;
         interval = nextInterval;
       } catch {
@@ -212,22 +227,21 @@ function useBrowserSignIn(onClaim: () => void) {
     return () => { active = false; clearTimeout(timer); };
   }, [approval, post, consumeCollection]);
 
-  async function start(): Promise<void> {
+  async function start(claimCode: string): Promise<void> {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy("start");
     setError(null);
     try {
-      const { response, body } = await post("start");
+      const { response, body } = await post("start", claimCode === "" ? {} : { claimCode });
       if (!mounted.current) return;
       if (response.status === 503 && body.status === "not-configured") { setAvailability("not-configured"); return; }
-      if (!response.ok || body.status !== "pending" || typeof body.requestId !== "string" ||
-          typeof body.collectionSecret !== "string" || body.verificationUri !== "https://github.com/login/device" ||
-          typeof body.userCode !== "string" || typeof body.interval !== "number" || body.interval <= 0 ||
-          typeof body.expiresIn !== "number" || body.expiresIn <= 0) throw new Error();
-      setApproval({ requestId: body.requestId, collectionSecret: body.collectionSecret,
-        verificationUri: body.verificationUri, userCode: body.userCode, interval: body.interval,
-        expiresAt: Date.now() + body.expiresIn * 1000 });
+      if (response.status === 400 && body.status === "claim-code-invalid") {
+        setError("The claim code is invalid, already used, or claiming has closed. The host operator can check ub-hub status for a new code while this hub is unclaimed.");
+        return;
+      }
+      if (!response.ok) throw new Error();
+      setApproval(approvalFields(body, claimCode !== ""));
     } catch {
       if (mounted.current) setError("GitHub sign-in could not start. Try again.");
     } finally { busyRef.current = false; if (mounted.current) setBusy(""); }
@@ -269,7 +283,7 @@ function useBrowserSignIn(onClaim: () => void) {
     void checkSession(tokenRef.current);
   }
 
-  return { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry };
+  return { availability, session, approval, claimedWorkspaceId, didNotClaim, error, busy, start, cancel, signOut, retry };
 }
 
 /** The session is sent only to this page's origin, never to a configured websocket hub. */
@@ -278,13 +292,16 @@ export function BrowserHubSignIn({ claimStateKnown, claimable, onClaim }: {
   claimable: boolean;
   onClaim: () => void;
 }): ReactElement {
-  const { availability, session, approval, claimedWorkspaceId, error, busy, start, cancel, signOut, retry } = useBrowserSignIn(onClaim);
+  const { availability, session, approval, claimedWorkspaceId, didNotClaim, error, busy, start, cancel, signOut, retry } = useBrowserSignIn(onClaim);
+  const [claimCode, setClaimCode] = useState("");
+  const claimCodeId = useId();
   return (
     <section className="mt-4 space-y-3" aria-label="Browser sign-in">
       <div role="status">
         {session !== null ? <>
           <p>Signed in as <strong>{session.username}</strong>.</p>
           {claimedWorkspaceId !== null && <p className="mt-2">Claimed this hub: you are a hub administrator and administrator of the default workspace (<code>{claimedWorkspaceId}</code>).</p>}
+          {didNotClaim && <p className="mt-2">This sign-in did not claim the hub. Claiming may have closed before approval completed.</p>}
         </> : <p>{availability === "checking" ? "Checking this browser’s sign-in…" : "This browser is not signed in."}</p>}
       </div>
       <p>This page has no document access. Browser sessions last 24 hours, with no automatic renewal.</p>
@@ -297,11 +314,20 @@ export function BrowserHubSignIn({ claimStateKnown, claimable, onClaim }: {
         <p className="select-text font-mono ub-type-h2"><code>{approval.userCode}</code></p>
         <p role="status">Waiting for GitHub approval…</p>
         <Button variant="outline" disabled={busy !== ""} onClick={() => void cancel()}>Cancel sign-in</Button>
-      </> : availability === "configured" ? <>
-        {!claimStateKnown && <p>If this hub is unclaimed, the first GitHub account to finish approval claims it and becomes hub administrator and administrator of its default workspace.</p>}
+      </> : availability === "configured" ? <form className="space-y-3" onSubmit={(event) => {
+        event.preventDefault();
+        void start(claimable ? claimCode.trim() : "");
+        setClaimCode("");
+      }}>
+        {claimable && <div className="space-y-2">
+          <label htmlFor={claimCodeId}>Claim code (optional)</label>
+          <Input id={claimCodeId} type="password" autoComplete="off" value={claimCode} disabled={busy !== ""}
+            onChange={(event) => setClaimCode(event.target.value)} />
+        </div>}
+        {(claimable || !claimStateKnown) && busy !== "start" && claimCode.trim() === "" && <p>This sign-in will not claim the hub. The host operator reads the claim code with <code>ub-hub status</code>.</p>}
         {!claimable && claimStateKnown && <p>Signing in grants no role or workspace membership.</p>}
-        <Button disabled={busy !== ""} onClick={() => void start()}>{busy === "start" ? "Starting sign-in…" : "Sign in with GitHub"}</Button>
-      </> : availability === "unavailable" && <Button variant="outline" onClick={retry}>Check sign-in again</Button>}
+        <Button type="submit" disabled={busy !== ""}>{busy === "start" ? "Starting sign-in…" : "Sign in with GitHub"}</Button>
+      </form> : availability === "unavailable" && <Button variant="outline" onClick={retry}>Check sign-in again</Button>}
     </section>
   );
 }

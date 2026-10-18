@@ -16,11 +16,16 @@ const MAX_REQUESTS = 100;
 const MAX_CLIENT_REQUESTS = 6;
 const MAX_TERMINAL_REQUESTS = 100;
 type TerminalStatus = "denied" | "expired" | "abandoned" | "failed" | "collected";
+export interface DeviceFlowLease {
+  expiresAt: number;
+  release(): void;
+}
 interface SignInRequest<Context> {
   secret: string;
   deviceCode?: string;
   deviceName?: string;
   context?: Context;
+  lease?: DeviceFlowLease;
   client?: string;
   expiresAt: number;
   intervalMs: number;
@@ -70,7 +75,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   constructor(
     private readonly config: GithubSignInConfig,
-    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string, context?: Context) => Result,
+    private readonly complete: (identity: { accountId: string; username: string }, deviceName?: string, context?: Context, lease?: DeviceFlowLease) => Result,
     private readonly log: HubLogger = stderrLogger,
     private readonly event = "hub.github.sign-in.failed",
   ) {
@@ -81,39 +86,23 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   stop(): void {
     this.closed.abort();
+    for (const request of this.requests.values()) this.finish(request, "failed");
     this.requests.clear();
   }
 
-  async start(deviceName?: string, context?: Context, client?: string) {
+  async start(deviceName?: string, context?: Context, client?: string, authorize?: () => DeviceFlowLease | undefined) {
     if (this.closed.signal.aborted) return { status: "failed" } as const;
-    // Active requests and retained outcomes have separate bounds. Outcomes
-    // last at most another lifetime; oldest ones may be evicted at capacity.
-    // There is no durable request/token record, and restart refuses requests.
-    let pending = 0;
-    let clientPending = client === undefined ? 0 : (this.startingClients.get(client) ?? 0);
-    let terminal = 0;
-    for (const [id, request] of this.requests) {
-      if (this.now() >= request.expiresAt + MAX_LIFETIME_MS) this.requests.delete(id);
-      else if (this.active(request)) {
-        pending++;
-        if (client !== undefined && request.client === client) clientPending++;
-      }
-      else terminal++;
-    }
-    for (const [id, request] of this.requests) {
-      if (terminal <= MAX_TERMINAL_REQUESTS) break;
-      if (request.status !== "pending") {
-        this.requests.delete(id);
-        terminal--;
-      }
-    }
+    const { pending, clientPending } = this.capacity(client);
     if (pending + this.starting >= MAX_REQUESTS) return { status: "busy" } as const;
     if (client !== undefined && (clientPending >= MAX_CLIENT_REQUESTS || !this.starts.take(client))) {
       return { status: "busy" } as const;
     }
+    const lease = authorize?.();
+    if (authorize !== undefined && lease === undefined) return { status: "claim-code-invalid" } as const;
     this.starting++;
     if (client !== undefined) this.startingClients.set(client, (this.startingClients.get(client) ?? 0) + 1);
     const startedAt = this.now();
+    let retained = false;
     try {
       const result = await this.github("https://github.com/login/device/code", {
         method: "POST",
@@ -129,13 +118,16 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
           result.verification_uri !== "https://github.com/login/device") throw new Error();
       const requestId = crypto.randomUUID();
       const collectionSecret = randomBytes(32).toString("base64url");
+      if (lease !== undefined) lease.expiresAt = expiresAt;
       this.requests.set(requestId, {
         secret: collectionSecret, deviceCode: result.device_code, expiresAt,
         ...(deviceName === undefined ? {} : { deviceName }),
         ...(context === undefined ? {} : { context }),
+        ...(lease === undefined ? {} : { lease }),
         ...(client === undefined ? {} : { client }),
         intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
       });
+      retained = true;
       return {
         status: "pending", requestId, collectionSecret,
         verificationUri: result.verification_uri, userCode: result.user_code,
@@ -146,6 +138,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (!this.closed.signal.aborted) this.logFailure("start", error);
       return { status: "failed" } as const;
     } finally {
+      if (!retained) lease?.release();
       this.starting--;
       if (client !== undefined) {
         const remaining = (this.startingClients.get(client) ?? 1) - 1;
@@ -153,6 +146,32 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
         else this.startingClients.set(client, remaining);
       }
     }
+  }
+
+  private capacity(client?: string): { pending: number; clientPending: number } {
+    // Active requests and retained outcomes have separate bounds. Outcomes
+    // last at most another lifetime; oldest ones may be evicted at capacity.
+    // There is no durable request/token record, and restart refuses requests.
+    let pending = 0;
+    let clientPending = client === undefined ? 0 : (this.startingClients.get(client) ?? 0);
+    let terminal = 0;
+    for (const [id, request] of this.requests) {
+      if (this.now() >= request.expiresAt + MAX_LIFETIME_MS) {
+        this.active(request);
+        this.requests.delete(id);
+      } else if (this.active(request)) {
+        pending++;
+        if (client !== undefined && request.client === client) clientPending++;
+      } else terminal++;
+    }
+    for (const [id, request] of this.requests) {
+      if (terminal <= MAX_TERMINAL_REQUESTS) break;
+      if (request.status !== "pending") {
+        this.requests.delete(id);
+        terminal--;
+      }
+    }
+    return { pending, clientPending };
   }
 
   cancel(requestId: string, secret: string, context?: Context): DeviceFlowCollection<Result> {
@@ -206,7 +225,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       if (typeof identity.id !== "number" || !Number.isSafeInteger(identity.id) || identity.id < 1 ||
           typeof identity.login !== "string") throw new Error();
       step = "issuance";
-      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName, request.context);
+      const completed = this.complete({ accountId: String(identity.id), username: identity.login }, request.deviceName, request.context, request.lease);
       // Completion is synchronous: cancellation/expiry cannot interleave with
       // the commit, and another collector cannot complete a second time.
       this.finish(request, "collected");
@@ -245,6 +264,8 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
 
   private finish(request: SignInRequest<Context>, status: TerminalStatus): void {
     request.status = status;
+    request.lease?.release();
+    delete request.lease;
     delete request.deviceCode;
     delete request.deviceName;
   }

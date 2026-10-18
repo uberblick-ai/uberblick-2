@@ -76,7 +76,8 @@ site and `/ws` from the host itself and exits 0 only when healthy; an HTTPS
 name the host cannot reach shows as not answering. `--json` prints one JSON
 object. Allow certificate acquisition to finish, then check status again.
 After starting a fresh hub, [claim it](#claim-a-fresh-hub) from its web page or with `ub auth login`
-before wider exposure; see the corpus's CLI: ub auth intents and examples
+using the code from `sh bin/remote-compose.sh exec hub ub-hub status`;
+see the corpus's CLI: ub auth intents and examples
 (0ad5f7da-edb2-4e53-a6eb-9d95922a3e95), “Claim a fresh hub”.
 
 ```sh
@@ -144,10 +145,10 @@ sh bin/remote-compose.sh logs --tail=100 hub caddy
 ```
 
 [Check the site and WebSocket upgrade](#check-the-deployment) on the host, then
-[claim the fresh hub](#claim-a-fresh-hub) by signing in at `http://localhost:8080`
-or with `ub auth login http://localhost:8080`.
-Do this before enabling wider access. A private Tailscale route can also be
-claimed before wider exposure. Confirm that the completed login reports the
+[claim the fresh hub](#claim-a-fresh-hub) with the code shown by `ub-hub status`:
+enter it on `http://localhost:8080`, or use
+`ub auth login http://localhost:8080 --claim-code <code>`.
+Keep the code private until the sign-in starts. Confirm that the completed login reports the
 claim and the default workspace's UUID. Startup creates that workspace once,
 with the name **Default workspace**, and changes no computer's workspace
 binding. Existing deployments keep
@@ -387,7 +388,8 @@ candidate_mcp_launcher() {
 candidate_mcp_launcher "$candidate_writer" > "$candidate_root/writer-mcp"
 candidate_mcp_launcher "$candidate_reader" > "$candidate_root/reader-mcp"
 chmod 700 "$candidate_root/writer-mcp" "$candidate_root/reader-mcp"
-candidate_ub auth login ws://candidate-hub:1234
+docker exec "$candidate_hub" ub-hub status
+candidate_ub auth login ws://candidate-hub:1234 --claim-code '<code-from-status>'
 ```
 
 The release Dockerfile builds the bundled hub and a separate build-stage image
@@ -401,8 +403,8 @@ network still permits the hub's outbound GitHub requests.
 
 Approve only this login's displayed GitHub URL and code. The approval page
 names **Uberblick Login**, while the terminal names
-`http://candidate-hub:1234`. The first completed sign-in claims this fresh hub's
-default workspace. Record its UUID from the successful login; do not reuse the
+`http://candidate-hub:1234`. The sign-in started with the host's claim code claims
+this fresh hub and its default workspace. Record its UUID from the successful login; do not reuse the
 corpus workspace UUID. After approval:
 
 ```bash
@@ -678,7 +680,9 @@ request ID and collection secret can collect its credential, once. Keep the
 collection secret private; the displayed code alone cannot collect anything.
 Cancellation abandons the attempt. The hub reads the authorized public account
 identity and discards GitHub's token; it accepts no supplied GitHub token or
-identity. Run `ub auth login [hub]` to complete this flow from a terminal; omit
+identity. The start body accepts `deviceName` and an optional `claimCode` for
+[claiming a fresh hub](#claim-a-fresh-hub); the code is sent only in that POST body.
+Run `ub auth login [hub] [--claim-code <code>]` to complete this flow from a terminal; omit
 the hub to use this machine's bound hub. Approval works in a browser on any
 machine and the terminal completes without further input. In a local terminal,
 login opens GitHub's approval page once after displaying the hub, URL, code and
@@ -747,6 +751,7 @@ sends it only in `X-Uberblick-Session` on its browser-session requests. There is
 no session cookie to send to another localhost port. Browser auth requests use
 JSON POSTs at `/auth/browser/start`, `/auth/browser/collect`,
 `/auth/browser/cancel`, `/auth/browser/session` and `/auth/browser/sign-out`.
+The start body is empty except for an optional `claimCode` from the unclaimed guide.
 The hub checks the browser origin, including the port, and binds attempts and
 sessions to that exact origin; it enables no cross-origin access. These tokens
 authorize neither collaboration rooms nor device management.
@@ -762,29 +767,44 @@ their existing local behavior.
 
 ### Claim a fresh hub
 
-Keep the fresh hub reachable only from the host or a private network, and
-claim it before wider exposure. With the default loopback route, open
-`http://localhost:8080` on the host and choose **Sign in with GitHub**, or run
-this using an installed client:
+On the deployment host, read the fresh hub's one-time claim code:
 
 ```sh
-ub auth login http://localhost:8080
+sh bin/remote-compose.sh exec hub ub-hub status
 ```
 
-The page and terminal say before approval when the hub is unclaimed: the GitHub
-account that completes sign-in first becomes hub administrator and administrator
-of its default workspace.
-Starting a login reserves nothing. If another reachable account completes
-first, it claims the hub instead. After completion, confirm the page's or terminal's
-claim result and the default workspace UUID; this reports what the hub
-committed, even if the earlier notice has become stale. Keep that UUID for
+Enter that code in the hub page's unclaimed guide and choose **Sign in with GitHub**,
+or pass it to an installed client:
+
+```sh
+ub auth login http://localhost:8080 --claim-code <code>
+```
+
+Keep the code private until the sign-in starts. It appears only in `ub-hub status`
+over the host's private control socket, never in `ub hub status`, an HTTP or
+WebSocket response, a URL, served configuration or hub logs. The first start with
+the code reserves it for that sign-in across browser and CLI routes. Later starts
+with the same code are refused before GitHub approval. If that attempt fails,
+expires or is cancelled while the hub is still unclaimed, read a new code from
+`ub-hub status`. No code is shown while an attempt holds the reservation or after
+claiming closes. Restarting the hub also replaces an unused code.
+
+A sign-in without a code grants neither administration nor membership and leaves
+the hub unclaimed. The page and terminal say before approval that it will not
+claim the hub and point the host operator to `ub-hub status`. Invalid, already-used
+codes and codes supplied after claiming closes have a separate claim-code refusal.
+Both start routes return HTTP 400 with `{"status":"claim-code-invalid"}` for
+that refusal, without contacting GitHub or echoing the submitted code.
+After a coded sign-in completes, confirm the page's or terminal's claim result
+and the default workspace UUID; it also reports if another host action closed
+claiming first. Keep the claimed workspace UUID for
 subsequent workspace use. CLI login stores a device credential covering the
 workspace and leaves this computer's hub and workspace binding unchanged.
 It does not sign a browser in; browser sign-in instead creates its own session
 and changes no computer's login or binding.
 
 Use the configured `LOOPBACK_PORT` if different. For a private Tailscale route,
-use `ub auth login https://<WEB_HOST>` from a computer on that tailnet; existing
+use `ub auth login https://<WEB_HOST> --claim-code <code>` from a computer on that tailnet; existing
 settings use `https://<TAILSCALE_HOST>`. The [endpoint table below](#choose-how-clients-reach-the-hub)
 gives each route's login and use commands. Include `http://` for loopback:
 a bare `localhost:8080` is interpreted as an HTTPS endpoint.
@@ -864,9 +884,9 @@ the same `not-configured` result as sign-in. Remote clients renew stored logins
 without another GitHub approval, including to discover later membership grants.
 
 Sign-in identifies the durable GitHub account and issues one Uberblick device
-credential for its memberships in active workspaces. Only the first completed sign-in
-on a fresh, unclaimed hub grants hub administration and creates the default
-workspace's admin membership; later sign-ins grant neither role nor membership.
+credential for its memberships in active workspaces. Only a sign-in started with
+the fresh hub's one-time claim code can grant hub administration and create the
+default workspace's admin membership; other sign-ins grant neither role nor membership.
 Remote hubs require these credentials for live sync and re-check membership
 and suspension. Revocation, membership removal or workspace suspension closes
 existing sessions. MCP and `ub open`
@@ -1316,9 +1336,12 @@ deadline after printing the headers. A `502` on
 restore, and otherwise a job for `sh bin/remote-compose.sh logs hub`.
 
 Then open the selected site origin. On a claimable fresh hub it shows
-**This hub is unclaimed** and warns that the first completed GitHub sign-in
-claims hub and default-workspace administration. Browser sign-in reports the
-claim and default workspace UUID. The guide also offers `ub auth login`,
+**This hub is unclaimed** and a claim-code field. Read the code from
+`sh bin/remote-compose.sh exec hub ub-hub status` on the host, then enter it
+before starting GitHub sign-in to claim hub and default-workspace administration.
+Without a code the guide says sign-in will not claim. Browser sign-in reports
+the claim and default workspace UUID, or says claiming did not happen.
+The guide also offers `ub auth login <hub> --claim-code <code>`,
 `ub workspace use <link>` and `ub open` on a computer. An open page rechecks claim state
 after each 15-second pause until claiming closes. A closed claim says only that
 the hub can no longer be claimed; an existing installation sealed without a
@@ -1423,8 +1446,22 @@ sh bin/remote-compose.sh exec hub ub-hub doctor
 ```
 
 `status` prints the release version, source commit and sync protocol, the
-database path, size and document count, and whether the hub is claimed. If the
-hub does not answer, it still prints the image's release identity and exits 1.
+database path, size and document count, and whether the hub is claimed. An
+unclaimed hub also shows its available one-time claim code:
+
+```text
+hub        running
+database   /data/hub.sqlite
+size       32768 bytes
+documents  1
+claimed    no
+claim code <one-time-code>
+```
+
+The claim-code line is absent while a sign-in reserves it or after claiming
+closes. This private host command is separate from `ub hub status`, which shows
+deployment health and never a claim code. If the hub does not answer, `ub-hub
+status` still prints the image's release identity and exits 1.
 `doctor` prints `ok`, `warn`, `FAIL` or `skip` for each hub, database, storage,
 GitHub and clock check, with an action for warnings and failures. It changes
 nothing and exits 1 if a check fails. Site, TLS and Caddy checks remain in
@@ -1583,7 +1620,7 @@ remains available. Close other clients while
 promoting. A workspace already bound to a hub cannot be promoted. The reservation
 itself does not change the hub's default workspace, first-claim state or other
 memberships. On a fresh hub, the separate sign-in before promotion can claim the
-default workspace through the normal first-login flow.
+default workspace when started with the host operator's one-time claim code.
 
 Host-only first-administrator setup remains a separate operation for workspaces
 without membership, existing or new. Its Unix-socket authority and restrictions are

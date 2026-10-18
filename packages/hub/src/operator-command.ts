@@ -45,7 +45,8 @@ function validLiveInfo(value: unknown, doctor: boolean): boolean {
   return base && (doctor
     ? Array.isArray(info.integrity) && info.integrity.length > 0 && info.integrity.every(item => typeof item === "string")
     : typeof info.claimed === "boolean" && typeof info.documentCount === "number" &&
-      Number.isSafeInteger(info.documentCount) && info.documentCount >= 0);
+      Number.isSafeInteger(info.documentCount) && info.documentCount >= 0 &&
+      (info.claimCode === undefined || !info.claimed && typeof info.claimCode === "string" && info.claimCode.length > 0));
 }
 
 function controlAbsent(error: unknown): boolean {
@@ -85,6 +86,7 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
     try {
       const info = await liveInfo(databasePath);
       console.log(`hub        running\ndatabase   ${info.databasePath}\nsize       ${info.size} bytes\ndocuments  ${info.documentCount}\nclaimed    ${info.claimed ? "yes" : "no"}`);
+      if (info.claimCode !== undefined) console.log(`claim code ${info.claimCode}`);
     } catch (error) {
       console.log(controlAbsent(error) ? "hub        not running" : "hub        inspection failed");
       console.error(String(error));

@@ -67,12 +67,13 @@ describe("the remote hub setup reading", () => {
     await act(async () => complete(answer({ unclaimed: true, canClaim: true })));
     const text = host.textContent ?? "";
     expect(text).toContain("This hub is unclaimed");
-    expect(text).toMatch(/first.*GitHub.*approval/i);
+    expect(text).toContain("one-time claim code");
+    expect(text).toContain("ub-hub status");
     expect(text).toContain("first member and administrator");
     expect(text).toContain("default workspace");
     expect(text).toMatch(/one[- ]time|once/i);
     expect(text).toMatch(/workspace UUID.*report|reported.*workspace UUID/i);
-    expect(commands(host)).toContain(`ub auth login '${window.location.origin}'`);
+    expect(commands(host)).toContain(`ub auth login '${window.location.origin}' --claim-code '<code>'`);
     expect(commands(host)).toContain(`ub workspace use '${window.location.origin}/<workspace-id>'`);
     expect(commands(host)).toContain("ub open");
     expect(text).toMatch(/browser is not signed in/i);

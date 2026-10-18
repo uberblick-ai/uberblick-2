@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { hostname } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,12 +47,16 @@ describe("ub auth local selection and command surface", () => {
         expect(help.stdout).toContain("Signing in grants no workspace membership");
         expect(help.stdout).toMatch(/revok.*replac|replac.*revok/i);
         expect(help.stdout.replace(/\s+/g, " ")).toMatch(/approve only a code you just started/i);
-        expect(help.stdout.replace(/\s+/g, " ")).toMatch(/first.*account.*approv.*claim.*default workspace.*admin/i);
+        expect(help.stdout).toContain("--claim-code");
+        expect(help.stdout).toContain("ub-hub status");
+        expect(help.stdout.replace(/\s+/g, " ")).toContain("Without a claim code, sign-in will not claim the hub.");
       }
       if (args[1] === "logout") expect(help.stdout).toContain("--all-devices");
     }
     for (const args of [["auth", "unknown"], ["auth", "login", "--json"], ["auth", "logout", "a", "b"],
-      ["auth", "login", "--all-devices"], ["auth", "status", "--all-devices"], ["auth", "logout", "--unknown"]]) {
+      ["auth", "login", "--all-devices"], ["auth", "status", "--all-devices"], ["auth", "logout", "--unknown"],
+      ["auth", "login", "--claim-code"], ["auth", "status", "--claim-code", "private-code"],
+      ["auth", "logout", "--claim-code", "private-code"]]) {
       const run = await runInProcess(args, box);
       expect(run.status).toBe(2);
       expect(run.stdout).toBe("");
@@ -286,22 +291,25 @@ describe("ub auth local selection and command surface", () => {
 describe("hub-driven CLI GitHub sign-in", () => {
   it("claims a fresh deployed hub before storing its workspace credential and leaves the binding unchanged", async () => {
     const remote = await rig([], true, true);
+    const claimCode = await remote.claimCode();
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL }, userConfig: { workspace: WORKSPACE, hubUrl: DEAD_HUB_URL } });
     const binding = readFileSync(configPath(box));
-    const login = await runInProcess(["auth", "login", remote.origin], box);
+    const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
     expect(login.status, login.stderr).toBe(0);
     const stored = savedLogin(box, remote.origin);
     const workspace = stored.credential.record.workspaces[0];
     expect(stored.credential.record.workspaces).toHaveLength(1);
     expect(workspace).toMatch(/^[0-9a-f-]{36}$/);
     expect(workspace).not.toBe(WORKSPACE);
-    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
+    expect(login.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis sign-in will claim the unclaimed hub and its default workspace for this account as admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\nsigned in  ${USERNAME} on ${remote.origin}\nclaimed    default workspace (${workspace}), you are admin\navailable workspaces:\n  ${workspace} | Default workspace\nUse it here: ub workspace use ${remote.origin.replace("http:", "ws:")}/ws/${workspace}\n`);
     expect(login.stderr).toBe("");
     expect(readFileSync(configPath(box))).toEqual(binding);
     expect(remote.requests[0]).toMatchObject({ path: "/auth/credential/renew", method: "POST", body: {
       protocolVersion: SYNC_PROTOCOL_VERSION, token: "",
     } });
     expect(remote.requests[1]).toMatchObject({ path: "/auth/claim-state", method: "GET", body: {} });
+    expect(remote.requests[2]).toMatchObject({ path: "/auth/github/start", body: { claimCode } });
+    expect(login.output + JSON.stringify(remote.logs)).not.toContain(claimCode);
     const again = await runInProcess(["auth", "login", remote.origin], box);
     expect(again.status, again.stderr).toBe(0);
     expect(again.stdout).not.toContain("this hub is unclaimed");
@@ -347,7 +355,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
     const remote = await rig([], true, true, true);
     const endpoint = `ws://127.0.0.1:${remote.hub.port}/custom//ws`;
     const box = unboundSandbox();
-    const login = await runInProcess(["auth", "login", endpoint], box);
+    const login = await runInProcess(["auth", "login", endpoint, "--claim-code", await remote.claimCode()], box);
     expect(login.status, login.stderr).toBe(0);
     const link = login.stdout.match(/^Use it here: ub workspace use (.+)$/m)?.[1];
     expect(link).toBeDefined();
@@ -385,17 +393,73 @@ describe("hub-driven CLI GitHub sign-in", () => {
     expect(parseJoinTarget(pasted.stdout.trim().split("\n")[2]!)).toEqual({ endpoint, workspace: WORKSPACE });
   });
 
-  it("reports ordinary completion when another account claimed after the unclaimed notice", async () => {
-    const remote = await rig();
-    remote.controls.transform = (path, status, result) => path === "/auth/claim-state"
-      ? { status: 200, result: { unclaimed: true, canClaim: true } } : { status, result };
+  it("signs in without claiming a fresh hub and explains the host-only code before approval", async () => {
+    const remote = await rig([], true, true);
+    const claimCode = await remote.claimCode();
     const box = sandbox();
     const login = await runInProcess(["auth", "login", remote.origin], box);
     expect(login.status, login.stderr).toBe(0);
-    expect(login.stdout).toContain("this hub is unclaimed");
+    const notice = "this hub is unclaimed: this sign-in will not claim it; the host operator reads the claim code with ub-hub status";
+    expect(login.stdout).toContain(notice);
+    expect(login.stdout.indexOf(notice)).toBeLessThan(login.stdout.indexOf("code       ABCD-EFGH"));
     expect(login.stdout).not.toContain("claimed    ");
     expect(login.stdout).toContain("available workspaces: none\n");
     expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
+    expect(remote.hub.hubAdmins?.isAdmin(savedLogin(box, remote.origin).identity.id)).toBe(false);
+    expect(await remote.claimCode()).toBe(claimCode);
+    expect(login.output).not.toContain(claimCode);
+  });
+
+  it.each(["invalid", "used", "closed"])("refuses a %s claim code separately before showing GitHub approval", async kind => {
+    const remote = await rig([], true, true);
+    const claimCode = kind === "invalid" ? "not-a-valid-claim-code" : await remote.claimCode();
+    if (kind === "used") {
+      const start = await fetch(`${remote.origin}/auth/github/start`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ claimCode }),
+      });
+      expect(start.status).toBe(200);
+    }
+    if (kind === "closed") {
+      const database = new DatabaseSync(remote.databasePath);
+      try { database.exec("UPDATE hub_claim_state SET unclaimed = 0"); } finally { database.close(); }
+    }
+    const before = remote.github.calls.length;
+    const box = sandbox();
+    const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
+    expect(login.status).toBe(1);
+    expect(login.stderr).toContain("claim code is invalid, already used, or claiming has closed");
+    expect(login.stdout).not.toContain("code       ");
+    expect(login.output).not.toContain(claimCode);
+    expect(existsSync(credentialPath(box))).toBe(false);
+    expect(remote.github.calls).toHaveLength(before);
+  });
+
+  it("reports when a coded sign-in completes after host setup closes claiming", async () => {
+    const remote = await rig([], true, true);
+    const claimCode = await remote.claimCode();
+    remote.controls.onStart = () => {
+      const database = new DatabaseSync(remote.databasePath);
+      try { database.exec("UPDATE hub_claim_state SET unclaimed = 0"); } finally { database.close(); }
+    };
+    const box = sandbox();
+    const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
+    expect(login.status, login.stderr).toBe(0);
+    expect(login.stdout).toContain("this sign-in did not claim the hub\n");
+    expect(login.stdout).not.toContain("claimed    ");
+    expect(login.stdout).toContain("available workspaces: none\n");
+    expect(savedLogin(box, remote.origin).credential.record.workspaces).toEqual([]);
+  });
+
+  it("never retries a coded start without its claim code after a start-body refusal", async () => {
+    const remote = await rig([], true, true);
+    const claimCode = await remote.claimCode();
+    remote.controls.transform = (path, status, result) => path === "/auth/github/start"
+      ? { status: 400, result: { status: "invalid-request" } } : { status, result };
+    const login = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], sandbox());
+    expect(login.status).toBe(1);
+    expect(login.stdout).not.toContain("code       ");
+    expect(remote.requests.filter(request => request.path === "/auth/github/start"))
+      .toEqual([expect.objectContaining({ body: { deviceName: hostname(), claimCode } })]);
   });
 
   it("reports a committed claim independently of an earlier failed claim-state read", async () => {
@@ -664,6 +728,7 @@ describe("hub-driven CLI GitHub sign-in", () => {
 
   it("reports an issued device left on the hub when publication fails after collection", async () => {
     const remote = await rig([], true, true);
+    const claimCode = await remote.claimCode();
     let claimedWorkspace: string | undefined;
     remote.controls.transform = (path, status, result) => {
       if (path === "/auth/github/collect" && result.status === "complete" && typeof result.claimedWorkspaceId === "string") {
@@ -679,10 +744,10 @@ describe("hub-driven CLI GitHub sign-in", () => {
       mkdirSync(credentialPath(box));
     };
     try {
-      const run = await runInProcess(["auth", "login", remote.origin], box);
+      const run = await runInProcess(["auth", "login", remote.origin, "--claim-code", claimCode], box);
       expect(run.status).toBe(1);
       expect(claimedWorkspace).toMatch(/^[0-9a-f-]{36}$/);
-      expect(run.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis hub is unclaimed: the first account to approve becomes its admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\n`);
+      expect(run.stdout).toBe(`hub        ${remote.origin}\napprove only a code you just started yourself\nthis sign-in will claim the unclaimed hub and its default workspace for this account as admin\nopen       https://github.com/login/device\ncode       ABCD-EFGH\nwaiting for approval…\n`);
       expect(run.stderr).toContain(`default workspace (${claimedWorkspace})`);
       expect(run.stderr).toContain("could not store login");
       expect(run.stderr).toMatch(/issued.*device.*remain|issued.*device.*hub|device.*remain.*hub/i);

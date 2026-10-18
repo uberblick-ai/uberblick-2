@@ -51,7 +51,7 @@ function createTeamExtension(
   const hasLiveDocuments = (workspaceId: string) =>
     [...server().hocuspocus.documents.keys()].some(name => name.startsWith(`${workspaceId}/`));
 
-  if (options.initializeDefaultWorkspace) claims = new HubClaimState(database);
+  if (options.initializeDefaultWorkspace) claims = new HubClaimState(database, undefined, config.github?.now);
   if (config.github !== undefined || options.operatorSetup) {
     principals = new PrincipalRegistry(database);
     memberships = new MembershipRegistry(database);

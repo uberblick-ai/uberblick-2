@@ -71,7 +71,7 @@ async function hub(start: unknown = started, unclaimed = true, pending = false, 
 function guidance(origin: string, unclaimed = true): string {
   return `hub        ${origin}\n` +
     "approve only a code you just started yourself\n" +
-    (unclaimed ? "this hub is unclaimed: the first account to approve becomes its admin\n" : "") +
+    (unclaimed ? "this hub is unclaimed: this sign-in will not claim it; the host operator reads the claim code with ub-hub status\n" : "") +
     `open       ${URL}\ncode       ABCD-EFGH\nwaiting for approval…\n`;
 }
 

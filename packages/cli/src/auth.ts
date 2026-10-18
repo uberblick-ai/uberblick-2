@@ -30,7 +30,7 @@ commands:
   logout [hub]           # Sign this computer out of a hub; --all-devices signs out all of yours
 `;
 
-export const AUTH_LOGIN_HELP = `usage: ub auth login [hub]
+export const AUTH_LOGIN_HELP = `usage: ub auth login [hub] [--claim-code <code>]
 
 Sign in to the given hub, or the hub selected by this project's binding.
 The hub can be a bare host, an http(s) address or a ws(s) endpoint.
@@ -47,14 +47,20 @@ If that revocation is not confirmed, login still succeeds and warns that the
 previous device is not revoked.
 Local-only work needs no login. Login never changes the project binding.
 Signing in grants no workspace membership, except for the first claim below.
-On a fresh, unclaimed hub, the first GitHub account to complete approval
-claims its default workspace as administrator. Claiming is one-time; this
+To claim a fresh, unclaimed hub, the host operator reads its one-time code
+with \`ub-hub status\`, then supplies it with --claim-code. Without a claim
+code, sign-in will not claim the hub. A valid code reserves the claim for
+this sign-in; completing approval makes this account hub administrator and
+administrator of its default workspace. Claiming is one-time; this
 command reports the claim after storing the login, then lists the available
 workspace UUIDs and any supplied names along with who signed in and the hub.
 
 options:
+  --claim-code <code>    claim a fresh hub using the host operator's code
   -h, --help             show this help
 `;
+
+export const AUTH_LOGIN_OPTIONS = { "claim-code": { type: "string" } } as const;
 
 export const AUTH_STATUS_OPTIONS = { json: { type: "boolean" } } as const;
 
@@ -501,11 +507,11 @@ async function post(
   received?.(result);
   if (typeof result.status !== "string") throw invalidResponse();
   const allowed = route === "start"
-    ? ["pending", "failed", "busy", "not-configured", "invalid-request"]
+    ? ["pending", "failed", "busy", "not-configured", "invalid-request", "claim-code-invalid"]
     : ["pending", "complete", "denied", "expired", "abandoned", "failed", "collected", "unknown-request", "not-configured", "invalid-request"];
   if (!allowed.includes(result.status)) throw invalidResponse();
   const expectedCode = result.status === "not-configured" ? 503
-    : result.status === "invalid-request" ? 400
+    : result.status === "invalid-request" || result.status === "claim-code-invalid" ? 400
     : result.status === "unknown-request" ? 404
     : route === "start" && result.status === "busy" ? 429
     : route === "start" && result.status === "failed" ? 502 : 200;
@@ -524,12 +530,13 @@ function terminal(result: Record<string, unknown>): never {
     "not-configured": "the hub is not configured for GitHub sign-in",
     busy: "the hub is busy with sign-in attempts; try again later",
     "invalid-request": "the hub refused the sign-in request; update the hub and client",
+    "claim-code-invalid": "the claim code is invalid, already used, or claiming has closed; the host operator can check ub-hub status",
   };
   throw new SignInFailure(messages[String(result.status)] ?? "the hub returned an invalid GitHub sign-in response; update the hub");
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-async function login(selection: Selection, io: Io, nextAction: boolean): Promise<number> {
+async function login(selection: Selection, io: Io, nextAction: boolean, claimCode?: string): Promise<number> {
   try { preflightHubLoginStore(); } catch (error) {
     io.err(`ub auth: ${error instanceof Error ? error.message : "credential store is not writable"}\n`);
     return 1;
@@ -560,10 +567,11 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
         attempt = { requestId: result.requestId, collectionSecret: result.collectionSecret };
       }
     });
-    let started = await start(deviceName === undefined ? {} : { deviceName });
+    let started = await start({ ...(deviceName === undefined ? {} : { deviceName }),
+      ...(claimCode === undefined ? {} : { claimCode }) });
     // Older hubs require an empty start body. Only a validated refusal with
     // no attempt authority permits one unnamed retry; interrupted starts stop.
-    if (deviceName !== undefined && started.status === "invalid-request" &&
+    if (claimCode === undefined && deviceName !== undefined && started.status === "invalid-request" &&
         Object.keys(started).length === 1 && !interrupted.signal.aborted) {
       started = await start({});
     }
@@ -578,7 +586,9 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
     deadline = performance.now() + started.expiresIn * 1000;
     if (interrupted.signal.aborted) throw new SignInFailure("GitHub sign-in interrupted");
     io.out("approve only a code you just started yourself\n");
-    if (unclaimed) io.out("this hub is unclaimed: the first account to approve becomes its admin\n");
+    if (unclaimed) io.out(claimCode === undefined
+      ? "this hub is unclaimed: this sign-in will not claim it; the host operator reads the claim code with ub-hub status\n"
+      : "this sign-in will claim the unclaimed hub and its default workspace for this account as admin\n");
     authField(io, "open", started.verificationUri);
     authField(io, "code", started.userCode);
     io.out("waiting for approval…\n");
@@ -639,6 +649,7 @@ async function login(selection: Selection, io: Io, nextAction: boolean): Promise
       }
       authField(io, "signed in", `${displayUsername(credential.identity.githubUsername)} on ${selection.origin}`);
       if (claimedWorkspaceId !== undefined) authField(io, "claimed", `default workspace (${claimedWorkspaceId}), you are admin`);
+      else if (claimCode !== undefined) io.out("this sign-in did not claim the hub\n");
       describeWorkspaces(credential, io);
       if (nextAction && claimedWorkspaceId !== undefined &&
           (!selection.bound || selection.workspace === undefined ||
@@ -686,8 +697,9 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   let hub: string | undefined;
   let allDevices = false;
   let json = false;
+  let claimCode: string | undefined;
   try {
-    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : sub === "status" ? AUTH_STATUS_OPTIONS : {}, allowPositionals: true });
+    const parsed = parseArgs({ args, options: sub === "logout" ? AUTH_LOGOUT_OPTIONS : sub === "status" ? AUTH_STATUS_OPTIONS : AUTH_LOGIN_OPTIONS, allowPositionals: true });
     if (parsed.positionals.length > 1) {
       io.err(`ub auth ${sub}: expected at most one hub\n\n${help}`);
       return 2;
@@ -695,6 +707,8 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
     hub = parsed.positionals[0];
     allDevices = "all-devices" in parsed.values && parsed.values["all-devices"] === true;
     json = "json" in parsed.values && parsed.values.json === true;
+    claimCode = "claim-code" in parsed.values && typeof parsed.values["claim-code"] === "string"
+      ? parsed.values["claim-code"] : undefined;
   } catch (error) {
     const unknown = error instanceof Error && "code" in error && error.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION";
     io.err(`ub auth ${sub}: ${unknown ? "unknown option" : "invalid option usage"}\n\n${help}`);
@@ -720,7 +734,7 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);
-    return await login(selection, io, options.loginNextAction !== false);
+    return await login(selection, io, options.loginNextAction !== false, claimCode);
   }
   if (sub === "status") return await status(selection, io, json);
   return await logout(selection, io, allDevices);

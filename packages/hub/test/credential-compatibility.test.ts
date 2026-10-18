@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { adminSocketPath, type SetupGrant } from "../src/admin-setup.js";
 import type { GithubSignIn, SignInCollection } from "../src/github-sign-in.js";
 import { silentLogger } from "../src/log.js";
+import { requestOperator } from "../src/operator-client.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createRoomAuthenticator, type HubContext } from "../src/server.js";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
@@ -184,7 +185,8 @@ function connect(
 describe("loopback admission is unchanged", () => {
   it("claiming a fresh hub changes no live admission decisions", async () => {
     let now = 1000;
-    const fresh = await createHub({ authSecret: TEST_SECRET, databasePath: tempDatabasePath(), address: "127.0.0.1", port: 0,
+    const databasePath = tempDatabasePath();
+    const fresh = await createHub({ authSecret: TEST_SECRET, databasePath, address: "127.0.0.1", port: 0,
       log: silentLogger, github: {
         clientId: "Iv1.0123456789abcdef", now: () => now,
         fetch: async (url) => Response.json(String(url) === "https://github.com/login/device/code"
@@ -193,12 +195,15 @@ describe("loopback admission is unchanged", () => {
             ? { access_token: "claim-private-token", token_type: "bearer", scope: "" }
             : { id: 5678, login: "claiming-account" }),
       },
-    }, { initializeDefaultWorkspace: true });
+    }, { initializeDefaultWorkspace: true, operatorSetup: true });
     try {
       const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${fresh.port}${path}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
-      const pending = await (await post("/auth/github/start", {})).json() as Awaited<ReturnType<GithubSignIn["start"]>>;
+      const status = await requestOperator(databasePath, "hub-status");
+      const claimCode = (status.info as Record<string, unknown>).claimCode;
+      expect(claimCode).toEqual(expect.any(String));
+      const pending = await (await post("/auth/github/start", { claimCode })).json() as Awaited<ReturnType<GithubSignIn["start"]>>;
       if (pending.status !== "pending") throw new Error("sign-in did not start");
       now += 1000;
       const claimed = await (await post("/auth/github/collect", {

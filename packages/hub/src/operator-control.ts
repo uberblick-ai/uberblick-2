@@ -35,12 +35,14 @@ export function createOperatorControls(
         });
         return { status: "complete", path };
       }
+      const claimCode = action === "hub-status" ? claims?.operatorClaimCode() : undefined;
       const info = {
         databasePath: resolve(database.databasePath), size: action === "hub-status"
           ? statSync(database.databasePath).size : databaseSize(database.databasePath),
         ...(action === "hub-status" ? {
           documentCount: Number(database.connection.prepare("SELECT count(*) AS count FROM documents").get()?.count),
           claimed: claims === undefined || !claims.state(config.github !== undefined).unclaimed,
+          ...(claimCode === undefined ? {} : { claimCode }),
         } : {}),
         port: context.server().address.port, host: config.address,
         storeFailure: context.storeFailure(), githubClientId: config.github?.clientId ?? null,

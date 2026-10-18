@@ -55,6 +55,9 @@ describe("hub browser sign-in", () => {
     await flush();
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(String(fetchMock.mock.calls[0]![0])).toBe(`${window.location.origin}/auth/browser/session`);
+    expect(view.container.textContent).toContain("This sign-in will not claim the hub");
+    expect(view.container.textContent).toContain("ub-hub status");
+    fireEvent.change(view.getByLabelText("Claim code (optional)"), { target: { value: "private-claim-code" } });
     fireEvent.click(view.getByRole("button", { name: "Sign in with GitHub" }));
     await flush();
     expect(view.getByRole("link", { name: "https://github.com/login/device" }).getAttribute("href"))
@@ -77,8 +80,61 @@ describe("hub browser sign-in", () => {
       expect(new Headers(init?.headers).get("Authorization")).toBeNull();
       expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
     }
-    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({});
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({ claimCode: "private-claim-code" });
     expect(JSON.parse(String(fetchMock.mock.calls[2]![1]?.body))).toEqual({ requestId: "request-id", collectionSecret: "collection-secret" });
+    expect(view.container.innerHTML).not.toContain("private-claim-code");
+    expect(localStorage.getItem(BROWSER_SESSION_STORAGE_KEY)).not.toContain("private-claim-code");
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("private-claim-code"))).toBe(true);
+  });
+
+  it("allows ordinary sign-in on an unclaimed hub without reporting a claim", async () => {
+    fetchMock.mockResolvedValueOnce(answer({ status: "signed-out" }, 401))
+      .mockResolvedValueOnce(answer({ status: "pending", requestId: "request-id", collectionSecret: "collection-secret",
+        verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH", expiresIn: 900, interval: 1 }))
+      .mockResolvedValueOnce(answer({ status: "complete", session: savedSession() }));
+    const view = mount(true);
+    await flush();
+    expect(view.container.textContent).toContain("This sign-in will not claim the hub");
+    fireEvent.click(view.getByRole("button", { name: "Sign in with GitHub" }));
+    await flush();
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1]?.body))).toEqual({});
+    await advance(1_000);
+    expect(view.container.textContent).toContain("Signed in as octocat");
+    expect(view.container.textContent).not.toContain("Claimed this hub");
+    expect(view.container.textContent).not.toContain("administrator");
+    expect(onClaim).not.toHaveBeenCalled();
+  });
+
+  it("names a refused claim code separately and clears it before a retry", async () => {
+    fetchMock.mockResolvedValueOnce(answer({ status: "signed-out" }, 401))
+      .mockResolvedValueOnce(answer({ status: "claim-code-invalid" }, 400));
+    const view = mount(true);
+    await flush();
+    fireEvent.change(view.getByLabelText("Claim code (optional)"), { target: { value: "used-claim-code" } });
+    fireEvent.click(view.getByRole("button", { name: "Sign in with GitHub" }));
+    await flush();
+    expect(view.getByRole("alert").textContent).toContain("claim code is invalid, already used, or claiming has closed");
+    expect(view.getByRole("alert").textContent).toContain("ub-hub status");
+    expect((view.getByLabelText("Claim code (optional)") as HTMLInputElement).value).toBe("");
+    expect(view.queryByRole("link", { name: "https://github.com/login/device" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("reports when a coded sign-in completes without claiming", async () => {
+    fetchMock.mockResolvedValueOnce(answer({ status: "signed-out" }, 401))
+      .mockResolvedValueOnce(answer({ status: "pending", requestId: "request-id", collectionSecret: "collection-secret",
+        verificationUri: "https://github.com/login/device", userCode: "ABCD-EFGH", expiresIn: 900, interval: 1 }))
+      .mockResolvedValueOnce(answer({ status: "complete", session: savedSession() }));
+    const view = mount(true);
+    await flush();
+    fireEvent.change(view.getByLabelText("Claim code (optional)"), { target: { value: "valid-claim-code" } });
+    fireEvent.submit(view.getByRole("button", { name: "Sign in with GitHub" }).closest("form")!);
+    await flush();
+    await advance(1_000);
+    expect(view.container.textContent).toContain("Signed in as octocat");
+    expect(view.container.textContent).toContain("This sign-in did not claim the hub");
+    expect(onClaim).not.toHaveBeenCalled();
   });
 
   it("restores the account from the hub and keeps the token until sign-out is confirmed", async () => {

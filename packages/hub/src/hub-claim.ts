@@ -1,18 +1,23 @@
 /** One-time bootstrap authority, private to the deployed hub's database. */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { seedTagCatalog, setWorkspaceName } from "@uberblick/schema";
 import * as Y from "yjs";
 import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import { HubAdminRegistry } from "./hub-admins.js";
+import type { DeviceFlowLease } from "./github-device-flow.js";
 
 const HUB_DATA_TABLES = [
   "documents", "hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_admins", "hub_workspace_promotions",
 ] as const;
 
 export class HubClaimState {
+  private code: string | undefined;
+  private reservation: DeviceFlowLease | undefined;
   constructor(private readonly database: HubDatabase,
-    private readonly admins = new HubAdminRegistry(database)) {
+    private readonly admins = new HubAdminRegistry(database),
+    private readonly now: () => number = Date.now) {
     const db = database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -54,8 +59,30 @@ export class HubClaimState {
     return { unclaimed, canClaim: unclaimed && githubConfigured };
   }
 
+  /** Only the host's private operator socket may disclose this value. */
+  operatorClaimCode(): string | undefined {
+    if (!this.state(false).unclaimed) return undefined;
+    if (this.reservation !== undefined && this.now() >= this.reservation.expiresAt) this.reservation.release();
+    if (this.reservation !== undefined) return undefined;
+    this.code ??= randomBytes(32).toString("base64url");
+    return this.code;
+  }
+
+  reserve(code: string): DeviceFlowLease | undefined {
+    const available = this.operatorClaimCode();
+    if (available === undefined || !/^[A-Za-z0-9_-]{43}$/.test(code) ||
+        !timingSafeEqual(Buffer.from(code), Buffer.from(available))) return undefined;
+    const lease: DeviceFlowLease = { expiresAt: Infinity, release: () => {
+      if (this.reservation === lease) this.reservation = undefined;
+    } };
+    this.code = undefined;
+    this.reservation = lease;
+    return lease;
+  }
+
   /** Caller holds the sign-in transaction through credential issuance. */
-  claim(principalId: string, memberships: MembershipRegistry): string | undefined {
+  claim(principalId: string, memberships: MembershipRegistry, lease?: DeviceFlowLease): string | undefined {
+    if (lease === undefined || lease !== this.reservation || this.now() >= lease.expiresAt) return undefined;
     const row = this.database.connection.prepare(
       "SELECT default_workspace_id FROM hub_claim_state WHERE id = 1 AND unclaimed = 1",
     ).get();

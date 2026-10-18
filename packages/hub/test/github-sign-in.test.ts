@@ -246,6 +246,20 @@ describe("hub-driven GitHub identity", () => {
 });
 
 describe("bounded device requests", () => {
+  it("charges invalid claim codes to the existing start budget without contacting GitHub", async () => {
+    const r = await rig(tempDatabasePath(), true);
+    const headers = { "X-Forwarded-For": "192.0.2.1" };
+    for (let index = 0; index < 12; index++) {
+      expect(await post(r.hub, "start", { claimCode: "invalid-private-claim-code" }, headers))
+        .toEqual({ code: 400, result: { status: "claim-code-invalid" } });
+    }
+    expect(await post(r.hub, "start", { claimCode: "invalid-private-claim-code" }, headers))
+      .toEqual({ code: 429, result: { status: "busy" } });
+    expect(r.github.calls).toHaveLength(0);
+    expect(JSON.stringify(r.logs)).not.toContain("invalid-private-claim-code");
+    expect(await post(r.hub, "start", {}, { "X-Forwarded-For": "192.0.2.2" })).toMatchObject({ code: 200 });
+  });
+
   it("bounds start history and GitHub calls across many clients even when every start fails", async () => {
     let now = 1000;
     let calls = 0;

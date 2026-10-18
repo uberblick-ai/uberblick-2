@@ -8,6 +8,7 @@ import { hostname } from "node:os";
 import { writeHubLogin } from "../src/auth-store.js";
 import { DatabaseSync } from "node:sqlite";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { requestOperator } from "../../hub/src/operator-client.js";
 import { expect } from "vitest";
 import { type Run, type Sandbox, sandbox } from "./helpers.js";
 
@@ -143,7 +144,8 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
       authSecret: SIGNING_SECRET, port: 0, databasePath, log: (line) => logs.push(line),
       ...(protocolVersion === undefined ? {} : { protocolVersion }),
       ...(configured ? { github: { clientId: "Iv23AbCdEF0123456789", fetch: github.fetch } } : {}),
-    }, { initializeDefaultWorkspace, ...(deviceCredentials ? { deviceCredentials: true } : {}) });
+    }, { initializeDefaultWorkspace, operatorSetup: initializeDefaultWorkspace,
+      ...(deviceCredentials ? { deviceCredentials: true } : {}) });
     hubs.push(hub);
     return hub;
   };
@@ -215,6 +217,12 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
   return {
     ...proxy, box, github, logs, requests, collectionStatuses, databasePath, controls,
     get hub() { return hub; },
+    async claimCode(): Promise<string> {
+      const status = await requestOperator(databasePath, "hub-status");
+      const code = (status.info as Record<string, unknown> | undefined)?.claimCode;
+      if (typeof code !== "string") throw new Error("expected host-only claim code");
+      return code;
+    },
     async restart() { await hub.stop(); hub = await startHub(); },
     async cancel(body: Record<string, unknown>) {
       return fetch(`http://127.0.0.1:${hub.port}/auth/github/cancel`, {
@@ -234,7 +242,7 @@ export function privateDeviceRows(databasePath: string) {
 export function assertPublicOnly(run: Run, testRig: Awaited<ReturnType<typeof rig>>, key?: string) {
   const printed = run.output + JSON.stringify(testRig.logs);
   for (const secret of [GITHUB_TOKEN, DEVICE_CODE, SIGNING_SECRET, key,
-    ...testRig.requests.map((request) => request.body.collectionSecret as string | undefined)]) {
-    if (secret) expect(printed.includes(secret), "no private flow or credential value was printed").toBe(false);
+    ...testRig.requests.flatMap((request) => [request.body.collectionSecret, request.body.claimCode])]) {
+    if (typeof secret === "string" && secret) expect(printed.includes(secret), "no private flow or credential value was printed").toBe(false);
   }
 }

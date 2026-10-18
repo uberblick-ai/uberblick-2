@@ -1,5 +1,6 @@
 /** Released bundles open sockets only to a served configuration's endpoint. */
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -10,6 +11,7 @@ import { createHub, silentLogger } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { createTeamHub } from "@uberblick/hub/team";
 import type { TeamHub } from "@uberblick/hub/team";
+import { requestOperator } from "../../hub/src/operator-client.js";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { build, preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -22,11 +24,13 @@ let serving: PreviewServer | undefined;
 let hub: Hub | undefined;
 let appUrl: string;
 let releaseOutDir: string;
+let originalDirectory: string;
 
 test.beforeAll(async () => {
   const scratchRoot = process.env.UB_AGENTS_SCRATCH ?? tmpdir();
   const run = process.env.UB_AGENTS_RUN ?? basename(dirname(scratchRoot));
   scratch = mkdtempSync(join(scratchRoot, `release-browser-${run}-`));
+  originalDirectory = process.cwd();
   const outDir = join(scratch, "bundle");
   releaseOutDir = outDir;
   const prior = process.env.UBERBLICK_RELEASE_WEB;
@@ -38,6 +42,9 @@ test.beforeAll(async () => {
     if (prior === undefined) delete process.env.UBERBLICK_RELEASE_WEB;
     else process.env.UBERBLICK_RELEASE_WEB = prior;
   }
+  // The private control socket uses a relative path to stay within the Unix
+  // socket path limit even when the run's scratch directory is deeply nested.
+  process.chdir(scratch);
   hub = await createHub({ port: 0, authSecret: SECRET, databasePath: ":memory:", log: silentLogger });
   serving = await preview({ configFile: false, root: webRoot, logLevel: "error",
     build: { outDir }, preview: { port: 0, host: "127.0.0.1", strictPort: true,
@@ -119,9 +126,10 @@ async function browserHub(secure = false, enforcePolicy = true): Promise<{
   hub: TeamHub; github: BrowserGithub; appUrl: string; stop(): Promise<void>;
 }> {
   const github = new BrowserGithub();
-  const running = await createTeamHub({ port: 0, authSecret: SECRET, databasePath: ":memory:", log: silentLogger,
+  if (scratch === undefined) throw new Error("release test scratch is missing");
+  const running = await createTeamHub({ port: 0, authSecret: SECRET, databasePath: join(scratch, `browser-${randomUUID()}.sqlite`), log: silentLogger,
     github: { clientId: "Iv1.0123456789abcdef", fetch: github.fetch, now: () => github.now } },
-  { initializeDefaultWorkspace: true, deviceCredentials: true });
+  { initializeDefaultWorkspace: true, deviceCredentials: true, operatorSetup: true });
   try {
     const served = await browserPreview(running, secure, enforcePolicy);
     return { hub: running, github, appUrl: served.appUrl, async stop() {
@@ -186,6 +194,7 @@ test.afterAll(async () => {
     await serving?.close();
   } finally {
     try { await hub?.stop(); } finally {
+      process.chdir(originalDirectory);
       if (scratch !== undefined) rmSync(scratch, { recursive: true, force: true });
     }
   }
@@ -258,7 +267,7 @@ for (const endpoint of ["ws://localhost:8080/ws", "wss://remote.example/ws"]) {
       await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
       const commands = page.getByRole("region", { name: "Hub setup guide" }).locator("li code");
       await expect(commands).toHaveText([
-        `ub auth login '${appUrl}'`, `ub workspace use '${appUrl}/<workspace-id>'`, "ub open",
+        `ub auth login '${appUrl}' --claim-code '<code>'`, `ub workspace use '${appUrl}/<workspace-id>'`, "ub open",
       ]);
       // Long origins and the placeholder must wrap and remain native
       // selectable text.
@@ -323,6 +332,19 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
       .toContainText("hub administrator");
     expect(running.github.starts).toBe(0);
 
+    await expect(page.getByText("This sign-in will not claim the hub.", { exact: false })).toBeVisible();
+    const ordinary = await completeBrowserSignIn(page, running.github);
+    expect(ordinary.claimedWorkspaceId).toBeUndefined();
+    const ordinaryPrincipal = running.hub.principals?.getByGithubAccountId("9007");
+    if (ordinaryPrincipal == null) throw new Error("Ordinary browser sign-in did not identify its account");
+    expect(running.hub.hubAdmins?.isAdmin(ordinaryPrincipal.id)).toBe(false);
+    const status = await requestOperator(running.hub.databasePath, "hub-status");
+    const info = status.info as { claimed: boolean; claimCode?: string };
+    expect(info.claimed).toBe(false);
+    if (typeof info.claimCode !== "string") throw new Error("Host status did not provide a fresh claim code");
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Sign in with GitHub", exact: true })).toBeVisible();
+    await page.getByLabel("Claim code (optional)", { exact: true }).fill(info.claimCode);
     const result = await completeBrowserSignIn(page, running.github);
     expect(result.claimedWorkspaceId).toMatch(/^[0-9a-f-]{36}$/);
     await expect(page.getByText(`Claimed this hub: you are a hub administrator and administrator of the default workspace (${result.claimedWorkspaceId}).`, { exact: true })).toBeVisible();
@@ -331,6 +353,9 @@ test("@webkit browser sign-in claims a released localhost hub and survives reloa
     expect(result.session.expiresAt).toBe(running.github.now + 24 * 60 * 60_000);
     expect(JSON.stringify(result)).not.toContain(SECRET);
     expect(JSON.stringify(result)).not.toContain("synthetic-browser-github-token");
+    expect(JSON.stringify(result)).not.toContain(info.claimCode);
+    expect(page.url()).not.toContain(info.claimCode);
+    expect((await requestOperator(running.hub.databasePath, "hub-status")).info).not.toHaveProperty("claimCode");
     const principal = running.hub.principals?.getByGithubAccountId("9007");
     if (principal == null || result.claimedWorkspaceId === undefined) throw new Error("Browser claim did not identify its account and workspace");
     expect(running.hub.hubAdmins?.isAdmin(principal.id)).toBe(true);

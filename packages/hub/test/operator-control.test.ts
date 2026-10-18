@@ -73,6 +73,33 @@ it("reports live claim/database facts and flushes pending updates into a private
   expect(readdirSync(dirname(hub.databasePath)).filter(file => file.includes("backing-up"))).toEqual([]);
 });
 
+it("shows the claim code only through host status and stops showing it after claiming closes", async () => {
+  const hub = await rig();
+  const status = await requestOperator(hub.databasePath, "hub-status");
+  const code = (status.info as Record<string, unknown>).claimCode;
+  expect(code).toEqual(expect.any(String));
+  expect(await requestOperator(hub.databasePath, "hub-doctor")).not.toHaveProperty("info.claimCode");
+  const publicState = await fetch(`http://127.0.0.1:${hub.port}/auth/claim-state`);
+  expect(await publicState.text()).not.toContain(code as string);
+  const identity = join(dirname(hub.databasePath), "release.json");
+  writeFileSync(identity, JSON.stringify({ version: "0.5.1", sourceCommit: "a".repeat(40), syncProtocolVersion: 5 }));
+  vi.stubEnv("HUB_DB_PATH", hub.databasePath);
+  const output: string[] = [];
+  vi.spyOn(console, "log").mockImplementation(value => { output.push(String(value)); });
+  try {
+    await runOperatorCommand(["status"], identity);
+    expect(output.join("\n")).toContain(`claim code ${code}`);
+    const database = new DatabaseSync(hub.databasePath);
+    try { database.exec("UPDATE hub_claim_state SET unclaimed = 0 WHERE id = 1"); }
+    finally { database.close(); }
+    expect(await requestOperator(hub.databasePath, "hub-status")).not.toHaveProperty("info.claimCode");
+    output.length = 0;
+    await runOperatorCommand(["status"], identity);
+    expect(output.join("\n")).toContain("claimed    yes");
+    expect(output.join("\n")).not.toContain("claim code");
+  } finally { vi.unstubAllEnvs(); }
+});
+
 it("refuses backups after a swallowed document store failure without stopping service or publishing a copy", async () => {
   const hub = await rig();
   const db = new DatabaseSync(hub.databasePath);

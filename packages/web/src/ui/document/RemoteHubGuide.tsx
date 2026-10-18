@@ -94,7 +94,9 @@ export function RemoteHubGuide(): ReactElement {
           </h1>
           {claimable && (
             <p className="mt-3">
-              The first GitHub account to finish approval claims this hub. It becomes
+              Start sign-in with the one-time claim code to claim this hub. The host
+              operator reads the code with <code>ub-hub status</code>. The account that
+              finishes that approval becomes
               hub administrator and the first member and administrator of this hub’s
               default workspace, whether signing in here or from a computer.
               Claiming happens once.
@@ -131,8 +133,8 @@ export function RemoteHubGuide(): ReactElement {
             </p>
             <ol className="mt-4 list-decimal space-y-4 pl-5">
               <li>
-                {claimable ? "Run the claim command and complete its GitHub approval:" : "Sign in on that computer:"}
-                <code className={commandClass}>{`ub auth login '${origin}'`}</code>
+                {claimable ? "Replace <code> with the claim code from the host operator, then complete GitHub approval:" : "Sign in on that computer:"}
+                <code className={commandClass}>{`ub auth login '${origin}'${claimable ? " --claim-code '<code>'" : ""}`}</code>
               </li>
               <li>
                 {claimable ? "Use the default workspace. Replace <workspace-id> with the workspace UUID reported by the claiming login:" :

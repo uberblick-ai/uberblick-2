@@ -149,7 +149,13 @@ Use the version just published, then follow [REMOTE.md](REMOTE.md) on a Linux
 host or Docker Desktop on macOS with no checkout. Apple Silicon runs the
 `linux/amd64` images under emulation. Verify the no-Tailscale loopback launch,
 GitHub claim, installed-client login and authenticated MCP and `ub open` sync,
-then the selected HTTPS route and operator commands. Verify Tailscale daemon
+then the selected HTTPS route and operator commands. For GitHub claim, first
+verify that sign-in without a code leaves the hub unclaimed and grants no role
+or workspace. Read the code with `sh bin/remote-compose.sh exec hub ub-hub status`,
+then claim through the page's code field or `ub auth login <hub> --claim-code <code>`.
+Require the completed sign-in to name the claim and default workspace UUID, and
+status to stop showing a code. An invalid or reused code must be refused before
+GitHub approval is shown. Verify Tailscale daemon
 certificate retrieval on Linux and public DNS certificate issuance on a host
 with the required DNS and TCP 443 reachability. These are attended checks;
 an image push alone does not prove anonymous deployment works.
