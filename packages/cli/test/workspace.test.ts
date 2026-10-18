@@ -170,6 +170,9 @@ describe("ub workspace list", () => {
     const box = sandbox();
     bind(box);
     withDatabase(box, UNRELATED);
+    const text = await runInProcess(["workspace", "list"], box);
+    expect(text.status, text.output).toBe(0);
+    expect(text.stdout).toBe(`* ${WORKSPACE} |  | https://hub.example.test\n  ${UNRELATED} |  | local\n`);
     const run = await runInProcess(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual([
@@ -210,7 +213,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     const text = runUb(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
-      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | local\n`,
+      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes  | https://hub.example.test\n  ${UNRELATED} |                | local\n`,
     );
     const json = runUb(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
@@ -238,7 +241,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     for (const env of [{}, { UB_WORKSPACE_ID: `notes-${WORKSPACE}`, UB_HUB_URL: "wss://override.example.test/ws" }]) {
       const text = await runInProcess(["workspace", "list"], box, env);
       expect(text.status, text.output).toBe(0);
-      expect(text.stdout).toBe(`* ${WORKSPACE} | ${display}\n`);
+      expect(text.stdout).toBe(`* ${WORKSPACE} |  | ${display}\n`);
       const json = await runInProcess(["workspace", "list", "--json"], box, env);
       expect(json.status, json.output).toBe(0);
       expect(JSON.parse(json.stdout)).toEqual([
@@ -254,7 +257,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     bind(box);
     const run = await runInProcess(["workspace", "list"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toBe(`* ${WORKSPACE} | local\n`);
+    expect(run.stdout).toBe(`* ${WORKSPACE} |  | local\n`);
     expect(existsSync(box.dataHome)).toBe(false);
     expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
   });
@@ -264,7 +267,7 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     withDatabase(box, WORKSPACE);
     const text = await runInProcess(["workspace", "list"], box);
     expect(text.status, text.output).toBe(0);
-    expect(text.stdout).toBe(`* ${WORKSPACE} | local\n`);
+    expect(text.stdout).toBe(`* ${WORKSPACE} |  | local\n`);
     const json = await runInProcess(["workspace", "list", "--json"], box);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)[0].hub).toBe("local");

@@ -309,10 +309,11 @@ function listCommand(argv: string[], io: Io): number {
     io.out("no workspaces on this machine — run `ub workspace create <name>` to create one\n");
     return 0;
   }
+  const nameWidth = entries.reduce((width, entry) => Math.max(width, entry.name?.length ?? 0), 0);
   let text = "";
   for (const entry of entries) {
     const hub = entry.hub === "local" ? "local" : displayWorkspaceHub(entry.hub);
-    text += `${entry.active ? "*" : " "} ${entry.uuid}${entry.name === null ? "" : ` | ${entry.name}`} | ${hub}\n`;
+    text += `${entry.active ? "*" : " "} ${entry.uuid} | ${(entry.name ?? "").padEnd(nameWidth)} | ${hub}\n`;
   }
   io.out(text);
   return 0;
