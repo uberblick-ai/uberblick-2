@@ -15,6 +15,9 @@ const INVALID_ROOMS = [
   `${WORKSPACE}/forged\n{"event":"hub.auth.accepted"}`,
   `${WORKSPACE}/space name`,
   `${WORKSPACE}/back\\slash`,
+  `${WORKSPACE}/not-a-uuid`,
+  `${WORKSPACE}/ABCDEF01-2345-4678-89AB-CDEF01234567`,
+  `${WORKSPACE}/${"a".repeat(MAX_ROOM_NAME_LENGTH - WORKSPACE.length - 1)}`,
 ];
 
 /** A throwing getter proves rejection happens before the callback reads the token. */
@@ -73,15 +76,14 @@ describe("bounded room admission", () => {
     },
   );
 
-  it("syncs current and legacy names, including a name at the length bound", async () => {
+  it("syncs canonical names and the legacy feedback room", async () => {
     const hub = await createHub({ port: 0, address: "127.0.0.1", databasePath: ":memory:",
       authSecret: TEST_SECRET, log: () => {} });
     const clients = [];
     try {
       const presented = await token("read-write");
       for (const suffix of ["abcdef01-2345-4678-89ab-cdef01234567",
-        "ABCDEF01-2345-4678-89AB-CDEF01234567", "_directory", "_sidebar", "_settings", "_feedback",
-        "a".repeat(MAX_ROOM_NAME_LENGTH - WORKSPACE.length - 1)]) {
+        "_directory", "_sidebar", "_settings", "_feedback"]) {
         const client = createClient({ port: hub.port, room: `${WORKSPACE}/${suffix}`, token: presented });
         clients.push(client);
         await client.synced;

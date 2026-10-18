@@ -16,6 +16,8 @@ import type {
 } from "@hocuspocus/server";
 import * as Y from "yjs";
 import {
+  DIRECTORY_DELETED_KEY,
+  DIRECTORY_DOCS_KEY,
   deleteDirectoryEntry,
   enforceDeletedDirectoryEntries,
   isDirectoryEntryDeleted,
@@ -63,6 +65,10 @@ function directoryState(document: Y.Doc): Uint8Array {
   }
 }
 
+function isArchivedEntry(entry: unknown): boolean {
+  return typeof entry === "object" && entry !== null && (entry as { deleted?: unknown }).deleted === true;
+}
+
 /** Anonymous SQLite databases need no directory and do not survive close. */
 export function isEphemeralDatabase(databasePath: string): boolean {
   return databasePath === ":memory:" || databasePath === "";
@@ -83,6 +89,7 @@ export class HubDatabase implements Extension {
   private readonly pendingDeletedRooms = new Set<string>();
   private readonly reconcilingDirectories = new WeakSet<Y.Doc>();
   private deletionHandler: (rooms: readonly string[]) => void = () => {};
+  private loadedRoom: (room: string) => boolean = () => false;
 
   private statements:
     | { select: StatementSync; upsert: StatementSync }
@@ -150,6 +157,11 @@ export class HubDatabase implements Extension {
     this.deletionHandler = handler;
   }
 
+  /** A loaded room may have no stored row until its debounced store runs. */
+  onLoadedRoom(predicate: (room: string) => boolean): void {
+    this.loadedRoom = predicate;
+  }
+
   isDeletedRoom(room: string): boolean {
     return this.deletedRooms.has(room);
   }
@@ -171,6 +183,12 @@ export class HubDatabase implements Extension {
     documentName,
   }: onLoadDocumentPayload): Promise<void> {
     this.requireRoom(documentName);
+    if (parseRoom(documentName).isDirectory) {
+      // A type first created by a remote update is replaced on its first getMap,
+      // leaving that transaction's change records keyed by the discarded type.
+      document.getMap(DIRECTORY_DOCS_KEY);
+      document.getMap(DIRECTORY_DELETED_KEY);
+    }
     const row = this.prepared().select.get({ name: documentName });
     const data = row?.data;
     if (data instanceof Uint8Array) {
@@ -183,6 +201,7 @@ export class HubDatabase implements Extension {
       document.on("afterTransaction", (transaction: Y.Transaction) => {
         if (transaction.changed.size === 0) return;
         try {
+          this.refuseUnarchivedDeletions(documentName, document, transaction);
           this.reconcileDirectory(documentName, document);
         } catch (error) {
           this.onStoreFailed(error);
@@ -221,6 +240,44 @@ export class HubDatabase implements Extension {
     this.statements = undefined;
     this.deletedRooms.clear();
     this.pendingDeletedRooms.clear();
+  }
+
+  /**
+   * Clients refuse to mark a live document; a raw directory write must not skip
+   * archive-first. Reverse a new mark for a room this hub holds unless its entry
+   * was archived before or within this change, and put back a removed entry.
+   * Marks for rooms the hub never held purge nothing, as a promotion uploads.
+   */
+  private refuseUnarchivedDeletions(room: string, directory: Y.Doc, transaction: Y.Transaction): void {
+    const marks = directory.getMap<unknown>(DIRECTORY_DELETED_KEY);
+    const changed = [...transaction.changed].find(([type]) => (type as unknown) === marks)?.[1];
+    if (changed === undefined) return;
+    const { workspaceId } = parseRoom(room);
+    const purgeable = new Set(listDeletedDirectoryUuids(directory));
+    const docs = directory.getMap<unknown>(DIRECTORY_DOCS_KEY);
+    const entryChanges = [...transaction.changedParentTypes].find(([type]) => (type as unknown) === docs)?.[1]
+      .find(event => event.target === docs)?.changes.keys;
+    const refused: Array<{ uuid: string; before: unknown }> = [];
+    for (const uuid of changed) {
+      if (uuid === null || !purgeable.has(uuid)) continue;
+      const target = roomForDoc(workspaceId, uuid);
+      if (this.deletedRooms.has(target) || !this.holdsRoom(target)) continue;
+      const change = entryChanges?.get(uuid);
+      const before = change === undefined ? docs.get(uuid) : change.oldValue;
+      if (isArchivedEntry(before) || isArchivedEntry(docs.get(uuid))) continue;
+      refused.push({ uuid, before });
+    }
+    if (refused.length === 0) return;
+    directory.transact(() => {
+      for (const { uuid, before } of refused) {
+        marks.delete(uuid);
+        if (before !== undefined && !docs.has(uuid)) docs.set(uuid, before);
+      }
+    });
+  }
+
+  private holdsRoom(room: string): boolean {
+    return this.loadedRoom(room) || this.prepared().select.get({ name: room }) !== undefined;
   }
 
   private reconcileDirectory(room: string, directory: Y.Doc): void {

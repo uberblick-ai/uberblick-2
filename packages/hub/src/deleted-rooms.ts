@@ -13,6 +13,7 @@ export class DeletedRooms {
     private readonly hocuspocus: () => Hocuspocus<HubContext>,
   ) {
     database.onDeleteRooms(rooms => this.remove(rooms));
+    database.onLoadedRoom(room => this.hocuspocus().documents.has(room));
   }
 
   hooks(): Pick<ServerConfiguration<HubContext>, "afterLoadDocument" | "beforeHandleMessage" | "beforeSync"> {

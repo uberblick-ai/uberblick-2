@@ -7,7 +7,8 @@ import type {
   connectedPayload,
   onAuthenticatePayload,
 } from "@hocuspocus/server";
-import { isRoomNameWithinBounds, parseRoom, settingsRoom } from "@uberblick/schema";
+import { parseRoom, settingsRoom } from "@uberblick/schema";
+import { isAdmissibleRoom } from "./admissible-room.js";
 import type { CredentialRecord, CredentialRegistry } from "./credentials.js";
 import type { HubLogger } from "./log.js";
 import type { MembershipRegistry } from "./memberships.js";
@@ -82,7 +83,7 @@ export class CredentialAdmission implements Extension<CredentialContext> {
       this.options.log({ event: "hub.auth.rejected", peer: peer.address, cause });
       throw new CredentialRefusal(reason);
     };
-    if (!isRoomNameWithinBounds(documentName)) {
+    if (!isAdmissibleRoom(documentName)) {
       return refuse("room-name-invalid", "room-name-invalid");
     }
     if (TOKEN_QUERY_PARAMS.some((key) => requestParameters.has(key))) {
