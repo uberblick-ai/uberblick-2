@@ -1993,7 +1993,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
         else await copy.click();
         await expect(copyNotice(page, "Link copied")).toBeVisible();
         await expect(page.getByRole("menu")).toHaveCount(0);
-        for (const key of ["Enter", "Space"]) {
+        for (const key of ["Enter", "Space"] as const) {
           await page.keyboard.press("Tab");
           await copy.focus();
           await expectFocusIndicator(copy);
