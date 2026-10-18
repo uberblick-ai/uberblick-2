@@ -5,6 +5,7 @@ import {
   deleteDirectoryEntry,
   DIRECTORY_SUFFIX,
   getMeta,
+  getWorkspaceName,
   initDoc,
   listDeletedDirectoryUuids,
   listDirectory,
@@ -118,7 +119,7 @@ it("copies snapshot tails, archived content and workspace roots without touching
   }
   const before = authoritativeState(path);
   const snapshot = readWorkspaceFork(path, `source-${WORKSPACE}`);
-  expect(snapshot.name).toBe("Source");
+  expect(getWorkspaceName(state(snapshot, SETTINGS_SUFFIX))).toBe("Source");
   expect(snapshot.missing).toEqual([]);
   expect(snapshot.rooms.map(room => room.id).sort()).toEqual([DIRECTORY_SUFFIX, SETTINGS_SUFFIX, SIDEBAR_SUFFIX, LIVE, ARCHIVED, ORPHAN].sort());
   expect(listDirectory(state(snapshot, DIRECTORY_SUFFIX), { includeDeleted: true }).find(entry => entry.uuid === ARCHIVED)?.deleted).toBe(true);
@@ -162,10 +163,10 @@ it("samples all rooms before a concurrent writer appends and compacts source cha
   });
   const snapshot = readWorkspaceFork(path, WORKSPACE);
   expect(interleaved).toBe(true);
-  expect(snapshot.name).toBe("Source");
+  expect(getWorkspaceName(state(snapshot, SETTINGS_SUFFIX))).toBe("Source");
   expect(getMeta(state(snapshot, LIVE)).title).toBe("Before");
   const after = readWorkspaceFork(path, WORKSPACE);
-  expect(after.name).toBe("After");
+  expect(getWorkspaceName(state(after, SETTINGS_SUFFIX))).toBe("After");
   expect(getMeta(state(after, LIVE)).title).toBe("After");
 });
 
@@ -198,6 +199,6 @@ it("refuses a foreign source claim and a pre-existing destination without changi
   const { path } = source();
   const before = authoritativeState(path);
   expect(() => readWorkspaceFork(path, FORK)).toThrow("different workspace");
-  expect(() => writeWorkspaceFork(path, FORK, { name: null, rooms: [], missing: [] })).toThrow("already exists");
+  expect(() => writeWorkspaceFork(path, FORK, { rooms: [], missing: [] })).toThrow("already exists");
   expect(authoritativeState(path)).toEqual(before);
 });

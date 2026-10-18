@@ -6,6 +6,7 @@ import { createMcpServer, defaultWorkspaceDatabasePath, resolveMcpConfig } from 
 import { appendBlock, listDirectory, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterAll, expect, it } from "vitest";
 import { initLockPath } from "../src/init-lock.js";
+import { parseJoinTarget } from "../src/remote.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { removeTempDirs, runUb, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
@@ -90,7 +91,7 @@ syncBuiltinESMExports();
   } finally { await source.close(); }
 });
 
-it("names every missing live and archived document and refuses before creating a database", async () => {
+it.each(["wss://source.example.test/ws", "ws://127.0.0.1:1", "wss://source.example.test/proxy/"])("names every missing document and preserves recovery endpoint %s before creating a database", async (hub) => {
   const { box, binding, config } = await localSource();
   const source = createMcpServer(config);
   let entries: { uuid: string; title: string }[];
@@ -106,7 +107,6 @@ it("names every missing live and archived document and refuses before creating a
       db.prepare("DELETE FROM snapshots WHERE room = ?").run(`${binding.workspaceId}/${entry.uuid}`);
     }
   } finally { db.close(); }
-  const hub = "wss://source.example.test/ws";
   writeFileSync(join(box.cwd, ".uberblick.json"), JSON.stringify({ ...binding, hubUrl: hub }));
   writeFileSync(workspaceRegistryPath(box.env), JSON.stringify({ [binding.workspaceId]: hub }));
   const beforeBinding = readFileSync(join(box.cwd, ".uberblick.json"));
@@ -116,7 +116,9 @@ it("names every missing live and archived document and refuses before creating a
   expect(result.status, result.output).toBe(1);
   expect(result.stdout).toBe("");
   for (const entry of entries) expect(result.stderr).toContain(`${entry.title} (${entry.uuid})`);
-  expect(result.stderr).toContain(`ub workspace use https://source.example.test/${binding.workspaceId}`);
+  const recovery = result.stderr.split("\n").find(line => line.includes("ub workspace use "))!;
+  const target = recovery.split("ub workspace use ")[1]!;
+  expect(parseJoinTarget(target)).toEqual({ endpoint: hub, workspace: binding.workspaceId });
   expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(beforeBinding);
   expect(readFileSync(workspaceRegistryPath(box.env))).toEqual(beforeRegistry);
   expect(readdirSync(join(box.dataHome, "uberblick")).filter(name => name.endsWith(".sqlite"))).toEqual(files);

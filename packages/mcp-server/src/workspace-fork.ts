@@ -4,7 +4,6 @@ import {
   canonicalDocumentUuid,
   DIRECTORY_SUFFIX,
   getMeta,
-  getWorkspaceName,
   listDeletedDirectoryUuids,
   listDirectory,
   parseWorkspaceId,
@@ -16,7 +15,6 @@ import * as Y from "yjs";
 import { MirrorStore } from "./store.js";
 
 export interface WorkspaceForkSnapshot {
-  name: string | null;
   rooms: readonly { id: string; state: Uint8Array }[];
   missing: readonly { uuid: string; title: string }[];
 }
@@ -96,17 +94,15 @@ function readForkSnapshot(db: DatabaseSync, workspaceId: string): WorkspaceForkS
   } finally {
     directory.destroy();
   }
-  let name: string | null = null;
   for (const id of [SETTINGS_SUFFIX, SIDEBAR_SUFFIX]) {
     const doc = read(id);
     try {
-      if (id === SETTINGS_SUFFIX) name = getWorkspaceName(doc);
       rooms.push({ id, state: Y.encodeStateAsUpdate(doc) });
     } finally {
       doc.destroy();
     }
   }
-  return { name, rooms, missing };
+  return { rooms, missing };
 }
 
 /** The caller holds the destination init lock and publishes its binding only after success. */

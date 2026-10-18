@@ -9,7 +9,7 @@ import { type Io, shellArgument } from "./io.js";
 import { NO_BINDING, resolveProjectBinding, writeProjectBinding } from "./project-binding.js";
 import { reportEnvironmentBinding } from "./workspace-create.js";
 import { readWorkspaceHub, withWorkspaceBindings } from "./workspace-registry.js";
-import { displayWorkspaceHub, useField, workspaceLabel } from "./workspace-use-output.js";
+import { useField, workspaceLabel } from "./workspace-use-output.js";
 
 export const WORKSPACE_FORK_HELP = `usage: ub workspace fork
 
@@ -50,7 +50,7 @@ export async function forkWorkspaceCommand(argv: string[], io: Io): Promise<numb
         const hub = recorded === undefined ? selected.binding.hubUrl : recorded;
         const recovery = hub === null
           ? "Restore the missing content before forking."
-          : `Complete this computer's copy first: ub workspace use ${shellArgument(`${displayWorkspaceHub(hub).replace(/\/$/, "")}/${source}`)}`;
+          : `Complete this computer's copy first: ub workspace use ${shellArgument(`${hub}/${source}`)}`;
         throw new Error(`local copy lacks content for:\n${snapshot.missing.map(doc => `  ${doc.title} (${doc.uuid})`).join("\n")}\n${recovery}`);
       }
       const uuid = randomUUID();
@@ -73,7 +73,7 @@ export async function forkWorkspaceCommand(argv: string[], io: Io): Promise<numb
     }
     return 0;
   } catch (error) {
-    io.err(`ub workspace fork: ${error instanceof Error ? error.message : "copy failed"}. Project binding unchanged.\n`);
+    io.err(`ub workspace fork: ${error instanceof Error ? error.message : "copy failed"}\nProject binding unchanged.\n`);
     return 1;
   }
 }
