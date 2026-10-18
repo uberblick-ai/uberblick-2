@@ -44,7 +44,7 @@ export function NotificationToaster(): ReactElement {
         classNames: {
           toast: "ub-type-small! shadow-(--shadow-float)! focus-visible:shadow-[inset_0_0_0_2px_var(--card-foreground)]! pr-10! w-full!",
           title: "ub-type-small! font-normal! text-card-foreground!",
-          actionButton: "ub-type-small! focus-visible:shadow-none! focus-visible:[outline:revert]! focus-visible:outline-offset-2! [@media(any-pointer:coarse)]:min-h-11! [@media(any-pointer:coarse)]:min-w-11!",
+          actionButton: "ub-type-small! rounded-(--radius-sm)! focus-visible:shadow-none! focus-visible:[outline:revert]! focus-visible:outline-offset-2! [@media(any-pointer:coarse)]:min-h-11! [@media(any-pointer:coarse)]:min-w-11!",
           closeButton: "left-auto! right-2! top-2! transform-none! size-6! text-card-foreground! bg-card! border-(--border)! hover:bg-secondary! focus-visible:shadow-[0_0_0_2px_var(--card-foreground)]!",
         },
       }}

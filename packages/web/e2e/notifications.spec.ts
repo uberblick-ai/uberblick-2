@@ -236,6 +236,14 @@ test("Undo has a visible keyboard focus indicator and accessible text in both ap
     const archived = notice(page, "Archived “Example document”.");
     const undo = archived.getByRole("button", { name: "Undo", exact: true });
     await expect(undo).toBeVisible();
+    expect(await undo.evaluate((element) => {
+      const probe = document.createElement("span");
+      probe.style.borderRadius = "var(--radius-sm)";
+      element.append(probe);
+      const matchesButtonRadius = getComputedStyle(element).borderRadius === getComputedStyle(probe).borderRadius;
+      probe.remove();
+      return matchesButtonRadius;
+    })).toBe(true);
     await expect(page.locator("html")).toHaveAttribute("data-theme", appearance);
     await expect(archived.locator("[data-description]")).toHaveCount(0);
     await expect(archived).toHaveCSS("opacity", "1");

@@ -102,7 +102,7 @@ test.describe("fractional layout", () => {
 });
 
 for (const hasTouch of [false, true]) {
-  test(`threads close target preserves its glyph and clears the first card — ${hasTouch ? "coarse" : "fine"} pointer`, async ({ browser }, info) => {
+  test(`threads close target preserves its glyph and clears the first card — ${hasTouch ? "coarse" : "fine"} pointer`, { tag: "@webkit" }, async ({ browser }, info) => {
     const context = await browser.newContext({ hasTouch, viewport: { width: 1400, height: 800 } });
     const page = await context.newPage();
     try {
@@ -117,6 +117,27 @@ for (const hasTouch of [false, true]) {
       const sheet = page.getByRole("dialog", { name: "Threads", exact: true });
       const close = sheet.getByRole("button", { name: "Close threads", exact: true });
       await expect(sheet).toBeVisible();
+      for (const colorScheme of ["light", "dark"] as const) {
+        await page.emulateMedia({ colorScheme });
+        const surfaces = await sheet.evaluate((node) => {
+          const probe = document.createElement("div");
+          probe.style.borderRadius = "var(--radius-sm)";
+          probe.className = "shadow-(--shadow-float)";
+          document.body.append(probe);
+          const shared = getComputedStyle(probe);
+          const close = node.querySelector('[data-slot="sheet-close"]');
+          const card = node.querySelector(".ub-thread");
+          if (close === null || card === null) throw new Error("e2e: missing thread sheet controls");
+          const result = {
+            floating: getComputedStyle(node).boxShadow === shared.boxShadow,
+            closeRadius: getComputedStyle(close).borderRadius === shared.borderRadius,
+            threadAccent: getComputedStyle(card).borderLeftWidth,
+          };
+          probe.remove();
+          return result;
+        });
+        expect(surfaces).toEqual({ floating: true, closeRadius: true, threadAccent: "2px" });
+      }
       const geometry = await sheet.evaluate((node) => {
         const button = node.querySelector<HTMLElement>('[data-slot="sheet-close"]');
         const glyph = button?.querySelector("svg");

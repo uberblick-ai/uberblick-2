@@ -77,15 +77,30 @@ test("both menu paths focus the title and optional placeholders collapse outside
     await page.emulateMedia({ colorScheme });
     const shell = await first.evaluate((element) => {
       const style = getComputedStyle(element);
-      const root = getComputedStyle(document.documentElement);
+      const probe = document.createElement("div");
+      probe.style.borderRadius = "var(--radius)";
+      document.body.append(probe);
+      const radius = getComputedStyle(probe).borderRadius;
+      probe.remove();
       return { vertical: style.paddingTop, horizontal: style.paddingLeft, border: style.borderTopWidth,
-        radius: style.borderTopLeftRadius, card: style.backgroundColor, radiusToken: root.getPropertyValue("--radius") };
+        sharedRadius: style.borderRadius === radius, shadow: style.boxShadow, card: style.backgroundColor };
     });
-    expect(shell).toMatchObject({ vertical: "20px", horizontal: "24px", border: "1px" });
+    expect(shell).toMatchObject({ vertical: "20px", horizontal: "24px", border: "1px", sharedRadius: true, shadow: "none" });
     expect(shell.card).not.toBe("rgba(0, 0, 0, 0)");
     if (process.env.UB_AGENTS_SCRATCH !== undefined) {
       await page.screenshot({ path: join(process.env.UB_AGENTS_SCRATCH, `card-${info.project.name}-${colorScheme}.png`) });
     }
+    await first.locator(".ub-card-title").click();
+    const focusRing = await first.evaluate((element) => {
+      const probe = document.createElement("div");
+      probe.style.boxShadow = "0 0 0 1px var(--ring)";
+      document.body.append(probe);
+      const matches = getComputedStyle(element).boxShadow === getComputedStyle(probe).boxShadow;
+      probe.remove();
+      return matches;
+    });
+    expect(focusRing).toBe(true);
+    await page.locator(".ub-title").click();
   }
 });
 

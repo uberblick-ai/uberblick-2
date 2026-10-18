@@ -80,7 +80,7 @@ export function RemoteHubGuide(): ReactElement {
   const claimable = state !== null && state !== "checking" && state.canClaim;
   const closed = state !== null && state !== "checking" && !state.unclaimed;
   const origin = window.location.origin;
-  const commandClass = "mt-2 block select-text break-all rounded-md bg-(--muted) p-3 font-mono ub-type-ui text-(--foreground)";
+  const commandClass = "mt-2 block select-text break-all rounded-(--radius-sm) bg-(--muted) p-3 font-mono ub-type-ui text-(--foreground)";
   return (
     <PaneNotice>
       <section className="mx-auto w-full max-w-xl p-6 text-(--foreground)" aria-label="Hub setup guide">

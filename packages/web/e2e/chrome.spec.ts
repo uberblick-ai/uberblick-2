@@ -1096,6 +1096,72 @@ for (const scheme of ["light"] as const) {
   });
 }
 
+for (const scheme of ["light", "dark"] as const) {
+  test(`collaborator overflow shares the document tag popover's surface — ${scheme} @webkit`, async ({ browser }, info) => {
+    const touch = info.project.use.hasTouch === true;
+    const page = await openApp(browser, "/", {
+      upstream: true,
+      contextOptions: { colorScheme: scheme, ...(touch ? devices["iPad (gen 7)"] : { viewport: { width: 1280, height: 900 } }) },
+      readySelector: ".ub-docs",
+    });
+    const activate = async (control: Locator): Promise<void> => {
+      if (touch) await control.tap();
+      else await control.click();
+    };
+    if (touch) await activate(page.getByRole("button", { name: "Show document list", exact: true }));
+    await activate(page.getByRole("button", { name: "+ New page" }));
+    await expect(page.locator(".ub-editor .ub-paragraph")).toBeVisible();
+    const surface = (control: Locator): Promise<string[]> => control.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.boxShadow, style.borderTopLeftRadius, style.borderTopRightRadius,
+        style.borderBottomRightRadius, style.borderBottomLeftRadius, style.borderTopWidth,
+        style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth];
+    });
+    await activate(page.getByRole("button", { name: "Edit tags", exact: true }));
+    const tags = page.locator(".ub-tag-picker-panel");
+    await expect(tags).toBeVisible();
+    const tagSurface = await surface(tags);
+    expect(tagSurface[0]).not.toBe("none");
+    expect(tagSurface.slice(5)).toEqual(["1px", "1px", "1px", "1px"]);
+    await page.keyboard.press("Escape");
+
+    const uuid = new URL(page.url()).pathname.split("/").filter(Boolean).at(-1);
+    if (uuid === undefined) throw new Error("e2e: the document route has no uuid");
+    const rootSecret = await importRootSecret(harness().authSecret);
+    const peers: { provider: HocuspocusProvider; doc: Y.Doc }[] = [];
+    try {
+      for (const name of ["Ada", "Bert", "Cleo", "Dora"]) {
+        const doc = new Y.Doc();
+        const provider = new HocuspocusProvider({
+          url: harness().hubUrl,
+          name: `${harness().workspaceUuid}/${uuid}`,
+          document: doc,
+          token: async () => wrapToken(await mintToken(rootSecret, {
+            typ: "room", sub: `human-${randomUUID()}`, workspace: harness().workspaceUuid,
+            scope: "read-write", kid: null, lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
+          })),
+        });
+        peers.push({ provider, doc });
+        await new Promise<void>((resolve) => provider.on("synced", resolve));
+        provider.setAwarenessField("user", { name, color: "#0c853d" });
+        provider.setAwarenessField("client", "web");
+      }
+      await expect(page.locator(".ub-peer-more")).toHaveText("+1");
+      await activate(page.locator(".ub-peer-more"));
+      const overflow = page.getByRole("dialog", { name: "More collaborators" });
+      await expect(overflow).toBeVisible();
+      expect(await surface(overflow)).toEqual(tagSurface);
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".ub-peer-more")).toBeFocused();
+    } finally {
+      for (const { provider, doc } of peers) {
+        provider.destroy();
+        doc.destroy();
+      }
+    }
+  });
+}
+
 for (const viewport of [720, 1280]) {
 test(`the document collaborator cluster stays compact and jumps once without moving selection — ${viewport}px`, async ({
   browser,

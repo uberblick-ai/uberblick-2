@@ -483,7 +483,7 @@ export function CommentComposer({
       ref={floating}
       data-slot="selection-composer"
       data-input={touch ? "touch" : "fine"}
-      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-2 border-l-brand bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-[calc(var(--radius-sm)+2px)] border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
+      className={`ub-composer fixed top-0 left-0 z-5 flex overflow-auto text-card-foreground shadow-(--shadow-float) ${mode === "comment" ? "w-80 flex-col [&>*]:shrink-0 gap-[0.4rem] rounded-(--radius-sm) border border-(--border) border-l-(length:--border-width-emphasis) border-l-brand bg-card px-[0.6rem] py-2 ub-type-ui" : !formatting ? "w-max bg-transparent shadow-none" : "w-max items-center rounded-(--radius-sm) border border-(--border) bg-[color-mix(in_srgb,var(--card)_95%,transparent)] p-1 backdrop-blur-[8px]"}`}
     >
       {mode === "comment" ? (
         <>
@@ -493,7 +493,7 @@ export function CommentComposer({
               <span data-slot="selection-clamp" className="rounded-(--radius-sm) bg-(--status-warning-subtle) px-[0.3rem] ub-type-caption tracking-[0.04em] text-foreground uppercase">{cell ? "first cell only" : card ? "first part only" : "first block only"}</span>
             )}
           </p>
-          <p data-slot="selection-excerpt" className="border-l-2 border-(--border) pl-[0.4rem] ub-type-ui text-foreground italic before:content-['“'] after:content-['”']">{target.text}</p>
+          <p data-slot="selection-excerpt" className="border-l-(length:--border-width-emphasis) border-(--border) pl-[0.4rem] ub-type-ui text-foreground italic before:content-['“'] after:content-['”']">{target.text}</p>
           <CommentForm
             placeholder={`Comment as ${author}…`}
             submitLabel="Comment"
