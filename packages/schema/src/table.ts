@@ -145,6 +145,11 @@ export function tableText(element: Y.XmlElement): string {
   return writeGfmTable(tableRows(element).map((row) => row.map((cell) => renderInline(tableCellTexts(cell).flatMap(readInlineRuns), true))));
 }
 
+export function isSupportedColumnWidth(value: unknown): boolean {
+  return value === undefined || value === null ||
+    (Array.isArray(value) && value.length === 1 && typeof value[0] === "number" && Number.isFinite(value[0]) && value[0] > 0);
+}
+
 /** Bindable cell grammar. Rectangularity is deliberately not a read invariant. */
 export function isSupportedTable(element: Y.XmlElement): boolean {
   if (element.nodeName !== "table" || element.length === 0) return false;
@@ -154,7 +159,7 @@ export function isSupportedTable(element: Y.XmlElement): boolean {
     return row.toArray().every((cell) => {
       if (!(cell instanceof Y.XmlElement) || cell.nodeName !== (index === 0 ? "tableHeader" : "tableCell")) return false;
       const attrs = cell.getAttributes() as Record<string, unknown>;
-      if (Object.keys(attrs).some((key) => !["colspan", "rowspan"].includes(key)) || attrs.colspan !== 1 || attrs.rowspan !== 1 || cell.length !== 1) return false;
+      if (Object.keys(attrs).some((key) => !["colspan", "rowspan", "colwidth"].includes(key)) || attrs.colspan !== 1 || attrs.rowspan !== 1 || !isSupportedColumnWidth(attrs.colwidth) || cell.length !== 1) return false;
       const paragraph = cell.firstChild;
       if (!(paragraph instanceof Y.XmlElement) || paragraph.nodeName !== "paragraph" || Object.keys(paragraph.getAttributes()).length !== 0 || paragraph.length > 1) return false;
       return paragraph.toArray().every((text) => text instanceof Y.XmlText &&

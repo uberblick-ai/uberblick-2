@@ -3,14 +3,17 @@
  * Cells are one paragraph, and table state lives only in the Yjs cell tree.
  */
 import { Extension } from "@tiptap/core";
-import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView } from "@tiptap/extension-table";
+import type { Editor } from "@tiptap/core";
+import { Table as TiptapTable, TableCell, TableHeader, TableRow, TableKit, TableView, updateColumns } from "@tiptap/extension-table";
+import type { TableOptions } from "@tiptap/extension-table";
 import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model";
 import type { Node as ProseMirrorNode, Schema } from "@tiptap/pm/model";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
+import { columnResizing, columnResizingPluginKey, ResizeState } from "@tiptap/pm/tables";
 import { ySyncPluginKey } from "y-prosemirror";
-import { InvalidTableError, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
+import { InvalidTableError, isSupportedColumnWidth, parseTableInput, TABLE_CELL_MARKS } from "@uberblick/schema";
 import type { GfmTable } from "@uberblick/schema";
 import { endUndoCapture, findBlockById } from "./block-menu.js";
 import { singleLine } from "./table-text.js";
@@ -31,6 +34,10 @@ const cellAttributes = () => ({
 // ProseMirror can reuse a table view for a different stable block. TableKit
 // refreshes its columns on update; mirror our identity too, as other blocks do.
 class IdentifiedTableView extends TableView {
+  constructor(node: ProseMirrorNode, cellMinWidth: number, view: EditorView) {
+    super(node, cellMinWidth, view, { class: "ub-table", "data-block-type": "table", id: node.attrs.id });
+  }
+
   override update(node: ProseMirrorNode): boolean {
     if (!super.update(node)) return false;
     if (typeof node.attrs.id === "string") this.table.id = node.attrs.id;
@@ -39,22 +46,86 @@ class IdentifiedTableView extends TableView {
   }
 }
 
+/** Keep the framework drag, while following live room permissions. */
+function tableResizing(editor: Editor, options: TableOptions): Plugin {
+  const resize = columnResizing({
+    handleWidth: options.handleWidth, cellMinWidth: options.cellMinWidth,
+    defaultCellMinWidth: options.cellMinWidth, View: options.View,
+    lastColumnResizable: options.lastColumnResizable,
+  });
+  const state = resize.spec.state;
+  if (!state) throw new Error("Column resizing requires framework plugin state");
+  const props = resize.props;
+  const canResize = (editorState: EditorState, active = columnResizingPluginKey.getState(editorState)?.activeHandle ?? -1): boolean => {
+    if (!editor.isEditable) return false;
+    if (active < 0) return true;
+    if (active > editorState.doc.content.size) return false;
+    const cell = editorState.doc.resolve(active);
+    return cell.depth > 0 && isOrdinaryTable(cell.node(-1));
+  };
+  return new Plugin({
+    ...resize.spec,
+    state: {
+      ...state,
+      apply(tr, previous, oldState, newState) {
+        const next = state.apply(tr, previous, oldState, newState);
+        return canResize(newState, next.activeHandle) ? next : new ResizeState(-1, false);
+      },
+    },
+    props: {
+      ...props,
+      attributes: (state) => editor.isEditable
+        ? (typeof props.attributes === "function" ? props.attributes(state) : props.attributes) ?? {} : {},
+      decorations: (state) => editor.isEditable ? props.decorations?.call(resize, state) : null,
+      handleDOMEvents: {
+        ...props.handleDOMEvents,
+        mousedown(view, event) {
+          if (!canResize(view.state)) return false;
+          if ((columnResizingPluginKey.getState(view.state)?.activeHandle ?? -1) >= 0) endUndoCapture(view.state);
+          return props.handleDOMEvents?.mousedown?.call(resize, view, event) ?? false;
+        },
+      },
+    },
+    view: () => ({
+      update(view, previous) {
+        const before = columnResizingPluginKey.getState(previous);
+        const current = columnResizingPluginKey.getState(view.state);
+        if (before?.dragging && !current?.dragging) endUndoCapture(view.state);
+        // setEditable changes view props without a transaction. Clear an active
+        // drag before its window mouseup listener can save a width.
+        if (current && current.activeHandle >= 0 && !canResize(view.state)) {
+          view.dispatch(view.state.tr.setMeta(columnResizingPluginKey, { setHandle: -1 }));
+          view.state.doc.forEach((node, pos) => {
+            if (node.type.name !== "table") return;
+            const wrapper = view.nodeDOM(pos) as HTMLElement | null;
+            const table = wrapper?.querySelector("table");
+            const colgroup = table?.querySelector("colgroup");
+            if (table && colgroup) updateColumns(node, colgroup, table, options.cellMinWidth);
+          });
+        }
+      },
+    }),
+  });
+}
+
 export const Table = TiptapTable.extend({
   addAttributes() {
     return { id: { default: null, parseHTML: (element: HTMLElement) => element.getAttribute("id") } };
   },
   addProseMirrorPlugins() {
-    return (this.parent?.() ?? []).map((plugin) => {
+    return [tableResizing(this.editor, this.options), ...(this.parent?.() ?? []).filter((plugin) =>
+      plugin.spec.key !== columnResizingPluginKey,
+    ).map((plugin) => {
       // Stock tableEditing calls fixTables after local AND remote edits. Two
       // replicas padding the same ragged CRDT merge insert duplicate cells.
       // Keep its public plugin spec (selection, arrows, pointer handling and
       // decorations), but never repair table structure as a side effect.
       const { appendTransaction: _repair, ...spec } = plugin.spec;
       return new Plugin(spec);
-    });
+    })];
   },
 }).configure({
-  resizable: false, renderWrapper: true, cellMinWidth: 120,
+  resizable: true, renderWrapper: true, cellMinWidth: 120,
   View: IdentifiedTableView,
   HTMLAttributes: { class: "ub-table", "data-block-type": "table" },
 });
@@ -88,7 +159,7 @@ function validTable(node: ProseMirrorNode, allowRagged: boolean): boolean {
     if (cells.type.name !== "tableRow" || cells.childCount === 0 || (!allowRagged && cells.childCount !== width)) return false;
     for (let col = 0; col < cells.childCount; col += 1) {
       const cell = cells.child(col);
-      if (cell.type.name !== (row === 0 ? "tableHeader" : "tableCell") || cell.attrs.colspan !== 1 || cell.attrs.rowspan !== 1 || cell.attrs.colwidth !== null || cell.childCount !== 1) return false;
+      if (cell.type.name !== (row === 0 ? "tableHeader" : "tableCell") || cell.attrs.colspan !== 1 || cell.attrs.rowspan !== 1 || !isSupportedColumnWidth(cell.attrs.colwidth) || cell.childCount !== 1) return false;
       const paragraph = cell.child(0);
       if (paragraph.type.name !== "paragraph" || paragraph.attrs.id !== null) return false;
       let valid = true;
