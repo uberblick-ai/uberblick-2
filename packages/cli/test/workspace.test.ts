@@ -192,15 +192,85 @@ it("workspace use remembers device admission after logout and never clears anoth
 });
 
 describe("ub workspace list", () => {
+  it.each([{}, { workspace: WORKSPACE, hubUrl: HUB }])("prints one neutral selection note with machine settings %j", async (userConfig) => {
+    const box = unboundSandbox({ userConfig });
+    withDatabase(box, WORKSPACE);
+    withDatabase(box, UNRELATED);
+    const entries = [WORKSPACE, UNRELATED].map(uuid => ({
+      uuid, name: null, active: false,
+      databasePath: join(box.dataHome, "uberblick", `${uuid}.sqlite`), hub: "local",
+    }));
+    for (const json of [false, true]) {
+      const run = runUb(["workspace", "list", ...(json ? ["--json"] : [])], box);
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toBe(json ? `${JSON.stringify(entries, null, 2)}\n`
+        : `  ${WORKSPACE} |  | local\n  ${UNRELATED} |  | local\n`);
+      expect(run.stderr).toBe("No workspace selected (no .uberblick.json found).\n");
+    }
+  });
+
+  it.each(["invalid machine config", "exposed credentials"])("retains %s warnings beside the selection note", async (kind) => {
+    const box = unboundSandbox(kind === "invalid machine config"
+      ? { raw: { userConfig: "{invalid" } }
+      : { userConfig: { workspace: WORKSPACE, hubUrl: HUB }, credentials: { signingSecret: "synthetic-secret" }, credentialsMode: 0o644 });
+    for (const args of [[], ["--json"]]) {
+      const run = await runInProcess(["workspace", "list", ...args], box);
+      expect(run.status, run.output).toBe(0);
+      expect(run.stdout).toBe(args.length === 0
+        ? "no workspaces on this machine — run `ub workspace create <name>` to create one\n" : "[]\n");
+      expect(run.stderr).toContain("No workspace selected (no .uberblick.json found).\n");
+      expect(run.stderr).toContain(kind === "invalid machine config"
+        ? `ub: warning: ignoring ${join(box.configHome, "uberblick", "config.json")}: invalid JSON\n`
+        : `ub: warning: refusing ${join(box.configHome, "uberblick", "credentials.json")}: mode 0644`);
+      expect(run.stderr).not.toContain("Legacy machine");
+      expect(run.stderr).not.toContain("synthetic-secret");
+    }
+  });
+
+  it.each([
+    [{ UB_WORKSPACE_ID: "invalid", UB_HUB_URL: "local" }, /environment binding: workspaceId must be a workspace id/],
+    [{ UB_HUB_URL: HUB }, /UB_HUB_URL requires a non-empty UB_WORKSPACE_ID/],
+    [{ UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "" }, /UB_HUB_URL must not be empty/],
+    [{ UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "file:///invalid" }, /that is not a websocket endpoint/],
+    [{ WORKSPACE_ID: WORKSPACE }, /Legacy WORKSPACE_ID \/ HUB_URL selection is no longer supported/],
+    [{ HUB_URL: HUB }, /Legacy WORKSPACE_ID \/ HUB_URL selection is no longer supported/],
+  ])("keeps invalid selection %j as an error", async (env, diagnostic) => {
+    const box = unboundSandbox({ userConfig: { workspace: WORKSPACE, hubUrl: HUB } });
+    for (const args of [[], ["--json"]]) {
+      const run = await runInProcess(["workspace", "list", ...args], box, env);
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toMatch(/^ub workspace list: /);
+      expect(run.stderr).toMatch(diagnostic);
+      expect(run.stderr).not.toContain("No workspace selected");
+      expect(run.stderr).not.toContain("ub: warning:");
+    }
+  });
+
+  it.each(["invalid JSON", "directory"])("refuses an owned binding containing %s without a selection note", async (kind) => {
+    const box = unboundSandbox();
+    const path = join(box.cwd, ".uberblick.json");
+    if (kind === "directory") mkdirSync(path);
+    else writeFileSync(path, "{invalid");
+    for (const args of [[], ["--json"]]) {
+      const run = await runInProcess(["workspace", "list", ...args], box);
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toBe(`ub workspace list: Cannot read ${path}: expected a regular file containing valid JSON\n`);
+    }
+  });
+
   it("unions database IDs with the explicitly selected workspace", async () => {
     const box = sandbox();
     bind(box);
     withDatabase(box, UNRELATED);
     const text = await runInProcess(["workspace", "list"], box);
     expect(text.status, text.output).toBe(0);
+    expect(text.stderr).toBe("");
     expect(text.stdout).toBe(`* ${WORKSPACE} |  | https://hub.example.test\n  ${UNRELATED} |  | local\n`);
     const run = await runInProcess(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
+    expect(run.stderr).toBe("");
     expect(JSON.parse(run.stdout)).toEqual([
       { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
       { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "local" },
@@ -267,9 +337,11 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     for (const env of [{}, { UB_WORKSPACE_ID: `notes-${WORKSPACE}`, UB_HUB_URL: "wss://override.example.test/ws" }]) {
       const text = await runInProcess(["workspace", "list"], box, env);
       expect(text.status, text.output).toBe(0);
+      expect(text.stderr).toBe("");
       expect(text.stdout).toBe(`* ${WORKSPACE} |  | ${display}\n`);
       const json = await runInProcess(["workspace", "list", "--json"], box, env);
       expect(json.status, json.output).toBe(0);
+      expect(json.stderr).toBe("");
       expect(JSON.parse(json.stdout)).toEqual([
         { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: hub ?? "local" },
       ]);
