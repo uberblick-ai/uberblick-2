@@ -1585,11 +1585,13 @@ sh bin/remote-compose.sh start hub
 
 Only start the hub after restore reports success. To restore a backup kept on
 the host, including one made by an older `bin/hub-backup.sh`, stream it through
-standard input. `-T` keeps the container terminal from changing binary input:
+standard input. `-T` keeps the container terminal from changing binary input;
+`--yes` confirms any access changes because this route has no terminal for a
+confirmation prompt:
 
 ```sh
 sh bin/remote-compose.sh stop hub
-sh bin/remote-compose.sh run --rm -T hub ub-hub restore - < ~/uberblick-hub-backup.sqlite
+sh bin/remote-compose.sh run --rm -T hub ub-hub restore --yes - < ~/uberblick-hub-backup.sqlite
 sh bin/remote-compose.sh start hub
 ```
 
@@ -1610,11 +1612,34 @@ are worth restoring even before the first document exists. A missing, corrupt
 or empty backup leaves the volume untouched. A running hub also refuses the
 restore and names `docker compose stop hub`.
 
+Before replacing the database, restore compares its private access records
+with the live database. It lists device revocations, workspace member removals
+and hub-admin removals that the backup would undo, showing each account's
+GitHub login and account ID, the device name or UUID, and the workspace for a
+membership. The list contains no keys or tokens. If the list is empty, restore
+says that no revocations or removals would be undone and proceeds without
+asking.
+
+When the list is not empty, answer yes at the terminal or pass `--yes` to
+proceed. A no, an interrupted prompt or no terminal without `--yes` exits 1
+and leaves the live database unchanged. Without a terminal, the message names
+the command to rerun with `--yes`.
+
+If the live database is absent, including in an empty `hub-data` volume, or
+cannot be opened and read, restore says that newer device revocations,
+workspace member removals and hub-admin removals cannot be determined and
+proceeds without asking. Both this warning and a non-empty list print the
+steps to restore the access restrictions after starting the hub:
+
+- Each account revokes its own lost devices again through Settings → User →
+  Devices or `ub auth logout --all-devices <hub>`.
+- Workspace admins remove members again through `ub workspace member remove`
+  or Workspace settings → Members.
+- Hub admins remove hub admins again through Hub → Admins.
+
 Opening a restored backup made before the device-created-key upgrade revokes
 its HMAC device credentials and removes their keys. Every computer and unattended
-agent host must then run `ub auth login <hub-origin>` again. Restoring any
-backup restores its recorded access state, including previously revoked
-devices or removed members; it does not add rollback protection.
+agent host must then run `ub auth login <hub-origin>` again.
 
 A rollback journal beside `hub.sqlite` refuses restore. Let SQLite recover it
 by opening the database cleanly, then stop the hub and retry; never delete the
