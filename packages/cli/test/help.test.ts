@@ -37,6 +37,7 @@ import { DATA_HELP, DATA_GET_OPTIONS, DATA_UPDATE_OPTIONS } from "../src/data.js
 import { INSTALL_HELP, INSTALL_OPTIONS } from "../src/install.js";
 import { OPEN_HELP, OPEN_OPTIONS } from "../src/open.js";
 import { WORKSPACE_CREATE_HELP } from "../src/workspace-create.js";
+import { WORKSPACE_FORK_HELP } from "../src/workspace-fork.js";
 import {
   WORKSPACE_MEMBER_HELP,
   WORKSPACE_MEMBER_SUBCOMMAND_HELP,
@@ -171,8 +172,9 @@ const PATHS: Path[] = [
     argv: ["workspace"],
     help: WORKSPACE_HELP,
     options: {},
-    children: ["create", "promote", "member", "list", "use", "remove"],
+    children: ["create", "fork", "promote", "member", "list", "use", "remove"],
   },
+  { argv: ["workspace", "fork"], help: WORKSPACE_FORK_HELP, options: {} },
   { argv: ["workspace", "list"], help: WORKSPACE_LIST_HELP, options: WORKSPACE_LIST_OPTIONS },
   { argv: ["workspace", "use"], help: WORKSPACE_USE_HELP, options: WORKSPACE_USE_OPTIONS },
   { argv: ["workspace", "remove"], help: WORKSPACE_REMOVE_HELP, options: WORKSPACE_REMOVE_OPTIONS },
@@ -537,6 +539,7 @@ describe("help before the work", () => {
   // other half of the proof, since every one of these announces its warnings
   // and its failures there.
   const inert: string[][] = [
+    ["workspace", "fork", "unexpected", "--help"],
     ["data", "update", "--file", "missing.json", "--dry-run", "--help"],
     ["open", "--port", "0", "-h"],
     ["workspace", "use", "ws://example.invalid:1234", "-h"],

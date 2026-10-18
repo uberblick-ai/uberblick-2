@@ -41,6 +41,7 @@ const osSensitive = [
   "workspace",
   "workspace-binding-guard",
   "workspace-create",
+  "workspace-fork",
   "workspace-main-repository",
   "workspace-promotion",
   "workspace-registry",
