@@ -30,7 +30,7 @@ export function DecisionsLink({ topics, id }: {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     focusDecisions(id);
-  }}>{decisionsSummary(topics)} <span aria-hidden="true">↓</span></a>;
+  }}>{decisionsSummary(topics)}</a>;
 }
 
 function Attribution({ record, now }: { record: DirectoryEntry; now: number }): ReactElement {
