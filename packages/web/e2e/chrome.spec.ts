@@ -1782,8 +1782,10 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   await page.evaluate(() => document.fonts.ready);
 
   const editTags = page.getByRole("button", { name: "Edit tags" });
-  const actions = page.getByRole("button", { name: "Document actions", exact: true });
-  const copy = page.getByRole("button", { name: "Copy link", exact: true });
+  // The modal menu hides background controls from the accessibility tree;
+  // their rendered boxes still anchor the open-menu geometry checks.
+  const actions = page.locator('.ub-document-actions button[aria-label="Document actions"]');
+  const copy = page.locator(".ub-copy-link-icon");
   const face = actions.locator(".ub-actions-face");
   await expect(actions).toHaveAccessibleName("Document actions");
   await expect(actions).toHaveAttribute("title", "Document actions");
@@ -2903,7 +2905,7 @@ for (const scheme of ["light"] as const) {
         await control.hover();
         expect(await controlPaint(control)).not.toEqual(before);
       }
-      const actions = page.getByRole("button", { name: "Document actions", exact: true });
+      const actions = page.locator('.ub-document-actions button[aria-label="Document actions"]');
       const face = actions.locator(".ub-actions-face");
       await page.mouse.move(1399, 999);
       const restingFace = await controlPaint(face);
