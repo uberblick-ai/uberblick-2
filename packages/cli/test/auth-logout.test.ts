@@ -4,10 +4,11 @@ import { createPrivateKey, createPublicKey, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { manageRequest } from "../src/access-management.js";
+import { writeHubLogin } from "../src/auth-store.js";
 import {
   OTHER_HUB, SIGNING_SECRET, USERNAME, WORKSPACE, assertPublicOnly, cleanUp,
   configPath, credentialPath, fixture, privateDeviceRows, readStore, rig,
@@ -75,6 +76,30 @@ describe("ub auth logout retires devices", () => {
     expect(help.stdout).toContain("--all-devices");
     expect(help.stderr).toBe("");
     expect(remote.requests).toHaveLength(0);
+  });
+
+  it("removes an expired login successfully without directing retirement of other current devices", async () => {
+    const remote = await rig([WORKSPACE]);
+    const { box, login } = await signedIn(remote);
+    const other = await signedIn(remote);
+    login.credential.record.issuedAt = Date.now() - DEVICE_CREDENTIAL_LIFETIME_MS;
+    const database = new DatabaseSync(remote.databasePath);
+    try {
+      database.prepare("UPDATE hub_credentials SET issued_at = ? WHERE id = ?")
+        .run(login.credential.record.issuedAt, login.credential.record.id);
+    } finally { database.close(); }
+    await writeHubLogin(remote.origin, login, box.env);
+
+    const run = await runInProcess(["auth", "logout"], box);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toBe(`expired    this computer's credential on ${remote.origin}\nremoved    login for ${remote.origin} on this computer\n`);
+    expect(run.stderr).toBe("");
+    expect(readStore(box).hubLogins?.[remote.origin]).toBeUndefined();
+    expect(readStore(box).hubLogins?.[OTHER_HUB]).toBeDefined();
+    expect(remote.requests.map(request => request.body.operation)).toEqual(["revoke-device"]);
+    expect(privateDeviceRows(remote.databasePath).every(row => row.revoked_at === null)).toBe(true);
+    expect((await manageRequest(remote.origin, { operation: "list-devices" }, other.login)).status).toBe(200);
+    assertPublicOnly(run, remote, login.credential.key);
   });
 
   it.each([

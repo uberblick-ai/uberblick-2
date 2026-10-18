@@ -239,6 +239,7 @@ export async function ensureDeviceLogin(endpoint: string, workspace: string, opt
     const recorded = readOutcome(path.outcome);
     const cached = recorded?.fingerprint === fingerprint(current.login) ? recorded : null;
     if (cached !== null && cached.retryAt > Date.now() &&
+        !(cached.status === "renewed" && oldEnough(current.login)) &&
         !(options.membershipGranted && !current.login.credential.record.workspaces.includes(workspace))) {
       // Reuse replacements for old connections; cool down a new credential's
       // refusal to avoid repeatedly retiring other processes' working keys.
