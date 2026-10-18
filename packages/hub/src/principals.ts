@@ -20,14 +20,38 @@ export class PrincipalRegistry {
   private readonly upsert: StatementSync;
   private readonly select: StatementSync;
   private readonly selectAccount: StatementSync;
+  private readonly selectUsername: StatementSync;
+  private readonly selectSignIn: StatementSync;
+  private readonly markSignIn: StatementSync;
 
-  constructor(database: HubDatabase) {
+  constructor(database: HubDatabase, now: () => number = Date.now) {
     const db = database.connection;
     db.exec(`CREATE TABLE IF NOT EXISTS hub_principals (
       id TEXT PRIMARY KEY NOT NULL,
       github_account_id TEXT UNIQUE NOT NULL,
-      github_username TEXT NOT NULL
+      github_username TEXT NOT NULL,
+      has_signed_in INTEGER NOT NULL DEFAULT 0
     )`);
+    if (!db.prepare("PRAGMA table_info(hub_principals)").all().some(column => column.name === "has_signed_in")) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("ALTER TABLE hub_principals ADD COLUMN has_signed_in INTEGER NOT NULL DEFAULT 0");
+        const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all();
+        if (tables.some(table => table.name === "hub_credentials")) {
+          // Revoked credentials still prove that their account completed sign-in.
+          db.exec(`UPDATE hub_principals SET has_signed_in = 1 WHERE id IN
+            (SELECT principal_id FROM hub_credentials)`);
+        }
+        if (tables.some(table => table.name === "hub_browser_sessions")) {
+          db.prepare(`UPDATE hub_principals SET has_signed_in = 1 WHERE id IN
+            (SELECT principal_id FROM hub_browser_sessions WHERE expires_at > $now)`).run({ now: now() });
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    }
     this.upsert = db.prepare(`
       INSERT INTO hub_principals (id, github_account_id, github_username)
       VALUES ($id, $accountId, $username)
@@ -40,6 +64,11 @@ export class PrincipalRegistry {
     this.selectAccount = db.prepare(`
       SELECT id, github_account_id, github_username FROM hub_principals WHERE github_account_id = $accountId
     `);
+    this.selectUsername = db.prepare(`
+      SELECT id, github_account_id, github_username FROM hub_principals WHERE github_username = $username COLLATE NOCASE
+    `);
+    this.selectSignIn = db.prepare("SELECT has_signed_in FROM hub_principals WHERE id = $id");
+    this.markSignIn = db.prepare("UPDATE hub_principals SET has_signed_in = 1 WHERE id = $id");
   }
 
   get(id: string): PrincipalRecord | null {
@@ -50,6 +79,19 @@ export class PrincipalRegistry {
   getByGithubAccountId(accountId: string): PrincipalRecord | null {
     const row = this.selectAccount.get({ accountId });
     return row === undefined ? null : fromRow(row);
+  }
+
+  findByGithubUsername(username: string): PrincipalRecord[] {
+    return this.selectUsername.all({ username }).map(fromRow);
+  }
+
+  hasSignedIn(id: string): boolean {
+    return this.selectSignIn.get({ id })?.has_signed_in === 1;
+  }
+
+  /** The caller commits this with the credential or browser session, never identity lookup alone. */
+  recordSignIn(id: string): void {
+    this.markSignIn.run({ id });
   }
 
   /** Internal only: identity comes from the hub's GitHub authorization or public lookup. */

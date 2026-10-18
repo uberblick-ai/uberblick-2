@@ -41,6 +41,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
       try {
         const identity = principals.identify(accountId, username);
         const claimedWorkspaceId = claims?.claim(identity.id, memberships);
+        principals.recordSignIn(identity.id);
         if (browser) {
           if (context === undefined) throw new Error();
           const session = sessions.issue(identity.id, identity.githubUsername, context);

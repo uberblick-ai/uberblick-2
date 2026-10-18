@@ -576,6 +576,7 @@ describe("direct GitHub account grants", () => {
     } } });
     const member = granted.result.member as { principalId: string };
     expect(hub.credentials!.listDevices(member.principalId)).toEqual([]);
+    expect(hub.principals!.hasSignedIn(member.principalId)).toBe(false);
     expect(await manage(hub, admin.issued, { operation: "list-members", workspaceId: WORKSPACE }))
       .toEqual({ code: 200, result: { status: "ok", members: expect.arrayContaining([
         { principalId: member.principalId, githubAccountId: "5678", githubUsername: "renamed-handle", role: "member" },

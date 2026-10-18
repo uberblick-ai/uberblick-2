@@ -53,15 +53,9 @@ function createTeamExtension(
 
   if (options.initializeDefaultWorkspace) claims = new HubClaimState(database);
   if (config.github !== undefined || options.operatorSetup) {
-    principals = new PrincipalRegistry(database);
+    principals = new PrincipalRegistry(database, config.github?.now);
     memberships = new MembershipRegistry(database);
     hubAdmins = new HubAdminRegistry(database, workspaceNames);
-    // A fresh hub gets its administrator by claiming; an existing deployment
-    // never can, so it adopts its oldest workspace member instead.
-    if (claims !== undefined && !claims.state(false).unclaimed) {
-      const adopted = hubAdmins.adoptOldestMember();
-      if (adopted !== undefined) log({ event: "hub.admin.adopted", ...adopted });
-    }
     if (config.github !== undefined) {
       credentials = new CredentialRegistry(database, hubAdmins, log);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
@@ -91,12 +85,12 @@ function createTeamExtension(
     },
     async start() {
       if (options.operatorSetup) {
-        if (principals === undefined || memberships === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
+        if (principals === undefined || memberships === undefined || hubAdmins === undefined || isEphemeralDatabase(config.databasePath ?? "")) {
           throw new Error("hub setup: durable hub database required");
         }
         adminSetup = await startAdminSetup({ database, principals, memberships, claims,
           github: config.github, log, hasLiveDocuments,
-          operator: createOperatorControls(context, config, claims) });
+          operator: createOperatorControls(context, config, claims, principals, hubAdmins) });
       }
     },
     async stop() {

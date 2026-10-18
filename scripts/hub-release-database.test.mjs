@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CREDENTIAL_SCHEMA, revokeHmacCredentials } from "../packages/hub/src/credentials-schema.ts";
+import { PrincipalRegistry } from "../packages/hub/src/principals.ts";
 import { assertHubDatabaseUpgrade, seedReleaseCredential, snapshotHubDatabase } from "./lib/hub-release-database.mjs";
 
 const tables = ["hub_principals", "hub_credentials", "hub_memberships", "hub_admin_setup_grants", "hub_claim_state"];
@@ -15,7 +16,7 @@ function fixture(schema) {
 	db.exec(schema);
 	db.exec(`CREATE TABLE documents(name TEXT, data BLOB);
 		INSERT INTO documents VALUES ('workspace/document', X'1234');
-		CREATE TABLE hub_principals(id TEXT, github_id TEXT, login TEXT);
+		CREATE TABLE hub_principals(id TEXT PRIMARY KEY, github_account_id TEXT UNIQUE, github_username TEXT);
 		INSERT INTO hub_principals VALUES ('principal', '123', 'release-proof');
 		CREATE TABLE hub_memberships(workspace_id TEXT, principal_id TEXT, role TEXT);
 		INSERT INTO hub_memberships VALUES ('workspace', 'principal', 'admin');
@@ -44,6 +45,7 @@ for (const withName of [false, true]) {
 			assert.equal(original.credentialKeyColumn, "signing_key");
 			assertHubDatabaseUpgrade(snapshot(db), original);
 			revokeHmacCredentials(db);
+			new PrincipalRegistry({ connection: db });
 			const upgraded = snapshot(db);
 			assert.equal(upgraded.credentialKeyColumn, "public_key");
 			assertHubDatabaseUpgrade(upgraded, original);
@@ -81,5 +83,41 @@ test("release proof seeds public-key releases and requires unchanged credentials
 		assert.throws(() => assertHubDatabaseUpgrade(revoked, original), assert.AssertionError);
 		db.exec("ALTER TABLE hub_credentials ADD COLUMN signing_key BLOB");
 		assert.throws(() => snapshot(db), /retains both signing_key and public_key/);
+	} finally { db.close(); }
+});
+
+test("release proof verifies additive sign-in backfill and preserves existing eligibility across restore", () => {
+	const db = fixture(CREDENTIAL_SCHEMA);
+	try {
+		db.exec("INSERT INTO hub_principals VALUES ('lookup', '456', 'not-signed-in')");
+		const original = snapshot(db);
+		new PrincipalRegistry({ connection: db });
+		const upgraded = snapshot(db);
+		assertHubDatabaseUpgrade(upgraded, original);
+		assert.deepEqual(upgraded.hub_principals.map((row) => [row.id, row.has_signed_in]), [["lookup", 0], ["principal", 1]]);
+		for (const mutate of [
+			(value) => { value.hub_principals.find((row) => row.id === "principal").has_signed_in = 0; },
+			(value) => { value.hub_principals.find((row) => row.id === "lookup").has_signed_in = 1; },
+			(value) => { value.hub_principals[0].github_account_id = "789"; },
+			(value) => { delete value.hub_principals[0].has_signed_in; },
+		]) {
+			const damaged = structuredClone(upgraded);
+			mutate(damaged);
+			assert.throws(() => assertHubDatabaseUpgrade(damaged, original), assert.AssertionError);
+			assert.throws(() => assertHubDatabaseUpgrade(damaged, upgraded), assert.AssertionError);
+		}
+		assertHubDatabaseUpgrade(snapshot(db), upgraded);
+	} finally { db.close(); }
+});
+
+test("release proof exposes browser sessions and refuses unmodeled legacy browser eligibility", () => {
+	const db = fixture(CREDENTIAL_SCHEMA);
+	try {
+		db.exec(`CREATE TABLE hub_browser_sessions(token_hash TEXT, principal_id TEXT, origin TEXT, expires_at INTEGER);
+			INSERT INTO hub_browser_sessions VALUES ('hash', 'principal', 'https://hub.example', 3000)`);
+		const original = snapshot(db);
+		assert.equal(original.hub_browser_sessions.length, 1);
+		new PrincipalRegistry({ connection: db }, () => 2000);
+		assert.throws(() => assertHubDatabaseUpgrade(snapshot(db), original), /no unmodeled browser sign-in evidence/);
 	} finally { db.close(); }
 });

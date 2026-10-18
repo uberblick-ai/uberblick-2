@@ -153,7 +153,8 @@ export async function rig(workspaces: string[] = [], configured = true, initiali
     const database = new DatabaseSync(databasePath);
     const principalId = randomUUID();
     try {
-      database.prepare("INSERT INTO hub_principals VALUES (?, ?, ?)").run(principalId, "1234", USERNAME);
+      database.prepare("INSERT INTO hub_principals (id, github_account_id, github_username) VALUES (?, ?, ?)")
+        .run(principalId, "1234", USERNAME);
       for (const workspace of workspaces) {
         database.prepare("INSERT INTO hub_memberships VALUES (?, ?, ?)").run(workspace, principalId, "member");
       }
