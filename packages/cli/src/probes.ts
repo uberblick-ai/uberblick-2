@@ -8,7 +8,7 @@
 
 import { createServer } from "node:net";
 import { DEFAULT_HOST, DEFAULT_PORT } from "@uberblick/hub/config";
-import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import type { HubState, McpConfig } from "@uberblick/mcp-server";
 import { inspectRemote } from "@uberblick/mcp-server";
 import { budget } from "./budget.js";
@@ -89,9 +89,11 @@ export function probePort(host: string, port: number): Promise<PortProbe> {
 export async function probeHubClock(
   hubUrl: string,
   timeoutMs = budget(2_000),
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<number | null> {
   let url: URL;
   try {
+    if (hubTransportProblem(hubUrl, env) !== null) return null;
     url = new URL(hubUrl);
   } catch {
     return null;
@@ -105,6 +107,7 @@ export async function probeHubClock(
   try {
     const response = await fetch(url, {
       method: "GET",
+      redirect: "error",
       cache: "no-store",
       signal: AbortSignal.timeout(timeoutMs),
     });

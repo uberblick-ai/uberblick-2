@@ -76,6 +76,56 @@ async function expectP95Within250ms(
 }
 
 describe("ub open: sharing through the upstream hub", () => {
+  it.each([false, true])("keeps browser edits local without any insecure upstream connection (stored login=%s)", async stored => {
+    const { box, env } = configured();
+    const hub = await createHub({ port: 0, address: "0.0.0.0", databasePath: join(box.cwd, "insecure-hub.sqlite"),
+      github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
+    hubs.push(hub);
+    let connections = 0;
+    hub.server.httpServer.on("connection", () => { connections += 1; });
+    const endpoint = `ws://0.0.0.0:${hub.port}`;
+    const origin = `http://0.0.0.0:${hub.port}`;
+    pointAt(box, endpoint);
+    env.UB_INSECURE_HUBS = `another-hub:${hub.port}`;
+    if (stored) {
+      const identity = hub.principals!.identify("12345", "open-person");
+      hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: identity.id, role: "admin" });
+      const credential = hub.credentials!.issue({ principalId: identity.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+      const { replacedAt: _replaced, ...record } = credential.record;
+      await writeHubLogin(origin, { identity, credential: { record, key: Buffer.from(credential.keyBytes).toString("base64url") } }, box.env);
+    }
+    const bindingPath = join(box.cwd, ".uberblick.json");
+    const before = readFileSync(bindingPath, "utf8");
+    const app = await open(box, ["--port", String(await freePort())], env);
+    const document = new Y.Doc();
+    const uuid = "7a819902-f86e-45d1-84d3-58d8f979a503";
+    const browser = new HocuspocusProvider({
+      url: app.url.replace(/^http:/, "ws:").replace(/\/$/, ""),
+      name: roomForDoc(WORKSPACE, uuid), document,
+      token: await authMessage(localBrowserKey(WORKSPACE, box.env), "read-write"),
+      ...{ WebSocketPolyfill: class extends WebSocket {
+        constructor(url: string | URL) { super(url, { headers: { Origin: app.url.slice(0, -1) } } as unknown as string[]); }
+      } },
+    });
+    try {
+      expect(app.stdout()).toContain("refusing an unencrypted connection");
+      expect(app.stdout()).toContain(`use wss://0.0.0.0:${hub.port}`);
+      await waitUntil("browser admission while insecure upstream is refused", () => browser.isSynced);
+      initDoc(document, { uuid, title: "Local with transport refusal" });
+      appendBlock(document, { type: "paragraph", text: "kept on this computer" });
+      await waitUntil("browser edit acknowledged locally with insecure upstream refused", () => !browser.hasUnsyncedChanges);
+      const headers = bearer(await authMessage(localBrowserKey(WORKSPACE, box.env)));
+      expect(await (await fetch(`${app.url}api/account`, { headers })).json()).toEqual({ state: "unavailable" });
+      expect(connections).toBe(0);
+      expect(hub.hocuspocus.documents.size).toBe(0);
+      expect(readFileSync(bindingPath, "utf8")).toBe(before);
+      expect((await get(app.url)).status).toBe(200);
+    } finally {
+      browser.destroy(); document.destroy();
+      expect((await app.interrupt()).status).toBe(0);
+    }
+  });
+
   it.each(["0.0.0.0", "127.0.0.1"])("reports a signed-in unreachable hub at startup and its recovery (%s)", async host => {
     const { box, env } = configured();
     const databasePath = join(box.cwd, "recovering-device-hub.sqlite");
@@ -83,6 +133,7 @@ describe("ub open: sharing through the upstream hub", () => {
       github: { clientId: "Iv1.0123456789abcdef" }, log: silentLogger });
     hubs.push(hub);
     const origin = `http://${host}:${hub.port}`;
+    env.UB_INSECURE_HUBS = `${host}:${hub.port}`;
     pointAt(box, `ws://${host}:${hub.port}`);
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
@@ -119,6 +170,7 @@ describe("ub open: sharing through the upstream hub", () => {
       github: { clientId: "Iv1.0123456789abcdef" }, protocolVersion: SYNC_PROTOCOL_VERSION + difference, log: silentLogger });
     hubs.push(hub);
     const origin = `http://0.0.0.0:${hub.port}`;
+    env.UB_INSECURE_HUBS = `0.0.0.0:${hub.port}`;
     pointAt(box, `ws://0.0.0.0:${hub.port}`);
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
@@ -208,6 +260,7 @@ describe("ub open: sharing through the upstream hub", () => {
     });
     hubs.push(hub);
     const endpoint = `ws://0.0.0.0:${hub.port}`;
+    env.UB_INSECURE_HUBS = `0.0.0.0:${hub.port}`;
     const origin = `http://0.0.0.0:${hub.port}`;
     pointAt(box, endpoint);
     const person = hub.principals!.identify("12345", "open-person");

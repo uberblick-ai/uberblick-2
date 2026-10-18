@@ -1,6 +1,7 @@
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { manageRequest, sanitizeManagementReply } from "@uberblick/mcp-server/management-client";
+import { hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import type { ServingSyncStatus } from "@uberblick/mcp-server";
 import type { AccessBinding } from "./open-access.js";
 
@@ -39,6 +40,7 @@ export async function requestAccount(
 ): Promise<ServingAccount> {
   if (binding.hubUrl === null) return { state: "signed-out" };
   try {
+    if (hubTransportProblem(binding.hubUrl, binding.env) !== null) return { state: "unavailable" };
     const current = readDeviceLogin(binding.hubUrl, binding.workspaceId, binding.env);
     if (current.status !== "ready") {
       return { state: current.status === "sign-in-required" ? "signed-out" : "unavailable" };
@@ -51,6 +53,7 @@ export async function requestAccount(
     const action = { operation: "own-role", workspaceId: binding.workspaceId } as const;
     const reply = sanitizeManagementReply(action, await manageRequest(current.origin, action, login, {
       signal: AbortSignal.any([signal, AbortSignal.timeout(4_000)]),
+      env: binding.env,
     }));
     if (reply.status === 401 && reply.body.status === "sign-in-required") return { state: "signed-out" };
     if (reply.status !== 200 || reply.body.status !== "ok") return { state: "unavailable" };

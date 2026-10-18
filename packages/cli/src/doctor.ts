@@ -1,6 +1,6 @@
 import { readDeviceLogin, type DeviceLoginResult } from "@uberblick/mcp-server/device-login";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
-import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -260,6 +260,10 @@ async function hubCheck(
       status: "skipped",
     };
   }
+  const transport = hubTransportProblem(config.hubUrl, config.authEnv ?? config.deviceLogin.env);
+  if (transport !== null) {
+    return { check: fail("hub", transport.reason, transport.fix), status: "hub-down" };
+  }
   if (login.status === "fail") {
     return { check: skipped("hub", "needs login"), status: "skipped" };
   }
@@ -354,7 +358,7 @@ async function clockCheck(config: McpConfig | null, hub: HubCheckResult): Promis
   ) {
     return skipped("clock", "needs the hub");
   }
-  const skew = await probeHubClock(config.hubUrl);
+  const skew = await probeHubClock(config.hubUrl, undefined, config.authEnv ?? config.deviceLogin?.env);
   if (skew === null) {
     return skipped(
       "clock",
@@ -425,6 +429,8 @@ async function localHubCheck(
       "ub workspace use <link|id>",
     );
   }
+  const transport = hubTransportProblem(config.hubUrl, env);
+  if (transport !== null) return fail(name, transport.reason, transport.fix);
   const bind = hubBind(env);
   if (bind.port === null) {
     return fail(

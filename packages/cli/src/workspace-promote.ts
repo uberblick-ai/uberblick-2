@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ensureDeviceLogin, readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import type { StoredHubLogin } from "@uberblick/mcp-server/auth-store";
-import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { assertHubTransport, authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { defaultWorkspaceDatabasePath, readWorkspaceName, syncWorkspace } from "@uberblick/mcp-server";
 import { parseWorkspaceId } from "@uberblick/schema";
@@ -102,6 +102,7 @@ export async function promoteWorkspaceCommand(argv: string[], io: Io): Promise<n
     if (positionals.length !== 1) throw new Error("expected exactly one hub");
     hub = positionals[0] ?? "";
     endpoint = normalizeRemoteUrl(hub);
+    assertHubTransport(hub);
   } catch (error) {
     io.err(`ub workspace promote: ${error instanceof Error ? error.message : "invalid hub"}\n`);
     return 2;

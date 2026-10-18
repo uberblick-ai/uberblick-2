@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { readDeviceLogin, ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { ManagementResponseError, manageRequest, sanitizeManagementReply, type ManagementAction } from "@uberblick/mcp-server/management-client";
-import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
+import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { readRequestAction } from "@uberblick/schema/token";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
 
@@ -79,12 +79,13 @@ export async function requestAccess(
   const origin = authenticationOrigin(endpoint);
   const reply = (status: number, body: Record<string, unknown>) => ({ status, body: { ...body, hub: origin } });
   const failure = (status: string) => reply(status === "update-required" ? 409 : status === "sign-in-required" ? 401 : 503, { status });
+  if (hubTransportProblem(endpoint, binding.env) !== null) return failure("hub-down");
   try {
     let current = readDeviceLogin(endpoint, binding.workspaceId, binding.env);
     let login = current.status === "ready" ? current.login : null;
     // With no login, an empty proof performs no change and asks this bound hub
     // to distinguish missing sign-in, missing GitHub configuration and skew.
-    let result = await manageRequest(origin, action, login, { signal });
+    let result = await manageRequest(origin, action, login, { signal, env: binding.env });
     const rejected = result.status === 401 && result.body.status === "sign-in-required";
     const missingScope = result.status === 403 && result.body.status === "forbidden" &&
       login !== null && !hubWorkspaceAction && "workspaceId" in action && !login.credential.record.workspaces.includes(binding.workspaceId);
@@ -98,7 +99,7 @@ export async function requestAccess(
         current = readDeviceLogin(endpoint, binding.workspaceId, binding.env);
         if (current.status !== "ready") return failure(current.status);
         login = current.login;
-        result = await manageRequest(origin, action, login, { signal });
+        result = await manageRequest(origin, action, login, { signal, env: binding.env });
       }
     }
     const safe = sanitizeManagementReply(action, result, login ?? undefined);
