@@ -1,3 +1,4 @@
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { MessageType, type onMessageParameters } from "@hocuspocus/provider";
@@ -14,8 +15,8 @@ import {
   settingsRoom,
 } from "@uberblick/schema";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
-import { importCredentialKey, mintRequestProof, mintToken, type RequestAction, type TokenScope } from "@uberblick/schema/token";
-import type { IssuedCredential } from "../src/credentials.js";
+import { importCredentialKey, mintToken, type RequestAction, type TokenScope } from "@uberblick/schema/token";
+
 import type { MembershipRole } from "../src/memberships.js";
 import { createTeamHub, type TeamHub } from "../src/team.js";
 import { createClient, removeTempDatabases, tempDatabasePath, TEST_SECRET, type TestClient,
@@ -43,7 +44,7 @@ async function teamHub(databasePath = tempDatabasePath()) {
 function person(hub: TeamHub, accountId: string, role: MembershipRole) {
   const principal = hub.principals!.identify(accountId, `user-${accountId}`);
   hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: principal.id, role });
-  const issued = hub.credentials!.issue({ principalId: principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
+  const issued = issueCredential(hub.credentials!, { principalId: principal.id, deviceId: randomUUID(), workspaces: [WORKSPACE] });
   return { principal, issued };
 }
 

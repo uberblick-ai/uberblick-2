@@ -1,4 +1,5 @@
 /** Device logins stay in the owner-only store, outside config and child environments. */
+import { createPrivateKey } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { sanitizeWorkspaceNames } from "@uberblick/schema/workspace-names";
@@ -24,6 +25,7 @@ export interface StoredHubLogin {
       issuedAt: number;
       revokedAt: number | null;
     };
+    /** Ed25519 PKCS8 private key; never received from or sent to the hub. */
     key: string;
     /** Optional display data, replaced with each issued credential. */
     workspaceNames?: Record<string, string>;
@@ -36,6 +38,8 @@ export interface HubLogins {
   logins: Record<string, StoredHubLogin>;
   /** Malformed entries do not hide valid logins for other hubs. */
   unreadableHubs: string[];
+  /** Obsolete HMAC logins select device admission but carry no usable authority. */
+  signedOutHubs: string[];
   /** Safe to print: a file or shape diagnostic, never stored contents. */
   diagnostic?: string;
   /** File failure and next action, separately consumable by diagnostics. */
@@ -57,8 +61,7 @@ function timestamp(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-/** Validate exactly the identity and issued credential that collection supplies. */
-export function isHubLogin(value: unknown): value is StoredHubLogin {
+function hasLoginFields(value: unknown): value is StoredHubLogin {
   if (!object(value) || !object(value.identity) || !object(value.credential)) return false;
   const { identity, credential } = value;
   const record = credential.record;
@@ -70,9 +73,23 @@ export function isHubLogin(value: unknown): value is StoredHubLogin {
       !record.workspaces.every(uuid) || !timestamp(record.issuedAt) ||
       (record.revokedAt !== null && !timestamp(record.revokedAt)) ||
       typeof credential.key !== "string") return false;
-  const bytes = Buffer.from(credential.key, "base64url");
-  return bytes.length === 32 && bytes.toString("base64url") === credential.key &&
-    !identity.githubUsername.includes(credential.key);
+  return !identity.githubUsername.includes(credential.key);
+}
+
+/** Validate locally held private material separately from public hub replies. */
+export function isHubLogin(value: unknown): value is StoredHubLogin {
+  if (!hasLoginFields(value)) return false;
+  const bytes = Buffer.from(value.credential.key, "base64url");
+  if (bytes.length !== 48 || bytes.toString("base64url") !== value.credential.key) return false;
+  try {
+    return createPrivateKey({ key: bytes, format: "der", type: "pkcs8" }).asymmetricKeyType === "ed25519";
+  } catch { return false; }
+}
+
+function isLegacyHubLogin(value: unknown): boolean {
+  if (!hasLoginFields(value)) return false;
+  const bytes = Buffer.from(value.credential.key, "base64url");
+  return bytes.length === 32 && bytes.toString("base64url") === value.credential.key;
 }
 
 function authOrigin(value: string): boolean {
@@ -91,7 +108,7 @@ interface Store extends HubLogins {
 
 function readStore(env: NodeJS.ProcessEnv): Store {
   const path = credentialsPath(env);
-  const empty = { path, logins: {}, unreadableHubs: [], raw: null };
+  const empty = { path, logins: {}, unreadableHubs: [], signedOutHubs: [], raw: null };
   const refusedFile = {
     ...empty, state: "refused" as const,
     diagnostic: `refusing credential store ${path}: it must be a regular file you own; move it aside and run \`ub auth login\` again`,
@@ -144,6 +161,7 @@ function readStore(env: NodeJS.ProcessEnv): Store {
   }
   const logins: Record<string, StoredHubLogin> = {};
   const unreadableHubs: string[] = [];
+  const signedOutHubs: string[] = [];
   for (const [origin, login] of Object.entries(entries ?? {})) {
     // Preserve unrecognized keys on write; they may contain secrets, so never print them.
     if (!authOrigin(origin)) continue;
@@ -155,9 +173,10 @@ function readStore(env: NodeJS.ProcessEnv): Store {
         ...credential, ...(names === undefined ? {} : { workspaceNames: names }),
       } };
     }
+    else if (isLegacyHubLogin(login)) signedOutHubs.push(origin);
     else unreadableHubs.push(origin);
   }
-  return { path, state: "usable", logins, unreadableHubs, raw };
+  return { path, state: "usable", logins, unreadableHubs, signedOutHubs, raw };
 }
 
 /** Offline reader: refused and unreadable files never return a credential. */
@@ -171,7 +190,7 @@ export function usesDeviceCredentials(endpoint: string, env: NodeJS.ProcessEnv =
   if (!isLoopbackEndpoint(endpoint) || env.HUB_ADMISSION === "device") return true;
   const origin = authenticationOrigin(endpoint);
   const store = readHubLogins(env);
-  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin);
+  return store.logins[origin] !== undefined || store.unreadableHubs.includes(origin) || store.signedOutHubs.includes(origin);
 }
 
 function editableStore(env: NodeJS.ProcessEnv): Store {

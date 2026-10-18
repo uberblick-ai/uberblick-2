@@ -1,3 +1,5 @@
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential } from "./device-credentials.js";
+import { replacementCredential } from "./device-credentials.js";
 /**
  * Credential admission is deliberately composed here, beside HubDatabase,
  * instead of enabled on createHub. These proofs drive the same Hocuspocus
@@ -23,21 +25,13 @@ import {
   CredentialAdmission,
   type CredentialContext,
 } from "../src/credential-admission.js";
-import {
-  CredentialRegistry,
-} from "../src/credentials.js";
+import { CredentialRegistry } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
-import {
-  importCredentialKey,
-  importRootSecret,
-  MAX_TOKEN_LIFETIME_SECONDS,
-  mintRequestProof,
-  mintToken,
-} from "@uberblick/schema/token";
+import { importCredentialKey, importRootSecret, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   OTHER_WORKSPACE,
   TEST_SECRET,
@@ -52,7 +46,7 @@ const sockets: HocuspocusProviderWebsocket[] = [];
 const servers: Server<CredentialContext>[] = [];
 const databases: HubDatabase[] = [];
 const directories: string[] = [];
-type IssuedCredential = ReturnType<CredentialRegistry["issue"]>;
+type IssuedCredential = ReturnType<typeof issueCredential>;
 
 afterEach(async () => {
   for (const provider of providers.splice(0)) provider.destroy();
@@ -115,7 +109,7 @@ async function startServer(
 }
 
 function issue(registry: CredentialRegistry, deviceId: string, workspaces = [WORKSPACE], principalId = "person") {
-  return registry.issue({ principalId, deviceId, workspaces });
+  return issueCredential(registry, { principalId, deviceId, workspaces });
 }
 
 type AccessEnd = "revocation" | "membership removal" | "replacement" | "suspension";
@@ -133,7 +127,7 @@ async function endAccess(rig: Awaited<ReturnType<typeof startServer>>, kind: Acc
       operation: "renew-credential",
       lifetimeSeconds: 60,
     });
-    expect(await rig.registry.renew(proof, rig.memberships)).toMatchObject({ status: "renewed" });
+    expect(await renewCredential(rig.registry, proof, rig.memberships)).toMatchObject({ status: "renewed" });
   }
 }
 
@@ -377,6 +371,32 @@ describe("credential admission on a composed server", () => {
     expect(client.provider.hasUnsyncedChanges).toBe(true);
     expect(rig.hocuspocus.documents.has(room)).toBe(false);
     expect(rig.logs.at(-1)).toMatchObject({ cause: "protocol-mismatch" });
+  });
+
+  it("closes a renewal winner's rooms when a fresh proof reuses the replaced credential, leaving another device connected", async () => {
+    const rig = await startServer();
+    const original = issue(rig.registry, "laptop");
+    const phone = issue(rig.registry, "phone");
+    const proof = await mintRequestProof(await importCredentialKey(original.keyBytes), {
+      kid: original.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+    });
+    const winner = replacementCredential(await renewCredential(rig.registry, proof, rig.memberships));
+    const room = testRoom();
+    const winnerClient = connect({ port: rig.port, room, token: await credentialToken(winner) });
+    const phoneClient = connect({ port: rig.port, room, token: await credentialToken(phone) });
+    await waitFor("the renewal winner to sync", winnerClient.synced);
+    await waitFor("the other device to sync", phoneClient.synced);
+    const fresh = await mintRequestProof(await importCredentialKey(original.keyBytes), {
+      kid: original.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+    });
+    expect(await renewCredential(rig.registry, fresh, rig.memberships)).toEqual({ status: "already-replaced" });
+    await waitFor("the compromised device's admitted room to close", winnerClient.closed);
+    const retried = connect({ port: rig.port, room, token: await credentialToken(winner) });
+    expect(await waitFor("the renewal winner's new admission to fail", retried.denied)).toBe("device-credential-refused");
+    phoneClient.text.insert(0, "other device stays connected");
+    await waitUntil("the unrelated device's write to land", () =>
+      rig.hocuspocus.documents.get(room)?.getText(TEXT_KEY).toString() === "other device stays connected");
+    expect(rig.registry.get(phone.record.id)?.revokedAt).toBeNull();
   });
 
   it("refuses a renewal proof as room authority", async () => {

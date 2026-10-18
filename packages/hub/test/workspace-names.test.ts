@@ -33,12 +33,11 @@ function store(database: HubDatabase, workspaceId: string, document: Y.Doc) {
     .run(settingsRoom(workspaceId), Y.encodeStateAsUpdate(document));
 }
 
-const key = Buffer.alloc(32, 1).toString("base64url");
 function reply(workspaces = [WORKSPACE, OTHER_WORKSPACE]): Extract<CredentialRenewal, { status: "renewed" }> {
   const record: CredentialRecord = { id: "7e0642bb-1c89-41b1-b615-b28191f17218",
     principalId: "7e0642bb-1c89-41b1-b615-b28191f17219", deviceId: "7e0642bb-1c89-41b1-b615-b28191f17220",
     workspaces, issuedAt: 1_000, revokedAt: null, replacedAt: null };
-  return { status: "renewed", credential: { record, key } };
+  return { status: "renewed", credential: { record } };
 }
 
 function completeReply(reserveBytes = 0, claimed = false) {
@@ -98,14 +97,14 @@ describe("credential workspace display names", () => {
     expect(reader.read(WORKSPACE)).toBeNull();
   });
 
-  it("adds names only for issued workspaces and suppresses terminal controls and both secrets", () => {
+  it("adds names only for issued workspaces and suppresses terminal controls and collection secrets", () => {
     const { database, reader } = rig();
     store(database, WORKSPACE, settings("Accepted"));
     store(database, OTHER_WORKSPACE, settings("Unissued"));
     expect(addWorkspaceNames(reply([WORKSPACE]), reader).credential.workspaceNames)
       .toEqual({ [WORKSPACE]: "Accepted" });
     const secret = "collection-secret-for-this-synthetic-request";
-    for (const name of [key, `prefix ${secret}`, "bad\u009bname", "bad\u202ename"]) {
+    for (const name of [`prefix ${secret}`, "bad\u009bname", "bad\u202ename"]) {
       vi.spyOn(reader, "read").mockReturnValueOnce(name);
       expect(addWorkspaceNames(reply([WORKSPACE]), reader, secret).credential.workspaceNames).toBeUndefined();
     }
@@ -133,7 +132,7 @@ describe("credential workspace display names", () => {
     expect(Object.values(named.credential.workspaceNames!)).toContain(names[0]);
     expect(Object.values(named.credential.workspaceNames!)).toContain(names[1]);
     expect(named.credential.record).toEqual(original.credential.record);
-    expect(named.credential.key).toBe(key);
+    expect(named.credential).not.toHaveProperty("key");
   });
 
   it("leaves a complete reply exactly at the byte bound intact, with no names", () => {
@@ -157,6 +156,6 @@ describe("credential workspace display names", () => {
     expect(named.credential.workspaceNames).toEqual({ [OTHER_WORKSPACE]: "n" });
     expect(Buffer.byteLength(JSON.stringify(named))).toBe(65_536);
     expect(named.credential.record.workspaces).toEqual(workspaces);
-    expect(named.credential.key).toBe(key);
+    expect(named.credential).not.toHaveProperty("key");
   });
 });

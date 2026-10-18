@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub, type TeamHub as Hub } from "@uberblick/hub/team";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { writeHubLogin, removeHubLogin, type StoredHubLogin } from "@uberblick/mcp-server/auth-store";
 import { ensureDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { compareCorpus, createMcpServer, inspectRemote, isIdentical, resolveMcpConfig, syncWorkspace } from "@uberblick/mcp-server";
@@ -42,7 +43,7 @@ async function hubFor(box: Sandbox, role: "admin" | "member" | null = "admin", h
   if (hubAdmin) hub.hubAdmins!.grant(identity.id);
   const administered = randomUUID();
   if (role !== null) hub.memberships!.grant({ workspaceId: administered, principalId: identity.id, role });
-  const credential = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: role === null ? [] : [administered] });
+  const credential = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: randomUUID(), workspaces: role === null ? [] : [administered] });
   const login: StoredHubLogin = { identity, credential: { record: credential.record, key: Buffer.from(credential.keyBytes).toString("base64url") } };
   const endpoint = `ws://127.0.0.1:${hub.port}`;
   await writeHubLogin(`http://127.0.0.1:${hub.port}`, login, box.env);
@@ -252,7 +253,7 @@ describe("workspace creation and promotion", () => {
       expect.objectContaining({ principal_id: login.identity.id, role: "admin" }),
     ]);
     const other = unboundSandbox();
-    const freshCredential = hub.credentials!.issue({ principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
+    const freshCredential = issueCredential(hub.credentials!, { principalId: login.identity.id, deviceId: randomUUID(), workspaces: [selected(box).workspaceId] });
     await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity: login.identity,
       credential: { record: freshCredential.record, key: Buffer.from(freshCredential.keyBytes).toString("base64url") } }, other.env);
     const joined = await runInProcess(["workspace", "use", `${endpoint}/${selected(box).workspaceId}`], other);
@@ -401,7 +402,7 @@ it.each(["missing", "revoked"])("refuses promotion with a %s login without start
   }, { deviceCredentials: true, initializeDefaultWorkspace: true });
   hubs.push(hub);
   const identity = hub.principals!.identify("1234", "test-first-owner");
-  const issued = hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
+  const issued = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
   if (state === "revoked") await writeHubLogin(`http://127.0.0.1:${hub.port}`, { identity,
     credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
   hub.credentials!.revokeDevice(identity.id, issued.record.deviceId);

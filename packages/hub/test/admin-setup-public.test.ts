@@ -1,3 +1,4 @@
+import { deviceFetch as fetch } from "./device-credentials.js";
 /** Public identity flows cannot invoke or collect host setup; command results are honest. */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection, type Socket } from "node:net";

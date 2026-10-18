@@ -1,3 +1,6 @@
+import { cancelDeviceSignIn, collectDeviceSignIn, startDeviceSignIn } from "./device-credentials.js";
+import { deviceFetch as fetch } from "./device-credentials.js";
+import { issueCredential } from "./device-credentials.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,7 +102,7 @@ function signIn(testRig: ReturnType<typeof rig>, github = new GithubFake()) {
 }
 
 async function pending(flow: GithubSignIn) {
-  const request = await flow.start();
+  const request = await startDeviceSignIn(flow);
   if (request.status !== "pending") throw new Error("sign-in did not start");
   return request;
 }
@@ -108,7 +111,7 @@ type Complete = Extract<SignInCollection, { status: "complete" }>;
 async function complete(flow: GithubSignIn, github: GithubFake): Promise<Complete> {
   const request = await pending(flow);
   github.time += 1000;
-  const result = await flow.collect(request.requestId, request.collectionSecret);
+  const result = await collectDeviceSignIn(flow, request.requestId, request.collectionSecret);
   if (result.status !== "complete") throw new Error(`sign-in ended with ${result.status}`);
   return result;
 }
@@ -160,7 +163,7 @@ describe("fresh deployed hub initialization", () => {
       if (family === "documents") old.database.connection.prepare("INSERT INTO documents(name, data) VALUES (?, ?)")
         .run(`${WORKSPACE}/_settings`, Uint8Array.of(0, 0));
       if (family === "principals") old.principals.identify("1234", "existing-identity");
-      if (family === "credentials") old.credentials.issue({ principalId: "existing-principal", deviceId: "old-device", workspaces: [] });
+      if (family === "credentials") issueCredential(old.credentials, { principalId: "existing-principal", deviceId: "old-device", workspaces: [] });
       if (family === "memberships") old.memberships.grant({ workspaceId: WORKSPACE, principalId: "existing-principal", role: "member" });
       if (family === "hub admins") old.hubAdmins.grant("existing-principal");
       if (family === "receipts") old.receipts.save({ status: "complete", setupId: crypto.randomUUID(), workspaceId: WORKSPACE,
@@ -207,7 +210,7 @@ describe("first-completed GitHub sign-in claim", () => {
     const collected = await complete(flow, github);
     expect(collected.credential.record.workspaces).toEqual([workspaceId]);
     expect(collected.credential.workspaceNames).toBeUndefined();
-    expect(collected.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(collected.credential).not.toHaveProperty("key");
     expect(testRig.credentials.get(collected.credential.record.id)).toEqual(collected.credential.record);
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
   });
@@ -250,9 +253,9 @@ describe("first-completed GitHub sign-in claim", () => {
     const resumed = new Promise<void>((resolve) => { resume = resolve; });
     github.pauseIdentity = async (accountId) => { if (accountId === 1234) { enter(); await resumed; } };
     github.time += 1000;
-    const collectingFirst = flow.collect(first.requestId, first.collectionSecret);
+    const collectingFirst = collectDeviceSignIn(flow, first.requestId, first.collectionSecret);
     await entered;
-    const winner = await flow.collect(second.requestId, second.collectionSecret);
+    const winner = await collectDeviceSignIn(flow, second.requestId, second.collectionSecret);
     expect(winner).toMatchObject({ status: "complete", claimedWorkspaceId: workspaceId, identity: { githubAccountId: "5678" } });
     resume();
     const loser = await collectingFirst;
@@ -270,7 +273,7 @@ describe("first-completed GitHub sign-in claim", () => {
       BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END`);
     const request = await pending(flow);
     github.time += 1000;
-    expect(await flow.collect(request.requestId, request.collectionSecret)).toEqual({ status: "failed" });
+    expect(await collectDeviceSignIn(flow, request.requestId, request.collectionSecret)).toEqual({ status: "failed" });
     expect(rows(testRig)).toEqual(before);
     testRig.database.connection.exec("DROP TRIGGER credential_failure");
     github.account = { id: 5678, login: "successful-approver" };
@@ -288,9 +291,9 @@ describe("first-completed GitHub sign-in claim", () => {
     const resumed = new Promise<void>((resolve) => { resume = resolve; });
     github.pauseIdentity = async () => { enter(); await resumed; };
     github.time += 1000;
-    const collecting = flow.collect(request.requestId, request.collectionSecret);
+    const collecting = collectDeviceSignIn(flow, request.requestId, request.collectionSecret);
     await entered;
-    flow.cancel(request.requestId, request.collectionSecret);
+    cancelDeviceSignIn(flow, request.requestId, request.collectionSecret);
     resume();
     expect(await collecting).toEqual({ status: "abandoned" });
     expect(rows(testRig)).toEqual(before);
@@ -305,7 +308,7 @@ describe("first-completed GitHub sign-in claim", () => {
     github.time += 1000;
     // Completion commits independently of delivery to the machine. Drop its
     // one-time result, then destroy all in-memory approval state by restarting.
-    await flow.collect(request.requestId, request.collectionSecret);
+    await collectDeviceSignIn(flow, request.requestId, request.collectionSecret);
     flow.stop();
     const path = first.database.databasePath;
     first.database.close();

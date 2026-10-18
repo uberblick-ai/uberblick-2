@@ -187,7 +187,9 @@ describe("browser request and flow isolation", () => {
     expect(await post(r.hub, "browser/collect", browser)).toMatchObject({ result: { status: "collected" } });
     expect(await post(r.hub, "browser/session", {}, { ...sessionHeaders(signed.session.token), Origin: `https://127.0.0.1:${r.hub.port}` })).toMatchObject({ code: 401 });
     expect(await post(r.hub, "browser/sign-out", {}, { ...sessionHeaders(signed.session.token), Origin: "https://other.example" })).toMatchObject({ code: 400 });
-    expect(await post(r.hub, "github/collect", cli)).toMatchObject({ result: { status: "complete", credential: { key: expect.any(String) } } });
+    const cliResult = await post(r.hub, "github/collect", cli);
+    expect(cliResult).toMatchObject({ result: { status: "complete", credential: { record: { id: expect.any(String) } } } });
+    expect(cliResult.result.credential).not.toHaveProperty("key");
     expect(await post(r.hub, "browser/session", {}, sessionHeaders(signed.session.token))).toMatchObject({ code: 200 });
     expect(rows(r.path).hub_browser_sessions).toHaveLength(1);
     expect(rows(r.path).hub_credentials).toHaveLength(1);
@@ -323,3 +325,4 @@ it("reports every browser route as unconfigured on core and team hubs without Gi
     expect(await post(hub, `browser/${route}`)).toEqual({ code: 503, result: { status: "not-configured" } });
   }
 });
+import { deviceFetch as fetch } from "./device-credentials.js";

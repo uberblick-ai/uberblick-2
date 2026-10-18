@@ -1,12 +1,10 @@
+import { replacementCredential } from "./device-credentials.js";
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
+import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
-import {
-  type RequestAction,
-  importCredentialKey,
-  mintRequestProof,
-} from "@uberblick/schema/token";
+import { type RequestAction, importCredentialKey } from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const databases: HubDatabase[] = [];
@@ -23,10 +21,10 @@ function registry(path = ":memory:") {
 }
 
 function issue(store: CredentialRegistry, deviceId = "laptop", principalId = "person", workspaces = [WORKSPACE]) {
-  return store.issue({ principalId, deviceId, workspaces });
+  return issueCredential(store, { principalId, deviceId, workspaces });
 }
 
-async function proof(issued: IssuedCredential, action: RequestAction = { operation: "list-devices" }) {
+async function proof(issued: IssuedCredential, action: RequestAction | { operation: "renew-credential" } = { operation: "list-devices" }) {
   return mintRequestProof(await importCredentialKey(issued.keyBytes), {
     kid: issued.record.id,
     ...action,
@@ -36,7 +34,7 @@ async function proof(issued: IssuedCredential, action: RequestAction = { operati
 
 function replacement(result: Awaited<ReturnType<CredentialRegistry["renew"]>>): IssuedCredential {
   if (result.status !== "renewed") throw new Error("expected a successful renewal");
-  return { record: result.credential.record, keyBytes: Buffer.from(result.credential.key, "base64url") };
+  return replacementCredential(result);
 }
 
 function states(db: HubDatabase) {
@@ -78,7 +76,7 @@ describe("principal-owned device management", () => {
     const laptop = issue(store);
     memberships.grant({ principalId: "person", workspaceId: OTHER_WORKSPACE, role: "member" });
     now.mockReturnValue(signedInAt + 10_000);
-    const renewed = replacement(await store.renew(await proof(laptop, { operation: "renew-credential" }), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(laptop, { operation: "renew-credential" }), memberships));
     const phone = issue(store, "phone", "person", []);
     const revoked = issue(store, "revoked");
     store.revokeDevice("person", "revoked");
@@ -119,7 +117,7 @@ describe("principal-owned device management", () => {
     const renewingProof = await proof(original, { operation: "renew-credential" });
     now.mockReturnValue(signedInAt - 10_000);
 
-    const renewed = replacement(await store.renew(renewingProof, memberships));
+    const renewed = replacement(await renewCredential(store, renewingProof, memberships));
     expect(renewed.record.issuedAt).toBeLessThan(original.record.issuedAt);
     expect(store.listDevices("person")).toEqual([
       { deviceId: "laptop", signedInAt, workspaces: [] },
@@ -129,7 +127,7 @@ describe("principal-owned device management", () => {
   it("revokes the renewal chain while leaving other devices and principals working", async () => {
     const { store, memberships } = registry();
     const original = issue(store);
-    const renewed = replacement(await store.renew(await proof(original, { operation: "renew-credential" }), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original, { operation: "renew-credential" }), memberships));
     const ownPhone = issue(store, "phone");
     const foreignLaptop = issue(store, "laptop", "another-person");
     const request = await proof(renewed);
@@ -142,7 +140,7 @@ describe("principal-owned device management", () => {
     expect(store.revokeDevice("person", "laptop")).toBe(true);
     expect(closed.sort()).toEqual([original.record.id, renewed.record.id].sort());
     expect(await store.verifyRequest(request, { operation: "list-devices" })).toBeNull();
-    expect(await store.renew(await proof(renewed, { operation: "renew-credential" }), memberships))
+    expect(await renewCredential(store, await proof(renewed, { operation: "renew-credential" }), memberships))
       .toEqual({ status: "sign-in-required" });
     expect(await store.verifyRequest(await proof(ownPhone), { operation: "list-devices" })).toHaveProperty("record", ownPhone.record);
     expect(await store.verifyRequest(await proof(foreignLaptop), { operation: "list-devices" })).toHaveProperty("record", foreignLaptop.record);
@@ -156,7 +154,7 @@ describe("principal-owned device management", () => {
     const original = issue(store);
     const request = await proof(original, { operation: "renew-credential" });
     const barrier = holdVerification();
-    const renewing = store.renew(request, memberships);
+    const renewing = renewCredential(store, request, memberships);
     await barrier.reached;
     try {
       expect(store.revokeDevice("person", "laptop")).toBe(true);
@@ -180,7 +178,7 @@ describe("principal-owned device management", () => {
       }
     });
 
-    expect(await store.renew(await proof(original, { operation: "renew-credential" }), memberships))
+    expect(await renewCredential(store, await proof(original, { operation: "renew-credential" }), memberships))
       .toEqual({ status: "sign-in-required" });
     const rows = states(db);
     expect(rows).toHaveLength(2);
@@ -191,7 +189,7 @@ describe("principal-owned device management", () => {
   it("runs all closures after commit despite failures, and retries already-revoked rows", async () => {
     const { store, memberships } = registry();
     const original = issue(store);
-    const renewed = replacement(await store.renew(await proof(original, { operation: "renew-credential" }), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original, { operation: "renew-credential" }), memberships));
     const closed: string[] = [];
     const unsubscribe = store.onRevoke(() => { throw new Error("closure failure fixture"); });
     store.onRevoke((id) => {
@@ -216,7 +214,7 @@ describe("principal-owned device management", () => {
   it("rolls back every row and closes nothing when a device-wide SQLite update fails partway", async () => {
     const { db, store, memberships } = registry();
     const original = issue(store);
-    const renewed = replacement(await store.renew(await proof(original, { operation: "renew-credential" }), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original, { operation: "renew-credential" }), memberships));
     const before = states(db);
     const closed = vi.fn();
     store.onRevoke(closed);
@@ -236,7 +234,7 @@ describe("principal-owned device management", () => {
     const path = tempDatabasePath();
     const first = registry(path);
     const original = issue(first.store);
-    const renewed = replacement(await first.store.renew(await proof(original, { operation: "renew-credential" }), first.memberships));
+    const renewed = replacement(await renewCredential(first.store, await proof(original, { operation: "renew-credential" }), first.memberships));
     const phone = issue(first.store, "phone", "person", []);
     first.store.revokeDevice("person", "laptop");
     first.db.close();
@@ -263,7 +261,7 @@ describe("current management credential verification", () => {
     await barrier.reached;
     try {
       if (change === "revocation") store.revokeDevice("person", "laptop");
-      else replacement(await store.renew(renewingProof, memberships));
+      else replacement(await renewCredential(store, renewingProof, memberships));
     } finally {
       barrier.release();
     }

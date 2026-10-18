@@ -16,7 +16,6 @@ const login = {
   credential: {
     record: { id: REQUEST, principalId: PRINCIPAL, deviceId: WORKSPACE,
       workspaces: [WORKSPACE], issuedAt: 0, revokedAt: null },
-    key: Buffer.alloc(32, 8).toString("base64url"),
   },
 };
 const started = { status: "pending", requestId: REQUEST,
@@ -141,7 +140,8 @@ syncBuiltinESMExports();
 
 function expectStored(box: Sandbox, origin: string) {
   const store = JSON.parse(readFileSync(join(box.configHome, "uberblick", "credentials.json"), "utf8"));
-  expect(store.hubLogins[origin]).toEqual(login);
+  expect(store.hubLogins[origin]).toMatchObject(login);
+  expect(Buffer.from(store.hubLogins[origin].credential.key, "base64url")).toHaveLength(48);
 }
 
 describe("login browser handoff", () => {

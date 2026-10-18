@@ -1,6 +1,7 @@
 /**
- * Wire: base64url(payloadJson) "." base64url(HMAC-SHA256(key, payloadPart)).
- * HMAC covers the encoded payload string, never reserialized JSON. Room claims
+ * Wire: base64url(payloadJson) "." base64url(signature(payloadPart)).
+ * Devices use Ed25519; the local root uses HMAC-SHA256. Both sign the encoded
+ * payload string, never reserialized JSON. Room claims
  * bind typ, sub, workspace, scope, kid, iat and exp.
  */
 
@@ -67,7 +68,7 @@ export type TokenRequest = Omit<TokenClaims, "iat" | "exp"> & {
 
 /** An HTTP proof binds the operation and every authority-bearing target. */
 export type RequestAction =
-  | { operation: "renew-credential" }
+  | { operation: "renew-credential"; publicKey: string }
   | { operation: "promote-workspace"; workspaceId: string; attemptId: string }
   | { operation: "list-devices" }
   | { operation: "own-hub-role" }
@@ -166,25 +167,50 @@ export async function importRootSecret(secret: string): Promise<CryptoKey> {
   return hmacKey(textEncoder.encode(secret));
 }
 
-/** A credential key's independent random bytes. */
-const CREDENTIAL_KEY_BYTES = 32;
-
 /** A credential id, and the same 8-4-4-4-12 lowercase spelling as a uuid. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
- * Import 32 independent random bytes issued by the hub registry; neither the
- * root secret nor another device's key can derive a credential key.
+ * Generate each credential on the device. Only its raw public key goes to the
+ * hub; the PKCS8 private key belongs in the owner's private credential store.
  */
+export async function generateCredentialKeyPair(): Promise<{
+  privateKey: Uint8Array<ArrayBuffer>;
+  publicKey: Uint8Array<ArrayBuffer>;
+}> {
+  const pair = await globalThis.crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as {
+    privateKey: CryptoKey; publicKey: CryptoKey;
+  };
+  return {
+    privateKey: new Uint8Array(await globalThis.crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+    publicKey: new Uint8Array(await globalThis.crypto.subtle.exportKey("raw", pair.publicKey)),
+  };
+}
+
+/** Import a device's PKCS8 private key for signing only. */
 export async function importCredentialKey(
   keyBytes: Uint8Array,
 ): Promise<CryptoKey> {
-  if (keyBytes.length !== CREDENTIAL_KEY_BYTES) {
-    throw new Error(
-      `importCredentialKey: a credential key is ${CREDENTIAL_KEY_BYTES} bytes, got ${keyBytes.length}`,
-    );
+  return globalThis.crypto.subtle.importKey(
+    "pkcs8", new Uint8Array(keyBytes), "Ed25519", false, ["sign"],
+  );
+}
+
+/** Import the hub's raw public key with no signing authority. */
+export async function importCredentialPublicKey(keyBytes: Uint8Array): Promise<CryptoKey> {
+  return globalThis.crypto.subtle.importKey(
+    "raw", new Uint8Array(keyBytes), "Ed25519", false, ["verify"],
+  );
+}
+
+/** A canonical wire-encoded raw Ed25519 public key. */
+export function isCredentialPublicKey(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    return base64urlDecode(value).length === 32;
+  } catch {
+    return false;
   }
-  return hmacKey(keyBytes);
 }
 
 function assertClaims(claims: TokenRequest): void {
@@ -330,7 +356,7 @@ async function signClaims(
     textEncoder.encode(JSON.stringify(payload)),
   );
   const signature = await globalThis.crypto.subtle.sign(
-    "HMAC",
+    key.algorithm.name,
     key,
     textEncoder.encode(payloadPart),
   );
@@ -345,16 +371,17 @@ async function signClaims(
   return minted;
 }
 
-const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId", "cursor"] as const;
+const REQUEST_TARGET_FIELDS = ["deviceId", "workspaceId", "principalId", "role", "attemptId", "githubUsername", "githubAccountId", "cursor", "publicKey"] as const;
 
 /** Parse target semantics, allowing request/proof metadata but no unrelated targets. */
 export function readRequestAction(payload: Record<string, unknown>): RequestAction | null {
-  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId, cursor } = payload;
+  const { operation, deviceId, workspaceId, principalId, role, attemptId, githubUsername, githubAccountId, cursor, publicKey } = payload;
   let action: RequestAction;
   switch (operation) {
     case "renew-credential":
-      // Renewal has no targets and intentionally ignores extra payload fields.
-      return { operation };
+      if (!isCredentialPublicKey(publicKey)) return null;
+      action = { operation, publicKey };
+      break;
     case "promote-workspace":
       if (!isWorkspace(workspaceId) || typeof attemptId !== "string" || !UUID.test(attemptId)) return null;
       action = { operation, workspaceId, attemptId };
@@ -412,11 +439,11 @@ export function readRequestAction(payload: Record<string, unknown>): RequestActi
 
 function parseRequestProofClaims(
   payload: Record<string, unknown>,
-  expected: RequestAction | "renew-credential",
+  expected: RequestAction,
 ): RequestProofClaims | null {
   const { typ, kid, iat, exp } = payload;
   const action = readRequestAction(payload);
-  const expectedAction = readRequestAction(typeof expected === "string" ? { operation: expected } : expected);
+  const expectedAction = readRequestAction(expected);
   if (
     typ !== "request" ||
     typeof kid !== "string" ||
@@ -578,7 +605,7 @@ async function verifySignature(
 ): Promise<boolean | null> {
   try {
     return await globalThis.crypto.subtle.verify(
-      "HMAC",
+      key.algorithm.name,
       key,
       parsed.signature,
       textEncoder.encode(parsed.payloadPart),
@@ -595,7 +622,7 @@ async function verifySignature(
 export async function inspectRequestProof(
   key: CryptoKey,
   token: string,
-  expected: RequestAction | "renew-credential",
+  expected: RequestAction,
 ): Promise<RequestProofClaims | TokenRejection> {
   const parsed = parseToken(token);
   if (parsed === null) return UNPARSEABLE;

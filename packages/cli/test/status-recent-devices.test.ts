@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { writeHubLogin } from "@uberblick/mcp-server/auth-store";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { afterAll, afterEach, expect, it } from "vitest";
 import { cleanUp, credentialPath, fixture, rig, seedLogin, serve, WORKSPACE } from "./auth-fixtures.js";
 import { removeTempDirs, sandbox } from "./helpers.js";
@@ -17,10 +18,10 @@ it("reports recent devices in text and JSON repeatedly without consuming them or
   const login = await seedLogin(remote, box);
   await writeHubLogin(origin, login, box.env);
   const otherId = randomUUID();
-  const issued = remote.hub.credentials!.issue({ principalId: login.identity.id, deviceId: otherId,
+  const issued = issueCredential(remote.hub.credentials!, { principalId: login.identity.id, deviceId: otherId,
     deviceName: "Same name as my laptop", workspaces: [WORKSPACE] });
   const stranger = remote.hub.principals!.identify("98765", "another-person");
-  remote.hub.credentials!.issue({ principalId: stranger.id, deviceId: randomUUID(), deviceName: "other account", workspaces: [] });
+  issueCredential(remote.hub.credentials!, { principalId: stranger.id, deviceId: randomUUID(), deviceName: "other account", workspaces: [] });
   const before = readFileSync(credentialPath(box));
 
   const json = await runInProcess(["status", "--json"], box);

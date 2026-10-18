@@ -1,5 +1,6 @@
 /** Member management across the real CLI, signed requests and a real hub. */
 import { randomUUID } from "node:crypto";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -269,7 +270,7 @@ describe("current member matching and mutations", () => {
     const remote = await administrator();
     const target = member(remote);
     member(remote, ACCOUNT, LOGIN, "member", OTHER_WORKSPACE);
-    remote.hub.credentials!.issue({ principalId: target.id, deviceId: randomUUID(), workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    issueCredential(remote.hub.credentials!, { principalId: target.id, deviceId: randomUUID(), workspaces: [WORKSPACE, OTHER_WORKSPACE] });
     const devices = privateDeviceRows(remote.databasePath);
     const original = binding(remote.box);
     const changed = await runInProcess(["workspace", "member", "role", LOGIN.toLowerCase(), "admin"], remote.box);
@@ -349,7 +350,7 @@ describe("stored device renewal and hub failures", () => {
     const original = binding(remote.box);
     const previous = savedLogin(remote.box, remote.origin);
     if (failure === "missing-scope") {
-      const issued = remote.hub.credentials!.issue({ principalId: previous.identity.id, deviceId: previous.credential.record.deviceId, workspaces: [OTHER_WORKSPACE] });
+      const issued = issueCredential(remote.hub.credentials!, { principalId: previous.identity.id, deviceId: previous.credential.record.deviceId, workspaces: [OTHER_WORKSPACE] });
       await writeHubLogin(remote.origin, { identity: previous.identity,
         credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, remote.box.env);
     } else {
@@ -451,7 +452,7 @@ describe("stored device renewal and hub failures", () => {
   it("lets a previously signed-in granted account use a link through renewal without new GitHub approval", async () => {
     const remote = await administrator([WORKSPACE, OTHER_WORKSPACE], true);
     const identity = remote.hub.principals!.identify(ACCOUNT, LOGIN);
-    const issued = remote.hub.credentials!.issue({ principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
+    const issued = issueCredential(remote.hub.credentials!, { principalId: identity.id, deviceId: randomUUID(), workspaces: [] });
     const other = sandbox({ projectBinding: { workspaceId: OTHER_WORKSPACE, hubUrl: null } });
     // The rig's HTTP front records management requests; the real hub also
     // serves the WebSocket connection that fetching the link needs.

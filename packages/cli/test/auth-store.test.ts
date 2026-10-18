@@ -50,7 +50,7 @@ function login(): StoredHubLogin {
         issuedAt: 1_790_000_000_000,
         revokedAt: null,
       },
-      key: Buffer.alloc(32, 17).toString("base64url"),
+      key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 17)]).toString("base64url"),
     },
   };
 }
@@ -180,6 +180,16 @@ process.send("ready");
 }
 
 describe("hub login store", () => {
+  it("treats a valid HMAC login as signed out and replaces it without a previous-device cleanup", async () => {
+    const old = login();
+    old.credential.key = Buffer.alloc(32, 17).toString("base64url");
+    const box = sandbox({ credentials: { hubLogins: { [HUB]: old } } });
+    const store = readHubLogins(box.env);
+    expect(store).toMatchObject({ state: "usable", logins: {}, unreadableHubs: [], signedOutHubs: [HUB] });
+    expect(await writeHubLogin(HUB, login(), box.env)).toBeNull();
+    expect(readHubLogins(box.env).logins[HUB]).toEqual(login());
+  });
+
   it("preflights an absent store without creating a credential or signing secret", () => {
     const box = sandbox();
     const path = credentialsPath(box.env);
@@ -209,7 +219,7 @@ describe("hub login store", () => {
     expect(lstatSync(path).mode & 0o777).toBe(0o600);
     expect(readFileSync(userConfigPath(box.env), "utf8")).toBe(binding);
     expect(readHubLogins(box.env)).toEqual({
-      path, state: "usable", logins: { [HUB]: login() }, unreadableHubs: [],
+      path, state: "usable", logins: { [HUB]: login() }, unreadableHubs: [], signedOutHubs: [],
     });
     // Issuance and storage do not opt existing commands into credential use.
     expect(JSON.stringify(resolveConfig({ env: box.env, cwd: box.cwd }))).not.toContain(login().credential.key);
@@ -256,7 +266,7 @@ describe("hub login store", () => {
     const box = sandbox({ credentials: { hubLogins: { [HUB]: login() } } });
     const latest = login();
     latest.credential.record.id = "eeeeeeee-5555-4555-8555-555555555555";
-    latest.credential.key = Buffer.alloc(32, 23).toString("base64url");
+    latest.credential.key = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 23)]).toString("base64url");
     const next = login();
     next.credential.record.deviceId = "ffffffff-6666-4666-8666-666666666666";
     const holder = await acquireInitLock(box.env);
@@ -471,7 +481,7 @@ describe("hub login store", () => {
     const path = credentialsPath(box.env);
     const before = readFileSync(path, "utf8");
     const next = login();
-    next.credential.key = Buffer.alloc(32, 23).toString("base64url");
+    next.credential.key = Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 23)]).toString("base64url");
     vi.spyOn(safeWrite, "publishOwnerOnly").mockImplementation(() => { throw new Error(next.credential.key); });
     await expect(writeHubLogin(HUB, next, box.env)).rejects.toThrow(/could not write credential store/);
     try { await writeHubLogin(HUB, next, box.env); } catch (error) {
@@ -506,6 +516,7 @@ describe("collected login validation", () => {
       (value: StoredHubLogin) => { value.credential.record.revokedAt = -1; },
       (value: StoredHubLogin) => { value.credential.key += "="; },
       (value: StoredHubLogin) => { value.credential.key = Buffer.alloc(31).toString("base64url"); },
+      (value: StoredHubLogin) => { value.credential.key = Buffer.alloc(48).toString("base64url"); },
     ]) {
       const value = login();
       mutate(value);

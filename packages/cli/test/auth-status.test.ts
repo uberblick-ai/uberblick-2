@@ -1,8 +1,9 @@
 /** Current login and hub-authority evidence stay separate from the stored snapshot. */
 import { existsSync, readFileSync } from "node:fs";
+import { createPrivateKey, createPublicKey } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { importCredentialKey, inspectRequestProof } from "@uberblick/schema/token";
+import { importCredentialPublicKey, inspectRequestProof } from "@uberblick/schema/token";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { runInProcess } from "./in-process.js";
@@ -73,7 +74,8 @@ describe.each(modes)("ub auth status current replies, JSON=%s", json => {
     expect(options).toMatchObject({ method: "POST", redirect: "error" });
     const request = JSON.parse(options!.body as string);
     expect(request).toEqual({ operation: "own-hub-role", protocolVersion: SYNC_PROTOCOL_VERSION, token: expect.any(String) });
-    const proof = await inspectRequestProof(await importCredentialKey(Buffer.from(login.credential.key, "base64url")), request.token, { operation: "own-hub-role" });
+    const publicKey = createPublicKey(createPrivateKey({ key: Buffer.from(login.credential.key, "base64url"), type: "pkcs8", format: "der" })).export({ format: "jwk" }).x!;
+    const proof = await inspectRequestProof(await importCredentialPublicKey(Buffer.from(publicKey, "base64url")), request.token, { operation: "own-hub-role" });
     expect(proof).not.toHaveProperty("failure");
     expect(proof).toMatchObject({ operation: "own-hub-role", kid: login.credential.record.id });
     for (const secret of [PRIVATE_REPLY, login.credential.key, request.token]) expect(run.output.includes(secret)).toBe(false);

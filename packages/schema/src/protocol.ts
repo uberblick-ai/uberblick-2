@@ -10,8 +10,8 @@ import { MAX_TOKEN_LENGTH } from "./token.js";
  * 409 protocol-mismatch with reason protocol-mismatch:<hubVersion> on skew,
  * or 401 sign-in-required on equality.
  */
-// Permanent document deletion requires every peer to retain its deletion marks.
-export const SYNC_PROTOCOL_VERSION = 4;
+// Device credentials use device-generated Ed25519 keys and bind renewal keys.
+export const SYNC_PROTOCOL_VERSION = 6;
 
 /** Terminal, room-local refusal; the client must discard its copy and stop publishing. */
 export const DOC_DELETED_REASON = "uberblick:doc-deleted";

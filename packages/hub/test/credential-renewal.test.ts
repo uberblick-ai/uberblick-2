@@ -1,16 +1,13 @@
+import { replacementCredential } from "./device-credentials.js";
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
+import { copyFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubAdminRegistry } from "../src/hub-admins.js";
 import { HubDatabase } from "../src/persistence.js";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  REQUEST_PROOF_LIFETIME_SECONDS,
-  importCredentialKey,
-  importRootSecret,
-  mintRequestProof,
-  mintToken,
-} from "@uberblick/schema/token";
+import { MAX_TOKEN_LIFETIME_SECONDS, REQUEST_PROOF_LIFETIME_SECONDS, importCredentialKey, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { OTHER_WORKSPACE, WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
 
 const PRINCIPAL = "person";
@@ -30,7 +27,7 @@ function registry(path = ":memory:") {
 }
 
 function issue(store: CredentialRegistry, workspaces: string[] = [WORKSPACE]): IssuedCredential {
-  return store.issue({ principalId: PRINCIPAL, deviceId: DEVICE, workspaces });
+  return issueCredential(store, { principalId: PRINCIPAL, deviceId: DEVICE, workspaces });
 }
 
 async function proof(issued: IssuedCredential, options: { key?: CryptoKey; kid?: string; iat?: number } = {}) {
@@ -51,7 +48,7 @@ async function roomToken(issued: IssuedCredential) {
 
 function replacement(result: Awaited<ReturnType<CredentialRegistry["renew"]>>): IssuedCredential {
   if (result.status !== "renewed") throw new Error("expected a successful renewal");
-  return { record: result.credential.record, keyBytes: Buffer.from(result.credential.key, "base64url") };
+  return replacementCredential(result);
 }
 
 function states(db: HubDatabase) {
@@ -99,17 +96,17 @@ describe("device credential renewal", () => {
     store.onRevoke(closed);
     admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended");
     expect(store.get(original.record.id)).toEqual(original.record);
-    expect(store.issue({ principalId: "new-device", deviceId: "new", workspaces: [WORKSPACE, OTHER_WORKSPACE] })
+    expect(issueCredential(store, { principalId: "new-device", deviceId: "new", workspaces: [WORKSPACE, OTHER_WORKSPACE] })
       .record.workspaces).toEqual([OTHER_WORKSPACE]);
 
-    const renewed = replacement(await store.renew(await proof(original), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original), memberships));
     expect(renewed.record.workspaces).toEqual([OTHER_WORKSPACE]);
     expect(closed).toHaveBeenCalledExactlyOnceWith(original.record.id);
     const now = Math.floor(Date.now() / 1000);
     const before = states(db);
     for (let attempt = 0; attempt < 3; attempt++) {
       const request = await proof(renewed, { iat: now + attempt });
-      expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
+      expect(await renewCredential(store, request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
     }
     expect(states(db)).toEqual(before);
     expect(closed).toHaveBeenCalledTimes(1);
@@ -117,7 +114,7 @@ describe("device credential renewal", () => {
     expect(memberships.roleFor(WORKSPACE, PRINCIPAL)).toBe("admin");
 
     admins.setWorkspaceStatus("hub-admin", WORKSPACE, "active");
-    const restored = replacement(await store.renew(await proof(renewed, { iat: now + 3 }), memberships, { ifWorkspacesChanged: true }));
+    const restored = replacement(await renewCredential(store, await proof(renewed, { iat: now + 3 }), memberships, { ifWorkspacesChanged: true }));
     expect(restored.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
     expect(store.listDevices(PRINCIPAL)).toEqual([{ ...device, workspaces: restored.record.workspaces }]);
   });
@@ -130,7 +127,7 @@ describe("device credential renewal", () => {
     const original = issue(store);
     const request = await proof(original);
     const barrier = holdVerification();
-    const renewing = store.renew(request, memberships);
+    const renewing = renewCredential(store, request, memberships);
     await barrier.reached;
     try { admins.setWorkspaceStatus("hub-admin", WORKSPACE, "suspended"); }
     finally { barrier.release(); }
@@ -141,17 +138,17 @@ describe("device credential renewal", () => {
   it("preserves the device name, UUID and original sign-in time across renewal and restart", async () => {
     const path = tempDatabasePath();
     const first = registry(path);
-    const original = first.store.issue({ principalId: PRINCIPAL, deviceId: DEVICE, deviceName: "agent-server", workspaces: [] });
+    const original = issueCredential(first.store, { principalId: PRINCIPAL, deviceId: DEVICE, deviceName: "agent-server", workspaces: [] });
     const originalDevice = first.store.listDevices(PRINCIPAL)[0];
     expect(originalDevice).toEqual({ deviceId: DEVICE, deviceName: "agent-server", signedInAt: original.record.issuedAt, workspaces: [] });
-    const renewed = replacement(await first.store.renew(await proof(original), first.memberships));
+    const renewed = replacement(await renewCredential(first.store, await proof(original), first.memberships));
     expect(renewed.record).not.toHaveProperty("deviceName");
     expect(renewed.record.deviceId).toBe(original.record.deviceId);
     expect(first.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
     first.db.close();
     const restarted = registry(path);
     expect(restarted.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
-    const next = replacement(await restarted.store.renew(await proof(renewed), restarted.memberships));
+    const next = replacement(await renewCredential(restarted.store, await proof(renewed), restarted.memberships));
     expect(restarted.store.listDevices(PRINCIPAL)).toEqual([originalDevice]);
     expect(restarted.store.revokeDevice(PRINCIPAL, DEVICE)).toBe(true);
     expect(restarted.store.listDevices(PRINCIPAL)).toEqual([]);
@@ -164,7 +161,7 @@ describe("device credential renewal", () => {
     db.connection.prepare("UPDATE hub_credentials SET device_name = ? WHERE id = ?")
       .run("bad\nname", original.record.id);
     expect(store.listDevices(PRINCIPAL)[0]).not.toHaveProperty("deviceName");
-    const renewed = replacement(await store.renew(await proof(original), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original), memberships));
     expect(store.listDevices(PRINCIPAL)[0]).not.toHaveProperty("deviceName");
     expect(db.connection.prepare("SELECT device_name FROM hub_credentials WHERE id = ?")
       .get(renewed.record.id)?.device_name).toBeNull();
@@ -180,21 +177,21 @@ describe("device credential renewal", () => {
     const closed = vi.fn();
     store.onRevoke(closed);
     const before = states(db);
-    expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
+    expect(await renewCredential(store, request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
     expect(states(db)).toEqual(before);
     expect(closed).not.toHaveBeenCalled();
     memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "member" });
-    expect(await store.renew(request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(store, request, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
     expect(states(db)).toEqual(before);
     expect(closed).not.toHaveBeenCalled();
     expect(await store.verify(await roomToken(original))).toHaveProperty("record", original.record);
     const freshRequest = await proof(original, { iat: now + 1 });
-    const next = replacement(await store.renew(freshRequest, memberships, { ifWorkspacesChanged: true }));
+    const next = replacement(await renewCredential(store, freshRequest, memberships, { ifWorkspacesChanged: true }));
     expect(next.record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
     expect(closed).toHaveBeenCalledExactlyOnceWith(original.record.id);
-    expect(await store.renew(freshRequest, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(store, freshRequest, memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
     store.revoke(next.record.id);
-    expect(await store.renew(await proof(next), memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(store, await proof(next), memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
   });
 
   it("accepts an unchanged proof only once when exchanges arrive concurrently", async () => {
@@ -204,8 +201,8 @@ describe("device credential renewal", () => {
     const request = await proof(original);
     const before = states(db);
     const results = await Promise.all([
-      store.renew(request, memberships, { ifWorkspacesChanged: true }),
-      store.renew(request, memberships, { ifWorkspacesChanged: true }),
+      renewCredential(store, request, memberships, { ifWorkspacesChanged: true }),
+      renewCredential(store, request, memberships, { ifWorkspacesChanged: true }),
     ]);
     expect(results.filter((result) => result.status === "unchanged")).toHaveLength(1);
     expect(results.filter((result) => result.status === "sign-in-required")).toHaveLength(1);
@@ -220,16 +217,16 @@ describe("device credential renewal", () => {
     const original = issue(first.store);
     const now = Math.floor(Date.now() / 1000);
     const request = await proof(original, { iat: now });
-    expect(await first.store.renew(request, first.memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
+    expect(await renewCredential(first.store, request, first.memberships, { ifWorkspacesChanged: true })).toEqual({ status: "unchanged" });
     first.db.close();
     const restarted = registry(path);
     restarted.memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "member" });
     const before = states(restarted.db);
 
-    expect(await restarted.store.renew(request, restarted.memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(restarted.store, request, restarted.memberships, { ifWorkspacesChanged: true })).toEqual({ status: "sign-in-required" });
     expect(states(restarted.db)).toEqual(before);
     expect(await restarted.store.verify(await roomToken(original))).toHaveProperty("record", original.record);
-    expect(replacement(await restarted.store.renew(await proof(original, { iat: now + 1 }), restarted.memberships,
+    expect(replacement(await renewCredential(restarted.store, await proof(original, { iat: now + 1 }), restarted.memberships,
       { ifWorkspacesChanged: true })).record.workspaces).toEqual([WORKSPACE, OTHER_WORKSPACE].sort());
   });
 
@@ -250,14 +247,14 @@ describe("device credential renewal", () => {
     });
     store.onRevoke(closing);
 
-    const result = await store.renew(request, memberships);
+    const result = await renewCredential(store, request, memberships);
     const renewed = replacement(result);
     expect(renewed.record).toEqual(expect.objectContaining({
       principalId: PRINCIPAL, deviceId: DEVICE, workspaces: [WORKSPACE, OTHER_WORKSPACE].sort(),
       revokedAt: null, replacedAt: null,
     }));
     expect(renewed.record.id).not.toBe(original.record.id);
-    expect(renewed.keyBytes).toHaveLength(32);
+    expect(renewed.keyBytes).toHaveLength(48);
     expect(renewed.keyBytes).not.toEqual(original.keyBytes);
     expect(github).not.toHaveBeenCalled();
     expect(db.connection.prepare("SELECT * FROM hub_memberships ORDER BY workspace_id, principal_id").all()).toEqual(membersBefore);
@@ -278,11 +275,11 @@ describe("device credential renewal", () => {
     const original = issue(store);
     memberships.remove({ actorPrincipalId: "admin", principalId: PRINCIPAL, workspaceId: WORKSPACE });
 
-    const renewed = replacement(await store.renew(await proof(original), memberships));
+    const renewed = replacement(await renewCredential(store, await proof(original), memberships));
     expect(renewed.record).toEqual(expect.objectContaining({ principalId: PRINCIPAL, deviceId: DEVICE, workspaces: [] }));
     expect(memberships.workspacesFor(PRINCIPAL)).toEqual([]);
     expect(memberships.roleFor(WORKSPACE, "admin")).toBe("admin");
-    expect((await store.renew(await proof(renewed), memberships)).status).toBe("renewed");
+    expect((await renewCredential(store, await proof(renewed), memberships)).status).toBe("renewed");
   });
 
   it("snapshots membership after the final asynchronous proof check", async () => {
@@ -290,7 +287,7 @@ describe("device credential renewal", () => {
     const original = issue(store, []);
     const request = await proof(original);
     const barrier = holdVerification();
-    const renewing = store.renew(request, memberships);
+    const renewing = renewCredential(store, request, memberships);
     await barrier.reached;
     try {
       memberships.grant({ principalId: PRINCIPAL, workspaceId: OTHER_WORKSPACE, role: "admin" });
@@ -323,12 +320,12 @@ describe("device credential renewal", () => {
       iat: now, exp: now + REQUEST_PROOF_LIFETIME_SECONDS,
     })).toString("base64url");
     const signature = await crypto.subtle.sign(
-      "HMAC", await importCredentialKey(active.keyBytes), new TextEncoder().encode(payload),
+      "Ed25519", await importCredentialKey(active.keyBytes), new TextEncoder().encode(payload),
     );
     requests.push(`${payload}.${Buffer.from(signature).toString("base64url")}`);
 
     for (const request of requests) {
-      expect(await store.renew(request, memberships)).toEqual({ status: "sign-in-required" });
+      expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
       expect(states(db)).toEqual(before);
     }
     expect(await store.verify(await roomToken(active))).toHaveProperty("record", active.record);
@@ -344,38 +341,64 @@ describe("device credential renewal", () => {
         iat: now, exp: now + lifetime,
       })).toString("base64url");
       const signature = await crypto.subtle.sign(
-        "HMAC", await importCredentialKey(original.keyBytes), new TextEncoder().encode(payload),
+        "Ed25519", await importCredentialKey(original.keyBytes), new TextEncoder().encode(payload),
       );
       const before = states(db);
 
-      expect(await store.renew(`${payload}.${Buffer.from(signature).toString("base64url")}`, memberships))
+      expect(await renewCredential(store, `${payload}.${Buffer.from(signature).toString("base64url")}`, memberships))
         .toEqual({ status: "sign-in-required" });
       expect(states(db)).toEqual(before);
       expect(await store.verify(await roomToken(original))).toHaveProperty("record", original.record);
     },
   );
 
-  it("distinguishes a fresh proof for a replaced credential from a spent proof without disclosing its replacement", async () => {
-    const { db, store, memberships } = registry();
+  it("revokes only a reused device after a fresh replaced-key proof, while spent proofs and stale requests revoke nothing", async () => {
+    const { db, memberships } = registry();
+    const log = vi.fn();
+    const store = new CredentialRegistry(db, undefined, log);
     const original = issue(store);
-    const other = issue(store);
+    const other = issueCredential(store, { principalId: PRINCIPAL, deviceId: "phone", workspaces: [WORKSPACE] });
+    const closed = vi.fn();
+    store.onRevoke(closed);
     const now = Math.floor(Date.now() / 1000);
     const request = await proof(original, { iat: now });
-    replacement(await store.renew(request, memberships));
+    const winner = replacement(await renewCredential(store, request, memberships));
     const before = states(db);
 
-    expect(await store.renew(request, memberships)).toEqual({ status: "sign-in-required" });
-    expect(await store.renew(await proof(original, { iat: now + 1 }), memberships)).toEqual({ status: "already-replaced" });
-    expect(await store.renew(await proof(original, { key: await importCredentialKey(other.keyBytes) }), memberships))
+    expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
+    expect(await store.verify(await roomToken(original))).toEqual({ failure: "replaced-credential" });
+    const staleManagement = await mintRequestProof(await importCredentialKey(original.keyBytes), {
+      kid: original.record.id, operation: "list-devices", lifetimeSeconds: 60,
+    });
+    expect(await store.verifyRequest(staleManagement, { operation: "list-devices" })).toBeNull();
+    expect(await renewCredential(store, await proof(original, { key: await importCredentialKey(other.keyBytes) }), memberships))
       .toEqual({ status: "sign-in-required" });
     expect(states(db)).toEqual(before);
+    const fresh = await proof(original, { iat: now + 1 });
+    expect(await renewCredential(store, fresh, memberships)).toEqual({ status: "already-replaced" });
+    expect(store.get(original.record.id)?.revokedAt).toBeTypeOf("number");
+    expect(store.get(winner.record.id)?.revokedAt).toBeTypeOf("number");
+    expect(store.get(other.record.id)?.revokedAt).toBeNull();
+    expect(closed.mock.calls.map(([id]) => id)).toEqual(expect.arrayContaining([original.record.id, winner.record.id]));
+    expect(closed).not.toHaveBeenCalledWith(other.record.id);
+    expect(await store.verify(await roomToken(winner))).toEqual({ failure: "revoked-credential" });
+    expect(await renewCredential(store, await proof(winner), memberships)).toEqual({ status: "sign-in-required" });
+    const winnerManagement = await mintRequestProof(await importCredentialKey(winner.keyBytes), {
+      kid: winner.record.id, operation: "list-devices", lifetimeSeconds: 60,
+    });
+    expect(await store.verifyRequest(winnerManagement, { operation: "list-devices" })).toBeNull();
+    expect(log).toHaveBeenCalledExactlyOnceWith({ event: "hub.credential.reuse", credentialId: original.record.id,
+      principalId: PRINCIPAL, deviceId: DEVICE });
+    for (const secret of [request, fresh, Buffer.from(original.keyBytes).toString("base64url"), Buffer.from(winner.keyBytes).toString("base64url")]) {
+      expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+    }
   });
 
   it("allows at most one usable result from concurrent exchanges of one credential", async () => {
     const { db, store, memberships } = registry();
     const original = issue(store);
     const request = await proof(original);
-    const results = await Promise.all([store.renew(request, memberships), store.renew(request, memberships)]);
+    const results = await Promise.all([renewCredential(store, request, memberships), renewCredential(store, request, memberships)]);
     expect(results.filter((result) => result.status === "renewed")).toHaveLength(1);
     expect(results.filter((result) => result.status === "sign-in-required")).toHaveLength(1);
     const winner = results.find((result) => result.status === "renewed");
@@ -391,10 +414,10 @@ describe("device credential renewal", () => {
     const request = await proof(original);
     if (when === "before verification") {
       store.revoke(original.record.id);
-      expect(await store.renew(request, memberships)).toEqual({ status: "sign-in-required" });
+      expect(await renewCredential(store, request, memberships)).toEqual({ status: "sign-in-required" });
     } else {
       const barrier = holdVerification();
-      const renewing = store.renew(request, memberships);
+      const renewing = renewCredential(store, request, memberships);
       await barrier.reached;
       try {
         store.revoke(original.record.id);
@@ -418,7 +441,7 @@ describe("device credential renewal", () => {
       }
     });
 
-    expect(await store.renew(await proof(original), memberships)).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(store, await proof(original), memberships)).toEqual({ status: "sign-in-required" });
     expect(store.get(original.record.id)?.revokedAt).toBeTypeOf("number");
     expect(usableCount(db)).toBe(0);
   });
@@ -430,7 +453,7 @@ describe("device credential renewal", () => {
     store.onRevoke(() => { throw new Error("closure failure fixture"); });
     store.onRevoke((id) => { closed.push(id); });
 
-    await expect(store.renew(await proof(original), memberships)).rejects.toThrow();
+    await expect(renewCredential(store, await proof(original), memberships)).rejects.toThrow();
     const rows = states(db);
     expect(rows).toHaveLength(2);
     const replacementRow = rows.find((row) => row.id !== original.record.id);
@@ -449,11 +472,11 @@ describe("device credential renewal", () => {
       ? "CREATE TRIGGER fail_renewal BEFORE INSERT ON hub_credentials BEGIN SELECT RAISE(FAIL, 'insertion failure fixture'); END"
       : "CREATE TRIGGER fail_renewal BEFORE UPDATE OF replaced_at ON hub_credentials BEGIN SELECT RAISE(FAIL, 'retirement failure fixture'); END");
 
-    await expect(store.renew(request, memberships)).rejects.toThrow();
+    await expect(renewCredential(store, request, memberships)).rejects.toThrow();
     expect(states(db)).toEqual(before);
     expect(await store.verify(await roomToken(original))).toHaveProperty("record", original.record);
     db.connection.exec("DROP TRIGGER fail_renewal");
-    expect((await store.renew(request, memberships)).status).toBe("renewed");
+    expect((await renewCredential(store, request, memberships)).status).toBe("renewed");
     expect(usableCount(db)).toBe(1);
   });
 
@@ -462,24 +485,24 @@ describe("device credential renewal", () => {
     const first = registry(path);
     const original = issue(first.store);
     const originalProof = await proof(original);
-    const renewed = replacement(await first.store.renew(originalProof, first.memberships));
+    const renewed = replacement(await renewCredential(first.store, originalProof, first.memberships));
     const revoked = issue(first.store);
     first.store.revoke(revoked.record.id);
     const active = issue(first.store);
     first.db.close();
     const restarted = registry(path);
 
-    expect(await restarted.store.renew(originalProof, restarted.memberships)).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(restarted.store, originalProof, restarted.memberships)).toEqual({ status: "sign-in-required" });
     expect(await restarted.store.verify(await roomToken(original))).toEqual({ failure: "replaced-credential" });
-    expect(await restarted.store.renew(await proof(revoked), restarted.memberships)).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(restarted.store, await proof(revoked), restarted.memberships)).toEqual({ status: "sign-in-required" });
     expect(await restarted.store.verify(await roomToken(renewed))).toHaveProperty("record", renewed.record);
     expect(await restarted.store.verify(await roomToken(active))).toHaveProperty("record", active.record);
     const olderBackup = registry();
-    expect(await olderBackup.store.renew(await proof(active), olderBackup.memberships)).toEqual({ status: "sign-in-required" });
+    expect(await renewCredential(olderBackup.store, await proof(active), olderBackup.memberships)).toEqual({ status: "sign-in-required" });
     expect(states(olderBackup.db)).toEqual([]);
   });
 
-  it("adds replacement state and optional names to legacy credentials while preserving active and revoked rows", async () => {
+  it("revokes legacy credentials and erases shared keys while preserving credential history", async () => {
     const db = database();
     db.connection.exec(`CREATE TABLE hub_credentials (
       id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL, device_id TEXT NOT NULL,
@@ -503,14 +526,41 @@ describe("device credential renewal", () => {
     const store = new CredentialRegistry(db);
     const memberships = new MembershipRegistry(db);
 
-    expect(store.get(original.record.id)).toEqual(original.record);
+    expect(store.get(original.record.id)).toEqual({ ...original.record, revokedAt: expect.any(Number) });
     expect(store.get(revoked.record.id)).toEqual(revoked.record);
-    expect(store.listDevices(PRINCIPAL)).toEqual([
-      { deviceId: DEVICE, signedInAt: original.record.issuedAt, workspaces: [WORKSPACE] },
-    ]);
-    expect(await store.verify(await roomToken(original))).toHaveProperty("record", original.record);
-    expect(await store.renew(await proof(revoked), memberships)).toEqual({ status: "sign-in-required" });
-    expect((await store.renew(await proof(original), memberships)).status).toBe("renewed");
-    expect(usableCount(db)).toBe(1);
+    expect(store.listDevices(PRINCIPAL)).toEqual([]);
+    expect(db.connection.prepare("PRAGMA table_info(hub_credentials)").all().map(column => column.name)).not.toContain("signing_key");
+    expect(db.connection.prepare("SELECT public_key FROM hub_credentials").all()).toEqual([{ public_key: null }, { public_key: null }]);
+    const hmac = await crypto.subtle.importKey("raw", new Uint8Array(original.keyBytes), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const oldToken = await mintToken(hmac, { typ: "room", sub: PRINCIPAL, workspace: WORKSPACE, scope: "read-write",
+      kid: original.record.id, lifetimeSeconds: 60 });
+    expect(await store.verify(oldToken)).toEqual({ failure: "revoked-credential" });
+    const oldProof = await mintRequestProof(hmac, { kid: original.record.id, operation: "renew-credential", lifetimeSeconds: 60 });
+    expect(await renewCredential(store, oldProof, memberships)).toEqual({ status: "sign-in-required" });
+    expect(usableCount(db)).toBe(0);
+  });
+
+  it("revokes HMAC keys on every legacy database open, including a restored backup without GitHub configured", () => {
+    const live = tempDatabasePath();
+    const backup = tempDatabasePath();
+    const old = new DatabaseSync(live);
+    old.exec(`CREATE TABLE hub_credentials (
+      id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL, device_id TEXT NOT NULL,
+      device_name TEXT, workspaces TEXT NOT NULL, signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
+      issued_at INTEGER NOT NULL, revoked_at INTEGER, replaced_at INTEGER
+    )`);
+    old.prepare("INSERT INTO hub_credentials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run("old", PRINCIPAL, DEVICE, "laptop-name", JSON.stringify([WORKSPACE]), new Uint8Array(32).fill(17), 10, null, null);
+    old.close();
+    copyFileSync(live, backup);
+    for (const path of [live, backup]) {
+      const opened = database(path);
+      expect(opened.connection.prepare("SELECT id, device_name, issued_at, revoked_at, public_key FROM hub_credentials").all())
+        .toEqual([{ id: "old", device_name: "laptop-name", issued_at: 10, revoked_at: expect.any(Number), public_key: null }]);
+      expect(opened.connection.prepare("PRAGMA table_info(hub_credentials)").all().map(column => column.name)).not.toContain("signing_key");
+      opened.close();
+      const reopened = database(path);
+      expect(reopened.connection.prepare("SELECT count(*) AS count FROM hub_credentials").get()?.count).toBe(1);
+    }
   });
 });

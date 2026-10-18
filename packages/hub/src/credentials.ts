@@ -12,11 +12,13 @@ import {
   type TokenClaims,
   type TokenFailure,
   clampToken,
-  importCredentialKey,
+  importCredentialPublicKey,
   inspectToken,
   inspectRequestProof,
   readTokenKeyId,
 } from "@uberblick/schema/token";
+import { type HubLogger, stderrLogger } from "./log.js";
+import { CREDENTIAL_SCHEMA, revokeHmacCredentials } from "./credentials-schema.js";
 
 export interface CredentialRecord {
   id: string;
@@ -33,12 +35,11 @@ export interface IssueCredentialRequest {
   deviceId: string;
   deviceName?: string;
   workspaces: readonly string[];
+  publicKey: Uint8Array;
 }
 
 export interface IssuedCredential {
   record: CredentialRecord;
-  /** Returned only on issuance, never by get() or verify(). */
-  keyBytes: Uint8Array;
 }
 
 export interface DeviceRecord {
@@ -49,7 +50,7 @@ export interface DeviceRecord {
 }
 
 export type CredentialRenewal =
-  | { status: "renewed"; credential: { record: CredentialRecord; key: string; workspaceNames?: Record<string, string> } }
+  | { status: "renewed"; credential: { record: CredentialRecord; workspaceNames?: Record<string, string> } }
   | { status: "unchanged" }
   | { status: "already-replaced" }
   | { status: "sign-in-required" };
@@ -81,18 +82,6 @@ interface CredentialRow {
   revoked_at: number | null;
   replaced_at: number | null;
 }
-
-const SCHEMA = `CREATE TABLE IF NOT EXISTS hub_credentials (
-  id TEXT PRIMARY KEY NOT NULL,
-  principal_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  device_name TEXT,
-  workspaces TEXT NOT NULL,
-  signing_key BLOB NOT NULL CHECK(length(signing_key) = 32),
-  issued_at INTEGER NOT NULL,
-  revoked_at INTEGER,
-  replaced_at INTEGER
-)`;
 
 const PUBLIC_COLUMNS =
   "id, principal_id, device_id, workspaces, issued_at, revoked_at, replaced_at";
@@ -130,10 +119,12 @@ export class CredentialRegistry {
   private readonly deleteExpiredProofs: StatementSync;
   private readonly revokeListeners = new Set<(credentialId: string) => void>();
 
-  constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database)) {
+  constructor(database: HubDatabase, private readonly hubAdmins = new HubAdminRegistry(database),
+    private readonly log: HubLogger = stderrLogger) {
     const db = database.connection;
     this.db = db;
-    db.exec(SCHEMA);
+    revokeHmacCredentials(db);
+    db.exec(CREDENTIAL_SCHEMA);
     db.exec(`CREATE TABLE IF NOT EXISTS hub_used_request_proofs (
       proof TEXT PRIMARY KEY NOT NULL,
       expires_at INTEGER NOT NULL
@@ -157,14 +148,14 @@ export class CredentialRegistry {
     }
     this.insert = db.prepare(`
       INSERT INTO hub_credentials
-        (id, principal_id, device_id, device_name, workspaces, signing_key, issued_at)
+        (id, principal_id, device_id, device_name, workspaces, public_key, issued_at)
       VALUES ($id, $principalId, $deviceId, $deviceName, $workspaces, $key, $issuedAt)
     `);
     this.select = db.prepare(
       `SELECT ${PUBLIC_COLUMNS} FROM hub_credentials WHERE id = $id`,
     );
     this.selectKey = db.prepare(
-      "SELECT signing_key FROM hub_credentials WHERE id = $id",
+      "SELECT public_key FROM hub_credentials WHERE id = $id",
     );
     this.selectDeviceName = db.prepare(
       "SELECT device_name FROM hub_credentials WHERE id = $id",
@@ -207,6 +198,9 @@ export class CredentialRegistry {
     if (typeof request.deviceId !== "string" || request.deviceId === "") {
       throw new Error("CredentialRegistry.issue: deviceId must not be empty");
     }
+    if (!(request.publicKey instanceof Uint8Array) || request.publicKey.length !== 32) {
+      throw new Error("CredentialRegistry.issue: publicKey must be a 32-byte Ed25519 public key");
+    }
     for (const workspace of request.workspaces) {
       try {
         if (parseWorkspaceId(workspace).uuid !== workspace) throw new Error();
@@ -223,19 +217,16 @@ export class CredentialRegistry {
       revokedAt: null,
       replacedAt: null,
     };
-    // Independent keys deny authority to the shared root and other devices;
-    // return each new key only at issuance or renewal.
-    const keyBytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
     this.insert.run({
       id: record.id,
       principalId: record.principalId,
       deviceId: record.deviceId,
       deviceName: sanitizeDeviceName(request.deviceName) ?? null,
       workspaces: JSON.stringify(record.workspaces),
-      key: keyBytes,
+      key: request.publicKey,
       issuedAt: record.issuedAt,
     });
-    return { record, keyBytes };
+    return { record };
   }
 
   /** Fresh public values: mutating a returned record cannot change the registry. */
@@ -265,9 +256,9 @@ export class CredentialRegistry {
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup || lookup.kid === null) return null;
     const row = this.selectKey.get({ id: lookup.kid });
-    if (!(row?.signing_key instanceof Uint8Array)) return null;
+    if (!(row?.public_key instanceof Uint8Array)) return null;
     const proof = await inspectRequestProof(
-      await importCredentialKey(row.signing_key), token, request,
+      await importCredentialPublicKey(row.public_key), token, request,
     );
     if ("failure" in proof || clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
       return null;
@@ -305,11 +296,11 @@ export class CredentialRegistry {
     if (record.revokedAt !== null) return { failure: "revoked-credential" };
     if (record.replacedAt !== null) return { failure: "replaced-credential" };
     const row = this.selectKey.get({ id: record.id });
-    const keyBytes = row?.signing_key;
+    const keyBytes = row?.public_key;
     if (!(keyBytes instanceof Uint8Array)) {
-      throw new Error("CredentialRegistry.verify: signing key is missing");
+      throw new Error("CredentialRegistry.verify: public key is missing");
     }
-    const inspected = await inspectToken(await importCredentialKey(keyBytes), token);
+    const inspected = await inspectToken(await importCredentialPublicKey(keyBytes), token);
     if ("failure" in inspected) return { failure: inspected.failure };
     const clampFailure = clampToken(inspected, Math.floor(Date.now() / 1000));
     if (clampFailure !== null) return { failure: clampFailure };
@@ -324,15 +315,16 @@ export class CredentialRegistry {
 
   /** A request proof grants this exchange only, never room admission. */
   async renew(token: string, memberships: MembershipRegistry, options: {
+    publicKey: string;
     ifWorkspacesChanged?: boolean;
-  } = {}): Promise<CredentialRenewal> {
+  }): Promise<CredentialRenewal> {
     const refusal = { status: "sign-in-required" } as const;
     const lookup = readTokenKeyId(token);
     if ("failure" in lookup || lookup.kid === null) return refusal;
     const row = this.selectKey.get({ id: lookup.kid });
-    if (!(row?.signing_key instanceof Uint8Array)) return refusal;
+    if (!(row?.public_key instanceof Uint8Array)) return refusal;
     const proof = await inspectRequestProof(
-      await importCredentialKey(row.signing_key), token, "renew-credential",
+      await importCredentialPublicKey(row.public_key), token, { operation: "renew-credential", publicKey: options.publicKey },
     );
     if ("failure" in proof || clampToken(proof, Math.floor(Date.now() / 1000)) !== null) {
       return refusal;
@@ -342,7 +334,7 @@ export class CredentialRegistry {
     // membership snapshot, issuance and retirement share one transaction:
     // a revoke or second exchange that got here first wins, and a failed write
     // cannot leave a second usable credential behind.
-    let issued: IssuedCredential;
+    let exchanged: { issued: IssuedCredential } | { reused: CredentialRecord; ids: string[] };
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.get(proof.kid);
@@ -351,28 +343,44 @@ export class CredentialRegistry {
         return refusal;
       }
       if (current.replacedAt !== null) {
-        this.db.exec("ROLLBACK");
-        return { status: "already-replaced" };
-      }
-      const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
-      if (options.ifWorkspacesChanged === true &&
-        workspaces.length === current.workspaces.length &&
-        workspaces.every((workspace, index) => workspace === current.workspaces[index])) {
-        // A denied workspace can be polled without retiring this machine's
-        // credential and closing its healthy rooms on every check.
+        const ids = this.selectDeviceCredentials.all({ principalId: current.principalId, deviceId: current.deviceId })
+          .map((credential) => credential.id as string);
+        this.markDeviceRevoked.run({ principalId: current.principalId, deviceId: current.deviceId, revokedAt: Date.now() });
         this.db.exec("COMMIT");
-        return { status: "unchanged" };
+        exchanged = { reused: current, ids };
+      } else {
+        const workspaces = this.hubAdmins.availableWorkspaces(memberships.workspacesFor(current.principalId)).sort();
+        if (options.ifWorkspacesChanged === true &&
+          workspaces.length === current.workspaces.length &&
+          workspaces.every((workspace, index) => workspace === current.workspaces[index])) {
+          // A denied workspace can be polled without retiring this machine's
+          // credential and closing its healthy rooms on every check.
+          this.db.exec("COMMIT");
+          return { status: "unchanged" };
+        }
+        const deviceName = sanitizeDeviceName(this.selectDeviceName.get({ id: current.id })?.device_name);
+        const issued = this.issue({ principalId: current.principalId, deviceId: current.deviceId,
+          ...(deviceName === undefined ? {} : { deviceName }),
+          publicKey: Buffer.from(options.publicKey, "base64url"),
+          workspaces });
+        this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
+        this.db.exec("COMMIT");
+        exchanged = { issued };
       }
-      const deviceName = sanitizeDeviceName(this.selectDeviceName.get({ id: current.id })?.device_name);
-      issued = this.issue({ principalId: current.principalId, deviceId: current.deviceId,
-        ...(deviceName === undefined ? {} : { deviceName }),
-        workspaces });
-      this.markReplaced.run({ id: current.id, replacedAt: Date.now() });
-      this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    if ("reused" in exchanged) {
+      try {
+        this.log({ event: "hub.credential.reuse", credentialId: exchanged.reused.id,
+          principalId: exchanged.reused.principalId, deviceId: exchanged.reused.deviceId });
+      } finally {
+        this.closeCredentials(exchanged.ids);
+      }
+      return { status: "already-replaced" };
+    }
+    const issued = exchanged.issued;
     try {
       this.closeCredential(proof.kid);
     } catch (error) {
@@ -388,8 +396,7 @@ export class CredentialRegistry {
       this.revoke(issued.record.id);
       return refusal;
     }
-    return { status: "renewed", credential: { record: issued.record,
-      key: Buffer.from(issued.keyBytes).toString("base64url") } };
+    return { status: "renewed", credential: { record: issued.record } };
   }
 
   /**

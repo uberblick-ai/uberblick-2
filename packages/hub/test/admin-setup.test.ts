@@ -1,3 +1,5 @@
+import { collectDeviceSignIn, startDeviceSignIn } from "./device-credentials.js";
+import { issueCredential } from "./device-credentials.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
@@ -268,7 +270,7 @@ describe("host-only first-admin setup", () => {
     const testRig = await rig();
     expect(statSync(testRig.control.path).mode & 0o777).toBe(0o600);
     const principal = testRig.principals.identify("1234", "old-login");
-    testRig.credentials.issue({ principalId: principal.id, deviceId: "existing-device", workspaces: [] });
+    issueCredential(testRig.credentials, { principalId: principal.id, deviceId: "existing-device", workspaces: [] });
     testRig.memberships.grant({ workspaceId: OTHER_WORKSPACE, principalId: "unrelated-member", role: "member" });
     testRig.database.connection.prepare("INSERT INTO documents(name, data) VALUES (?, ?)")
       .run(`${WORKSPACE}/document`, Uint8Array.of(1, 2, 3));
@@ -430,14 +432,14 @@ describe("host-only first-admin setup", () => {
     const testRig = await rig({ initialize: true });
     const defaultId = defaultWorkspace(testRig);
     const flow = publicSignIn(testRig);
-    const login = await flow.start();
+    const login = await startDeviceSignIn(flow);
     if (login.status !== "pending") throw new Error("sign-in did not start");
     testRig.github.account = { id: 5678, login: "host-approver" };
     const setup = await pending(testRig, defaultId);
     await tick(testRig);
     expect(await setup.client.next()).toMatchObject({ status: "complete" });
     expect(testRig.claims!.state(true)).toEqual({ unclaimed: false, canClaim: false });
-    const result = await flow.collect(login.requestId, login.collectionSecret);
+    const result = await collectDeviceSignIn(flow, login.requestId, login.collectionSecret);
     expect(result).toMatchObject({ status: "complete", identity: { githubAccountId: "1234" }, credential: { record: { workspaces: [] } } });
     expect(result).not.toHaveProperty("claimedWorkspaceId");
     const grants = rows(testRig).memberships;
@@ -456,10 +458,10 @@ describe("host-only first-admin setup", () => {
     testRig.github.pauseIdentity = undefined;
     testRig.github.account = { id: 5678, login: "public-approver" };
     const flow = publicSignIn(testRig);
-    const login = await flow.start();
+    const login = await startDeviceSignIn(flow);
     if (login.status !== "pending") throw new Error("sign-in did not start");
     testRig.github.time += 1000;
-    const result = await flow.collect(login.requestId, login.collectionSecret);
+    const result = await collectDeviceSignIn(flow, login.requestId, login.collectionSecret);
     expect(result).toMatchObject({ status: "complete", claimedWorkspaceId: defaultId });
     pause.resume();
     await polling;

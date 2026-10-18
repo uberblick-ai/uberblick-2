@@ -11,11 +11,12 @@ import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { BrowserSessions, type BrowserSession } from "./browser-sessions.js";
 import { requestClient } from "./client-address.js";
+import { isCredentialPublicKey } from "@uberblick/schema/token";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
   identity: PrincipalRecord;
-  credential: { record: CredentialRecord; key: string; workspaceNames?: Record<string, string> };
+  credential: { record: CredentialRecord; workspaceNames?: Record<string, string> };
   claimedWorkspaceId?: string;
 }
 export type SignInCollection = DeviceFlowCollection<SignInResult>;
@@ -31,7 +32,8 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
     claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database),
     private readonly sessions = new BrowserSessions(database, config.now)) {
-    const complete = ({ accountId, username }: { accountId: string; username: string }, deviceName?: string, browserOrigin?: string) => {
+    const complete = ({ accountId, username }: { accountId: string; username: string }, deviceName?: string,
+      context?: string, browser = false) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
       const db = database.connection;
@@ -39,16 +41,18 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
       try {
         const identity = principals.identify(accountId, username);
         const claimedWorkspaceId = claims?.claim(identity.id, memberships);
-        if (browserOrigin !== undefined) {
-          const session = sessions.issue(identity.id, identity.githubUsername, browserOrigin);
+        if (browser) {
+          if (context === undefined) throw new Error();
+          const session = sessions.issue(identity.id, identity.githubUsername, context);
           db.exec("COMMIT");
           return { session, ...(claimedWorkspaceId === undefined ? {} : { claimedWorkspaceId }) };
         }
         const issued = credentials.issue({ principalId: identity.id, deviceId: crypto.randomUUID(),
           ...(deviceName === undefined ? {} : { deviceName }),
+          publicKey: Buffer.from(context ?? "", "base64url"),
           workspaces: memberships.workspacesFor(identity.id) });
         const result = { identity,
-          credential: { record: issued.record, key: Buffer.from(issued.keyBytes).toString("base64url") },
+          credential: { record: issued.record },
           ...(claimedWorkspaceId === undefined ? {} : { claimedWorkspaceId }) };
         db.exec("COMMIT");
         return result;
@@ -58,7 +62,7 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
       }
     };
     super(config, complete, log);
-    this.browser = new GithubDeviceFlow(config, complete, log);
+    this.browser = new GithubDeviceFlow(config, (identity, deviceName, origin) => complete(identity, deviceName, origin, true), log);
   }
 
   override stop(): void {
@@ -66,8 +70,8 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
     this.browser.stop();
   }
 
-  override async collect(requestId: string, secret: string): Promise<SignInCollection> {
-    const result = await super.collect(requestId, secret);
+  override async collect(requestId: string, secret: string, publicKey?: string): Promise<SignInCollection> {
+    const result = await super.collect(requestId, secret, publicKey);
     if (result.status !== "complete") return result;
     return "credential" in result ? addWorkspaceNames(result, this.workspaceNames, secret) : { status: "unknown-request" };
   }
@@ -137,15 +141,16 @@ export async function handleGithubSignIn(
     }
     const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     if (path === "/auth/github/start") {
-      if (Object.keys(body).some((key) => key !== "deviceName")) throw new Error();
-      const result = await signIn.start(sanitizeDeviceName(body.deviceName), undefined, requestClient(request, behindReleaseProxy));
+      if (Object.keys(body).some((key) => !["deviceName", "publicKey"].includes(key)) ||
+        !isCredentialPublicKey(body.publicKey)) throw new Error();
+      const result = await signIn.start(sanitizeDeviceName(body.deviceName), body.publicKey, requestClient(request, behindReleaseProxy));
       reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : 200, result);
     } else {
-      if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" ||
-          typeof body.collectionSecret !== "string") throw new Error();
+      if (Object.keys(body).length !== 3 || typeof body.requestId !== "string" ||
+          typeof body.collectionSecret !== "string" || !isCredentialPublicKey(body.publicKey)) throw new Error();
       const result = path.endsWith("/cancel")
-        ? signIn.cancel(body.requestId, body.collectionSecret)
-        : await signIn.collect(body.requestId, body.collectionSecret);
+        ? signIn.cancel(body.requestId, body.collectionSecret, body.publicKey)
+        : await signIn.collect(body.requestId, body.collectionSecret, body.publicKey);
       reply(result.status === "unknown-request" ? 404 : 200, result);
     }
   } catch {

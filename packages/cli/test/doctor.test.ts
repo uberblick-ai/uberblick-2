@@ -1,6 +1,6 @@
 /** Doctor verdicts against real isolated configuration and local hubs. */
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -219,7 +219,7 @@ function repository(box: Sandbox): void {
 function deviceBox(endpoint: string, username = "doctor-person"): Sandbox {
   const principalId = randomUUID();
   const login: StoredHubLogin = { identity: { id: principalId, githubAccountId: "12345", githubUsername: username },
-    credential: { record: { id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [WORKSPACE], issuedAt: Date.now(), revokedAt: null }, key: Buffer.alloc(32, 1).toString("base64url") } };
+    credential: { record: { id: randomUUID(), principalId, deviceId: randomUUID(), workspaces: [WORKSPACE], issuedAt: Date.now(), revokedAt: null }, key: generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url") } };
   return sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: endpoint },
     userConfig: { hubAdmissions: { [endpoint]: "device" } },
     credentials: { signingSecret: SECRET, hubLogins: { [authenticationOrigin(endpoint)]: login } } });

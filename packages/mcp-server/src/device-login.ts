@@ -8,7 +8,7 @@ import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMis
 import { authenticationOrigin, hubTransportProblem } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
-import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
+import { generateCredentialKeyPair, importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
 
 const REQUEST_MS = 10_000;
 const MAX_RESPONSE_BYTES = 65_536;
@@ -147,8 +147,11 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
   try {
     signal?.throwIfAborted();
     const key = await importCredentialKey(Buffer.from(login.credential.key, "base64url"));
+    const replacementKey = await generateCredentialKeyPair();
+    const publicKey = Buffer.from(replacementKey.publicKey).toString("base64url");
     const proof = await mintRequestProof(key, {
       kid: login.credential.record.id, operation: "renew-credential", lifetimeSeconds: REQUEST_PROOF_LIFETIME_SECONDS,
+      publicKey,
     });
     requestSignal.throwIfAborted();
     const request = (body: string) => fetch(`${origin}/auth/credential/renew`, {
@@ -156,12 +159,14 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
       body,
       redirect: "error", signal: requestSignal,
     });
-    let response = await request(ifWorkspacesChanged ? JSON.stringify({ ...JSON.parse(wrapToken(proof)), ifWorkspacesChanged: true }) : wrapToken(proof));
+    let response = await request(JSON.stringify({ ...JSON.parse(wrapToken(proof)), publicKey,
+      ...(ifWorkspacesChanged ? { ifWorkspacesChanged: true } : {}),
+    }));
     const invalid = () => offline(origin);
     let body = await readRenewalReply(response);
     if (body === null) return invalid();
-    if (ifWorkspacesChanged && response.status === 400 && body.status === "invalid-request" && Object.keys(body).length === 1) {
-      // If the conditional field is refused before version checking, probe once
+    if (response.status === 400 && body.status === "invalid-request" && Object.keys(body).length === 1) {
+      // If new fields are refused before version checking, probe once
       // without a credential, within this deadline. Accept only protocol skew;
       // retrying a proof could retire the working credential.
       response = await request(wrapToken(""));
@@ -170,7 +175,10 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
     }
     if (ifWorkspacesChanged && response.status === 200 && body.status === "unchanged" && Object.keys(body).length === 1) return "unchanged";
     if (response.status === 200 && body.status === "renewed") {
-      const replacement = { identity: login.identity, credential: body.credential };
+      if (!object(body.credential) || Object.hasOwn(body.credential, "key")) return offline(origin);
+      const replacement = { identity: login.identity, credential: {
+        ...body.credential, key: Buffer.from(replacementKey.privateKey).toString("base64url"),
+      } };
       if (!isHubLogin(replacement) || replacement.credential.record.principalId !== login.credential.record.principalId ||
         replacement.credential.record.deviceId !== login.credential.record.deviceId ||
         replacement.credential.record.id === login.credential.record.id ||

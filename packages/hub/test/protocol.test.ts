@@ -125,9 +125,8 @@ describe("the version exchange", () => {
       protocolVersion: 3, reconnectDelayMs: 60_000 });
     clients.push(old);
     try {
-      expect(SYNC_PROTOCOL_VERSION).toBe(4);
-      await expect(old.denied).resolves.toBe("protocol-mismatch:4");
-      await expect(old.synced).rejects.toThrow("protocol-mismatch:4");
+      await expect(old.denied).resolves.toBe(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
+      await expect(old.synced).rejects.toThrow(`protocol-mismatch:${SYNC_PROTOCOL_VERSION}`);
       expect(old.provider.isAuthenticated).toBe(false);
       expect(old.provider.synced).toBe(false);
       expect(old.provider.hasUnsyncedChanges).toBe(true);

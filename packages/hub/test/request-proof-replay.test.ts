@@ -1,6 +1,7 @@
+import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCredential, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { importCredentialKey, mintRequestProof, type RequestAction } from "@uberblick/schema/token";
-import { CredentialRegistry, type IssuedCredential } from "../src/credentials.js";
+import { importCredentialKey, type RequestAction } from "@uberblick/schema/token";
+import { CredentialRegistry } from "../src/credentials.js";
 import { MembershipRegistry } from "../src/memberships.js";
 import { HubDatabase } from "../src/persistence.js";
 import { WORKSPACE, removeTempDatabases, tempDatabasePath } from "./helpers.js";
@@ -27,7 +28,7 @@ function rig(path = ":memory:") {
 }
 
 function issue(store: CredentialRegistry) {
-  return store.issue({ principalId, deviceId, workspaces: [WORKSPACE] });
+  return issueCredential(store, { principalId, deviceId, workspaces: [WORKSPACE] });
 }
 
 async function proof(issued: IssuedCredential, action: RequestAction, iat = Math.floor(Date.now() / 1000)) {
@@ -92,17 +93,17 @@ describe("durable request proof consumption", () => {
   it("records nothing for a forged signature or an overlong signed proof on either verification path", async () => {
     const { db, store, memberships } = rig();
     const issued = issue(store);
-    const wrongKey = await importCredentialKey(crypto.getRandomValues(new Uint8Array(32)));
+    const wrongKey = await importCredentialKey(issue(store).keyBytes);
     for (const action of [mutations[2]!, { operation: "renew-credential" } as const]) {
       const forged = await mintRequestProof(wrongKey, { kid: issued.record.id, ...action, lifetimeSeconds: 60 });
       const now = Math.floor(Date.now() / 1000);
       const payload = Buffer.from(JSON.stringify({ typ: "request", kid: issued.record.id, ...action,
         iat: now, exp: now + 61 })).toString("base64url");
-      const signature = await crypto.subtle.sign("HMAC", await importCredentialKey(issued.keyBytes), new TextEncoder().encode(payload));
+      const signature = await crypto.subtle.sign("Ed25519", await importCredentialKey(issued.keyBytes), new TextEncoder().encode(payload));
       const overlong = `${payload}.${Buffer.from(signature).toString("base64url")}`;
       for (const token of [forged, overlong]) {
         if (action.operation === "renew-credential") {
-          expect(await store.renew(token, memberships)).toEqual({ status: "sign-in-required" });
+          expect(await renewCredential(store, token, memberships)).toEqual({ status: "sign-in-required" });
         } else {
           expect(await store.verifyRequest(token, action)).toBeNull();
         }

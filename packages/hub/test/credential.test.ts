@@ -1,13 +1,7 @@
 /** The credential key import contract: independent bytes, never the root. */
 
 import { describe, expect, it } from "vitest";
-import {
-  MAX_TOKEN_LIFETIME_SECONDS,
-  importCredentialKey,
-  importRootSecret,
-  mintToken,
-  verifyToken,
-} from "@uberblick/schema/token";
+import { MAX_TOKEN_LIFETIME_SECONDS, generateCredentialKeyPair, importCredentialKey, importCredentialPublicKey, importRootSecret, mintToken, verifyToken } from "@uberblick/schema/token";
 
 const ROOT = "a-dev-root-secret";
 const WORKSPACE = "3f6a1c20-9d84-4b1e-8a77-2c5e9b0d4411";
@@ -26,23 +20,21 @@ function roomClaims(kid: string) {
 }
 
 describe("importCredentialKey", () => {
-  it("takes 32 bytes and nothing else", async () => {
-    await expect(importCredentialKey(new Uint8Array(31))).rejects.toThrow(/32/);
-    await expect(importCredentialKey(new Uint8Array(33))).rejects.toThrow(/32/);
-    await expect(
-      importCredentialKey(new Uint8Array(32)),
-    ).resolves.toBeInstanceOf(CryptoKey);
+  it("imports a device's PKCS8 private key and refuses old shared-key bytes", async () => {
+    await expect(importCredentialKey(new Uint8Array(32))).rejects.toThrow();
+    const pair = await generateCredentialKeyPair();
+    await expect(importCredentialKey(pair.privateKey)).resolves.toBeInstanceOf(CryptoKey);
   });
 
   it("mints a token its own bytes verify and the root secret cannot", async () => {
-    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const pair = await generateCredentialKeyPair();
     const token = await mintToken(
-      await importCredentialKey(keyBytes),
+      await importCredentialKey(pair.privateKey),
       roomClaims(CRED_ID),
     );
 
     expect(
-      await verifyToken(await importCredentialKey(keyBytes), token),
+      await verifyToken(await importCredentialPublicKey(pair.publicKey), token),
     ).toMatchObject({ workspace: WORKSPACE, kid: CRED_ID });
     expect(await verifyToken(await importRootSecret(ROOT), token)).toBeNull();
   });

@@ -1,3 +1,5 @@
+import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
+import { mintDeviceRequestProof as mintRequestProof } from "./device-credentials.js";
 /** Loopback admission retains the local shared-secret security model. */
 
 import { randomUUID } from "node:crypto";
@@ -12,7 +14,7 @@ import { silentLogger } from "../src/log.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createRoomAuthenticator, type HubContext } from "../src/server.js";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintRequestProof, mintToken } from "@uberblick/schema/token";
+import { importCredentialKey, MAX_TOKEN_LIFETIME_SECONDS, mintToken } from "@uberblick/schema/token";
 import {
   createClient,
   removeTempDatabases,
@@ -120,7 +122,7 @@ beforeAll(async () => {
   if (collected.status !== "complete") throw new Error("sign-in did not complete");
   expect(collected.identity.id).toBe(setup.identity.id);
   expect(collected.credential.record.workspaces).toEqual([WORKSPACE]);
-  const proof = await mintRequestProof(await importCredentialKey(Buffer.from(collected.credential.key, "base64url")), {
+  const proof = await mintRequestProof(await importCredentialKey(credentialPrivateKey(collected.credential.record)), {
     kid: collected.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
   });
   const renewed = await (await post("/auth/credential/renew", { protocolVersion: SYNC_PROTOCOL_VERSION, token: proof })).json() as {
@@ -128,7 +130,7 @@ beforeAll(async () => {
   };
   expect(renewed.status).toBe("renewed");
   expect(renewed.credential.record.deviceId).toBe(collected.credential.record.deviceId);
-  issuedToken = await mintToken(await importCredentialKey(Buffer.from(renewed.credential.key, "base64url")), {
+  issuedToken = await mintToken(await importCredentialKey(credentialPrivateKey(renewed.credential.record)), {
     typ: "room",
     sub: collected.identity.id,
     workspace: WORKSPACE,
@@ -214,7 +216,7 @@ describe("loopback admission is unchanged", () => {
       const observer = connect(fresh.port, workspace, rootToken, room);
       await observer.synced;
       await waitForText("claimed-hub observer", observer.text, "claim still uses root admission");
-      const deviceToken = await mintToken(await importCredentialKey(Buffer.from(claimed.credential.key, "base64url")), {
+      const deviceToken = await mintToken(await importCredentialKey(credentialPrivateKey(claimed.credential.record)), {
         typ: "room", sub: claimed.identity.id, workspace, scope: "read-write", kid: claimed.credential.record.id,
         lifetimeSeconds: MAX_TOKEN_LIFETIME_SECONDS,
       });

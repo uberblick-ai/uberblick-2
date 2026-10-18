@@ -15,6 +15,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberblick/schema/token";
 import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
+import { issueCredential } from "@uberblick/hub/test-device-credentials";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { createMcpServer, openWorkspaceReplicas, resolveMcpConfig, storeWorkspaceName } from "@uberblick/mcp-server";
 import {
@@ -90,12 +91,12 @@ describe("ub open: sharing through the upstream hub", () => {
     const namedId = crypto.randomUUID();
     const unnamedId = crypto.randomUUID();
     const strangerId = crypto.randomUUID();
-    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: currentId,
+    const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: currentId,
       deviceName: "My laptop", workspaces: [WORKSPACE] });
-    hub.credentials!.issue({ principalId: person.id, deviceId: namedId, deviceName: "My laptop", workspaces: [WORKSPACE] });
-    hub.credentials!.issue({ principalId: person.id, deviceId: unnamedId, workspaces: [WORKSPACE] });
+    issueCredential(hub.credentials!, { principalId: person.id, deviceId: namedId, deviceName: "My laptop", workspaces: [WORKSPACE] });
+    issueCredential(hub.credentials!, { principalId: person.id, deviceId: unnamedId, workspaces: [WORKSPACE] });
     const stranger = hub.principals!.identify("67890", "another-person");
-    hub.credentials!.issue({ principalId: stranger.id, deviceId: strangerId, deviceName: "Another account's computer", workspaces: [] });
+    issueCredential(hub.credentials!, { principalId: stranger.id, deviceId: strangerId, deviceName: "Another account's computer", workspaces: [] });
     const { replacedAt: _replaced, ...record } = issued.record;
     await writeHubLogin(origin, { identity: person, credential: {
       record, key: Buffer.from(issued.keyBytes).toString("base64url"),
@@ -137,7 +138,7 @@ describe("ub open: sharing through the upstream hub", () => {
     pointAt(box, `ws://127.0.0.1:${hub.port}`);
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
-    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
     const { replacedAt: _replaced, ...record } = issued.record;
     await writeHubLogin(origin, { identity: person, credential: {
       record, key: Buffer.from(issued.keyBytes).toString("base64url"),
@@ -181,7 +182,7 @@ describe("ub open: sharing through the upstream hub", () => {
     if (stored) {
       const identity = hub.principals!.identify("12345", "open-person");
       hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: identity.id, role: "admin" });
-      const credential = hub.credentials!.issue({ principalId: identity.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+      const credential = issueCredential(hub.credentials!, { principalId: identity.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
       const { replacedAt: _replaced, ...record } = credential.record;
       await writeHubLogin(origin, { identity, credential: { record, key: Buffer.from(credential.keyBytes).toString("base64url") } }, box.env);
     }
@@ -228,7 +229,7 @@ describe("ub open: sharing through the upstream hub", () => {
     pointAt(box, `ws://${host}:${hub.port}`);
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
-    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
     const { replacedAt: _replaced, ...record } = issued.record;
     await writeHubLogin(origin, { identity: person, credential: {
       record, key: Buffer.from(issued.keyBytes).toString("base64url"),
@@ -266,7 +267,7 @@ describe("ub open: sharing through the upstream hub", () => {
     pointAt(box, `ws://0.0.0.0:${hub.port}`);
     const person = hub.principals!.identify("12345", "open-person");
     hub.memberships!.grant({ workspaceId: WORKSPACE, principalId: person.id, role: "admin" });
-    const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+    const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
     const { replacedAt: _replaced, ...record } = issued.record;
     await writeHubLogin(origin, { identity: person, credential: {
       record, key: Buffer.from(issued.keyBytes).toString("base64url"),
@@ -329,7 +330,7 @@ describe("ub open: sharing through the upstream hub", () => {
       await waitUntil("unsigned loopback browser edit durable", () => !browser.hasUnsyncedChanges);
       const remoteBefore = hub.hocuspocus.documents.get(room);
       expect(remoteBefore === undefined ? undefined : getBlocks(remoteBefore)[0]?.text).not.toBe("kept here before login");
-      const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
+      const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [WORKSPACE] });
       const { replacedAt: _replaced, ...record } = issued.record;
       await writeHubLogin(origin, { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } }, box.env);
       await waitUntil("loopback origin login resumes sharing", async () => (await status()).caughtUp);
@@ -358,7 +359,7 @@ describe("ub open: sharing through the upstream hub", () => {
     const person = hub.principals!.identify("12345", "open-person");
     const admin = hub.principals!.identify("67890", "open-admin");
     const login = (): StoredHubLogin => {
-      const issued = hub.credentials!.issue({ principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [] });
+      const issued = issueCredential(hub.credentials!, { principalId: person.id, deviceId: crypto.randomUUID(), workspaces: [] });
       const { replacedAt: _replaced, ...record } = issued.record;
       return { identity: person, credential: { record, key: Buffer.from(issued.keyBytes).toString("base64url") } };
     };

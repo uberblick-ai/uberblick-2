@@ -1,3 +1,5 @@
+import { credentialPrivateKey, deviceFetch as fetch } from "./device-credentials.js";
+import { mintDeviceRequestProof as mintRequestProof } from "./device-credentials.js";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveRemoteHubConfig, SHARED_GITHUB_CLIENT_ID } from "../src/team-config.js";
@@ -6,7 +8,7 @@ import type { SignInCollection } from "../src/github-sign-in.js";
 import type { HubLogRecord } from "../src/log.js";
 import { HubDatabase } from "../src/persistence.js";
 import type { TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, mintRequestProof, mintToken } from "@uberblick/schema/token";
+import { importCredentialKey, mintToken } from "@uberblick/schema/token";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { GithubDeviceFlow } from "../src/github-device-flow.js";
 import { removeTempDatabases, startHub, tempDatabasePath, TEST_SECRET, WORKSPACE } from "./helpers.js";
@@ -127,7 +129,7 @@ describe("hub-driven GitHub identity", () => {
     "completes legacy or invalid-name sign-in with an unnamed device", async (deviceName) => {
       const testRig = await rig();
       const signedIn = await complete(testRig, deviceName === undefined ? {} : { deviceName });
-      expect(signedIn.result.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(signedIn.result.credential).not.toHaveProperty("key");
       expect(testRig.hub.credentials!.listDevices(signedIn.result.identity.id)).toEqual([
         { deviceId: signedIn.result.credential.record.deviceId,
           signedInAt: signedIn.result.credential.record.issuedAt, workspaces: [] },
@@ -176,7 +178,7 @@ describe("hub-driven GitHub identity", () => {
     expect(b.result.identity).toEqual({ ...a.result.identity, githubUsername: "new_acme" });
     expect(b.result.credential.record.deviceId).not.toBe(a.result.credential.record.deviceId);
     expect(b.result.credential.record.id).not.toBe(a.result.credential.record.id);
-    expect(b.result.credential.key).not.toBe(a.result.credential.key);
+    expect(credentialPrivateKey(b.result.credential.record)).not.toEqual(credentialPrivateKey(a.result.credential.record));
     await first.hub.stop();
     const restarted = await rig(first.databasePath);
     restarted.github.account.login = "new_acme";
@@ -197,17 +199,17 @@ describe("hub-driven GitHub identity", () => {
     const db = new HubDatabase(first.databasePath, () => {});
     db.open();
     try {
-      const signed = await mintToken(await importCredentialKey(Buffer.from(a.result.credential.key, "base64url")), {
+      const signed = await mintToken(await importCredentialKey(credentialPrivateKey(a.result.credential.record)), {
         typ: "room", sub: a.result.identity.id, workspace: WORKSPACE, scope: "read-write", kid: a.result.credential.record.id, lifetimeSeconds: 60,
       });
       expect(await new CredentialRegistry(db).verify(signed)).toMatchObject({ record: a.result.credential.record });
     } finally { db.close(); }
   });
 
-  it("requests only public identity and discloses key material in one collection only", async () => {
+  it("requests only public identity and returns no key material", async () => {
     const testRig = await rig();
     const { request, result } = await complete(testRig);
-    expect(result.credential.key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(result.credential).not.toHaveProperty("key");
     expect(await post(testRig.hub, "collect", request)).toMatchObject({ result: { status: "collected" } });
     expect(await post(testRig.hub, "cancel", request)).toMatchObject({ result: { status: "collected" } });
     expect(testRig.github.calls.map((call) => call.url)).toEqual([
@@ -221,8 +223,9 @@ describe("hub-driven GitHub identity", () => {
       expect(persisted).not.toContain(secret);
       expect(disclosed).not.toContain(secret);
     }
-    expect(persisted).not.toContain(result.credential.key);
-    expect(JSON.stringify(testRig.logs)).not.toContain(result.credential.key);
+    const privateKey = Buffer.from(credentialPrivateKey(result.credential.record)).toString("base64url");
+    expect(persisted).not.toContain(privateKey);
+    expect(disclosed).not.toContain(privateKey);
     expect(privateRows(testRig.databasePath).tables.map((row) => row.name)).not.toContain("hub_sign_ins");
   });
 
@@ -424,7 +427,7 @@ describe("bounded device requests", () => {
     const signed = (await complete(r)).result;
     for (let index = 0; index < 6; index++) await start(r.hub);
     expect(await post(r.hub, "start", {})).toMatchObject({ code: 429 });
-    const token = await mintRequestProof(await importCredentialKey(Buffer.from(signed.credential.key, "base64url")), {
+    const token = await mintRequestProof(await importCredentialKey(credentialPrivateKey(signed.credential.record)), {
       kid: signed.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
     });
     const response = await fetch(`http://127.0.0.1:${r.hub.port}/auth/credential/renew`, {

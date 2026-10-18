@@ -24,6 +24,7 @@ import {
   roomForDoc,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
+import { revokeHmacCredentials } from "./credentials-schema.js";
 
 /**
  * Retain the exact extension schema and unique index; SQLite does not enforce
@@ -117,6 +118,7 @@ export class HubDatabase implements Extension {
     }
     try {
       db.exec(SCHEMA);
+      revokeHmacCredentials(db);
       this.statements = {
         select: db.prepare(SELECT_DOCUMENT),
         upsert: db.prepare(UPSERT_DOCUMENT),

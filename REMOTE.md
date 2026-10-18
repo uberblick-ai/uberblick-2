@@ -264,6 +264,24 @@ Host-opened browsers can sign in but have no document access. The supported edit
 `ub auth login` followed by `ub open` on a computer. Revocation and membership
 removal stop live sync but cannot erase downloaded data or local edits.
 
+### Upgrade an existing deployment to device-created keys
+
+Update the hub and every client to the matching protocol in one sitting, then
+run `ub auth login <hub-origin>` once on every computer and unattended agent
+host that syncs here. Restart MCP servers and `ub open` processes, and reload
+host-served pages. Each sign-in creates its signing key on that device; the
+hub receives only its public key.
+
+When the upgraded hub opens its database, it revokes every earlier HMAC device
+credential and erases its signing key. This also happens when it opens a
+restored backup from before the upgrade. There is no exchange of an old
+credential for a new key pair or compatibility window. An updated client
+treats an earlier login as signed out: `ub auth status` reports
+`not-signed-in`, and MCP and `ub open` name `ub auth login` as the action.
+Local documents and pending edits remain available and resume sharing after
+sign-in with workspace access. An earlier client or hub receives the existing
+update-required guidance. Loopback signing-secret admission is unchanged.
+
 ### Keep an existing installation while testing a candidate
 
 Keep each corpus connection on an explicitly installed, compatible client whose
@@ -818,11 +836,16 @@ It reveals no workspace UUID, name, account, member or credential. A failed
 read or an older hub is never reported as unclaimed by `ub auth login`.
 
 Device renewal is `POST /auth/credential/renew`, beside those sign-in routes.
-Its JSON body is `{protocolVersion, token}`: `token` is an HMAC-SHA256 request
-proof signed with the presented credential's key, with `typ: "request"`,
-`operation: "renew-credential"`, its credential UUID as `kid`, and `iat` and
-`exp` in epoch seconds. The hub applies the same fifteen-minute proof lifetime
-ceiling and sixty-second clock skew as room tokens. A request proof opens no
+The device creates a fresh Ed25519 key pair before each sign-in or renewal and
+keeps its private key in its owner-only credential store. Sign-in start,
+collection and cancellation carry the same `publicKey`; no sign-in reply
+contains signing key material. Renewal's JSON body is
+`{protocolVersion, token, publicKey}`: `token` is an Ed25519 request proof
+signed with the presented credential's private key, with `typ: "request"`,
+`operation: "renew-credential"`, the new `publicKey`, its credential UUID as
+`kid`, and `iat` and `exp` in epoch seconds. `publicKey` is the canonical
+base64url encoding of the 32-byte public key. The hub applies a sixty-second
+proof lifetime ceiling and sixty-second clock skew. A request proof opens no
 room, and a room token authorizes no renewal. Send secrets only in JSON bodies,
 never URLs or an `Authorization` header; bodies are limited to 4096 bytes and
 all answers are `no-store`.
@@ -838,11 +861,12 @@ versions. Login believes only a validated mismatch reply; other replies or
 probe failures leave sign-in's existing diagnostics in charge.
 
 Renewal needs no GitHub approval or GitHub connection. It retires the presented
-credential and returns `renewed` with `credential: {record, key, workspaceNames?}` once, for the
+credential and returns `renewed` with `credential: {record, workspaceNames?}` once, for the
 same principal and device and its current memberships in active workspaces,
 including none. Suspended workspaces stay out of issued snapshots.
 It grants no membership. Retirement closes and fences any rooms admitted under
-the old credential on a remote hub.
+the old credential on a remote hub. The hub stores only each credential's public
+key; a database or backup copy cannot sign room tokens or management proofs.
 Both a `complete` sign-in collection and a `renewed` reply can include names
 from the issued workspaces' hub `_settings` rooms. Loaded rooms supply their
 current state; otherwise the hub reads persisted state without loading or
@@ -854,10 +878,15 @@ list. Names refresh only when an existing renewal trigger or sign-in stores a
 new credential. A rename or new grant can therefore remain absent from status
 until then, and promotion initially shows the UUID alone. Conditional renewal
 with unchanged available workspaces still returns only `{status: "unchanged"}`.
-Replaying a verified proof under that retired credential returns
-`already-replaced`; unknown, revoked or unverifiable credentials return
-`sign-in-required`, revealing no identity or workspace. If the replacement
-answer is lost, sign in again: its key cannot be collected a second time.
+A fresh, valid renewal proof under an already-replaced credential revokes every
+credential for that principal and device, closes their rooms, logs the reuse
+without key or token material, and returns `already-replaced`. A replay of an
+already-spent proof revokes nothing. Room and management requests using a
+replaced credential are refused and revoke nothing, so a process holding a
+token minted just before another process renewed cannot sign the device out.
+Unknown, revoked or unverifiable credentials return `sign-in-required`, revealing
+no identity or workspace. If the replacement answer is lost, sign in again:
+the credential cannot be collected a second time.
 Malformed requests return `invalid-request`, version skew returns
 `protocol-mismatch` with the hub's version, and an unconfigured hub returns
 the same `not-configured` result as sign-in. Remote clients renew stored logins
@@ -898,7 +927,7 @@ the other management operations make no GitHub call. Use
 its credential UUID as `kid`, the operation and all targets below, and
 `lifetimeSeconds` (clients should use 60 seconds). The signed payload carries
 `typ: "request"`, those exact fields, and `iat` and `exp` in epoch seconds.
-The key stays on the device. The hub verifies against its own issued,
+The private key stays on the device. The hub verifies against the public key of its own issued,
 unrevoked, unreplaced credential and the current authority for the operation. A proof cannot
 authorize a different operation, workspace, device, person or role. Renewal
 proofs, room tokens, GitHub tokens, another hub's credentials and the local
@@ -1466,7 +1495,10 @@ If the terminal loses the result after a verified copy was published, the
 command reports an unknown result. Inspect `hub-data` for that completed copy.
 
 A backup contains documents, default workspace and claim state, and private
-access records for every workspace. Keep it private like a device credential.
+access records for every workspace. Current backups contain device public keys,
+not device signing secrets, but their documents and access records still require
+private storage. Backups made before the device-created-key upgrade contain
+the earlier device signing secrets and must remain private.
 Manage retention yourself; a copy in `hub-data` is lost if that volume is lost.
 The retained `bin/hub-backup.sh` is a compatibility route used by `ub hub
 upgrade`; it stops and restarts the hub and writes its backup to the host.
@@ -1505,6 +1537,12 @@ Identities, credentials, memberships, committed setup receipts and claim state
 are worth restoring even before the first document exists. A missing, corrupt
 or empty backup leaves the volume untouched. A running hub also refuses the
 restore and names `docker compose stop hub`.
+
+Opening a restored backup made before the device-created-key upgrade revokes
+its HMAC device credentials and erases their keys. Every computer and unattended
+agent host must then run `ub auth login <hub-origin>` again. Restoring any
+backup restores its recorded access state, including previously revoked
+devices or removed members; it does not add rollback protection.
 
 A rollback journal beside `hub.sqlite` refuses restore. Let SQLite recover it
 by opening the database cleanly, then stop the hub and retry; never delete the
