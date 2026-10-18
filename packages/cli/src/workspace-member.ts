@@ -19,25 +19,27 @@ Uses this machine's stored device login; never starts a GitHub sign-in.
 The project binding and UB_WORKSPACE_ID/UB_HUB_URL select the target.
 
 commands:
-  add <github-handle> [--role admin|member]  confirm a resolved account and grant access
-  list [--json]                              list members, account IDs and roles
-  role <member> <admin|member>               change a member's role
-  remove <member>                            end a member's access on every device
+  add <github-handle> [--role admin|member] [--yes]  confirm a resolved account and grant access
+  list [--json]                                      list members, account IDs and roles
+  role <member> <admin|member>                       change a member's role
+  remove <member>                                    end a member's access on every device
 
 options:
   -h, --help        show this help
 `;
 
 export const WORKSPACE_MEMBER_SUBCOMMAND_HELP = {
-  add: `usage: ub workspace member add <github-handle> [--role admin|member]
+  add: `usage: ub workspace member add <github-handle> [--role admin|member] [--yes]
 
 Resolve a GitHub user at the bound hub, then confirm the hub origin, workspace
 UUID, login, permanent account ID and role at a terminal prompt. Only y or yes
-grants access; the default is no. Non-terminal input cannot grant access.
+grants access; the default is no. --yes confirms the grant without a prompt
+and is required without a terminal.
 The default role is member. An existing membership keeps its role.
 
 options:
   --role admin|member   role for a new membership (default: member)
+  --yes                confirm the grant without a prompt; required without a terminal
   -h, --help            show this help
 `,
   list: `usage: ub workspace member list [--json]
@@ -69,7 +71,10 @@ options:
 `,
 } as const;
 
-export const WORKSPACE_MEMBER_ADD_OPTIONS = { role: { type: "string" } } as const;
+export const WORKSPACE_MEMBER_ADD_OPTIONS = {
+  role: { type: "string" },
+  yes: { type: "boolean" },
+} as const;
 export const WORKSPACE_MEMBER_LIST_OPTIONS = { json: { type: "boolean" } } as const;
 
 type Role = "admin" | "member";
@@ -116,6 +121,7 @@ export async function workspaceMemberCommand(argv: string[], io: Io): Promise<nu
   let positionals: string[];
   let role: Role = "member";
   let json = false;
+  let yes = false;
   try {
     const options: ParseArgsOptionsConfig =
       command === "add" ? WORKSPACE_MEMBER_ADD_OPTIONS :
@@ -135,6 +141,7 @@ export async function workspaceMemberCommand(argv: string[], io: Io): Promise<nu
       role = positionals[1];
     }
     json = parsed.values.json === true;
+    yes = parsed.values.yes === true;
   } catch (error) {
     io.err(`ub workspace member ${command}: ${error instanceof Error ? error.message : "invalid arguments"}\n\n${help}`);
     return 2;
@@ -210,14 +217,16 @@ export async function workspaceMemberCommand(argv: string[], io: Io): Promise<nu
       const account = { githubUsername: resolved.githubUsername, githubAccountId: resolved.githubAccountId };
       const existing = (await members()).find(row => row.githubAccountId === account.githubAccountId);
       if (existing !== undefined) { already(existing, io); return 0; }
-      if (!process.stdin.isTTY) throw new MemberRefusal("granting access requires explicit confirmation at a terminal; non-terminal stdin grants nothing");
-      const terminal = createInterface({ input: process.stdin, output: process.stderr });
-      let answer: string;
-      try {
-        answer = await terminal.question(`Grant access on ${origin} to workspace ${workspaceId} for ${describe(account)} as ${role}? [y/N] `);
-      } catch { throw new MemberRefusal("confirmation ended; nothing was granted"); }
-      finally { terminal.close(); }
-      if (!/^(y|yes)$/i.test(answer.trim())) { io.out("cancelled; nothing was granted\n"); return 0; }
+      if (!yes) {
+        if (!process.stdin.isTTY) throw new MemberRefusal("granting access requires explicit confirmation at a terminal; non-terminal stdin grants nothing");
+        const terminal = createInterface({ input: process.stdin, output: process.stderr });
+        let answer: string;
+        try {
+          answer = await terminal.question(`Grant access on ${origin} to workspace ${workspaceId} for ${describe(account)} as ${role}? [y/N] `);
+        } catch { throw new MemberRefusal("confirmation ended; nothing was granted"); }
+        finally { terminal.close(); }
+        if (!/^(y|yes)$/i.test(answer.trim())) { io.out("cancelled; nothing was granted\n"); return 0; }
+      }
       const result = await request({ operation: "grant-member", workspaceId, githubAccountId: account.githubAccountId, role });
       const added = member(result.member);
       if (added.githubAccountId !== account.githubAccountId) throw new MemberRefusal("hub returned a different account after the grant; check the member list");
