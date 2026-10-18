@@ -47,10 +47,10 @@ class GithubFake {
   };
 }
 
-async function rig(path = tempDatabasePath(), port = 0) {
+async function rig(path = tempDatabasePath(), port = 0, behindReleaseProxy = false) {
   const github = new GithubFake();
   const logs: HubLogRecord[] = [];
-  const hub = await createTeamHub({ databasePath: path, address: "127.0.0.1", port,
+  const hub = await createTeamHub({ databasePath: path, address: "127.0.0.1", port, behindReleaseProxy,
     authSecret: TEST_SECRET, github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time },
     log: line => logs.push(line) }, { deviceCredentials: true, initializeDefaultWorkspace: true });
   hubs.push(hub);
@@ -193,13 +193,27 @@ describe("browser request and flow isolation", () => {
     expect(rows(r.path).hub_credentials).toHaveLength(1);
   });
 
-  it("shares the 100 active GitHub-attempt limit with CLI sign-in", async () => {
+  it.each(["github", "browser"])("keeps the other pool available when the %s pool fills", async (kind) => {
+    const r = await rig(tempDatabasePath(), 0, true);
+    for (let index = 0; index < 100; index++) {
+      expect(await post(r.hub, `${kind}/start`, {}, { "X-Forwarded-For": `192.0.2.${index + 1}` })).toMatchObject({ code: 200 });
+    }
+    expect(await post(r.hub, `${kind}/start`)).toEqual({ code: 429, result: { status: "busy" } });
+    expect(await post(r.hub, `${kind === "github" ? "browser" : "github"}/start`)).toMatchObject({ code: 200 });
+    expect(r.github.starts).toBe(101);
+  });
+
+  it("bounds browser starts while session, sign-out, collection and cancellation remain available", async () => {
     const r = await rig();
-    for (let index = 0; index < 50; index++) await start(r.hub, "github");
-    for (let index = 0; index < 50; index++) await start(r.hub);
-    expect(await post(r.hub, "browser/start")).toMatchObject({ code: 429, result: { status: "busy" } });
-    expect(await post(r.hub, "github/start")).toMatchObject({ code: 429 });
-    expect(r.github.starts).toBe(100);
+    const signed = await complete(r);
+    const pending = [];
+    for (let index = 0; index < 6; index++) pending.push(await start(r.hub));
+    expect(await post(r.hub, "browser/start")).toEqual({ code: 429, result: { status: "busy" } });
+    expect(r.github.starts).toBe(7);
+    expect(await post(r.hub, "browser/collect", pending[0])).toMatchObject({ code: 200, result: { status: "pending" } });
+    expect(await post(r.hub, "browser/cancel", pending[0])).toMatchObject({ code: 200, result: { status: "abandoned" } });
+    expect(await post(r.hub, "browser/session", {}, sessionHeaders(signed.session.token))).toMatchObject({ code: 200 });
+    expect(await post(r.hub, "browser/sign-out", {}, sessionHeaders(signed.session.token))).toMatchObject({ code: 200 });
   });
 });
 

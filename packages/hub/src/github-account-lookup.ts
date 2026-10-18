@@ -1,5 +1,6 @@
 /** Unauthenticated public identity lookup, never an authorization source. */
 import { isGithubAccountId, isGithubUsername } from "@uberblick/schema/github-identity";
+import { RequestBudget } from "./request-budget.js";
 
 type AccountTarget = { githubUsername: string } | { githubAccountId: string };
 type AccountLookup =
@@ -8,18 +9,22 @@ type AccountLookup =
 
 export class GithubAccountLookup {
   private readonly closed = new AbortController();
+  private readonly budget: RequestBudget;
 
-  constructor(private readonly fetch: typeof globalThis.fetch = globalThis.fetch) {}
+  constructor(private readonly fetch: typeof globalThis.fetch = globalThis.fetch, now: () => number = Date.now) {
+    this.budget = new RequestBudget(12, 3_600_000, 60, now);
+  }
 
   stop(): void { this.closed.abort(); }
 
-  async lookup(target: AccountTarget): Promise<AccountLookup> {
+  async lookup(target: AccountTarget, principalId: string, workspaceId: string): Promise<AccountLookup> {
     try {
       const byId = "githubAccountId" in target;
       const value = byId ? target.githubAccountId : target.githubUsername;
       if (!(byId ? isGithubAccountId(value) : isGithubUsername(value))) throw new Error();
+      this.closed.signal.throwIfAborted();
+      if (!this.budget.take(`account:${principalId}`, `workspace:${workspaceId}`)) return { status: "lookup-unavailable" };
       const signal = AbortSignal.any([this.closed.signal, AbortSignal.timeout(10_000)]);
-      signal.throwIfAborted();
       const response = await this.fetch(`https://api.github.com/${byId ? "user" : "users"}/${encodeURIComponent(value)}`, {
         method: "GET", redirect: "error", signal,
         headers: { Accept: "application/json", "User-Agent": "Uberblick-Hub", "X-GitHub-Api-Version": "2026-03-10" },

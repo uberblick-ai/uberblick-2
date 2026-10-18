@@ -101,7 +101,7 @@ export async function handleAccessManagement(
           reply(503, { status: "not-configured" });
           break;
         }
-        const account = await accounts.lookup(action);
+        const account = await accounts.lookup(action, current.principalId, action.workspaceId);
         if (account.status !== "ok") {
           reply(account.status === "account-not-found" ? 404 : 503, account);
           break;

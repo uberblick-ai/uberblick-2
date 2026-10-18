@@ -10,6 +10,7 @@ import type { HubDatabase } from "./persistence.js";
 import { addWorkspaceNames, WorkspaceNameReader } from "./workspace-names.js";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { BrowserSessions, type BrowserSession } from "./browser-sessions.js";
+import { requestClient } from "./client-address.js";
 
 export type { GithubSignInConfig } from "./github-device-flow.js";
 interface SignInResult {
@@ -25,11 +26,12 @@ interface BrowserSignInResult {
 export type BrowserSignInCollection = DeviceFlowCollection<BrowserSignInResult>;
 
 export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInResult, string> {
+  private readonly browser: GithubDeviceFlow<SignInResult | BrowserSignInResult, string>;
   constructor(config: GithubSignInConfig, database: HubDatabase, principals: PrincipalRegistry,
     credentials: CredentialRegistry, memberships: MembershipRegistry, log: HubLogger = stderrLogger,
     claims?: HubClaimState, private readonly workspaceNames = new WorkspaceNameReader(database),
     private readonly sessions = new BrowserSessions(database, config.now)) {
-    super(config, ({ accountId, username }, deviceName, browserOrigin) => {
+    const complete = ({ accountId, username }: { accountId: string; username: string }, deviceName?: string, browserOrigin?: string) => {
       // Completion is synchronous and shares host setup's connection. Starting
       // or polling a flow reserves nothing; only this commit can win the claim.
       const db = database.connection;
@@ -54,7 +56,14 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
         db.exec("ROLLBACK");
         throw error;
       }
-    }, log);
+    };
+    super(config, complete, log);
+    this.browser = new GithubDeviceFlow(config, complete, log);
+  }
+
+  override stop(): void {
+    super.stop();
+    this.browser.stop();
   }
 
   override async collect(requestId: string, secret: string): Promise<SignInCollection> {
@@ -63,18 +72,18 @@ export class GithubSignIn extends GithubDeviceFlow<SignInResult | BrowserSignInR
     return "credential" in result ? addWorkspaceNames(result, this.workspaceNames, secret) : { status: "unknown-request" };
   }
 
-  startBrowser(origin: string) {
-    return super.start(undefined, origin);
+  startBrowser(origin: string, client?: string) {
+    return this.browser.start(undefined, origin, client);
   }
 
   async collectBrowser(requestId: string, secret: string, origin: string): Promise<BrowserSignInCollection> {
-    const result = await super.collect(requestId, secret, origin);
+    const result = await this.browser.collect(requestId, secret, origin);
     if (result.status !== "complete") return result;
     return "session" in result ? result : { status: "unknown-request" };
   }
 
   cancelBrowser(requestId: string, secret: string, origin: string) {
-    return super.cancel(requestId, secret, origin);
+    return this.browser.cancel(requestId, secret, origin);
   }
 
   browserSession(token: string, origin: string): BrowserSession | null {
@@ -96,6 +105,7 @@ export async function handleGithubSignIn(
   signIn: GithubSignIn | undefined,
   request: IncomingMessage,
   response: ServerResponse,
+  behindReleaseProxy = false,
 ): Promise<boolean> {
   const path = request.url ?? "";
   if (!path.startsWith("/auth/")) return false;
@@ -128,7 +138,7 @@ export async function handleGithubSignIn(
     const body = object(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     if (path === "/auth/github/start") {
       if (Object.keys(body).some((key) => key !== "deviceName")) throw new Error();
-      const result = await signIn.start(sanitizeDeviceName(body.deviceName));
+      const result = await signIn.start(sanitizeDeviceName(body.deviceName), undefined, requestClient(request, behindReleaseProxy));
       reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : 200, result);
     } else {
       if (Object.keys(body).length !== 2 || typeof body.requestId !== "string" ||

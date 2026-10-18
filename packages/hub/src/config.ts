@@ -19,6 +19,8 @@ export interface HubConfig {
   port?: number;
   /** `HUB_HOST`; defaults to loopback. Wildcard binds require device credentials. */
   address?: string;
+  /** Only the release proxy's appended forwarded hop may select a sign-in client bucket. */
+  behindReleaseProxy?: boolean;
   /** SQLite file; creates its parent. `":memory:"` loses everything on restart. */
   databasePath?: string;
   /** Local-only HMAC signing secret (`HUB_AUTH_TOKEN`). */
@@ -72,6 +74,7 @@ export function resolveCoreHubConfig(
     port: parsePort(env.PORT),
     address,
     databasePath,
+    ...(env.HUB_RELEASE_PROXY === "1" ? { behindReleaseProxy: true } : {}),
     ...(authSecret === undefined ? {} : { authSecret }),
   };
 }

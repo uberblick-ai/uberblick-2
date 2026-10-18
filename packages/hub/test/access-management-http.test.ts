@@ -437,6 +437,70 @@ describe("authenticated hub access management", () => {
 });
 
 describe("direct GitHub account grants", () => {
+  it("shares an account's lookup allowance across its devices and workspaces without blocking another account", async () => {
+    const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"], [OTHER_WORKSPACE, "admin"]]);
+    const spare = hub.credentials!.issue({ principalId: admin.principal.id, deviceId: randomUUID(),
+      workspaces: [WORKSPACE, OTHER_WORKSPACE] });
+    const other = person(hub, "9012", "other-admin", [[OTHER_WORKSPACE, "admin"]]);
+    const resolve = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" } as const;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      expect(await manage(hub, attempt % 2 === 0 ? admin.issued : spare,
+        { ...resolve, workspaceId: attempt % 2 === 0 ? WORKSPACE : OTHER_WORKSPACE }))
+        .toMatchObject({ code: 200, result: { status: "ok" } });
+    }
+    const identify = vi.spyOn(hub.principals!, "identify");
+    expect(await manage(hub, admin.issued, { ...resolve, workspaceId: OTHER_WORKSPACE }))
+      .toEqual({ code: 503, result: { status: "lookup-unavailable" } });
+    expect(await manage(hub, spare, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" }))
+      .toEqual({ code: 503, result: { status: "lookup-unavailable" } });
+    expect(identify).not.toHaveBeenCalled();
+    expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+    expect(github).toHaveBeenCalledTimes(12);
+    expect(await manage(hub, other.issued, { ...resolve, workspaceId: OTHER_WORKSPACE }))
+      .toMatchObject({ code: 200, result: { status: "ok" } });
+    expect(github).toHaveBeenCalledTimes(13);
+  });
+
+  it("shares a workspace's lookup allowance across admins while another workspace retains its share", async () => {
+    const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
+    const first = person(hub, "1234", "first-admin", [[WORKSPACE, "admin"], [OTHER_WORKSPACE, "admin"]]);
+    const second = person(hub, "9012", "second-admin", [[WORKSPACE, "admin"]]);
+    const resolve = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" } as const;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      expect(await manage(hub, attempt % 2 === 0 ? first.issued : second.issued, resolve))
+        .toMatchObject({ code: 200, result: { status: "ok" } });
+    }
+    expect(await manage(hub, first.issued, resolve)).toEqual({ code: 503, result: { status: "lookup-unavailable" } });
+    expect(await manage(hub, second.issued, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" }))
+      .toEqual({ code: 503, result: { status: "lookup-unavailable" } });
+    expect(hub.principals!.getByGithubAccountId("5678")).toBeNull();
+    expect(github).toHaveBeenCalledTimes(12);
+    expect(await manage(hub, first.issued, { ...resolve, workspaceId: OTHER_WORKSPACE }))
+      .toMatchObject({ code: 200, result: { status: "ok" } });
+    expect(github).toHaveBeenCalledTimes(13);
+  });
+
+  it("does not spend a workspace or account allowance on member and outsider requests", async () => {
+    const { hub, github } = await rig({ githubFetch: async () => Response.json({ id: 5678, login: "new-account", type: "User" }) });
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "9012", "member", [[WORKSPACE, "member"]]);
+    const outsider = person(hub, "3456", "outsider");
+    const resolve = { operation: "resolve-account", workspaceId: WORKSPACE, githubUsername: "new-account" } as const;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      expect(await manage(hub, member.issued, resolve)).toEqual({ code: 403, result: { status: "forbidden" } });
+      expect(await manage(hub, outsider.issued, { operation: "grant-member", workspaceId: WORKSPACE, githubAccountId: "5678" }))
+        .toEqual({ code: 403, result: { status: "forbidden" } });
+    }
+    expect(github).not.toHaveBeenCalled();
+    hub.memberships!.changeRole({ workspaceId: WORKSPACE, actorPrincipalId: admin.principal.id,
+      principalId: member.principal.id, role: "admin" });
+    for (let attempt = 0; attempt < 12; attempt++) {
+      expect(await manage(hub, member.issued, resolve)).toMatchObject({ code: 200, result: { status: "ok" } });
+    }
+    expect(github).toHaveBeenCalledTimes(12);
+  });
+
   it("resolves without writing, then grants the confirmed ID with the provider's current login", async () => {
     const { hub, github } = await rig({ githubFetch: async (input, init) => {
       expect(init?.method ?? "GET").toBe("GET");
@@ -613,7 +677,8 @@ describe("direct GitHub account grants", () => {
   });
 
   it.each(["resolve-account", "grant-member"] as const)("distinguishes missing accounts from unavailable %s lookups and writes nothing", async operation => {
-    const { hub, github, logs } = await rig();
+    let now = Date.now();
+    const { hub, github, logs } = await rig({ githubNow: () => now });
     const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
     const identify = vi.spyOn(hub.principals!, "identify");
     const action: Action = operation === "resolve-account"
@@ -645,6 +710,7 @@ describe("direct GitHub account grants", () => {
       github.mockImplementationOnce(answer);
       expect(await manage(hub, admin.issued, action)).toEqual({ code, result: { status } });
       expect(hub.memberships!.listMembers(WORKSPACE, admin.principal.id)).toHaveLength(1);
+      now += 3_600_000;
     }
     expect(identify).not.toHaveBeenCalled();
     expect(github).toHaveBeenCalledTimes(cases.length);

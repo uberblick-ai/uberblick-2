@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { requestClient } from "./client-address.js";
 import type { GithubSignIn } from "./github-sign-in.js";
 
 const ROUTES = ["/auth/browser/start", "/auth/browser/collect", "/auth/browser/cancel",
@@ -19,6 +20,7 @@ function browserOrigin(request: IncomingMessage): string | null {
 /** Opaque page-held tokens are accepted here only, never by device or room APIs. */
 export async function handleBrowserSignIn(
   signIn: GithubSignIn | undefined, request: IncomingMessage, response: ServerResponse,
+  behindReleaseProxy = false,
 ): Promise<boolean> {
   const path = request.url ?? "";
   if (!path.startsWith("/auth/browser/")) return false;
@@ -62,7 +64,7 @@ export async function handleBrowserSignIn(
   }
   try {
     if (path.endsWith("/start")) {
-      const result = await signIn.startBrowser(origin);
+      const result = await signIn.startBrowser(origin, requestClient(request, behindReleaseProxy));
       reply(result.status === "failed" ? 502 : result.status === "busy" ? 429 : 200, result);
     } else if (path.endsWith("/collect") || path.endsWith("/cancel")) {
       const requestId = body.requestId as string;
