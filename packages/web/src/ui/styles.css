@@ -2497,21 +2497,30 @@ h6.ub-heading {
 
 .ub-sync-dot {
   --sync-dot-rest: light-dark(oklch(0.55 0.09 145), oklch(0.63 0.10 145));
-  --sync-dot-full: light-dark(oklch(0.55 0.18 145), oklch(0.76 0.20 145));
+  --sync-ring: light-dark(oklch(0.55 0.18 145), oklch(0.76 0.20 145));
+  position: relative;
   background: var(--sync-dot-rest);
+}
+
+.ub-sync-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--sync-ring);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ub-sync-dot[data-state="offline"],
 .ub-sync-dot[data-state="error"] {
-  /* A refusal or lost connection remains red even during an activity pulse. */
   --sync-dot-rest: var(--destructive);
-  --sync-dot-full: var(--destructive);
 }
 
-.ub-sync-dot--pulse { animation: ub-sync-pulse 650ms ease-out; }
-@keyframes ub-sync-pulse {
-  from { background: var(--sync-dot-full); }
-  to { background: var(--sync-dot-rest); }
+.ub-sync-dot--pulse[data-state="resting"]::after { animation: ub-sync-ring 650ms ease-out; }
+@keyframes ub-sync-ring {
+  from { inset: 0; opacity: 0.8; }
+  to { inset: -0.5rem; opacity: 0; }
 }
 
 .ub-status .ub-doc-rev {
@@ -2537,7 +2546,7 @@ h6.ub-heading {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ub-sync-dot--pulse { animation: none; }
+  .ub-sync-dot--pulse[data-state="resting"]::after { animation: none; }
 }
 
 /* Fixed mark slots remain shared with sync surfaces outside the header. */
