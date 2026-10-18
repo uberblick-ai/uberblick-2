@@ -10,6 +10,7 @@ import { acquireServingReplicaRole } from "../../mcp-server/src/serving-role.js"
 import { startServer, testConfig } from "../../mcp-server/test/helpers.js";
 import { resolveConfig } from "../src/config.js";
 import { readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { acquireInitLock } from "../src/init-lock.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";
@@ -172,8 +173,8 @@ describe("ub workspace list", () => {
     const run = await runInProcess(["workspace", "list", "--json"], box);
     expect(run.status, run.output).toBe(0);
     expect(JSON.parse(run.stdout)).toEqual([
-      { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
-      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "unknown" },
+      { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "local" },
     ]);
     expect(existsSync(join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`))).toBe(false);
   });
@@ -209,14 +210,14 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     const text = runUb(["workspace", "list"], box, env);
     expect(text.status, text.output).toBe(0);
     expect(text.stdout).toBe(
-      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | hub unknown\n`,
+      `  ${OTHER} | Research notes | local\n* ${WORKSPACE} | Project notes | https://hub.example.test\n  ${UNRELATED} | local\n`,
     );
     const json = runUb(["workspace", "list", "--json"], box, env);
     expect(json.status, json.output).toBe(0);
     expect(JSON.parse(json.stdout)).toEqual([
       { uuid: OTHER, name: "Research notes", active: false, databasePath: join(box.dataHome, "uberblick", `${OTHER}.sqlite`), hub: "local" },
       { uuid: WORKSPACE, name: "Project notes", active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
-      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "unknown" },
+      { uuid: UNRELATED, name: null, active: false, databasePath: join(box.dataHome, "uberblick", `${UNRELATED}.sqlite`), hub: "local" },
     ]);
     expect(readFileSync(join(box.cwd, ".uberblick.json"))).toEqual(bindingBefore);
     expect(readFileSync(configPath)).toEqual(configBefore);
@@ -253,9 +254,22 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     bind(box);
     const run = await runInProcess(["workspace", "list"], box, { UB_WORKSPACE_ID: WORKSPACE, UB_HUB_URL: "local" });
     expect(run.status, run.output).toBe(0);
-    expect(run.stdout).toBe(`* ${WORKSPACE} | hub unknown\n`);
+    expect(run.stdout).toBe(`* ${WORKSPACE} | local\n`);
     expect(existsSync(box.dataHome)).toBe(false);
     expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
+  });
+
+  it.each([HUB, null])("shows an active unrecorded replica as local despite a %s selection without registering it", async (hub) => {
+    const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: hub } });
+    withDatabase(box, WORKSPACE);
+    const text = await runInProcess(["workspace", "list"], box);
+    expect(text.status, text.output).toBe(0);
+    expect(text.stdout).toBe(`* ${WORKSPACE} | local\n`);
+    const json = await runInProcess(["workspace", "list", "--json"], box);
+    expect(json.status, json.output).toBe(0);
+    expect(JSON.parse(json.stdout)[0].hub).toBe("local");
+    expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
+    expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: hub });
   });
 
   it.each(["unnamed", "empty", "old schema", "unreadable"])(
@@ -281,11 +295,10 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
       const list = await runInProcess(["workspace", "list", "--json"], box);
       expect(list.status, list.output).toBe(0);
       expect(JSON.parse(list.stdout)).toEqual([
-        { uuid: OTHER, name: null, active: false, databasePath: path, hub: "unknown" },
-        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: "unknown" },
+        { uuid: OTHER, name: null, active: false, databasePath: path, hub: "local" },
+        { uuid: WORKSPACE, name: null, active: true, databasePath: join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`), hub: HUB },
       ]);
       expect(readFileSync(path)).toEqual(before);
-      record(box, OTHER, null);
       const selected = await runInProcess(["workspace", "use", OTHER.slice(0, 8)], box);
       expect(selected.status, selected.output).toBe(0);
       expect(binding(box).workspaceId).toBe(OTHER);
@@ -340,17 +353,18 @@ globalThis.fetch = () => { throw new Error("list must stay local"); };
     expect(readFileSync(registry, "utf8")).toBe("{invalid");
   });
 
-  it("explains recorded, local and unknown hubs without reading records for help", async () => {
+  it.each(["list", "use"])("explains the local fallback without reading records for %s help", async (command) => {
     const box = sandbox();
     const registry = workspaceRegistryPath(box.env);
     mkdirSync(dirname(registry), { recursive: true });
     writeFileSync(registry, "{invalid");
-    const run = await runInProcess(["workspace", "list", "--help"], box);
+    const run = await runInProcess(["workspace", command, "--help"], box);
     expect(run.status, run.output).toBe(0);
     expect(run.stdout).toContain("hub this machine recorded");
-    expect(run.stdout).toContain("local for an explicit local");
-    expect(run.stdout).toContain("hub unknown when no record exists");
-    expect(run.stdout).toContain('"unknown"');
+    expect(run.stdout).toContain("no hub record");
+    expect(run.stdout).toContain("local");
+    expect(run.stdout).not.toContain("unknown");
+    expect(run.stdout).not.toContain("UB_HUB_URL=local ub mcp serve");
     expect(run.stderr).toBe("");
   });
 
@@ -669,16 +683,35 @@ describe("ub workspace use", () => {
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
-  it("requires a record even if the requested workspace has a local database", async () => {
+  it.each([WORKSPACE, `notes-${WORKSPACE}`, WORKSPACE.slice(0, 8), OTHER])("selects and records an unrecorded replica as local by %s without hub traffic", async (operand) => {
     const box = sandbox();
     bind(box);
+    const id = operand === OTHER ? OTHER : WORKSPACE;
+    withDatabase(box, id);
+    const preload = join(box.cwd, "no-network.mjs");
+    writeFileSync(preload, `
+import { Socket } from "node:net";
+Socket.prototype.connect = () => { throw new Error("use by id must stay local"); };
+globalThis.fetch = () => { throw new Error("use by id must stay local"); };
+`);
+    const run = runUb(["workspace", "use", operand], box, { NODE_OPTIONS: `--import=${preload}` });
+    expect(run.status, run.output).toBe(0);
+    expect(run.stdout).toContain("local)");
+    expect(run.stderr).toBe("");
+    expect(binding(box)).toEqual({ workspaceId: operand.startsWith("notes-") ? operand : id, hubUrl: null });
+    expect(readWorkspaceHub(id, box.env)).toBeNull();
+  });
+
+  it("still refuses to switch away from a different unrecorded replica selected on a hub", async () => {
+    const box = sandbox();
+    bind(box);
+    withDatabase(box, WORKSPACE);
     withDatabase(box, OTHER);
     const run = await runInProcess(["workspace", "use", OTHER], box);
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("ub workspace use <link>");
-    expect(run.stderr).toContain(`UB_WORKSPACE_ID=${OTHER} UB_HUB_URL=local ub mcp serve`);
-    expect(run.stderr).toContain("use an explicit hub link to reconnect a hub replica");
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain("existing replica with no hub record");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
+    expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
   });
 
   it("updates both fields together and preserves the unrelated user configuration", async () => {
@@ -851,6 +884,38 @@ describe("ub workspace use", () => {
     expect(run.status, run.output).toBe(0);
     expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: null });
     expect(existsSync(lock)).toBe(false);
+  });
+
+  it.each([undefined, null, HUB])("preserves the hub recorded while use waits for the init lock (previous record: %s)", async (initial) => {
+    const box = sandbox({ projectBinding: { workspaceId: OTHER, hubUrl: HUB } });
+    withDatabase(box, OTHER);
+    if (initial !== undefined) record(box, OTHER, initial);
+    const lock = await acquireInitLock(box.env);
+    const pending = runInProcess(["workspace", "use", OTHER], box);
+    const concurrentHub = "wss://concurrent.example.test/ws";
+    try {
+      // The in-process command reaches the contended lock before returning its promise.
+      record(box, OTHER, concurrentHub);
+    } finally { lock.release(); }
+    const run = await pending;
+    expect(run.status, run.output).toBe(0);
+    expect(binding(box)).toEqual({ workspaceId: OTHER, hubUrl: concurrentHub });
+    expect(readWorkspaceHub(OTHER, box.env)).toBe(concurrentHub);
+    expect(run.stdout).toContain("https://concurrent.example.test");
+  });
+
+  it("does not register a replica removed while use waits for the init lock", async () => {
+    const box = sandbox();
+    withDatabase(box, OTHER);
+    const lock = await acquireInitLock(box.env);
+    const pending = runInProcess(["workspace", "use", OTHER], box);
+    try { rmSync(join(box.dataHome, "uberblick", `${OTHER}.sqlite`)); }
+    finally { lock.release(); }
+    const run = await pending;
+    expect(run.status, run.output).toBe(1);
+    expect(run.stderr).toContain("ub workspace use <link>");
+    expect(binding(box).workspaceId).not.toBe(OTHER);
+    expect(existsSync(workspaceRegistryPath(box.env))).toBe(false);
   });
 
   it("rejects the removed hub flag as usage without any writes", async () => {
