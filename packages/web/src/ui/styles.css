@@ -823,10 +823,15 @@ textarea.ub-title {
 }
 
 /* Tags give up width before the actions target. */
-.ub-document-actions {
+.ub-document-controls {
   flex: none;
   display: inline-flex;
   margin-left: auto;
+}
+
+.ub-document-actions {
+  flex: none;
+  display: inline-flex;
 }
 
 /* Keep compact paint at the column edge; retain the menu's vertical anchor. */
