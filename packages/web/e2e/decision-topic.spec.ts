@@ -45,9 +45,10 @@ test("malformed synced document ids leave valid topics and sidebar navigation us
   const other = await create(writer, "Unrelated document", "The other room stays unchanged.");
   const current = await create(writer, "Protected topic", "Keep this room's answer.", { kind: "decision", status: "decided" });
   const peer = await legacyDecisionPeer(harness(), current.uuid);
+  let group: string | null = null;
   try {
     const sidebar = await peer.join(sidebarRoom(harness().workspaceUuid));
-    const group = createGroup(sidebar, "Malformed-id regression");
+    group = createGroup(sidebar, "Malformed-id regression");
     pinDoc(sidebar, group, current.uuid);
     sidebar.getArray(`pins:${group}`).push([
       { uuid: "..", since: 0 }, { uuid: "a/record/b", since: 0 }, { uuid: other.uuid.toUpperCase(), since: 0 },
@@ -83,7 +84,14 @@ test("malformed synced document ids leave valid topics and sidebar navigation us
   } finally {
     getDirectoryMap(peer.directory).delete("evil/key");
     getMetaMap(peer.doc).set("uuid", current.uuid);
-    peer.close();
+    try {
+      if (group !== null) {
+        await expectMcp(() => writer.call<{ groups: { id: string }[] }>("get_sidebar", {}), sidebar => {
+          expect(sidebar.groups.some(entry => entry.id === group)).toBe(true);
+        });
+        await writer.call("sidebar_group", { action: "delete", group });
+      }
+    } finally { peer.close(); }
   }
 });
 
