@@ -20,10 +20,15 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
   const [finishedPulse, setFinishedPulse] = useState(0);
   useEffect(() => {
     if (pulse === 0) return;
+    if (offline || error) {
+      // Returning to green must not replay activity interrupted by a red state.
+      setFinishedPulse(pulse);
+      return;
+    }
     // Reduced motion has no animationend; retire its key on the same deadline.
     const timer = setTimeout(() => setFinishedPulse(pulse), 650);
     return () => clearTimeout(timer);
-  }, [pulse]);
+  }, [pulse, offline, error]);
   const wasOffline = useRef(false);
   useEffect(() => {
     if (offline) {
@@ -48,7 +53,7 @@ export function SyncDot({ offline, error, confirmed, lastConfirmedAt, pulse, syn
       : "Sync details";
   const dot = <span
     key={pulse}
-    className={`ub-dot ub-sync-dot${pulse > finishedPulse ? " ub-sync-dot--pulse" : ""}`}
+    className={`ub-dot ub-sync-dot${!offline && !error && pulse > finishedPulse ? " ub-sync-dot--pulse" : ""}`}
     data-state={offline ? "offline" : error ? "error" : "resting"}
     data-pulse={pulse}
     aria-hidden="true"

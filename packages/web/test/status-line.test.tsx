@@ -5,6 +5,7 @@ import { within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/document/EditorPane.js";
 import { Popover } from "../src/ui/shadcn/popover.js";
+import { SyncDot } from "../src/ui/status/SyncDot.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
 import { notifyTransient } from "../src/notifications.js";
@@ -41,6 +42,23 @@ function fixture(patch: Partial<RoomStatus> = {}) {
 beforeEach(() => { vi.useFakeTimers(); copy.mockClear(); vi.mocked(notifyTransient).mockClear(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 function settle() { act(() => void vi.advanceTimersByTime(5_000)); }
+
+it.each(["offline", "error"] as const)("retires activity interrupted by %s without replaying it on recovery", (state) => {
+  const tree = (red: boolean, pulse: number) => <SyncDot offline={state === "offline" && red}
+    error={state === "error" && red} confirmed={!red} lastConfirmedAt={Date.now()} pulse={pulse} syncDetails={false} />;
+  const view = render(tree(false, 1));
+  const dot = () => view.container.querySelector(".ub-sync-dot");
+  expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(true);
+  view.rerender(tree(true, 1));
+  expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
+  view.rerender(tree(false, 1));
+  expect(dot()?.getAttribute("data-pulse")).toBe("1");
+  expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
+  view.rerender(tree(false, 2));
+  expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(true);
+  act(() => { vi.advanceTimersByTime(650); });
+  expect(dot()?.classList.contains("ub-sync-dot--pulse")).toBe(false);
+});
 
 describe("the edited row", () => {
   it("keeps edit freshness visible before sync is known, with the existing exact-time hover", () => {
