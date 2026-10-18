@@ -650,7 +650,6 @@ describe("credential admission on a composed server", () => {
     ] as const)("%s fences %s already past the admission check and the burst queued behind it", async (accessEnd, _label, type, detachBeforeAccessEnd) => {
       const held = gate();
       const entered = gate();
-      const completed = gate();
       let armed = false;
       let victimId = "";
       let queued!: Promise<void>;
@@ -666,9 +665,6 @@ describe("credential admission on a composed server", () => {
           queued = frameBarrier(connection, 12);
           entered.open();
           await held.opened;
-        },
-        afterHandleMessage: async ({ context }) => {
-          if (context.credentialId === victimId && !context.authorization.active) completed.open();
         },
       });
       const laptop = issue(rig.registry, "laptop");
@@ -709,13 +705,21 @@ describe("credential admission on a composed server", () => {
           expect(serverDocument.getConnections().map((connection) => connection.context.credentialId)).toEqual([phone.record.id]);
         }
         await endAccess(rig, accessEnd, laptop);
+        if (accessEnd === "expiry") {
+          // A detached room is already absent from the document. Wait for the
+          // deadline callback to fence its retained frame before releasing it.
+          await waitUntil("the credential deadline to fence the retained frame", () =>
+            !victimConnection.context.authorization.active && victimConnection.readOnly);
+        }
+        expect(victimConnection.context.authorization.active).toBe(false);
+        expect(victimConnection.readOnly).toBe(true);
         expect(serverDocument.getConnections().map((connection) => connection.context.credentialId))
           .toEqual(accessEnd === "suspension" ? [] : [phone.record.id]);
         const appliedAfterAccessEnd: Uint8Array[] = [];
         const onUpdate = (update: Uint8Array) => appliedAfterAccessEnd.push(update);
         serverDocument.on("update", onUpdate);
         held.open();
-        await waitFor("the held frame to finish after access ends", completed.opened);
+        await waitFor("the held and queued frames to finish after access ends", victimConnection.waitForPendingMessages());
         await waitUntil("the queued frame to be rejected by current authority", () =>
           rig.logs.some((record) => record.cause === accessEndCause(accessEnd)));
         expect(serverDocument.getText(TEXT_KEY).toString()).toBe("preserved content");
