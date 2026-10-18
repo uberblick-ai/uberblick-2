@@ -211,16 +211,19 @@ for (const scheme of ["light", "dark"] as const) {
     const copied = await page.evaluate(() => (window as unknown as { revisionCopies: string[] }).revisionCopies.at(-1));
     expect(copied).toMatch(/^[0-9a-f]{16}$/);
     expect(copied?.startsWith(short)).toBe(true);
-    for (const [name, expected] of [["Copy link", new URL(path, harness().appUrl).href], ["Copy document id", uuid]] as const) {
-      const actions = page.getByRole("button", { name: "Document actions", exact: true });
-      if (hasTouch) await actions.tap();
-      else { await actions.focus(); await actions.press("Enter"); }
-      const item = page.getByRole("menuitem", { name, exact: true });
-      if (hasTouch) await item.tap();
-      else await item.press("Enter");
-      await expect.poll(() => page.evaluate(() => (window as unknown as { revisionCopies: string[] }).revisionCopies.at(-1))).toBe(expected);
-      await expect(actions).toBeFocused();
-    }
+    const copyLink = page.getByRole("button", { name: "Copy link", exact: true });
+    if (hasTouch) await copyLink.tap();
+    else { await copyLink.focus(); await copyLink.press("Space"); }
+    await expect.poll(() => page.evaluate(() => (window as unknown as { revisionCopies: string[] }).revisionCopies.at(-1))).toBe(new URL(path, harness().appUrl).href);
+    if (!hasTouch) await expect(copyLink).toBeFocused();
+    const actions = page.getByRole("button", { name: "Document actions", exact: true });
+    if (hasTouch) await actions.tap();
+    else { await actions.focus(); await actions.press("Enter"); }
+    const item = page.getByRole("menuitem", { name: "Copy document id", exact: true });
+    if (hasTouch) await item.tap();
+    else await item.press("Enter");
+    await expect.poll(() => page.evaluate(() => (window as unknown as { revisionCopies: string[] }).revisionCopies.at(-1))).toBe(uuid);
+    await expect(actions).toBeFocused();
 
     const observerPulses = await pulseCount(observer);
     await harness().stopHub();

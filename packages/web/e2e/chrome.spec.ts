@@ -175,7 +175,7 @@ function tagStripGeometry(page: Page): Promise<{
     if (strip === null || row === null) {
       throw new Error("e2e: no tag strip in the identity line");
     }
-    const neighbours = [".ub-document-actions"].flatMap((selector) => {
+    const neighbours = [".ub-copy-link-icon", ".ub-document-actions"].flatMap((selector) => {
       const element = document.querySelector(selector);
       return element === null ? [] : [[selector, element.getBoundingClientRect()] as const];
     });
@@ -966,9 +966,11 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(page.getByRole("button", { name: "Show document list", exact: true })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "Document actions" });
+  const copyLink = page.getByRole("button", { name: "Copy link", exact: true });
   const title = page.locator(".ub-title");
   for (const [name, control] of [
     ["title", title],
+    ["copy link", copyLink],
     ["actions", trigger],
   ] as const) {
     await expect(control).toBeVisible();
@@ -994,8 +996,7 @@ test("document actions stay reachable, close with the route, and archive into Re
     expect(scroll).toBeLessThanOrEqual(client ?? 0);
   }
 
-  await trigger.click();
-  await page.getByRole("menuitem", { name: "Copy link", exact: true }).click();
+  await copyLink.click();
   await expect(copyNotice(page, "Link copied")).toBeVisible();
   // Copy feedback leaves the document actions immediately reachable.
   await trigger.click();
@@ -1035,8 +1036,18 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(restore).toBeVisible();
   await expect(restore).toBeFocused();
   await expect(trigger).toBeVisible();
+  await expect(copyLink).toBeVisible();
+  const previousLinkCopy = (await copyNotice(page, "Link copied").elementHandles())[0];
+  await copyLink.click();
+  if (previousLinkCopy !== undefined) {
+    await expect.poll(() => previousLinkCopy.evaluate((element) => element.isConnected)).toBe(false);
+    await previousLinkCopy.dispose();
+  }
+  await expect(copyNotice(page, "Link copied")).toHaveCount(1);
+  await expect(copyNotice(page, "Link copied")).toBeVisible();
   await trigger.click();
-  await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Copy link", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("menuitem")).toHaveCount(1);
   await expect(page.getByRole("menuitem", { name: "Copy document id", exact: true })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Archive document", exact: true })).toHaveCount(0);
   await page.keyboard.press("Escape");
@@ -1743,7 +1754,7 @@ for (const scheme of ["light", "dark"] as const) {
 }
 
 /**
- * The document-actions control's target.
+ * The document header controls' targets.
  *
  * The control's own pointer-sized box must take clicks at rest and after scrolling.
  * An overhanging target could steal taps from `.ub-title` below or borrow
@@ -1777,10 +1788,15 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
   await page.evaluate(() => document.fonts.ready);
 
   const editTags = page.getByRole("button", { name: "Edit tags" });
-  const actions = page.locator(".ub-actions-trigger");
+  // The modal menu hides background controls from the accessibility tree;
+  // their rendered boxes still anchor the open-menu geometry checks.
+  const actions = page.locator('.ub-document-actions button[aria-label="Document actions"]');
+  const copy = page.locator(".ub-copy-link-icon");
   const face = actions.locator(".ub-actions-face");
   await expect(actions).toHaveAccessibleName("Document actions");
   await expect(actions).toHaveAttribute("title", "Document actions");
+  await expect(copy).toHaveAttribute("title", "Copy link");
+  await expect(copy.locator("svg")).toHaveAttribute("aria-hidden", "true");
 
   /**
    * The live target, hit-tested rather than computed. Reading the rule's own
@@ -1792,15 +1808,17 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
    */
   const probe = (
     toClipEdge: boolean,
+    selector: string,
   ): Promise<{
     liveHeight: number;
     liveWidth: number;
     takesTheRevision: boolean;
     takesTheTitle: boolean;
+    takesOtherControl: boolean;
     scrolled: number;
   }> =>
-    page.evaluate((flush) => {
-      const control = document.querySelector(".ub-actions-trigger");
+    page.evaluate(({ flush, selector }) => {
+      const control = document.querySelector(selector);
       const revision = document.querySelector(".ub-doc-rev");
       const title = document.querySelector(".ub-title");
       const pane = document.querySelector(".ub-pane");
@@ -1840,9 +1858,14 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
           Math.round(revisionBox.y + revisionBox.height / 2),
         ),
         takesTheTitle: answers(x, title.getBoundingClientRect().top + 1),
+        takesOtherControl: [...document.querySelectorAll(".ub-actions-trigger")].some((other) => {
+          if (other === control) return false;
+          const otherBox = other.getBoundingClientRect();
+          return answers(otherBox.x + otherBox.width / 2, otherBox.y + otherBox.height / 2);
+        }),
         scrolled: pane.scrollTop,
       };
-    }, toClipEdge);
+    }, { flush: toClipEdge, selector });
 
   const expectCompactPaint = async (): Promise<void> => {
     const geometry = await actions.evaluate((control) => {
@@ -1885,6 +1908,31 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
     if (geometry.revisionInset !== null) expect(geometry.revisionInset).toBeCloseTo(0, 1);
     expect(alphaOf(await paintedIn(actions, "background-color"))).toBe(0);
     expect(Number.parseFloat(await paintedIn(actions, "border-top-width"))).toBe(0);
+    const copyGeometry = await copy.evaluate((control) => {
+      const face = control.querySelector(".ub-actions-face");
+      const svg = control.querySelector("svg");
+      const actions = control.parentElement?.querySelector(".ub-document-actions");
+      if (face === null || svg === null || actions == null) throw new Error("e2e: incomplete copy link control");
+      const box = control.getBoundingClientRect();
+      const faceBox = face.getBoundingClientRect();
+      const svgBox = svg.getBoundingClientRect();
+      const actionBox = actions.getBoundingClientRect();
+      return {
+        faceWidth: faceBox.width, faceHeight: faceBox.height,
+        iconWidth: svgBox.width, iconHeight: svgBox.height,
+        gap: actionBox.left - box.right,
+        sameRow: box.top === actionBox.top && box.height === actionBox.height,
+      };
+    });
+    expect(copyGeometry.faceWidth).toBe(geometry.faceWidth);
+    expect(copyGeometry.faceHeight).toBe(geometry.faceHeight);
+    expect(copyGeometry.iconWidth).toBe(16);
+    expect(copyGeometry.iconHeight).toBe(16);
+    expect(copyGeometry.gap).toBeGreaterThanOrEqual(0);
+    expect(copyGeometry.gap).toBeLessThanOrEqual(8);
+    expect(copyGeometry.sameRow).toBe(true);
+    expect(alphaOf(await paintedIn(copy, "background-color"))).toBe(0);
+    expect(Number.parseFloat(await paintedIn(copy, "border-top-width"))).toBe(0);
   };
 
   const attachHeader = async (state: string): Promise<void> => {
@@ -1916,13 +1964,14 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
         if (pane !== null) pane.scrollTop = 0;
       });
 
-      const rest = await probe(false);
-      // The target required by this pointer is really there, not merely declared…
-      expect(rest.liveHeight).toBeGreaterThanOrEqual(floor);
-      expect(rest.liveWidth).toBeGreaterThanOrEqual(floor);
-      // …and it is not paid for with either adjacent fact.
-      expect(rest.takesTheRevision).toBe(false);
-      expect(rest.takesTheTitle).toBe(false);
+      for (const selector of [".ub-copy-link-icon", ".ub-document-actions .ub-actions-trigger"]) {
+        const rest = await probe(false, selector);
+        expect(rest.liveHeight, selector).toBeGreaterThanOrEqual(floor);
+        expect(rest.liveWidth, selector).toBeGreaterThanOrEqual(floor);
+        expect(rest.takesTheRevision, selector).toBe(false);
+        expect(rest.takesTheTitle, selector).toBe(false);
+        expect(rest.takesOtherControl, selector).toBe(false);
+      }
       const titleBefore = await page.locator(".ub-title").boundingBox();
       if (!tagged && !touch) expect((await page.locator(".ub-doc-meta").boundingBox())?.height).toBe(44);
       await expectCompactPaint();
@@ -1945,6 +1994,21 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       await page.keyboard.press("Escape");
       await expect(actions).toBeFocused();
       if (!tagged && width === 1280) {
+        await clipboardMode(page, "modern");
+        if (touch) await copy.tap();
+        else await copy.click();
+        await expect(copyNotice(page, "Link copied")).toBeVisible();
+        await expect(page.getByRole("menu")).toHaveCount(0);
+        for (const key of ["Enter", "Space"] as const) {
+          await page.keyboard.press("Tab");
+          await copy.focus();
+          await expectFocusIndicator(copy);
+          await activateCopy(page, copy, key);
+          await expect(copyNotice(page, "Link copied")).toBeVisible();
+          await expect(copy).toBeFocused();
+          await expect(page.getByRole("menu")).toHaveCount(0);
+        }
+        expect(await copiedTexts(page)).toEqual([page.url(), page.url(), page.url()]);
         for (const key of ["Enter", "Space"]) {
           await page.keyboard.press("Tab");
           await actions.focus();
@@ -1960,18 +2024,21 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
       // Then again with the header scrolled up against the clip edge. A
       // measurement taken where the pane could not scroll proves nothing, so the
       // offset it reached is asserted too.
-      const scrolled = await probe(true);
-      expect(scrolled.scrolled).toBeGreaterThan(0);
-      expect(scrolled.liveHeight).toBeGreaterThanOrEqual(floor);
-      expect(scrolled.liveWidth).toBeGreaterThanOrEqual(floor);
-      expect(scrolled.takesTheRevision).toBe(false);
-      expect(scrolled.takesTheTitle).toBe(false);
+      for (const selector of [".ub-copy-link-icon", ".ub-document-actions .ub-actions-trigger"]) {
+        const scrolled = await probe(true, selector);
+        expect(scrolled.scrolled, selector).toBeGreaterThan(0);
+        expect(scrolled.liveHeight, selector).toBeGreaterThanOrEqual(floor);
+        expect(scrolled.liveWidth, selector).toBeGreaterThanOrEqual(floor);
+        expect(scrolled.takesTheRevision, selector).toBe(false);
+        expect(scrolled.takesTheTitle, selector).toBe(false);
+        expect(scrolled.takesOtherControl, selector).toBe(false);
+      }
     }
   }
 }
 
 for (const scheme of ["light", "dark"] as const) {
-  test(`document actions keep compact paint and pointer targets at rest and after scrolling — ${scheme}`, { tag: "@webkit" }, async ({
+  test(`document header controls keep compact paint and pointer targets at rest and after scrolling — ${scheme}`, { tag: "@webkit" }, async ({
     browser,
   }, info) => {
     await exerciseDocumentActions(browser, scheme, info);
@@ -1995,7 +2062,7 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
       receivesPointer: element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
     };
   })).toEqual({ withinViewport: true, lowerRight: true, receivesPointer: true });
-  for (const control of [page.locator(".ub-status-sync"), page.getByRole("button", { name: "Document actions" })]) {
+  for (const control of [page.locator(".ub-status-sync"), page.getByRole("button", { name: "Copy link", exact: true }), page.getByRole("button", { name: "Document actions" })]) {
     expect(await control.evaluate((element) => {
       const box = element.getBoundingClientRect();
       return element.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
@@ -2004,10 +2071,9 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
 }
 
 /** Wait for native dismissal before inspecting the replacement's content. */
-async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
-  if (await control.count() === 0) await page.getByRole("button", { name: "Document actions" }).click();
+async function activateCopy(page: Page, control: Locator, key?: "Enter" | "Space"): Promise<void> {
   const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
-  if (keyboard) await control.press("Enter");
+  if (key !== undefined) await control.press(key);
   else await control.click();
   if (previous !== undefined) {
     await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
@@ -2091,16 +2157,25 @@ for (const scheme of ["light"] as const) {
       for (const [, type, text] of sources) appendBlock(doc, { type, text });
       await expect(page.locator(".ub-copy")).toHaveCount(4);
       await clipboardMode(page, "modern");
-      const link = page.getByRole("menuitem", { name: "Copy link", exact: true });
+      const link = page.getByRole("button", { name: "Copy link", exact: true });
       const canonicalUrl = new URL(`/${harness().workspace}/${uuid}`, page.url()).href;
-      await page.getByRole("button", { name: "Document actions" }).click();
       await expect(link).toHaveAccessibleName("Copy link");
+      await expect(link).toHaveAttribute("title", "Copy link");
       await activateCopy(page, link);
       await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
-      await activateCopy(page, link, true);
+      await activateCopy(page, link, "Enter");
       await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
+      for (const mode of ["missing", "refused", "failed"] as const) {
+        await clipboardMode(page, mode);
+        await activateCopy(page, link);
+        const message = mode === "failed" ? "Couldn't copy the link. Select it in the address bar instead." : "Link copied";
+        await expect(copyNotice(page, message)).toHaveAttribute("data-type", mode === "failed" ? "error" : "success");
+        expect(await copiedTexts(page)).toEqual(mode === "failed" ? [] : [canonicalUrl]);
+        await expect(page.getByRole("menu")).toHaveCount(0);
+      }
+      await clipboardMode(page, "modern");
 
       // Desktop and iPad layouts must leave the notification region unobstructed
       // by the header. One source consumer proves it uses the same region;
@@ -2184,7 +2259,7 @@ for (const scheme of ["light"] as const) {
     expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, waiting.url()).href]);
     await expect(waiting.locator(".ub-copied")).toHaveCount(0);
     await clipboardMode(waiting, "failed");
-    await activateCopy(waiting, waitingCopy, true);
+    await activateCopy(waiting, waitingCopy, "Enter");
     await expect(copyNotice(waiting, "Couldn't copy the link. Select it in the address bar instead.")).toHaveAttribute("data-type", "error");
     await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
   });
@@ -2226,7 +2301,7 @@ for (const scheme of ["light", "dark"] as const) {
     const blankSpace = async (): Promise<{ x: number; y: number }> => {
       const geometry = await trigger.evaluate((control) => {
         const row = control.closest(".ub-doc-meta");
-        const actions = row?.querySelector(".ub-document-actions");
+        const actions = row?.querySelector(".ub-document-controls");
         const chevron = control.querySelector(".ub-tag-chevron");
         const visible = chevron ?? control.querySelector(".ub-tag-placeholder");
         if (row === null || actions == null || visible === null) throw new Error("e2e: incomplete tag header");
@@ -2244,6 +2319,7 @@ for (const scheme of ["light", "dark"] as const) {
           gap: actionBox.left - box.right,
           actionInset: rowBox.right - actionBox.right,
           takesBlank: control.contains(document.elementFromPoint(x, y)),
+          controlsTakeBlank: actions.contains(document.elementFromPoint(x, y)),
           takesTop: control.contains(document.elementFromPoint(box.left + box.width / 2, box.top + 1)),
           takesBottom: control.contains(document.elementFromPoint(box.left + box.width / 2, box.bottom - 1)),
         };
@@ -2257,9 +2333,12 @@ for (const scheme of ["light", "dark"] as const) {
       expect(geometry.gap).toBeGreaterThan(24);
       expect(geometry.actionInset).toBeCloseTo(0, 1);
       expect(geometry.takesBlank).toBe(false);
+      expect(geometry.controlsTakeBlank).toBe(false);
       if (touch) await page.touchscreen.tap(geometry.x, geometry.y);
       else await page.mouse.click(geometry.x, geometry.y);
       await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
+      await expect(page.getByRole("menu")).toHaveCount(0);
+      await expect(copyNotice(page, "Link copied")).toHaveCount(0);
       return { x: geometry.x, y: geometry.y };
     };
     await blankSpace();
@@ -2271,6 +2350,7 @@ for (const scheme of ["light", "dark"] as const) {
       await trigger.press(key);
       await expect(page.getByRole("option").first()).toBeFocused();
       await page.keyboard.press("Escape");
+      await expect(page.locator(".ub-tag-picker-panel")).toHaveCount(0);
       await expect(trigger).toBeFocused();
     }
     await activate(trigger);
@@ -2460,10 +2540,8 @@ test("the document's tags are wrapping pills, and the panel earns its search fie
     expect(geometry.row).toBeGreaterThanOrEqual(geometry.strip);
   }
 
-  // The read-only header draws the same pills from the same rule, and it is the
-  // surface criterion 2 owns. An archived document is how a reader reaches it;
-  // the actions go with the archive, so the machine facts are the only
-  // neighbour left to paint over.
+  // The read-only header keeps both document controls beside the same pills.
+  // An archived document is how a reader reaches it.
   await page.setViewportSize({ width: 1280, height: 620 });
   await page.getByRole("button", { name: "Document actions" }).click();
   await page.getByRole("menuitem", { name: "Archive document" }).click();
@@ -2674,7 +2752,7 @@ for (const scheme of ["light", "dark"] as const) {
       await trigger.click();
       await page.getByRole("menuitem", { name: "Pin to sidebar" }).click();
       await trigger.click();
-      const copy = page.getByRole("menuitem", { name: "Copy link", exact: true });
+      const copy = page.getByRole("menuitem", { name: "Copy document id", exact: true });
       const unpin = page.getByRole("menuitem", { name: "Unpin from sidebar" });
       const archive = page.getByRole("menuitem", { name: "Archive document", exact: true });
       const restingInk = await paintedIn(copy, "color");
@@ -2788,8 +2866,9 @@ for (const scheme of ["light"] as const) {
       for (const selector of [".ub-sync-toggle", ".ub-doc-rev"]) {
         await check(page.locator(selector));
       }
-      const actions = page.locator(".ub-actions-trigger");
-      await check(actions, actions.locator(".ub-actions-face"));
+      for (const actions of await page.locator(".ub-actions-trigger").all()) {
+        await check(actions, actions.locator(".ub-actions-face"));
+      }
       await check(page.getByRole("button", { name: "Edit tags" }), page.locator(".ub-tag-chevron"));
       for (const peer of await page.locator(".ub-peer-control").all()) await check(peer);
       await page.locator(".ub-peer-more").tap();
@@ -2827,20 +2906,26 @@ for (const scheme of ["light"] as const) {
     await contrastDocument(page, scheme, async () => {
       expect(await page.evaluate(() => matchMedia("(hover: hover)").matches)).toBe(true);
       await page.addStyleTag({ content: "* { transition: none !important; }" });
-      for (const selector of [".ub-sync-toggle", ".ub-doc-rev", ".ub-actions-trigger", ".ub-tag-chevron"]) {
-        const control = page.locator(selector);
+      for (const control of await page.locator(".ub-sync-toggle, .ub-doc-rev, .ub-actions-trigger, .ub-tag-chevron").all()) {
         await page.mouse.move(1399, 999);
         const before = await controlPaint(control);
         await control.hover();
         expect(await controlPaint(control)).not.toEqual(before);
       }
-      const actions = page.locator(".ub-actions-trigger");
+      const actions = page.locator('.ub-document-actions button[aria-label="Document actions"]');
       const face = actions.locator(".ub-actions-face");
       await page.mouse.move(1399, 999);
       const restingFace = await controlPaint(face);
+      const copy = page.getByRole("button", { name: "Copy link", exact: true });
+      const copyFace = copy.locator(".ub-actions-face");
+      expect(await controlPaint(copyFace)).toEqual(restingFace);
+      await copy.hover();
+      const hoveredCopyFace = await controlPaint(copyFace);
+      expect(hoveredCopyFace).not.toEqual(restingFace);
       await actions.hover();
       const hoveredAction = await controlPaint(face);
       expect(hoveredAction).not.toEqual(restingFace);
+      expect(hoveredCopyFace).toEqual(hoveredAction);
       await actions.click();
       await expect(actions).toHaveAttribute("data-state", "open");
       await page.mouse.move(1399, 999);

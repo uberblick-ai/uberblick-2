@@ -24,7 +24,7 @@
  */
 
 import { act, render } from "./react-render.js";
-import { screen, within } from "@testing-library/react";
+import { within } from "@testing-library/react";
 import { afterEach, describe, expect, it, beforeEach, vi } from "vitest";
 import type { ReactElement } from "react";
 import * as Y from "yjs";
@@ -734,7 +734,7 @@ describe("an address that resolves to no document says which one, and why", () =
 });
 
 /**
- * Select Copy link from a mounted document's actions and return what it says.
+ * Activate a mounted document's Copy link icon and return what it says.
  *
  * `segment` is the workspace as the address spells it, which is what the app
  * hands the line — the room key is always the bare uuid.
@@ -756,12 +756,7 @@ async function clickCopy(
   );
   const host = view.container;
 
-  act(() => {
-    const trigger = within(host).getByRole("button", { name: "Document actions" });
-    trigger.focus();
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  const button = screen.getByRole("menuitem", { name: "Copy link" });
+  const button = within(host).getByRole("button", { name: "Copy link" });
   const label = button?.textContent ?? "";
   const ariaLabel = button?.getAttribute("aria-label") ?? label;
   await act(async () => {
@@ -804,7 +799,7 @@ describe("the copy control hands back the document's canonical link", () => {
 
     const { label, ariaLabel, said } = await clickCopy();
 
-    expect(label).toBe("Copy link");
+    expect(label).toBe("");
     expect(ariaLabel).toBe("Copy link");
 
     // Exactly what `parseRoute` resolves back to this document.
@@ -837,7 +832,7 @@ describe("the copy control hands back the document's canonical link", () => {
     const { label, ariaLabel } = await clickCopy(DECORATED);
 
     expect(written).toEqual([`${window.location.origin}/${DECORATED}/${UUID}`]);
-    expect(label).toBe("Copy link");
+    expect(label).toBe("");
     expect(ariaLabel).toBe("Copy link");
     // And it is a link that resolves back to this document.
     expect(route(new URL(written[0] as string).pathname)).toEqual({

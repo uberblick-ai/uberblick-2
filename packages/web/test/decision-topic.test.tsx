@@ -243,12 +243,7 @@ function copiedUrls(): ReturnType<typeof vi.fn> {
 }
 
 async function copy(host: HTMLElement): Promise<void> {
-  await act(async () => {
-    const trigger = within(host).getByRole("button", { name: "Document actions" });
-    trigger.focus();
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  });
-  await act(async () => screen.getByRole("menuitem", { name: "Copy link" }).click());
+  await act(async () => within(host).getByRole("button", { name: "Copy link" }).click());
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });

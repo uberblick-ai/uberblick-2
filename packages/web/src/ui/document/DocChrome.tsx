@@ -402,22 +402,43 @@ export function DocMetaLine({
             readOnly={archived || readOnly}
             canWrite={() => connection.status.writable}
           />
-          <DocumentActions
-            key={`${connection.room}/${archived}`}
-            title={titleOf(meta)}
-            uuid={meta.uuid}
-            address={copyAddress(connection.room, segment, copyPath)}
-            archived={archived}
-            pinned={pinned}
-            onTogglePin={onTogglePin}
-            onArchive={onArchive}
-            onConfirmationFocusChange={onArchiveConfirmationFocusChange}
-            hasTldr={hasTldr}
-            tldrOptOut={meta.tldrOptOut === true}
-            contentReadOnly={contentReadOnly || meta.kind === "decision"}
-            onEditTldr={readOnly ? null : (onEditTldr ?? null)}
-            onRemoveTldr={readOnly ? null : (onRemoveTldr ?? null)}
-          />
+          <span className="ub-document-controls">
+            <button
+              type="button"
+              className="ub-copy-link-icon ub-actions-trigger focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1"
+              aria-label="Copy link"
+              title="Copy link"
+              onClick={() => void copyText(shareUrl(copyAddress(connection.room, segment, copyPath), window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
+            >
+              <span className="ub-actions-face">
+                <svg className="block size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
+                  <path
+                    d="m6.5 9.5 3-3m-4 1-1 1a2.83 2.83 0 0 0 4 4l1.5-1.5m-3-6L8.5 3.5a2.83 2.83 0 0 1 4 4l-1 1"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+            </button>
+            <DocumentActions
+              key={`${connection.room}/${archived}`}
+              title={titleOf(meta)}
+              uuid={meta.uuid}
+              archived={archived}
+              pinned={pinned}
+              onTogglePin={onTogglePin}
+              onArchive={onArchive}
+              onConfirmationFocusChange={onArchiveConfirmationFocusChange}
+              hasTldr={hasTldr}
+              tldrOptOut={meta.tldrOptOut === true}
+              contentReadOnly={contentReadOnly || meta.kind === "decision"}
+              onEditTldr={readOnly ? null : (onEditTldr ?? null)}
+              onRemoveTldr={readOnly ? null : (onRemoveTldr ?? null)}
+            />
+          </span>
         </>
       )}
     </p>
@@ -435,7 +456,6 @@ const ARCHIVE_UNAVAILABLE =
 function DocumentActions({
   title,
   uuid,
-  address,
   archived,
   pinned,
   onTogglePin,
@@ -449,7 +469,6 @@ function DocumentActions({
 }: {
   title: string;
   uuid: string;
-  address: string;
   archived: boolean;
   pinned: boolean;
   onTogglePin: (() => void) | null;
@@ -521,11 +540,6 @@ function DocumentActions({
               event.preventDefault();
             }}
           >
-            <DropdownMenuItem
-              onSelect={() => copyFromMenu(shareUrl(address, window.location.origin), "Link copied", "Couldn't copy the link. Select it in the address bar instead.")}
-            >
-              Copy link
-            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => copyFromMenu(uuid, "Document id copied", "Couldn't copy the document id. Try again in a browser with clipboard access.")}
             >
