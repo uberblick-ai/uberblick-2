@@ -117,11 +117,11 @@ img { max-width: 100%; display: block }
 .links li { display: flex; gap: 10px; align-items: baseline; min-width: 0 }
 .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; flex-shrink: 0 }
 .dir { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line) }
-.dir li { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) auto; gap: 4px 20px; padding: 12px 10px; border-bottom: 1px solid var(--line); align-items: baseline }
+.dir a { display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 4px 20px; padding: 12px 10px; border-bottom: 1px solid var(--line); align-items: baseline; color: var(--fg); text-decoration: none }
+.dir a:hover { background: var(--tint) }
 .dir .n { font: 500 14px var(--mono); color: var(--accent); overflow-wrap: anywhere }
 .dir .d { font-size: 14.5px }
 .dir .d span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px }
-.dir .v { font: 12px var(--mono); color: var(--muted) }
 .changes { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line) }
 .changes li { display: grid; grid-template-columns: 110px 70px minmax(0, 1fr); gap: 4px 16px; padding-block: 10px; border-bottom: 1px solid var(--line); font-size: 14px; align-items: baseline }
 .changes time { font-family: var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px }
@@ -177,8 +177,7 @@ td code { white-space: nowrap }
   .side summary { display: block; cursor: pointer; font-size: 14px; color: var(--muted) }
   .side[open] summary { margin-bottom: 10px }
   .side-in { position: static }
-  .dir li { grid-template-columns: minmax(0, 1fr) auto }
-  .dir .d { grid-column: 1 / -1 }
+  .dir a { grid-template-columns: minmax(0, 1fr) }
 }
 @media (max-width: 700px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)) }

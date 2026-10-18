@@ -59,18 +59,41 @@
 </section>
 </section>
 
+<section class="blk" id="mcp">
+<div class="blk-h"><h2>An opinionated MCP: agents read before they write.</h2><a href="/docs/agents">Agents over MCP</a></div>
+<p class="blk-intro">Tag the pages that matter as guidance. The server refuses every write from an agent that has not read them, and tells it which ones. No prompt engineering, no hoping.</p>
+<div class="flow" role="img" aria-label="An agent calls edit_block; the server refuses with guidance_required and lists the unread pages; the agent reads them with get_doc; the write is accepted for ten minutes of edits.">
+  <div class="step"><span class="k">1 · agent</span><b>Calls <code>edit_block</code></b><span>on a page in the workspace</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step no"><span class="k">2 · server</span><b>Refuses: <code>guidance_required</code></b><span>unread: Product principles, Web UI: typography</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">3 · agent</span><b>Reads both with <code>get_doc</code></b><span>the same pages people pinned</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step ok"><span class="k">4 · server</span><b>Accepts the write</b><span>and every write for ten minutes</span></div>
+</div>
+<p class="flow-cap">With <a href="https://agents.uberblick.ai">ub-agents</a> the loop closes: the pages stay true to what ships.</p>
+<div class="flow loop" role="img" aria-label="An issue is filed; the preparer links the pages it depends on; the implementer reads them over MCP and builds; the pull request carries a corpus update; the pages stay true and the next issue starts from them.">
+  <div class="step"><span class="k">issue</span><b>Filed with pointers</b><span>to the pages it depends on</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">implementer</span><b>Reads them over MCP</b><span>then builds against them</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step"><span class="k">reviewer</span><b>Checks the result</b><span>against the pages, not the issue</span></div>
+  <span class="arr" aria-hidden="true"></span>
+  <div class="step ok"><span class="k">pull request</span><b>Updates the page</b><span>which block, what it now says</span></div>
+  <span class="arr back" aria-hidden="true"></span>
+</div>
+</section>
+
 <section class="blk" id="blocks">
-<div class="blk-h"><h2>What a document can hold.</h2><a href="/docs/editor">The editor</a></div>
+<div class="blk-h"><h2>What a document can hold.</h2><a href="/docs/custom-markdown">Custom Markdown</a></div>
 <p class="blk-intro">The Markdown you already write, plus the blocks that never survive in a README. Every block has a Markdown form, so an agent can write it and a person can read the source.</p>
 <ul class="dir">
-  <li><span class="n">code</span><span class="d">Fenced code with highlighting.<span>Any language the editor knows.</span></span><span class="v">0.4</span></li>
-  <li><span class="n">terminal</span><span class="d">A terminal transcript that replays line by line.<span>For demos and runbooks.</span></span><span class="v">0.4</span></li>
-  <li><span class="n">chart</span><span class="d">Line and bar charts drawn from records stored in the document.<span>When an agent updates the records, the chart updates with them.</span></span><span class="v">0.4</span></li>
-  <li><span class="n">table</span><span class="d">Data tables with typed columns and document typeahead in cells.<span><code>get_data</code> and <code>update_data</code> on the CLI and over MCP.</span></span><span class="v">0.4</span></li>
-  <li><span class="n">decision</span><span class="d">A decision record: the answer first, then the reason and the links.<span>Superseded on the same topic, never edited away.</span></span><span class="v">0.4</span></li>
-  <li><span class="n">card</span><span class="d">A prose card for a summary, a warning or a next step.<span>Native in the editor and over MCP since 0.4.3.</span></span><span class="v">0.4.3</span></li>
-  <li><span class="n">figma</span><span class="d">A Figma file or frame, with its title and a placeholder for private files.<span><code>:::figma</code> in Markdown.</span></span><span class="v">0.4.5</span></li>
-  <li><span class="n">ablauf</span><span class="d">Flow diagrams in a small text format.<span>Mermaid blocks became code blocks in 0.4.5.</span></span><span class="v">0.4.5</span></li>
+  <li><a href="/docs/custom-markdown#chart"><span class="n">chart</span><span class="d">Line charts and data tables drawn from records stored in the document.<span>When an agent updates the records, the chart updates with them.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#decision"><span class="n">decision</span><span class="d">A decision record: the answer first, then the reason and the links.<span>Superseded on the same topic, never edited away.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#card"><span class="n">card</span><span class="d">A prose card with a label, a title, a footer and buttons.<span>For a recommendation, a warning or a next step an agent proposes.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#figma"><span class="n">figma</span><span class="d">A Figma file, frame, prototype or board, with a caption.<span>Nothing contacts Figma until the reader opens it.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#wireframe"><span class="n">wireframe</span><span class="d">A screen sketch in text that the editor draws.<span>Early.</span></span></a></li>
+  <li><a href="/docs/custom-markdown#ablauf"><span class="n">ablauf</span><span class="d">Flow diagrams in a small text format, replacing Mermaid.<span>Early; a <code>mermaid</code> fence is plain code today.</span></span></a></li>
 </ul>
 </section>
 
@@ -80,7 +103,7 @@
 <div class="qcards">
   <article class="qcard"><span class="lab">Product intent</span><h3>How do agents read what the product should do before they build?</h3><ul class="links"><li><span class="tag">Use case</span><a href="/use-cases/product-intent">Product intent that agents read</a></li><li><span class="tag">Docs</span><a href="/docs/agents">Agents over MCP</a></li></ul></article>
   <article class="qcard"><span class="lab">Decisions</span><h3>How do decisions stay decided?</h3><ul class="links"><li><span class="tag">Use case</span><a href="/use-cases/decisions">Decisions that stay decided</a></li><li><span class="tag">Docs</span><a href="/docs/decisions">Decisions</a></li></ul></article>
-  <article class="qcard"><span class="lab">Reports</span><h3>How does a daily report keep its numbers inside the page?</h3><ul class="links"><li><span class="tag">Use case</span><a href="/use-cases/reports">Reports with the numbers inside</a></li><li><span class="tag">Docs</span><a href="/docs/markdown-data">Markdown and data</a></li></ul></article>
+  <article class="qcard"><span class="lab">Reports</span><h3>How does a daily report keep its numbers inside the page?</h3><ul class="links"><li><span class="tag">Use case</span><a href="/use-cases/reports">Reports with the numbers inside</a></li><li><span class="tag">Docs</span><a href="/docs/custom-markdown">Custom Markdown</a></li></ul></article>
   <article class="qcard"><span class="lab">Research</span><h3>Where do an agent's findings go when the chat is over?</h3><ul class="links"><li><span class="tag">Use case</span><a href="/use-cases/research">Research that doesn't get lost in chat</a></li><li><span class="tag">Compare</span><a href="/compare">Notion, Obsidian, Jupyter and the repo</a></li></ul></article>
 </div>
 </section>

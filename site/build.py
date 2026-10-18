@@ -116,7 +116,7 @@ SIDE = [
     ('Start', [('/docs/motivation', 'Motivation'), ('/docs/install', 'Install and update'), ('/docs/workspaces', 'Workspaces'), ('/docs/editor', 'The editor')]),
     ('Agents', [('/docs/agents', 'Agents over MCP'), ('/docs/decisions', 'Decisions')]),
     ('Sharing', [('/docs/hub', 'Run a hub'), ('/docs/access', 'Access and membership')]),
-    ('Reference', [('/docs/cli', 'CLI reference'), ('/docs/configuration', 'Configuration'), ('/docs/markdown-data', 'Markdown and data'), ('/docs/mcp', 'MCP reference')]),
+    ('Reference', [('/docs/cli', 'CLI reference'), ('/docs/configuration', 'Configuration'), ('/docs/custom-markdown', 'Custom Markdown'), ('/docs/mcp', 'MCP reference')]),
     (None, [('/#usecases', 'Use cases'), ('/compare', 'Compare')]),
 ]
 

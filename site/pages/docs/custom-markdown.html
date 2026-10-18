@@ -1,0 +1,109 @@
+<head>
+<title>Custom Markdown · Uberblick docs</title>
+<meta name="description" content="The Markdown Uberblick reads and writes, and the blocks it adds: charts and data tables from records in the document, cards, Figma references, decision records, wireframes and ablauf flows. Each with its source form.">
+<link rel="stylesheet" href="/css/sub.css">
+</head>
+<div class="hero sub">
+  <p class="crumb"><a href="/">Uberblick</a> / Docs / Reference</p>
+  <h1>Custom Markdown</h1>
+  <p class="lede">A document is a list of blocks. Most of them are the Markdown you already write: paragraphs, headings, lists, quotes, fenced code and tables. The rest are the blocks a software team needs and a README cannot hold. Every block has a source form, so an agent writes it over MCP with <code>insert_block</code> or <code>edit_block</code>, a person edits it in the browser, and <code>export_markdown</code> gives the whole document back as text.</p>
+</div>
+<article class="col">
+  <section class="q" id="standard"><h2>What is standard</h2>
+  <p>Paragraphs, ATX headings, bullet and ordered lists, <code>&gt;</code> quotes, fenced code with a language and GFM tables read and write as you expect. Inline, <code>**bold**</code>, <code>*italic*</code>, <code>~~strike~~</code>, inline code and links work; a link whose target is a document id, <code>[label](document-uuid)</code>, links to that document and counts as a backlink. A <code>terminal</code> fence keeps a transcript as a demonstration, with <code>$&nbsp;</code> lines as the commands. The custom blocks below use one of two shapes: a fence with an info string for source that a program reads, or a <code>:::name</code> container for prose with a header.</p>
+  </section>
+
+  <section class="q" id="chart"><h2>Chart and data table</h2>
+  <p>A document can own named collections of JSON records beside its prose. A <code>chart</code> fence holds a mapping that names a collection and its fields, never the values, so the chart is the data: when an agent writes records with <code>update_data</code>, every chart and table that reads them refreshes.</p>
+  <section class="block code"><div class="cap"><span>Markdown</span><button type="button" data-copy="```chart
+{
+  &quot;version&quot;: 1,
+  &quot;type&quot;: &quot;line&quot;,
+  &quot;collection&quot;: &quot;deliveries&quot;,
+  &quot;x&quot;: {&quot;field&quot;: &quot;day&quot;, &quot;type&quot;: &quot;date&quot;},
+  &quot;y&quot;: [{&quot;field&quot;: &quot;count&quot;, &quot;label&quot;: &quot;Deliveries&quot;}]
+}
+```">Copy</button></div><pre>```chart
+{
+  "version": 1,
+  "type": "line",
+  "collection": "deliveries",
+  "x": {"field": "day", "type": "date"},
+  "y": [{"field": "count", "label": "Deliveries"}]
+}
+```</pre></section>
+  <p>A line chart takes one x field, a number or a date, and one to eight numeric y series with optional labels and units. <code>layout: "panels"</code> draws one small chart per series; <code>missing</code> decides whether a gap breaks or bridges a line. The same block with <code>"type":"table"</code> and up to thirty <code>columns</code>, each with a field and a text, number, date or link format, is a data table with sorting. Both omit records that fail the collection's schema and say how many they left out.</p>
+  </section>
+
+  <section class="q" id="decision"><h2>Decision record</h2>
+  <p>A decision is not a block but a kind of document: a topic with a question as its title, an answer of at most three blocks at the top, then the reason and the links to the issues and pull requests it affects. Writing a new record on the same topic supersedes the old one; nothing is edited away. An agent asks <code>find_decisions</code> for the issue it is working on before it changes anything, and a person reads the answer first because it is the first thing on the page.</p>
+  <section class="block decision" aria-label="Example decision record"><div class="cap"><span>Decision · decided 10 October 2026</span><span>Uberblick product workspace</span></div>
+    <div class="body">
+      <h3>Where does the web UI use monospace?</h3>
+      <p class="answer">Only for text a person would paste somewhere: code, terminal output and ids in Settings. Everything else is set in the UI face.</p>
+      <p class="why">Mono reads as machine output. Used for labels and timestamps it made the chrome look like a debug overlay and competed with real code blocks.</p>
+      <div class="links"><span>Links</span><a href="https://github.com/uberblick-ai/uberblick-2/issues/1551">uberblick-2#1551</a><span>Web UI: typography</span></div>
+    </div>
+  </section>
+  <p>How topics, challenges and superseding work is on <a href="/docs/decisions">Decisions</a>.</p>
+  </section>
+
+  <section class="q" id="card"><h2>Card</h2>
+  <p>A card is prose with a shape: an optional label, a required title, an optional body and footer, and any number of link buttons. Agents use it for the thing a reader should act on, such as a recommendation in a report, and the buttons can open the discussion in Claude Code or Codex.</p>
+  <section class="block code"><div class="cap"><span>Markdown</span><button type="button" data-copy=":::card
+label: Recommendation
+title: Cut the retry limit to two
+footer: From the delivery report of 16 October
+button: [Discuss in Claude Code](claude://code/new?prompt=Review%20the%20retry%20limit) filled blue
+button: [Open the issue](https://github.com/uberblick-ai/uberblick-2/issues/1588)
+
+Three of this week's wasted runs were third retries on the same failure. A limit of two would have stopped each one a run earlier.
+:::">Copy</button></div><pre>:::card
+label: Recommendation
+title: Cut the retry limit to two
+footer: From the delivery report of 16 October
+button: [Discuss in Claude Code](claude://code/new?prompt=Review%20the%20retry%20limit) filled blue
+button: [Open the issue](https://github.com/uberblick-ai/uberblick-2/issues/1588)
+
+Three of this week's wasted runs were third retries on the same failure. A limit of two would have stopped each one a run earlier.
+:::</pre></section>
+  <p>Header lines are <code>label:</code>, <code>title:</code>, <code>footer:</code> and <code>button:</code>, in any order; the first blank line ends the header and the rest is the body. A button is one Markdown link to an <code>https://</code> address or to <code>claude://code/new</code>, <code>claude-cli://open</code> or <code>codex://new</code>, followed by an optional style (<code>outline</code> or <code>filled</code>) and colour (<code>neutral</code>, <code>blue</code>, <code>green</code> or <code>violet</code>).</p>
+  </section>
+
+  <section class="q" id="figma"><h2>Figma</h2>
+  <p>A Figma block holds one design reference: a file, a frame, a prototype, a board or slides, with a title, a height and a caption. The page shows the title and a placeholder until the reader opens the embed, and no part of Uberblick contacts Figma on its own.</p>
+  <section class="block code"><div class="cap"><span>Markdown</span><button type="button" data-copy=":::figma
+url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345
+title: Payment, mobile
+height: 560
+
+Card form after the **address** step.
+:::">Copy</button></div><pre>:::figma
+url: https://www.figma.com/design/k3Lm9QzT2x/Checkout-flow?node-id=12-345
+title: Payment, mobile
+height: 560
+
+Card form after the **address** step.
+:::</pre></section>
+  <p><code>url</code> is required and must be an <code>https</code> link on figma.com to a design, file, proto, board, slides or community file; the stored link keeps only the file key, the name and the node ids. <code>title</code> is plain text, <code>height</code> is 240 to 960 pixels and defaults to 480, and the caption after the blank line is inline Markdown.</p>
+  </section>
+
+  <section class="q" id="wireframe"><h2>Wireframe</h2>
+  <p>A <code>wireframe</code> fence is a code block the editor draws as a screen sketch. The format is early and is being rebuilt from the ASCII sketches people already draw in issues, so that an agent can write a sketch without breaking it and a person can still read the source. Until then, the fence keeps its text.</p>
+  <section class="block code"><div class="cap"><span>Markdown</span></div><pre>```wireframe
++----------------------+---------------------------+
+| Pinned               |  Delivery report          |
+|  Delivery report     |  Seven issues merged ...  |
+|  Release plan 0.5    |  [ line chart ]           |
++----------------------+---------------------------+
+```</pre></section>
+  </section>
+
+  <section class="q" id="ablauf"><h2>Ablauf</h2>
+  <p>Ablauf is a small text format for flow diagrams, built to replace Mermaid in Uberblick: short enough for an agent to write correctly and plain enough to read as text. It is early. Since 0.4.5 Mermaid is gone; a <code>mermaid</code> fence is an ordinary code block with that language and is never drawn.</p>
+  </section>
+
+  <section class="q" id="reading"><h2>Reading and writing it</h2>
+  <p>Over MCP, <code>get_doc</code> returns the blocks with their ids, types, source text and revisions; <code>edit_block</code> changes one block against the revision it read; <code>export_markdown</code> writes the document as one Markdown file in these forms, and the CLI's <code>ub data get</code> and <code>ub data update</code> read and write the records a chart draws. The full list is in the <a href="/docs/mcp">MCP reference</a>.</p>
+  </section>
+</article>

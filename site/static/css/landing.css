@@ -109,3 +109,27 @@ mark.sel { background: oklch(0.85 0.12 75 / 55%); color: inherit; border-radius:
 /* Terminal replay. */
 #term { min-height: 198px; }
 .blk .block { margin: 0; }
+
+/* The MCP flow: four steps in a row, stacked on a phone. The looping row ends with a return arrow. */
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: stretch; margin: 0 0 18px; }
+.flow .step { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; align-content: start; min-width: 0; background: var(--panel); }
+.flow .step .k { font: 500 11px var(--mono); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.flow .step b { font-size: 14.5px; font-weight: 600; line-height: 1.35; }
+.flow .step b code { font-weight: 500; font-size: 0.92em; }
+.flow .step > span:last-child { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.flow .step.no { border-color: var(--accent); }
+.flow .step.no .k { color: var(--accent); }
+.flow .step.ok { background: var(--tint); border-color: transparent; }
+.flow .arr { align-self: center; width: 22px; height: 2px; background: var(--line); position: relative; }
+.flow .arr::after { content: ""; position: absolute; right: -1px; top: -4px; width: 7px; height: 7px; border-top: 2px solid var(--line); border-right: 2px solid var(--line); transform: rotate(45deg); }
+.flow.loop { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+.flow .arr.back { width: 22px; height: 22px; background: none; border: 2px solid var(--line); border-radius: 50%; border-right-color: transparent; }
+.flow .arr.back::after { right: 2px; top: -4px; border-color: var(--line); transform: rotate(-20deg); }
+.flow-cap { font-size: 14px; color: var(--muted); margin: 0 0 14px; }
+@media (max-width: 899px) {
+  .flow, .flow.loop { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .flow .arr { justify-self: center; width: 2px; height: 18px; }
+  .flow .arr::after { right: -3px; top: auto; bottom: -1px; transform: rotate(135deg); }
+  .flow .arr.back { width: 22px; height: 22px; }
+  .flow .arr.back::after { right: 2px; top: -4px; bottom: auto; transform: rotate(-20deg); }
+}
