@@ -13,6 +13,8 @@ commands:
   doctor                              Diagnose this hub without changing it
   admin-setup <workspace-uuid>         Set up the first workspace admin
   admin-setup status <setup-uuid>       Look up a setup result
+  hub-admin add <github-login>         Appoint an account that has signed in
+  hub-admin add --account-id <id>      Appoint by durable GitHub account ID
   backup                              Verify and save an online database copy
   restore <file|->                     Restore a database while the hub is stopped
 `;
@@ -62,6 +64,32 @@ async function runWithSignals(work: (signal: AbortSignal) => Promise<void>): Pro
   finally { for (const signal of signals) process.off(signal, cancel); }
 }
 
+async function addHubAdmin(databasePath: string, target: { account: string } | { accountId: string }): Promise<void> {
+  let result: Record<string, unknown>;
+  try { result = await requestOperator(databasePath, { action: "hub-admin-add", ...target }); }
+  catch (error) { throw new Error(`${String(error)}; appointment result unknown; retry the same account to check`); }
+  if (result.status === "account-not-found") throw new Error("hub has never recorded this account");
+  if (result.status === "sign-in-required") throw new Error("account has no recorded sign-in; sign in to this hub and retry");
+  if (result.status === "ambiguous-account") throw new Error("login matches more than one recorded account; use --account-id <GitHub account ID>");
+  const identity = result.identity as Record<string, unknown> | undefined;
+  if ((result.status !== "complete" && result.status !== "already-admin") || identity === null ||
+      typeof identity !== "object" || typeof identity.githubUsername !== "string" || typeof identity.githubAccountId !== "string") {
+    throw new Error(String(result.error ?? "appointment result unknown; retry the same account to check"));
+  }
+  console.log(`${result.status === "already-admin" ? "already hub admin" : "appointed hub admin"}  ${identity.githubUsername} (GitHub account ${identity.githubAccountId})`);
+}
+
+async function runHubAdminCommand(args: string[]): Promise<void> {
+  let target: { account: string } | { accountId: string } | undefined;
+  if (args.length === 3 && /^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/.test(args[2] ?? "")) {
+    target = { account: args[2] ?? "" };
+  } else if (args.length === 4 && args[2] === "--account-id" && /^[1-9][0-9]{0,99}$/.test(args[3] ?? "")) {
+    target = { accountId: args[3] ?? "" };
+  }
+  if (args[1] !== "add" || target === undefined) { console.error(USAGE); process.exitCode = 2; return; }
+  await addHubAdmin(requiredHubDatabasePath(), target);
+}
+
 export async function runOperatorCommand(args: string[], releasePath = "/release/release.json"): Promise<void> {
   const command = args[0];
   if (args.length === 0 || (args.length === 1 && (command === "--help" || command === "-h"))) {
@@ -76,6 +104,7 @@ export async function runOperatorCommand(args: string[], releasePath = "/release
     }
     return;
   }
+  if (command === "hub-admin") { await runHubAdminCommand(args); return; }
   const valid = args.length === 1 && ["status", "doctor", "backup"].includes(command ?? "") ||
     command === "restore" && args.length === 2 && args[1] !== "" && !args[1]?.startsWith("--");
   if (!valid) { console.error(USAGE); process.exitCode = 2; return; }

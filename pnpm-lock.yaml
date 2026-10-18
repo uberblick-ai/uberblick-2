@@ -13,7 +13,7 @@ overrides:
 
 patchedDependencies:
   '@hocuspocus/server@4.7.1':
-    hash: 369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d
+    hash: 37ecaf52e2a37385ff6971a89b8b7b4ce2b316016ed7a67effc72a965cdfdf8b
     path: patches/@hocuspocus__server@4.7.1.patch
 
 importers:
@@ -34,7 +34,7 @@ importers:
     dependencies:
       '@hocuspocus/server':
         specifier: 4.7.1
-        version: 4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        version: 4.7.1(patch_hash=37ecaf52e2a37385ff6971a89b8b7b4ce2b316016ed7a67effc72a965cdfdf8b)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@uberblick/hub':
         specifier: workspace:*
         version: link:../hub
@@ -80,7 +80,7 @@ importers:
     dependencies:
       '@hocuspocus/server':
         specifier: 4.7.1
-        version: 4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
+        version: 4.7.1(patch_hash=37ecaf52e2a37385ff6971a89b8b7b4ce2b316016ed7a67effc72a965cdfdf8b)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)
       '@uberblick/schema':
         specifier: workspace:*
         version: link:../schema
@@ -2805,7 +2805,7 @@ snapshots:
       y-protocols: 1.0.7(yjs@13.6.32)
       yjs: 13.6.32
 
-  '@hocuspocus/server@4.7.1(patch_hash=369b6cf89d77fbe06fffc8587efb43dd9e2395fd56553e0602d592792d5ef65d)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
+  '@hocuspocus/server@4.7.1(patch_hash=37ecaf52e2a37385ff6971a89b8b7b4ce2b316016ed7a67effc72a965cdfdf8b)(y-protocols@1.0.7(yjs@13.6.32))(yjs@13.6.32)':
     dependencies:
       '@hocuspocus/common': 4.7.1
       async-mutex: 0.5.0

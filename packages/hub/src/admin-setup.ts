@@ -9,7 +9,7 @@ import type { MembershipRegistry } from "./memberships.js";
 import type { HubDatabase } from "./persistence.js";
 import type { PrincipalRecord, PrincipalRegistry } from "./principals.js";
 import type { HubClaimState } from "./hub-claim.js";
-import type { OperatorControls } from "./operator-control.js";
+import type { OperatorControls, OperatorRequest } from "./operator-control.js";
 
 export function adminSocketPath(databasePath: string): string {
   const absolute = `${resolve(databasePath)}.admin/control.sock`;
@@ -217,12 +217,22 @@ export async function startAdminSetup(options: {
       schedule(result.interval);
     };
 
-    const operatorRequest = (message: { action: string }): boolean => {
+    const operatorRequest = (message: Record<string, unknown>): boolean => {
       const operator = options.operator;
-      if (started || Object.keys(message).length !== 1 || operator === undefined ||
-          !["hub-status", "hub-doctor", "backup"].includes(message.action)) return false;
+      if (started || operator === undefined) return false;
+      let request: OperatorRequest;
+      if (Object.keys(message).length === 1 &&
+          (message.action === "hub-status" || message.action === "hub-doctor" || message.action === "backup")) {
+        request = { action: message.action };
+      } else if (message.action === "hub-admin-add" && Object.keys(message).length === 2 &&
+          typeof message.account === "string" && /^[A-Za-z0-9][A-Za-z0-9-]{0,99}$/.test(message.account)) {
+        request = { action: "hub-admin-add", account: message.account };
+      } else if (message.action === "hub-admin-add" && Object.keys(message).length === 2 &&
+          typeof message.accountId === "string" && /^[1-9][0-9]{0,99}$/.test(message.accountId)) {
+        request = { action: "hub-admin-add", accountId: message.accountId };
+      } else return false;
       started = true;
-      const operation = operator.run(message.action as "hub-status" | "hub-doctor" | "backup", abort.signal)
+      const operation = operator.run(request, abort.signal)
         .then(value => { if (!ended) finish(value); })
         .catch(error => { if (!ended) finish({ status: "failed", error: String(error) }); });
       operations.add(operation);

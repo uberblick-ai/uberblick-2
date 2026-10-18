@@ -6,7 +6,7 @@
  * publish unauthenticated rooms before the token gate admits them.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MAX_PENDING_DOCUMENTS } from "@uberblick/hub";
 import type { Hub } from "@uberblick/hub";
 import { cleanupTestResources,
@@ -33,7 +33,6 @@ afterEach(async () => {
   await cleanupTestResources({
     clients: rigs.splice(0).map((client) => () => client.close()),
     hubs: hubs.splice(0).map((hub) => () => hub.stop()),
-    after: [() => { vi.restoreAllMocks(); }],
   });
 });
 
@@ -57,27 +56,21 @@ async function server(port: number, syncTimeoutMs = 10_000): Promise<Rig> {
 }
 
 /**
- * Hocuspocus reports this guard through process-wide `console.warn`. Match a
+ * Hocuspocus reports this guard through the hub's instance logger. Match a
  * room owned by this test so a previous rig finishing teardown cannot make the
  * next test claim that its own socket was terminated.
  */
-function watchForPendingRoomTermination(
-  rooms: readonly string[],
-): () => readonly string[] {
+function watchForPendingRoomTermination(rooms: readonly string[]) {
   const seen: string[] = [];
-  const warn = console.warn;
-  vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
-    const line = args.map(String).join(" ");
-    if (
-      line.includes("too many pending unauthenticated documents") &&
-      rooms.some((room) => line.includes(room))
-    ) {
-      seen.push(line);
-      return;
-    }
-    warn(...args);
-  });
-  return () => seen;
+  return {
+    log: (record: { event: string; [key: string]: unknown }) => {
+      const line = String(record.message);
+      if (record.event === "hub.hocuspocus.warning" &&
+        line.includes("too many pending unauthenticated documents") &&
+        rooms.some((room) => line.includes(room))) seen.push(line);
+    },
+    terminations: () => seen,
+  };
 }
 
 function endsWithin<T>(label: string, promise: Promise<T>): Promise<T> {
@@ -94,8 +87,8 @@ function endsWithin<T>(label: string, promise: Promise<T>): Promise<T> {
 describe("fresh-room admission", () => {
   it("syncs a create burst past the default hub ceiling without breaching it", async () => {
     const rooms: string[] = [];
-    const terminations = watchForPendingRoomTermination(rooms);
-    const running = await hub();
+    const { log, terminations } = watchForPendingRoomTermination(rooms);
+    const running = await hub({ log });
     expect(running.server.configuration.maxPendingDocuments).toBe(
       MAX_PENDING_DOCUMENTS,
     );
@@ -133,8 +126,8 @@ describe("fresh-room admission", () => {
 
   it("drops closing-window updates before they can replay ahead of admission", async () => {
     const rooms: string[] = [];
-    const terminations = watchForPendingRoomTermination(rooms);
-    const running = await hub();
+    const { log, terminations } = watchForPendingRoomTermination(rooms);
+    const running = await hub({ log });
     const rig = await server(running.port, 3_000);
     const created = await Promise.all(
       Array.from({ length: BURST }, (_, index) =>
@@ -183,9 +176,9 @@ describe("fresh-room admission", () => {
 
   it("releases every admission after a hub-initiated socket termination", async () => {
     const rooms = [`${WORKSPACE}/_directory`, `${WORKSPACE}/_sidebar`];
-    const terminations = watchForPendingRoomTermination(rooms);
+    const { log, terminations } = watchForPendingRoomTermination(rooms);
     const databasePath = tempDatabasePath();
-    const first = await hub({ databasePath, maxPendingDocuments: 1 });
+    const first = await hub({ databasePath, maxPendingDocuments: 1, log });
     const port = first.port;
     const rig = await server(port, 60_000);
 

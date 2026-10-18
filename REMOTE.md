@@ -965,12 +965,11 @@ Hub operations require current hub administration, independently of workspace
 membership and credential workspace scope. Hub administrators live only in the
 hub-private `hub_admins` table; synchronized settings grant no hub authority.
 Claiming a fresh hub grants this role once. A deployed hub that cannot be
-claimed and has no hub administrator appoints one when it starts: the oldest
-GitHub account, in the order the hub first recorded accounts, that belongs to
-any workspace. The hub logs `hub.admin.adopted` with that account. A hub with
-no workspace members waits until one exists and restarts. Once an administrator
-exists, startup appoints no one, and there is no product route to restore the
-role.
+claimed and has no hub administrator waits without appointing anyone, regardless
+of its accounts or workspace memberships. Existing hub administrators keep their
+role through upgrade and restart. The host operator can
+[appoint a hub administrator](#appoint-a-hub-administrator) through the private
+operator socket, whether or not other administrators exist.
 Administrator rows contain `principalId`, `githubAccountId`, `githubUsername`,
 `workspaces` (membership count), `lastSignedInAt` (epoch milliseconds or null)
 and `current` (the requesting account). The last sign-in comes from the newest
@@ -1098,9 +1097,9 @@ Settings also shows **Hub → Admins** and **Hub → Workspaces** to current hub
 administrators, even without membership in the open workspace. These pages
 manage only that workspace's bound hub; another stored login is never a
 fallback. Admins lists accounts, membership counts and relative last sign-in
-dates, with confirmation before removing another administrator. Workspaces shows
-Active or Suspended and asks before Suspend or Restore. Its actions remain
-reachable from the suspended workspace itself. Hub role changes are enforced immediately on every hub request;
+dates, with confirmation before removing another administrator and no Add action.
+Workspaces shows Active or Suspended and asks before Suspend or Restore. Its
+actions remain reachable from the suspended workspace itself. Hub role changes are enforced immediately on every hub request;
 the browser rechecks authority during navigation, on focus and while open.
 
 Removing a member ends that account's access to this workspace on every device.
@@ -1110,6 +1109,50 @@ until `ub auth login <hub>` is run again. An acknowledged change remains applied
 even if the next read is refused, including after removing yourself or revoking
 this computer. A `closure-failed` answer with `applied: true` also reports an
 applied change, with a failed live closure.
+
+## Appoint a hub administrator
+
+Run this in the deployment directory **on the hub host**, for example over SSH:
+
+```sh
+sh bin/remote-compose.sh exec hub ub-hub hub-admin add <github-login>
+```
+
+The account must have completed GitHub sign-in to **this hub**, through
+`ub auth login <hub>` or the hub's web page. A workspace grant's account lookup
+or `ub-hub admin-setup` alone does not qualify: sign in to this hub, then retry.
+Once recorded, sign-in eligibility survives sign-out, browser-session expiry,
+device revocation and restart. Device sign-ins already on record at upgrade
+count, including revoked devices, as do browser sessions that have not yet
+ended. Browser-only sign-ins whose sessions ended before upgrade cannot be
+recovered; those accounts must sign in again. Browser sign-ins stay out of the
+device list and Hub → Admins' last sign-in time.
+
+The command looks up only this hub's recorded accounts; it does not contact
+GitHub. It prints the recorded GitHub login and durable account ID, and the hub
+logs a committed appointment. An account already holding the role is reported
+as already a hub administrator without changing anything. An unrecorded account,
+a recorded account with no sign-in, or an ambiguous login is refused with a
+non-zero exit and no grant. GitHub logins can match more than one recorded account
+after renames; select the intended account's durable ID explicitly instead:
+
+```sh
+sh bin/remote-compose.sh exec hub ub-hub hub-admin add --account-id <github-account-id>
+```
+
+A plain argument is always a login, including an entirely numeric login.
+
+Host access authorizes the operation through the running hub's private Unix
+socket beside its database. No HTTP, WebSocket or management-request route can
+appoint a hub administrator. Appointment grants no workspace membership and
+issues no device credential. It works both when no hub administrator exists and
+when others already hold the role; existing administrators are retained.
+
+To replace an unintended hub administrator, first appoint the intended account.
+Sign in as that account, open **Hub → Admins**, then remove the unintended
+administrator. The host command provides no removal action. Hub administration
+alone gives no workspace document access; grant workspace membership separately
+when needed.
 
 ## Establish a workspace's first administrator
 
@@ -1201,7 +1244,7 @@ logs with `sh bin/remote-compose.sh logs hub` and the applicable backups when th
 receipt is unavailable. Do not interpret a connection failure or an unknown
 result as permission to replace an administrator.
 
-### Out of scope: recovery of administrator access
+### Out of scope: recovery of workspace administrator access
 
 Setup provides no privileged recovery route. It never acts on a workspace with
 membership, and access management cannot remove or demote its final admin.
@@ -1215,8 +1258,9 @@ or a workspace with no membership where setup can run anew. A restore replaces
 the **whole hub database**, including the documents and access state of every
 workspace, not just the affected workspace. Use the
 [backup and restore procedure](#backing-the-hub-up) below. Without a suitable
-backup, this version offers no supported recovery. Any operator recovery route
-requires a separate owner decision.
+backup, this version offers no supported workspace administrator recovery. Any
+operator route to recover workspace administration requires a separate owner
+decision.
 
 ## Configure and check the stack
 
@@ -1439,6 +1483,19 @@ volume, so normal container replacement and `sh bin/remote-compose.sh down`
 preserve it. Both the hub and `ub-hub` require a non-empty `HUB_DB_PATH` for database operations;
 an unset or empty value refuses startup and names the setting.
 
+The sync endpoint accepts WebSocket messages up to 16 MiB (16,777,216 bytes),
+including encoded room names and Yjs framing. A larger message closes its whole
+multiplexed socket with code 1009; other sockets keep serving. Clients reconnect
+and retry, so a room whose single message exceeds the ceiling cannot sync.
+The separate unauthenticated queue budget remains 5 MiB / 1,000 messages per socket.
+
+Room names are limited to 128 ASCII letters, digits, underscores, hyphens and
+slashes. Names outside those bounds are refused as `room-name-invalid` before
+token inspection; the rejection event omits the name. Current UUID rooms and
+reserved roots, including the retired `_feedback`, remain admissible.
+Hub events and Hocuspocus warnings and errors use one JSON event per stderr line;
+client text appears only in JSON-escaped strings.
+
 ### Checking the hub
 
 The hub image supplies `ub-hub` for status, diagnostics, first-admin setup,
@@ -1595,8 +1652,8 @@ ub workspace promote http://localhost:8080
 starter documents/sidebar. Sign in first with `ub auth login <hub>`; `promote`
 reuses this hub's stored login and refuses if sign-in is required. Your account
 must currently be a hub administrator. The login that claims a fresh hub also
-grants hub administration and qualifies, as does the account an existing
-deployment appoints at startup. Signing in otherwise, workspace
+grants hub administration and qualifies, as does an account the host operator
+appoints with `ub-hub hub-admin add`. Signing in otherwise, workspace
 membership and workspace administration do not qualify. A refusal uploads
 nothing and leaves the workspace local; ask a hub administrator.
 

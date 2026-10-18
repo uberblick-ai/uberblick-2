@@ -1,8 +1,51 @@
 diff --git a/dist/hocuspocus-server.cjs b/dist/hocuspocus-server.cjs
-index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82bca47401e 100644
+index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..11e00f2cfae69b88624ab9e14bf166e6a1f67182 100644
 --- a/dist/hocuspocus-server.cjs
 +++ b/dist/hocuspocus-server.cjs
-@@ -866,6 +866,7 @@ var ClientConnection = class {
+@@ -273,9 +273,9 @@ var MessageReceiver = class {
+ 					connection?.callbacks.onTokenSyncCallback({ token: message.readVarString() });
+ 					break;
+ 				}
+-				console.error("Received an authentication message on a connection that is already fully authenticated. Probably your provider has been destroyed + recreated really fast.");
++				(connection?.logger ?? console).error("Received an authentication message on a connection that is already fully authenticated. Probably your provider has been destroyed + recreated really fast.");
+ 				break;
+-			default: console.error(`Unable to handle message of type ${type}: no handler defined! Are your provider/server versions aligned?`);
++			default: (connection?.logger ?? console).error(`Unable to handle message of type ${type}: no handler defined! Are your provider/server versions aligned?`);
+ 		}
+ 	}
+ 	async readSyncMessage(message, document, connection, reply, requestFirstSync = true) {
+@@ -347,7 +347,7 @@ var Connection = class {
+ 	/**
+ 	* Constructor.
+ 	*/
+-	constructor(connection, request, document, socketId, context, readOnly = false, sessionId, providerVersion) {
++	constructor(connection, request, document, socketId, context, readOnly = false, sessionId, providerVersion, logger = console) {
+ 		this.callbacks = {
+ 			onClose: [(document, event) => {}],
+ 			beforeHandleMessage: (connection, update) => Promise.resolve(),
+@@ -366,6 +366,7 @@ var Connection = class {
+ 		this.readOnly = readOnly;
+ 		this.sessionId = sessionId ?? null;
+ 		this.providerVersion = providerVersion ?? null;
++		this.logger = logger;
+ 		this.document.addConnection(this);
+ 		this.sendCurrentAwareness();
+ 	}
+@@ -495,11 +496,11 @@ var Connection = class {
+ 					try {
+ 						await this.callbacks.afterHandleMessage(this, rawUpdate);
+ 					} catch (afterError) {
+-						console.error(`afterHandleMessage hook failed (while handling ${documentName})`, afterError);
++						this.logger.error(`afterHandleMessage hook failed (while handling ${documentName})`, afterError);
+ 					}
+ 				}
+ 			} catch (e) {
+-				console.error(`closing connection ${this.socketId} (while handling ${documentName}) because of exception`, e);
++				this.logger.error(`closing connection ${this.socketId} (while handling ${documentName}) because of exception`, e);
+ 				this.close({
+ 					code: "code" in e && typeof e.code === "number" ? e.code : _hocuspocus_common.ResetConnection.code,
+ 					reason: "reason" in e ? e.reason : _hocuspocus_common.ResetConnection.reason
+@@ -866,6 +867,7 @@ var ClientConnection = class {
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -10,7 +53,25 @@ index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82b
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(_hocuspocus_common.ConnectionTimeout);
-@@ -973,15 +974,19 @@ var ClientConnection = class {
+@@ -895,7 +897,7 @@ var ClientConnection = class {
+ 						};
+ 					});
+ 				} catch (err) {
+-					console.error(err);
++					(this.opts.logger ?? console).error(err);
+ 					const error = {
+ 						..._hocuspocus_common.Unauthorized,
+ 						...err
+@@ -933,7 +935,7 @@ var ClientConnection = class {
+ 					const exceedsBytes = queuedBytes + data.byteLength > this.maxUnauthenticatedQueueSize;
+ 					const exceedsMessages = queuedMessages + 1 > this.maxUnauthenticatedQueueMessages;
+ 					if (exceedsBytes || exceedsMessages) {
+-						console.warn(exceedsBytes ? `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue size limit exceeded for "${documentName}" (${queuedBytes + data.byteLength} > maxUnauthenticatedQueueSize ${this.maxUnauthenticatedQueueSize} bytes).` : `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue length limit exceeded for "${documentName}" (${queuedMessages + 1} > maxUnauthenticatedQueueMessages ${this.maxUnauthenticatedQueueMessages}).`);
++						(this.opts.logger ?? console).warn(exceedsBytes ? `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue size limit exceeded for "${documentName}" (${queuedBytes + data.byteLength} > maxUnauthenticatedQueueSize ${this.maxUnauthenticatedQueueSize} bytes).` : `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue length limit exceeded for "${documentName}" (${queuedMessages + 1} > maxUnauthenticatedQueueMessages ${this.maxUnauthenticatedQueueMessages}).`);
+ 						this.terminate(_hocuspocus_common.ResetConnection);
+ 						return;
+ 					}
+@@ -973,22 +975,26 @@ var ClientConnection = class {
  					});
  					if (this.hookPayloads[rawKey] !== hookPayload) return;
  					hookPayload.connectionConfig.isAuthenticated = true;
@@ -31,15 +92,26 @@ index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82b
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -1006,6 +1011,7 @@ var ClientConnection = class {
+ 					delete this.incomingMessageQueueBytes[rawKey];
+ 				}
+ 			} catch (error) {
+-				console.error(error);
++				(this.opts.logger ?? console).error(error);
+ 				this.websocket.close(_hocuspocus_common.ResetConnection.code, _hocuspocus_common.ResetConnection.reason);
+ 			}
+ 		};
+@@ -1006,8 +1012,9 @@ var ClientConnection = class {
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
 +					if (lib0_decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
- 						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
+-						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
++						(this.opts.logger ?? console).warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(_hocuspocus_common.ResetConnection);
-@@ -1026,6 +1032,7 @@ var ClientConnection = class {
+ 						return;
+ 					}
+@@ -1026,10 +1033,11 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -47,7 +119,12 @@ index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82b
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1054,6 +1061,7 @@ var ClientConnection = class {
+-				console.error(closeError);
++				(this.opts.logger ?? console).error(closeError);
+ 				this.websocket.close(_hocuspocus_common.Unauthorized.code, _hocuspocus_common.Unauthorized.reason);
+ 			}
+ 		};
+@@ -1054,6 +1062,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -55,7 +132,7 @@ index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82b
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1080,9 +1088,7 @@ var ClientConnection = class {
+@@ -1080,9 +1089,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -66,11 +143,111 @@ index 41cf40ec8ecdd4c37c91bbd921b519dce2a17738..0b0e9a5c376ea986ad998a2a8ac6c82b
  	}
  	/**
  	* Set a callback that will be triggered when the connection is closed
+@@ -1095,7 +1102,7 @@ var ClientConnection = class {
+ 	* Create a new connection by the given request and document
+ 	*/
+ 	createConnection(connection, document, hookPayload, sessionId, providerVersion) {
+-		const instance = new Connection(connection, hookPayload.request, document, hookPayload.socketId, hookPayload.context, hookPayload.connectionConfig.readOnly, sessionId, providerVersion);
++		const instance = new Connection(connection, hookPayload.request, document, hookPayload.socketId, hookPayload.context, hookPayload.connectionConfig.readOnly, sessionId, providerVersion, this.opts.logger);
+ 		instance.onClose(async (document, event) => {
+ 			await instance.waitForPendingMessages();
+ 			const disconnectHookPayload = {
+@@ -1421,7 +1428,8 @@ var Hocuspocus = class {
+ 			timeout: this.configuration.timeout,
+ 			maxUnauthenticatedQueueSize: this.configuration.maxUnauthenticatedQueueSize,
+ 			maxUnauthenticatedQueueMessages: this.configuration.maxUnauthenticatedQueueMessages,
+-			maxPendingDocuments: this.configuration.maxPendingDocuments
++			maxPendingDocuments: this.configuration.maxPendingDocuments,
++			logger: this.configuration.logger
+ 		}, defaultContext);
+ 		clientConnection.onClose((document, hookPayload) => {
+ 			if (document.getConnectionsCount() > 0) return;
+@@ -1590,7 +1598,7 @@ var Hocuspocus = class {
+ 					}, 0);
+ 					return;
+ 				}
+-				console.error("Caught error during storeDocumentHooks. Document stays in memory to avoid data loss", error);
++				(this.configuration.logger ?? console).error("Caught error during storeDocumentHooks. Document stays in memory to avoid data loss", error);
+ 				return;
+ 			}
+ 			setTimeout(() => {
+@@ -1607,7 +1615,7 @@ var Hocuspocus = class {
+ 		let chain = Promise.resolve();
+ 		extensions.filter((extension) => typeof extension[name] === "function").forEach((extension) => {
+ 			chain = chain.then(() => extension[name]?.(payload)).catch((error) => {
+-				if (error?.message) console.error(`[${name}]`, error.message);
++				if (error?.message) (this.configuration.logger ?? console).error(`[${name}]`, error.message);
+ 				throw error;
+ 			});
+ 			if (callback) chain = chain.then((...args) => callback(...args));
+@@ -5746,8 +5754,8 @@ var Server = class {
+ 					});
+ 				},
+ 				error: (peer, error) => {
+-					console.error("WebSocket error for peer:", peer.id);
+-					console.error(error);
++					(this.configuration.logger ?? console).error("WebSocket error for peer:", peer.id);
++					(this.configuration.logger ?? console).error(error);
+ 				}
+ 			}
+ 		});
+@@ -5808,7 +5816,7 @@ var Server = class {
+ 				this.hocuspocus.closeConnections();
+ 				this.hocuspocus.flushPendingStores();
+ 			} catch (error) {
+-				console.error(error);
++				(this.configuration.logger ?? console).error(error);
+ 			}
+ 		});
+ 		await this.hocuspocus.hooks("onDestroy", { instance: this.hocuspocus });
 diff --git a/dist/hocuspocus-server.esm.js b/dist/hocuspocus-server.esm.js
-index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3dde9c505d 100644
+index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..6aa0817ac072c4a43c590af24541c02d0171779f 100644
 --- a/dist/hocuspocus-server.esm.js
 +++ b/dist/hocuspocus-server.esm.js
-@@ -836,6 +836,7 @@ var ClientConnection = class {
+@@ -243,9 +243,9 @@ var MessageReceiver = class {
+ 					connection?.callbacks.onTokenSyncCallback({ token: message.readVarString() });
+ 					break;
+ 				}
+-				console.error("Received an authentication message on a connection that is already fully authenticated. Probably your provider has been destroyed + recreated really fast.");
++				(connection?.logger ?? console).error("Received an authentication message on a connection that is already fully authenticated. Probably your provider has been destroyed + recreated really fast.");
+ 				break;
+-			default: console.error(`Unable to handle message of type ${type}: no handler defined! Are your provider/server versions aligned?`);
++			default: (connection?.logger ?? console).error(`Unable to handle message of type ${type}: no handler defined! Are your provider/server versions aligned?`);
+ 		}
+ 	}
+ 	async readSyncMessage(message, document, connection, reply, requestFirstSync = true) {
+@@ -317,7 +317,7 @@ var Connection = class {
+ 	/**
+ 	* Constructor.
+ 	*/
+-	constructor(connection, request, document, socketId, context, readOnly = false, sessionId, providerVersion) {
++	constructor(connection, request, document, socketId, context, readOnly = false, sessionId, providerVersion, logger = console) {
+ 		this.callbacks = {
+ 			onClose: [(document, event) => {}],
+ 			beforeHandleMessage: (connection, update) => Promise.resolve(),
+@@ -336,6 +336,7 @@ var Connection = class {
+ 		this.readOnly = readOnly;
+ 		this.sessionId = sessionId ?? null;
+ 		this.providerVersion = providerVersion ?? null;
++		this.logger = logger;
+ 		this.document.addConnection(this);
+ 		this.sendCurrentAwareness();
+ 	}
+@@ -465,11 +466,11 @@ var Connection = class {
+ 					try {
+ 						await this.callbacks.afterHandleMessage(this, rawUpdate);
+ 					} catch (afterError) {
+-						console.error(`afterHandleMessage hook failed (while handling ${documentName})`, afterError);
++						this.logger.error(`afterHandleMessage hook failed (while handling ${documentName})`, afterError);
+ 					}
+ 				}
+ 			} catch (e) {
+-				console.error(`closing connection ${this.socketId} (while handling ${documentName}) because of exception`, e);
++				this.logger.error(`closing connection ${this.socketId} (while handling ${documentName}) because of exception`, e);
+ 				this.close({
+ 					code: "code" in e && typeof e.code === "number" ? e.code : ResetConnection.code,
+ 					reason: "reason" in e ? e.reason : ResetConnection.reason
+@@ -836,6 +837,7 @@ var ClientConnection = class {
  		this.connectionEstablishedAt = Date.now();
  		this.hasAuthenticated = false;
  		this.terminated = false;
@@ -78,7 +255,25 @@ index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3d
  		this.check = () => {
  			const referenceTime = this.hasAuthenticated ? this.lastMessageReceivedAt : this.connectionEstablishedAt;
  			if (Date.now() - referenceTime > this.timeout) this.terminate(ConnectionTimeout);
-@@ -943,15 +944,19 @@ var ClientConnection = class {
+@@ -865,7 +867,7 @@ var ClientConnection = class {
+ 						};
+ 					});
+ 				} catch (err) {
+-					console.error(err);
++					(this.opts.logger ?? console).error(err);
+ 					const error = {
+ 						...Unauthorized,
+ 						...err
+@@ -903,7 +905,7 @@ var ClientConnection = class {
+ 					const exceedsBytes = queuedBytes + data.byteLength > this.maxUnauthenticatedQueueSize;
+ 					const exceedsMessages = queuedMessages + 1 > this.maxUnauthenticatedQueueMessages;
+ 					if (exceedsBytes || exceedsMessages) {
+-						console.warn(exceedsBytes ? `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue size limit exceeded for "${documentName}" (${queuedBytes + data.byteLength} > maxUnauthenticatedQueueSize ${this.maxUnauthenticatedQueueSize} bytes).` : `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue length limit exceeded for "${documentName}" (${queuedMessages + 1} > maxUnauthenticatedQueueMessages ${this.maxUnauthenticatedQueueMessages}).`);
++						(this.opts.logger ?? console).warn(exceedsBytes ? `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue size limit exceeded for "${documentName}" (${queuedBytes + data.byteLength} > maxUnauthenticatedQueueSize ${this.maxUnauthenticatedQueueSize} bytes).` : `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue length limit exceeded for "${documentName}" (${queuedMessages + 1} > maxUnauthenticatedQueueMessages ${this.maxUnauthenticatedQueueMessages}).`);
+ 						this.terminate(ResetConnection);
+ 						return;
+ 					}
+@@ -943,22 +945,26 @@ var ClientConnection = class {
  					});
  					if (this.hookPayloads[rawKey] !== hookPayload) return;
  					hookPayload.connectionConfig.isAuthenticated = true;
@@ -99,15 +294,26 @@ index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3d
  					this.documentConnectionsEstablished.delete(rawKey);
  					delete this.hookPayloads[rawKey];
  					delete this.incomingMessageQueue[rawKey];
-@@ -976,6 +981,7 @@ var ClientConnection = class {
+ 					delete this.incomingMessageQueueBytes[rawKey];
+ 				}
+ 			} catch (error) {
+-				console.error(error);
++				(this.opts.logger ?? console).error(error);
+ 				this.websocket.close(ResetConnection.code, ResetConnection.reason);
+ 			}
+ 		};
+@@ -976,8 +982,9 @@ var ClientConnection = class {
  					return;
  				}
  				if (this.incomingMessageQueue[rawKey] === void 0) {
 +					if (decoding.readVarUint(tmpMsg.decoder) !== MessageType.Auth) return;
  					if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
- 						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
+-						console.warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
++						(this.opts.logger ?? console).warn(`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`);
  						this.terminate(ResetConnection);
-@@ -996,6 +1002,7 @@ var ClientConnection = class {
+ 						return;
+ 					}
+@@ -996,10 +1003,11 @@ var ClientConnection = class {
  						context: { ...this.defaultContext },
  						providerVersion: null
  					};
@@ -115,7 +321,12 @@ index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3d
  				}
  				this.handleQueueingMessage(data, rawKey, documentName);
  			} catch (closeError) {
-@@ -1024,6 +1031,7 @@ var ClientConnection = class {
+-				console.error(closeError);
++				(this.opts.logger ?? console).error(closeError);
+ 				this.websocket.close(Unauthorized.code, Unauthorized.reason);
+ 			}
+ 		};
+@@ -1024,6 +1032,7 @@ var ClientConnection = class {
  			delete this.incomingMessageQueueBytes[rawKey];
  		}
  		for (const rawKey of Object.keys(this.hookPayloads)) delete this.hookPayloads[rawKey];
@@ -123,7 +334,7 @@ index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3d
  		this.documentConnectionsEstablished.clear();
  	}
  	/**
-@@ -1050,9 +1058,7 @@ var ClientConnection = class {
+@@ -1050,9 +1059,7 @@ var ClientConnection = class {
  		return total;
  	}
  	getPendingDocumentCount() {
@@ -134,8 +345,103 @@ index 306b27aec3ce1f5fd5f12196afbef28dea0a13a1..a7ad41a453a111cf878a52782f939d3d
  	}
  	/**
  	* Set a callback that will be triggered when the connection is closed
+@@ -1065,7 +1072,7 @@ var ClientConnection = class {
+ 	* Create a new connection by the given request and document
+ 	*/
+ 	createConnection(connection, document, hookPayload, sessionId, providerVersion) {
+-		const instance = new Connection(connection, hookPayload.request, document, hookPayload.socketId, hookPayload.context, hookPayload.connectionConfig.readOnly, sessionId, providerVersion);
++		const instance = new Connection(connection, hookPayload.request, document, hookPayload.socketId, hookPayload.context, hookPayload.connectionConfig.readOnly, sessionId, providerVersion, this.opts.logger);
+ 		instance.onClose(async (document, event) => {
+ 			await instance.waitForPendingMessages();
+ 			const disconnectHookPayload = {
+@@ -1391,7 +1398,8 @@ var Hocuspocus = class {
+ 			timeout: this.configuration.timeout,
+ 			maxUnauthenticatedQueueSize: this.configuration.maxUnauthenticatedQueueSize,
+ 			maxUnauthenticatedQueueMessages: this.configuration.maxUnauthenticatedQueueMessages,
+-			maxPendingDocuments: this.configuration.maxPendingDocuments
++			maxPendingDocuments: this.configuration.maxPendingDocuments,
++			logger: this.configuration.logger
+ 		}, defaultContext);
+ 		clientConnection.onClose((document, hookPayload) => {
+ 			if (document.getConnectionsCount() > 0) return;
+@@ -1560,7 +1568,7 @@ var Hocuspocus = class {
+ 					}, 0);
+ 					return;
+ 				}
+-				console.error("Caught error during storeDocumentHooks. Document stays in memory to avoid data loss", error);
++				(this.configuration.logger ?? console).error("Caught error during storeDocumentHooks. Document stays in memory to avoid data loss", error);
+ 				return;
+ 			}
+ 			setTimeout(() => {
+@@ -1577,7 +1585,7 @@ var Hocuspocus = class {
+ 		let chain = Promise.resolve();
+ 		extensions.filter((extension) => typeof extension[name] === "function").forEach((extension) => {
+ 			chain = chain.then(() => extension[name]?.(payload)).catch((error) => {
+-				if (error?.message) console.error(`[${name}]`, error.message);
++				if (error?.message) (this.configuration.logger ?? console).error(`[${name}]`, error.message);
+ 				throw error;
+ 			});
+ 			if (callback) chain = chain.then((...args) => callback(...args));
+@@ -1691,8 +1699,8 @@ var Server = class {
+ 					});
+ 				},
+ 				error: (peer, error) => {
+-					console.error("WebSocket error for peer:", peer.id);
+-					console.error(error);
++					(this.configuration.logger ?? console).error("WebSocket error for peer:", peer.id);
++					(this.configuration.logger ?? console).error(error);
+ 				}
+ 			}
+ 		});
+@@ -1753,7 +1761,7 @@ var Server = class {
+ 				this.hocuspocus.closeConnections();
+ 				this.hocuspocus.flushPendingStores();
+ 			} catch (error) {
+-				console.error(error);
++				(this.configuration.logger ?? console).error(error);
+ 			}
+ 		});
+ 		await this.hocuspocus.hooks("onDestroy", { instance: this.hocuspocus });
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 4343b527b9b5f65cab2875ab56d9e8076bf5e8da..c7e69faddaff6331d8b70a0d1f82dcb70574fd74 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -61,6 +61,7 @@ declare class ClientConnection<Context = any> {
+     maxUnauthenticatedQueueSize?: number;
+     maxUnauthenticatedQueueMessages?: number;
+     maxPendingDocuments?: number;
++    logger?: Pick<Console, "warn" | "error">;
+   }, defaultContext?: Context);
+   /**
+    * Handle WebSocket close event. Call this from your integration
+@@ -407,6 +408,8 @@ interface Configuration<Context = any> extends Extension<Context>, FlushOptions
+    * A name for the instance, used for logging.
+    */
+   name: string | null;
++  /** Per-instance warning and error output; defaults to the process console. */
++  logger?: Pick<Console, "warn" | "error">;
+   /**
+    * A list of hocuspocus extensions.
+    */
+@@ -943,6 +946,7 @@ declare class Connection<Context = any> {
+   readOnly: boolean;
+   sessionId: string | null;
+   providerVersion: string | null;
++  readonly logger: Pick<Console, "warn" | "error">;
+   /**
+    * The address string prefixed to outgoing messages.
+    * Session-aware clients get `documentName\0sessionId`; legacy clients get plain `documentName`.
+@@ -953,7 +957,7 @@ declare class Connection<Context = any> {
+   /**
+    * Constructor.
+    */
+-  constructor(connection: WebSocketLike, request: Request, document: Document, socketId: string, context: Context, readOnly?: boolean, sessionId?: string | null, providerVersion?: string | null);
++  constructor(connection: WebSocketLike, request: Request, document: Document, socketId: string, context: Context, readOnly?: boolean, sessionId?: string | null, providerVersion?: string | null, logger?: Pick<Console, "warn" | "error">);
+   /**
+    * Set a callback that will be triggered when the connection is closed
+    */
 diff --git a/src/ClientConnection.ts b/src/ClientConnection.ts
-index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa57ae7426 100644
+index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..54a66e22f8edd90339748ebd32b00be45602d1ec 100644
 --- a/src/ClientConnection.ts
 +++ b/src/ClientConnection.ts
 @@ -75,6 +75,8 @@ export class ClientConnection<Context = any> {
@@ -147,7 +453,15 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  	pingInterval: NodeJS.Timeout;
  
  	lastMessageReceivedAt = Date.now();
-@@ -163,6 +165,7 @@ export class ClientConnection<Context = any> {
+@@ -127,6 +129,7 @@ export class ClientConnection<Context = any> {
+ 			maxUnauthenticatedQueueSize?: number;
+ 			maxUnauthenticatedQueueMessages?: number;
+ 			maxPendingDocuments?: number;
++			logger?: Pick<Console, "warn" | "error">;
+ 		},
+ 		private readonly defaultContext: Context = {} as Context,
+ 	) {
+@@ -163,6 +166,7 @@ export class ClientConnection<Context = any> {
  		for (const rawKey of Object.keys(this.hookPayloads)) {
  			delete this.hookPayloads[rawKey];
  		}
@@ -155,7 +469,7 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  		this.documentConnectionsEstablished.clear();
  	}
  
-@@ -240,14 +243,9 @@ export class ClientConnection<Context = any> {
+@@ -240,14 +244,9 @@ export class ClientConnection<Context = any> {
  	// Auth frame has been seen) so that sending an Auth frame first — which marks
  	// the document as "establishing" but keeps its hook payload alive while a slow
  	// `onAuthenticate` runs — cannot be used to bypass the limit.
@@ -172,7 +486,33 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  	}
  
  	/**
-@@ -550,6 +548,7 @@ export class ClientConnection<Context = any> {
+@@ -280,6 +279,7 @@ export class ClientConnection<Context = any> {
+ 			hookPayload.connectionConfig.readOnly,
+ 			sessionId,
+ 			providerVersion,
++			this.opts.logger,
+ 		);
+ 
+ 		instance.onClose(async (document, event) => {
+@@ -415,7 +415,7 @@ export class ClientConnection<Context = any> {
+ 					},
+ 				);
+ 			} catch (err: any) {
+-				console.error(err);
++				(this.opts.logger ?? console).error(err);
+ 				const error = { ...Unauthorized, ...err };
+ 				connection.close({ code: error.code, reason: error.reason });
+ 			}
+@@ -476,7 +476,7 @@ export class ClientConnection<Context = any> {
+ 					queuedMessages + 1 > this.maxUnauthenticatedQueueMessages;
+ 
+ 				if (exceedsBytes || exceedsMessages) {
+-					console.warn(
++					(this.opts.logger ?? console).warn(
+ 						exceedsBytes
+ 							? `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue size limit exceeded for "${documentName}" (${queuedBytes + data.byteLength} > maxUnauthenticatedQueueSize ${this.maxUnauthenticatedQueueSize} bytes).`
+ 							: `Hocuspocus: closing connection ${this.socketId}: unauthenticated message queue length limit exceeded for "${documentName}" (${queuedMessages + 1} > maxUnauthenticatedQueueMessages ${this.maxUnauthenticatedQueueMessages}).`,
+@@ -550,6 +550,7 @@ export class ClientConnection<Context = any> {
  
  				// All `onAuthenticate` hooks passed.
  				hookPayload.connectionConfig.isAuthenticated = true;
@@ -180,7 +520,7 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  				this.hasAuthenticated = true;
  
  				// Let the client know that authentication was successful.
-@@ -562,9 +561,13 @@ export class ClientConnection<Context = any> {
+@@ -562,9 +563,13 @@ export class ClientConnection<Context = any> {
  				// Time to actually establish the connection.
  				await this.setUpNewConnection(rawKey, documentName, sessionId, hookPayload);
  			} catch (err: any) {
@@ -197,7 +537,7 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  					return;
  				}
  
-@@ -577,6 +580,10 @@ export class ClientConnection<Context = any> {
+@@ -577,6 +582,10 @@ export class ClientConnection<Context = any> {
  
  				// Clean up all state for this document so a retry is treated
  				// as a fresh first connection attempt.
@@ -208,7 +548,16 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  				this.documentConnectionsEstablished.delete(rawKey);
  				delete this.hookPayloads[rawKey];
  				delete this.incomingMessageQueue[rawKey];
-@@ -623,6 +630,12 @@ export class ClientConnection<Context = any> {
+@@ -585,7 +594,7 @@ export class ClientConnection<Context = any> {
+ 
+ 			// Catch errors due to failed decoding of data
+ 		} catch (error) {
+-			console.error(error);
++			(this.opts.logger ?? console).error(error);
+ 			this.websocket.close(ResetConnection.code, ResetConnection.reason);
+ 		}
+ 	};
+@@ -623,12 +632,18 @@ export class ClientConnection<Context = any> {
  
  			const isFirst = this.incomingMessageQueue[rawKey] === undefined;
  			if (isFirst) {
@@ -221,7 +570,14 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  				// Cap the number of documents a single connection can open before
  				// authenticating any of them. Each pending document allocates its own
  				// queue and hook payload, so this prevents memory amplification by
-@@ -655,6 +668,7 @@ export class ClientConnection<Context = any> {
+ 				// fanning out across many document names (GHSA-xwhh-v746-pj9m).
+ 				if (this.getPendingDocumentCount() >= this.maxPendingDocuments) {
+-					console.warn(
++					(this.opts.logger ?? console).warn(
+ 						`Hocuspocus: closing connection ${this.socketId}: too many pending unauthenticated documents (maxPendingDocuments ${this.maxPendingDocuments}). Last requested document: "${documentName}".`,
+ 					);
+ 					this.terminate(ResetConnection);
+@@ -655,12 +670,13 @@ export class ClientConnection<Context = any> {
  					},
  					providerVersion: null as string | null,
  				};
@@ -229,3 +585,128 @@ index 03922faf85ac9d3ab7e27ee746d6cdb39fd23008..91da191a3d40a2940c29ee231b59d1fa
  			}
  
  			this.handleQueueingMessage(data, rawKey, documentName);
+ 		} catch (closeError) {
+ 			// catch is needed in case an invalid payload crashes the parsing of the Uint8Array
+-			console.error(closeError);
++			(this.opts.logger ?? console).error(closeError);
+ 			this.websocket.close(Unauthorized.code, Unauthorized.reason);
+ 		}
+ 	};
+diff --git a/src/Connection.ts b/src/Connection.ts
+index 1981acb5c99d7bacb27797dbe36dfee04d3dbf74..c6d053806d1484effb1c38e0eafcdd9515b227d7 100644
+--- a/src/Connection.ts
++++ b/src/Connection.ts
+@@ -70,6 +70,7 @@ export class Connection<Context = any> {
+ 		readOnly = false,
+ 		sessionId?: string | null,
+ 		providerVersion?: string | null,
++		public readonly logger: Pick<Console, "warn" | "error"> = console,
+ 	) {
+ 		this.webSocket = connection;
+ 		this.context = context;
+@@ -277,7 +278,7 @@ export class Connection<Context = any> {
+ 					try {
+ 						await this.callbacks.afterHandleMessage(this, rawUpdate);
+ 					} catch (afterError) {
+-						console.error(
++						this.logger.error(
+ 							`afterHandleMessage hook failed (while handling ${documentName})`,
+ 							afterError,
+ 						);
+@@ -285,7 +286,7 @@ export class Connection<Context = any> {
+ 				}
+ 				// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+ 			} catch (e: any) {
+-				console.error(
++				this.logger.error(
+ 					`closing connection ${this.socketId} (while handling ${documentName}) because of exception`,
+ 					e,
+ 				);
+diff --git a/src/Hocuspocus.ts b/src/Hocuspocus.ts
+index 681d54aa9f562dea0942b8d74adbec5c8f11a91b..3580dbdde3108d318d07c1454ab26d31592ea828 100644
+--- a/src/Hocuspocus.ts
++++ b/src/Hocuspocus.ts
+@@ -231,6 +231,7 @@ export class Hocuspocus<Context = any> {
+ 				maxUnauthenticatedQueueMessages:
+ 					this.configuration.maxUnauthenticatedQueueMessages,
+ 				maxPendingDocuments: this.configuration.maxPendingDocuments,
++				logger: this.configuration.logger,
+ 			},
+ 			defaultContext,
+ 		);
+@@ -539,7 +540,7 @@ export class Hocuspocus<Context = any> {
+ 						return;
+ 					}
+ 
+-					console.error(
++					(this.configuration.logger ?? console).error(
+ 						"Caught error during storeDocumentHooks. Document stays in memory to avoid data loss",
+ 						error,
+ 					);
+@@ -584,7 +585,7 @@ export class Hocuspocus<Context = any> {
+ 					.catch((error) => {
+ 						// make sure to log error messages
+ 						if (error?.message) {
+-							console.error(`[${name}]`, error.message);
++							(this.configuration.logger ?? console).error(`[${name}]`, error.message);
+ 						}
+ 
+ 						throw error;
+diff --git a/src/MessageReceiver.ts b/src/MessageReceiver.ts
+index 0d6021c67397e273f7253328d61266bd4e5a7250..6daec8d86579aed910507c827659376361f30c9a 100644
+--- a/src/MessageReceiver.ts
++++ b/src/MessageReceiver.ts
+@@ -179,14 +179,14 @@ export class MessageReceiver {
+ 					});
+ 					break;
+ 				}
+-				console.error(
++				(connection?.logger ?? console).error(
+ 					"Received an authentication message on a connection that is already fully authenticated. Probably your provider has been destroyed + recreated really fast.",
+ 				);
+ 				break;
+ 			}
+ 
+ 			default:
+-				console.error(
++				(connection?.logger ?? console).error(
+ 					`Unable to handle message of type ${type}: no handler defined! Are your provider/server versions aligned?`,
+ 				);
+ 			// Do nothing
+diff --git a/src/Server.ts b/src/Server.ts
+index b3b3513682781e62e06914d37f75ce395e70f8f9..cc93a8b9ff55f98cc61b988397a606e482fa427e 100644
+--- a/src/Server.ts
++++ b/src/Server.ts
+@@ -86,8 +86,8 @@ export class Server<Context = any> {
+ 					});
+ 				},
+ 				error: (peer, error) => {
+-					console.error("WebSocket error for peer:", peer.id);
+-					console.error(error);
++					(this.configuration.logger ?? console).error("WebSocket error for peer:", peer.id);
++					(this.configuration.logger ?? console).error(error);
+ 				},
+ 			},
+ 		});
+@@ -241,7 +241,7 @@ export class Server<Context = any> {
+ 				// promptly, even when unloadImmediately is false.
+ 				this.hocuspocus.flushPendingStores();
+ 			} catch (error) {
+-				console.error(error);
++				(this.configuration.logger ?? console).error(error);
+ 			}
+ 		});
+ 
+diff --git a/src/types.ts b/src/types.ts
+index dc8b31637f75bb2f7d7159bf109e782955970220..38d14c9382cbf0bdd14516298832a9d3d91dc065 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -243,6 +243,8 @@ export interface Configuration<Context = any>
+ 	 * A name for the instance, used for logging.
+ 	 */
+ 	name: string | null;
++	/** Per-instance warning and error output; defaults to the process console. */
++	logger?: Pick<Console, "warn" | "error">;
+ 	/**
+ 	 * A list of hocuspocus extensions.
+ 	 */

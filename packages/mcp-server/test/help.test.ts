@@ -336,6 +336,8 @@ it("serves the short startup orientation verbatim and directs clients to the com
   const rig = await local();
   const instructions = rig.client.getInstructions()!;
   const corpusOrientation = "Uberblick organizes local-first workspaces into documents, blocks and decision records. " +
+    "Before you change anything in this repo, consult the corpus and its decision records for relevant documents: " +
+    "use `search` with a query or tags. If the request conflicts with a decision in force, ask before building. " +
     "Document tools operate on your selected workspace: discover with `get_sidebar`, " +
     "`list_docs` or `search`, then read with `get_doc` before editing. Use returned text " +
     "and rev for block edits. Structured data has dedicated tools and can supply document " +
@@ -344,7 +346,7 @@ it("serves the short startup orientation verbatim and directs clients to the com
     "Built-in help is workspace-agnostic; workspace conventions are ordinary documents, " +
     "not initialization instructions or help resources. Follow recovery guidance on failures.";
   expect(instructions.replace(/\s+/g, " ")).toContain(corpusOrientation);
-  expect(instructions.length).toBeLessThanOrEqual(1_000);
+  expect(instructions.length).toBeLessThanOrEqual(1_200);
   expect((await rig.ok("get_help", { topic: "orientation" })).text).toBe(instructions);
   for (const id of concepts) expect(instructions).toContain(id);
   expect(instructions).toContain("uberblick://help/{topic}");

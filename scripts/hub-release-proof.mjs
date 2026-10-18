@@ -294,7 +294,7 @@ db.prepare("UPDATE documents SET name = ? WHERE name = ?")
   .run("${WORKSPACE}/_settings", initial.default_workspace_id + "/_settings");
 db.prepare("UPDATE hub_claim_state SET default_workspace_id = ?, unclaimed = 0 WHERE id = 1").run("${WORKSPACE}");
 db.prepare("INSERT INTO documents(name,data) VALUES (?,?)").run("${WORKSPACE}/${SETUP}", Buffer.from("${UPDATE}", "base64"));
-db.prepare("INSERT INTO hub_principals VALUES (?,?,?)").run("${PRINCIPAL}", "11720001", "release-proof");
+db.prepare("INSERT INTO hub_principals (id,github_account_id,github_username) VALUES (?,?,?)").run("${PRINCIPAL}", "11720001", "release-proof");
 db.prepare("INSERT INTO hub_memberships VALUES (?,?,?)").run("${WORKSPACE}", "${PRINCIPAL}", "admin");
 (${seedReleaseCredential.toString()})(db, "${PRINCIPAL}", "${WORKSPACE}");
 db.prepare("INSERT INTO hub_admin_setup_grants VALUES (?,?,?,?,?,?)")
