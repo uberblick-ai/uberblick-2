@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { appendBlock } from "@uberblick/schema";
+import { appendBlock, createGroup, getDirectoryEntry, getDirectoryMap, getMetaMap, pinDoc, sidebarRoom } from "@uberblick/schema";
 import { activateControl, closeIfOpen, editor, setupHarness } from "./app-helpers.js";
 import { legacyDecisionPeer } from "./legacy-decision-peer.js";
 import { McpAgent } from "./mcp-agent.js";
@@ -39,6 +39,61 @@ function session(): McpSession {
   if (agent === null) throw new Error("e2e: the MCP agent is not configured");
   return agent.open({ name: "decision-topic-e2e" });
 }
+
+test("malformed synced document ids leave valid topics and sidebar navigation usable", async ({ browser }) => {
+  const writer = session();
+  const other = await create(writer, "Unrelated document", "The other room stays unchanged.");
+  const current = await create(writer, "Protected topic", "Keep this room's answer.", { kind: "decision", status: "decided" });
+  const peer = await legacyDecisionPeer(harness(), current.uuid);
+  let group: string | null = null;
+  try {
+    const sidebar = await peer.join(sidebarRoom(harness().workspaceUuid));
+    group = createGroup(sidebar, "Malformed-id regression");
+    pinDoc(sidebar, group, current.uuid);
+    sidebar.getArray(`pins:${group}`).push([
+      { uuid: "..", since: 0 }, { uuid: "a/record/b", since: 0 }, { uuid: other.uuid.toUpperCase(), since: 0 },
+    ]);
+    getMetaMap(peer.doc).set("uuid", other.uuid);
+    getDirectoryMap(peer.directory).set("evil/key", {
+      title: "Forged topic answer", kind: "decision", status: "decided",
+      topic: current.uuid, supersedes: current.uuid, createdAt: Date.now() + 1_000,
+    });
+    const pageErrors: string[] = [];
+    const warnings: string[] = [];
+    const page = await openApp(browser, `/${harness().workspace}/${current.uuid}`, {
+      upstream: true,
+      beforeNavigate: async (opened) => {
+        opened.on("pageerror", (error) => pageErrors.push(error.message));
+        opened.on("console", (message) => { if (message.type() === "warning") warnings.push(message.text()); });
+      },
+    });
+    await selected(page, current.uuid, answerText(current));
+    await expect(page.locator(".ub-decision-timeline > li")).toHaveCount(1);
+    await expect(page.locator('a[href*="evil/key"], a[href$="/.."], a[href*="a/record/b"]')).toHaveCount(0);
+    await expect(page.locator(`a[href$="/${other.uuid.toUpperCase()}"]`)).toHaveCount(0);
+    await page.getByRole("textbox", { name: "Document title", exact: true }).fill("Protected topic renamed");
+    await expect.poll(() => getDirectoryEntry(peer.directory, current.uuid)?.title).toBe("Protected topic renamed");
+    expect(getDirectoryEntry(peer.directory, other.uuid)?.title).toBe(other.title);
+    await expect(page.locator('.ub-list button[title=".."], .ub-list button[title="a/record/b"]')).toHaveCount(0);
+    await expect(page.locator(`.ub-list button[title="${other.uuid.toUpperCase()}"]`)).toHaveCount(0);
+    await expect(page.locator(".ub-list").getByRole("button", { name: "Protected topic renamed", exact: true })).toBeVisible();
+    await page.locator(".ub-list").getByRole("button", { name: "Protected topic renamed", exact: true }).click();
+    await selected(page, current.uuid, answerText(current));
+    expect(warnings.filter((warning) => warning.includes("evil/key"))).toHaveLength(1);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    getDirectoryMap(peer.directory).delete("evil/key");
+    getMetaMap(peer.doc).set("uuid", current.uuid);
+    try {
+      if (group !== null) {
+        await expectMcp(() => writer.call<{ groups: { id: string }[] }>("get_sidebar", {}), sidebar => {
+          expect(sidebar.groups.some(entry => entry.id === group)).toBe(true);
+        });
+        await writer.call("sidebar_group", { action: "delete", group });
+      }
+    } finally { peer.close(); }
+  }
+});
 
 function answer(who = "A workspace member") {
   return { who, when: "2026-10-04T12:00:00Z", where: "https://example.org/team/decision" };

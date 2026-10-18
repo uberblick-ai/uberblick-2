@@ -11,6 +11,7 @@ import {
   InvalidSupersedesReferenceError,
 } from "./errors.js";
 import { canonicalDocumentUuid } from "./rooms.js";
+import { readSyncedDocId } from "./synced-doc-id.js";
 import {
   isDocumentKind,
   isDocumentStatusForKind,
@@ -149,11 +150,6 @@ export function initDoc(ydoc: Y.Doc, options: InitDocOptions): void {
   });
 }
 
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
 /** Deterministic public view over the flat per-tag presence entries. */
 function storedTags(meta: Y.Map<unknown>): string[] {
   const tags: string[] = [];
@@ -217,9 +213,11 @@ export function decisionContentLocked(meta: Pick<DocMeta, "kind" | "status">): b
  * Tolerant defaults make incomplete replicas readable; blank and absent
  * descriptions/summaries both read as null.
  */
-export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
+export function getMeta(ydoc: Y.Doc, authoritativeUuid?: string): DocMeta & { tldr: string | null } {
   const meta = getMetaMap(ydoc);
-  const uuid = meta.get("uuid");
+  const storedUuid = meta.get("uuid");
+  const uuid = typeof storedUuid === "string" && storedUuid !== ""
+    ? authoritativeUuid ?? storedUuid : "";
   const title = meta.get("title");
   const description = meta.get("description");
   const storedTldr = meta.get("tldr");
@@ -258,7 +256,7 @@ export function getMeta(ydoc: Y.Doc): DocMeta & { tldr: string | null } {
     ...(decision && approvalFingerprint !== undefined ? { approvalFingerprint } : {}),
     ...(decision && rejectionReason !== undefined ? { rejectionReason } : {}),
     links: effectiveLinks(
-      readStringArray(meta.get("links")),
+      meta.get("links"),
       [governs, supersedes, discussion].filter((link): link is string => typeof link === "string"),
     ),
   };
@@ -376,15 +374,18 @@ function readDecisionString(value: unknown): string | undefined {
 }
 
 /** Curated edges plus the record's related page, predecessor and discussion. */
-function effectiveLinks(curated: string[], derived: string[]): string[] {
-  if (derived.length === 0) return curated;
+function effectiveLinks(curated: unknown, derived: string[]): string[] {
+  const valid = (Array.isArray(curated) ? curated : []).flatMap((value) => {
+    const link = readSyncedDocId(value, "curated link");
+    return link === null ? [] : [link];
+  });
+  if (derived.length === 0) return valid;
   const derivedSet = new Set(derived);
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const link of curated) {
-    const canonical = canonicalDocumentUuid(link);
-    if (canonical === null || !derivedSet.has(canonical)) out.push(link);
-    else if (!seen.has(canonical)) { seen.add(canonical); out.push(canonical); }
+  for (const link of valid) {
+    if (!derivedSet.has(link)) out.push(link);
+    else if (!seen.has(link)) { seen.add(link); out.push(link); }
   }
   for (const link of derived) {
     if (!seen.has(link)) { seen.add(link); out.push(link); }

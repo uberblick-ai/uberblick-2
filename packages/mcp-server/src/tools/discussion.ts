@@ -5,7 +5,7 @@ import type { ToolContext } from "./context.js";
 /** Connecting a discussion validates its live identity without editing it. */
 export function discussionTarget(context: ToolContext, uuid: string): string {
   const target = context.requireWritableDoc(uuid);
-  const meta = getMeta(target.doc);
+  const meta = getMeta(target.doc, target.id);
   if (meta.kind === "decision") {
     throw new ToolError(
       "discussion_not_regular_document",
@@ -13,5 +13,5 @@ export function discussionTarget(context: ToolContext, uuid: string): string {
       { discussion: uuid, kind: "decision" },
     );
   }
-  return meta.uuid;
+  return target.id;
 }

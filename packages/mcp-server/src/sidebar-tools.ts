@@ -4,6 +4,7 @@ import { ToolError } from "./failures.js";
 import { strictInput } from "./inputs.js";
 import type { ToolMode } from "./inputs.js";
 import { findGroup, placeInGroup, sidebarPayload } from "./sidebar.js";
+import { uuidArg } from "./tools/schemas.js";
 
 const groupArg = z
   .string()
@@ -51,7 +52,7 @@ export const getSidebarOperation = operation("get_sidebar", getSidebarInput, (co
 });
 
 export const pinDocInput = strictInput({
-  uuid: z.uuid().describe("Document UUID."),
+  uuid: uuidArg,
   group: groupArg,
   index: indexArg,
 });
@@ -74,7 +75,7 @@ export const pinDocOperation = sidebarOperation("pin_doc", pinDocInput, (context
 export const unpinDocInput = strictInput({
   // No directory check: a pin whose document nothing can resolve is
   // exactly the one that most needs removing.
-  uuid: z.uuid().describe("Document UUID."),
+  uuid: uuidArg,
 });
 
 export const unpinDocOperation = sidebarOperation("unpin_doc", unpinDocInput, (context, { uuid }, _request, sidebar) => {

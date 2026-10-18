@@ -14,7 +14,13 @@ import type { Harness } from "./harness.js";
 export async function legacyDecisionPeer(
   harness: Harness,
   uuid: string,
-): Promise<{ doc: Y.Doc; decide: (status: DecisionStatus, tldr?: string | null) => void; close: () => void }> {
+): Promise<{
+  doc: Y.Doc;
+  directory: Y.Doc;
+  join: (room: string) => Promise<Y.Doc>;
+  decide: (status: DecisionStatus, tldr?: string | null) => void;
+  close: () => void;
+}> {
   const secret = await importRootSecret(harness.authSecret);
   const peers: Array<{ doc: Y.Doc; provider: HocuspocusProvider }> = [];
   const close = (): void => {
@@ -37,7 +43,7 @@ export async function legacyDecisionPeer(
     const doc = await connect(roomForDoc(harness.workspaceUuid, uuid));
     const directory = await connect(directoryRoom(harness.workspaceUuid));
     return {
-      doc, close,
+      doc, directory, join: connect, close,
       decide: (status, tldr) => {
         doc.transact(() => {
           setKind(doc, "decision");

@@ -5,7 +5,7 @@ import type { DocLinkContext } from "../../editor/doc-links.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { EditorPane } from "./EditorPane.js";
 import { DocumentTitle } from "./DocumentTitle.js";
-import { useDocMeta, useRoomStatus } from "../hooks.js";
+import { readRoomMeta, useDocMeta, useRoomStatus } from "../hooks.js";
 import { decisionRecordPath, docPath } from "../route.js";
 import type { Navigate } from "../route.js";
 import { formatTimestamp, useTimestampClock } from "../timestamps.js";
@@ -223,7 +223,7 @@ function TopicTitle({ topic, current, selected, connection, directoryConnection,
   connection: RoomConnection | null; directoryConnection: RoomConnection | null; archived: boolean;
 }): ReactElement {
   const observedMeta = useDocMeta(connection);
-  const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
+  const meta = observedMeta ?? (connection === null ? null : readRoomMeta(connection));
   const { writable } = useRoomStatus(connection);
   const currentRoom = selected === current.uuid && connection !== null &&
     parseRoom(connection.room).uuid === current.uuid && meta?.uuid === current.uuid && meta.kind === "decision";
@@ -234,7 +234,7 @@ function TopicTitle({ topic, current, selected, connection, directoryConnection,
       if (!currentRoom || archived || connection === null || !connection.status.writable || directoryConnection === null) return;
       const liveMeta = getMeta(connection.ydoc);
       const liveTopic = resolveDecisionTopics(directoryConnection.ydoc).find((entry) => entry.topic === topic.topic);
-      if (liveMeta.uuid !== current.uuid || liveMeta.kind !== "decision" || liveTopic === undefined ||
+      if (liveMeta.uuid === "" || liveMeta.kind !== "decision" || liveTopic === undefined ||
         liveTopic.archived || decisionCurrentRecord(liveTopic)?.uuid !== current.uuid) return;
       setTitle(connection.ydoc, value);
     }}

@@ -17,13 +17,11 @@ import { ToolError } from "../failures.js";
 import { strictInput } from "../inputs.js";
 import { resolveTagSelectors } from "../tag-catalog.js";
 import { documentOperation } from "./operation.js";
-import { descriptionArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
+import { descriptionArg, docLinkTargetArg, titleArg, tldrArg, uuidArg } from "./schemas.js";
 import { discussionTarget } from "./discussion.js";
 
 const fields = ["title", "description", "tldr", "tags", "links", "discussion", "code_check"] as const;
-const linkArg = z
-  .uuid("a link is a target document UUID, never a path or a title")
-  .describe("Target document UUID.");
+const linkArg = docLinkTargetArg.describe("Target document UUID.");
 
 // Keep malformed entries intact for the shared validator so every refusal
 // carries field: code_check instead of the SDK's plain-text schema error.
@@ -93,7 +91,7 @@ function forField<T>(field: typeof fields[number], validate: () => T): T {
 
 export const setMetadataOperation = documentOperation("set_metadata", inputSchema, (context, args, _request, replica) => {
   const { uuid, title, description, tldr, tldr_opt_in, tags, links, discussion, code_check } = args;
-  const current = getMeta(replica.doc);
+  const current = getMeta(replica.doc, replica.id);
   const codeCheck = code_check === undefined ? undefined : normalizeCodeCheck(code_check);
   if (codeCheck === null) {
     throw new ToolError("invalid_code_check", "A code check needs a repository, full hexadecimal commit and matches, ahead or drift result; checked_at is assigned by this replica.", { uuid, field: "code_check" });
@@ -148,7 +146,7 @@ export const setMetadataOperation = documentOperation("set_metadata", inputSchem
     if (discussionUuid !== undefined) setDiscussion(replica.doc, discussionUuid);
     if (codeCheck !== undefined) setCodeCheck(replica.doc, codeCheck);
   });
-  const meta = getMeta(replica.doc);
+  const meta = getMeta(replica.doc, replica.id);
   return {
     uuid,
     title: meta.title,

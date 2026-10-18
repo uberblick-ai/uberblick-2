@@ -6,6 +6,7 @@
 import type * as Y from "yjs";
 import { readDocumentLifecycle } from "./types.js";
 import { canonicalDocumentUuid } from "./rooms.js";
+import { readSyncedDocId } from "./synced-doc-id.js";
 import { getMeta } from "./doc.js";
 import { listAnnotations } from "./annotations.js";
 import { decisionApprovalChanged } from "./approval.js";
@@ -148,7 +149,7 @@ export function isDirectoryEntryDeleted(dirDoc: Y.Doc, uuid: string): boolean {
 /** Deleted UUIDs remain discoverable for physical replica and hub cleanup. */
 export function listDeletedDirectoryUuids(dirDoc: Y.Doc): string[] {
   return [...dirDoc.getMap<unknown>(DIRECTORY_DELETED_KEY).entries()]
-    .filter(([uuid, value]) => canonicalDocumentUuid(uuid) === uuid && value === true)
+    .filter(([uuid, value]) => readSyncedDocId(uuid, "directory key") !== null && value === true)
     .map(([uuid]) => uuid)
     .sort();
 }
@@ -359,18 +360,18 @@ export type DecisionDirectoryFields = Pick<DirectoryUpsert,
 export type DocumentDirectoryFields = DecisionDirectoryFields & { openThreadCount: number; code_check?: CodeCheck[] };
 
 /** Hydrated writers recompute every document cache instead of carrying stale values. */
-export function documentDirectoryFields(doc: Y.Doc): DocumentDirectoryFields {
-  const meta = getMeta(doc);
+export function documentDirectoryFields(doc: Y.Doc, authoritativeUuid?: string): DocumentDirectoryFields {
+  const meta = getMeta(doc, authoritativeUuid);
   return {
-    ...decisionDirectoryFields(doc),
+    ...decisionDirectoryFields(doc, authoritativeUuid),
     openThreadCount: listAnnotations(doc).filter((thread) => thread.resolved !== true).length,
     ...(meta.kind === "decision" ? {} : { code_check: meta.code_check ?? [] }),
   };
 }
 
 /** Hydrated writers restate every decision cache, including deliberate clears. */
-export function decisionDirectoryFields(doc: Y.Doc): DecisionDirectoryFields {
-  const meta = getMeta(doc);
+export function decisionDirectoryFields(doc: Y.Doc, authoritativeUuid?: string): DecisionDirectoryFields {
+  const meta = getMeta(doc, authoritativeUuid);
   if (meta.kind !== "decision") return {};
   return {
     governs: meta.governs ?? null,
@@ -562,6 +563,7 @@ export function getDirectoryEntry(
   dirDoc: Y.Doc,
   uuid: string,
 ): DirectoryEntry | null {
+  if (readSyncedDocId(uuid, "directory key") === null) return null;
   if (isDirectoryEntryDeleted(dirDoc, uuid)) return null;
   const stored = withResolvedUpdatedAt(
     readStored(getDirectoryMap(dirDoc).get(uuid)),
@@ -585,6 +587,7 @@ export function listDirectory(
   const out: DirectoryEntry[] = [];
   const updatedAts = recordedUpdatedAts(dirDoc);
   for (const [uuid, value] of getDirectoryMap(dirDoc).entries()) {
+    if (readSyncedDocId(uuid, "directory key") === null) continue;
     if (isDirectoryEntryDeleted(dirDoc, uuid)) continue;
     const stored = withResolvedUpdatedAt(
       readStored(value),

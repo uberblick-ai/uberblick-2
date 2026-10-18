@@ -42,6 +42,7 @@ import { CardButtonControls } from "../editor-controls/CardButtonControls.js";
 import { TableControls } from "../editor-controls/TableControls.js";
 import { MentionMenu } from "../editor-controls/MentionMenu.js";
 import {
+  readRoomMeta,
   useDocMeta,
   useDocRev,
   useForeignBlocks,
@@ -877,7 +878,7 @@ export function EditorPane({
   const revision = useDocRev(connection);
   // RoutePane admits only hydrated documents. Its child subscription starts
   // after mounting, so read this exact connection on the first frame too.
-  const meta = observedMeta ?? (connection === null ? null : getMeta(connection.ydoc));
+  const meta = observedMeta ?? (connection === null ? null : readRoomMeta(connection));
   const decision = decisionView || meta?.kind === "decision";
   const contentReadOnly = archived || decision;
   const foreign = useForeignBlocks(connection);

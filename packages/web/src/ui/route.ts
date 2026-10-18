@@ -243,8 +243,8 @@ export function shareUrl(address: string, origin: string): string {
 }
 
 /**
- * Require this room's meta.uuid to equal the routed UUID before mounting a
- * writable editor. Directory stubs arrive independently and cannot prove
+ * Require metadata read from the routed room before mounting a writable
+ * editor. Directory stubs arrive independently and cannot prove
  * hydration. A false answer waits for observed room content rather than
  * becoming a 404.
  */

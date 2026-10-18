@@ -244,8 +244,8 @@ function collectionChanges(
 
 /** Validate and summarize without writing; commit the resulting plan synchronously. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This function predates the complexity limit.
-export function prepareDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[]): DataUpdatePlan {
-  const meta = getMeta(doc);
+export function prepareDocData(doc: Y.Doc, directory: Y.Doc, operations: readonly DataOperation[], authoritativeUuid?: string): DataUpdatePlan {
+  const meta = getMeta(doc, authoritativeUuid);
   if (decisionTopicArchived(directory, meta.uuid)) throw new DataError("doc_archived", "Archived documents are read-only", { uuid: meta.uuid, archived: true });
   if (decisionContentLocked(meta)) {
     throw new DataError("decision_read_only", "Decided document content is read-only", { uuid: meta.uuid, kind: meta.kind, status: meta.status });

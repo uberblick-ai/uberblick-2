@@ -180,7 +180,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
 
   const relatedPage =
     related === undefined ? null : requireWritableDoc(related);
-  if (relatedPage !== null && getMeta(relatedPage.doc).kind === "decision") {
+  if (relatedPage !== null && getMeta(relatedPage.doc, relatedPage.id).kind === "decision") {
     throw new ToolError(
       "related_not_regular_document",
       `Document ${related} is a decision record, so it cannot be the related page`,
@@ -197,7 +197,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
   const superseded =
     supersedesUuid === null ? null : requireWritableDoc(supersedesUuid);
   const supersededKind =
-    superseded === null ? null : (getMeta(superseded.doc).kind ?? null);
+    superseded === null ? null : (getMeta(superseded.doc, superseded.id).kind ?? null);
   if (superseded !== null && supersededKind !== "decision") {
     throw new ToolError(
       "supersedes_not_decision",
@@ -216,7 +216,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
       : requireGroup(replicas, sidebar.group.id);
 
   const inputs = initialBlocks(context, { blocks, tldr, answer }, lifecycle, superseded !== null);
-  const governs = relatedPage === null ? (superseded === null ? undefined : getMeta(superseded.doc).governs) : getMeta(relatedPage.doc).uuid;
+  const governs = relatedPage === null ? (superseded === null ? undefined : getMeta(superseded.doc, superseded.id).governs) : relatedPage.id;
 
   const uuid = randomUUID();
   const replica = replicas.replica(uuid);
@@ -250,7 +250,7 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
         description,
         ...(governs === undefined ? {} : { governs }),
         ...(lifecycle?.kind === "decision"
-          ? { topic: superseded === null ? uuid : (getMeta(superseded.doc).topic ?? getMeta(superseded.doc).uuid) }
+          ? { topic: superseded === null ? uuid : (getMeta(superseded.doc, superseded.id).topic ?? superseded.id) }
           : {}),
         ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
       });
@@ -335,9 +335,9 @@ export const createDocOperation = operation("create_doc", inputSchema, (context,
     tags: documentTags(replica),
     ...(lifecycle === null ? {} : lifecycle),
     ...(governs === undefined ? {} : { governs }),
-    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc).topic, discussion: getMeta(replica.doc).discussion } : {}),
+    ...(lifecycle?.kind === "decision" ? { topic: getMeta(replica.doc, replica.id).topic, discussion: getMeta(replica.doc, replica.id).discussion } : {}),
     ...(supersedesUuid === null ? {} : { supersedes: supersedesUuid }),
-    ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc).tldr }),
+    ...(tldr === undefined ? {} : { tldr: getMeta(replica.doc, replica.id).tldr }),
     ...decisionAuthorityJson(replica),
     blocks: blocksJson(replica),
     ...(placement === null ? {} : { sidebar: placement }),

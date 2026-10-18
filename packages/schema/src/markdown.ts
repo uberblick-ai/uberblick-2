@@ -36,6 +36,8 @@ import type {
 } from "./types.js";
 
 export interface ExportMarkdownOptions {
+  /** The document room's identity, when the caller has it. */
+  uuid?: string;
   /**
    * Default true: emit uuid, title and tags, plus description/kind/status only
    * when present, within a --- frontmatter block.
@@ -604,7 +606,7 @@ export function exportMarkdown(
   };
 
   if (withFrontmatter) {
-    const meta = getMeta(ydoc);
+    const meta = getMeta(ydoc, options.uuid);
     const tags =
       options.tagCatalog === undefined
         ? meta.tags
@@ -683,7 +685,7 @@ export function exportMarkdown(
     push(comments.map((line) => `${inside}${line}`).join("\n"), true);
   }
 
-  const decisions = readDecisions(ydoc, options.directory);
+  const decisions = readDecisions(ydoc, options.directory, options.uuid);
   if (decisions.length > 0) {
     push(DECISIONS_HEADING);
     push(DECISIONS_NOTE);

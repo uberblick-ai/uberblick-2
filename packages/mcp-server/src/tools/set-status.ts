@@ -16,7 +16,7 @@ export const inputSchema = strictInput({
 export const setStatusOperation = documentOperation("set_status", inputSchema, (context, { uuid, status, answer, reason }, _request, replica) => {
   const { replicas, recordAnswer, decisionAuthorityJson } = context;
 
-  const stored = getMeta(replica.doc);
+  const stored = getMeta(replica.doc, replica.id);
   const kind = stored.kind ?? "decision";
 
   // Validate every authority/lifecycle door before adopting a kind or writing metadata.

@@ -66,6 +66,7 @@ export type {
 } from "./blocks.js";
 
 export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
+export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";
 

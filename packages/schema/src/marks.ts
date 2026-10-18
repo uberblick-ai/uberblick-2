@@ -23,7 +23,7 @@ export function isExternalHref(href: unknown): href is string {
  * writers canonicalize before storing them.
  */
 export function isDocId(docId: unknown): docId is string {
-  return canonicalDocumentUuid(docId) === docId;
+  return typeof docId === "string" && canonicalDocumentUuid(docId) === docId;
 }
 
 /**

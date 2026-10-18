@@ -311,6 +311,28 @@ function navRows(host: HTMLElement): HTMLButtonElement[] {
 }
 
 describe("the sidebar is the _sidebar document", () => {
+  it("skips malformed synced pins while valid pins still navigate", async () => {
+    seedDirectory();
+    const sidebar = sidebarDoc();
+    const reading = createGroup(sidebar, "Reading");
+    pinDoc(sidebar, reading, ONE);
+    sidebar.getArray(`pins:${reading}`).push([
+      { uuid: "..", since: 0 },
+      { uuid: "a/record/b", since: 0 },
+      { uuid: ONE.toUpperCase(), since: 0 },
+      { uuid: null, since: 0 },
+    ]);
+    initDoc(room(roomForDoc(WORKSPACE, ONE)).ydoc, { uuid: ONE, title: "Overview" });
+    const host = await openApp(`/${WORKSPACE}`);
+    const navigation = documentsPane(host);
+    expect(navigation.querySelectorAll('button[title=".."], button[title="a/record/b"]')).toHaveLength(0);
+    expect(navigation.querySelectorAll(`button[title="${ONE.toUpperCase()}"]`)).toHaveLength(0);
+    expect(stored(sidebar)).toEqual([["Reading", [ONE]]]);
+    await act(async () => within(navigation).getByRole("button", { name: "Overview" }).click());
+    expect(window.location.pathname).toBe(`/${WORKSPACE}/${ONE}`);
+    expect(within(host).getByRole("textbox", { name: "Document title" })).toHaveProperty("value", "Overview");
+  });
+
   // Not writable is the stricter reading: sortability must not disable or
   // re-role the rows even when the room cannot accept a reorder.
   it("keeps row navigation and disclosure semantics when the sidebar is not writable", async () => {

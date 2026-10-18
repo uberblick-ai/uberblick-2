@@ -139,11 +139,11 @@ describe("decision metadata and caches", () => {
     setLinks(doc, [discussion.toUpperCase(), E, discussion]);
     expect(getMeta(doc)).toMatchObject({
       discussion,
-      links: [discussion, E, PAGE, A],
+      links: [E, discussion, PAGE, A],
     });
     expect(getMetaMap(doc).get("links")).toEqual([discussion.toUpperCase(), E, discussion]);
     setDiscussion(doc, D);
-    expect(getMeta(doc)).toMatchObject({ discussion: D, links: [discussion.toUpperCase(), E, discussion, PAGE, A, D] });
+    expect(getMeta(doc)).toMatchObject({ discussion: D, links: [E, discussion, PAGE, A, D] });
     setDiscussion(doc, null);
     expect(getMetaMap(doc).get("discussion")).toBeNull();
     expect(getMeta(doc).discussion).toBeNull();

@@ -19,6 +19,7 @@ import {
   getMetaMap,
   listDirectory,
   normalizeLegacyTables,
+  parseRoom,
   removeLegacyMermaidBlocks,
   repairDuplicateBlocks,
   tableText,
@@ -256,13 +257,18 @@ export function useDocMeta(connection: RoomConnection | null): DocMeta | null {
   return useConnectionReading<DocMeta | null>(connection, null, observeDocMeta)[0];
 }
 
+/** Empty metadata still means unhydrated; a populated room owns its identity. */
+export function readRoomMeta(connection: RoomConnection): DocMeta {
+  return getMeta(connection.ydoc, parseRoom(connection.room).uuid);
+}
+
 function observeDocMeta(
   connection: RoomConnection,
   emit: (value: DocMeta | null) => void,
 ): () => void {
   const { ydoc } = connection;
   const map = getMetaMap(ydoc);
-  const read = (): void => emit(getMeta(ydoc));
+  const read = (): void => emit(readRoomMeta(connection));
   read();
   map.observe(read);
   return () => map.unobserve(read);

@@ -30,14 +30,14 @@ export const UPDATED_AT_COARSENESS_MS = 5 * 60_000;
  * to restoreDirectoryEntry; decision caches still repair while archived because
  * their metadata resolves the topic and their tombstone mirrors topic archive.
  */
-function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): void {
-  const meta = getMeta(docDoc);
+function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, uuid: string, changedAt: number | null): void {
+  const meta = getMeta(docDoc, uuid);
   if (meta.uuid === "") return;
-  if (isDirectoryEntryDeleted(dirDoc, meta.uuid)) return;
-  const stub = getDirectoryEntry(dirDoc, meta.uuid);
+  if (isDirectoryEntryDeleted(dirDoc, uuid)) return;
+  const stub = getDirectoryEntry(dirDoc, uuid);
   if (stub?.deleted === true && meta.kind !== "decision") return;
 
-  const documentFields = documentDirectoryFields(docDoc);
+  const documentFields = documentDirectoryFields(docDoc, uuid);
   const metaChanged = directoryStubDiffers(stub, meta, documentFields);
   const staleStamp =
     stub?.updatedAt === undefined ||
@@ -47,7 +47,7 @@ function repairStub(docDoc: Y.Doc, dirDoc: Y.Doc, changedAt: number | null): voi
   if (!metaChanged && !stamp && stub?.createdAt !== undefined) return;
 
   upsertDirectoryEntry(dirDoc, {
-    uuid: meta.uuid,
+    uuid,
     title: meta.title,
     tags: meta.tags,
     // Supply every optional field so repair cannot retain stale metadata.
@@ -76,6 +76,7 @@ export interface StubWriteGate {
 export function watchDocumentStub(
   docDoc: Y.Doc,
   dirDoc: Y.Doc,
+  uuid: string,
   gate?: StubWriteGate,
 ): () => void {
   let pendingChangedAt: number | null = null;
@@ -87,7 +88,7 @@ export function watchDocumentStub(
     ) {
       return;
     }
-    repairStub(docDoc, dirDoc, pendingChangedAt);
+    repairStub(docDoc, dirDoc, uuid, pendingChangedAt);
     pendingChangedAt = null;
   };
   const onUpdate = (
