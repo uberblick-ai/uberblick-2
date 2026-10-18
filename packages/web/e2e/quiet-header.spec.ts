@@ -1,6 +1,6 @@
 /** The quiet header keeps real sync feedback and native document controls. */
 import { expect, test } from "@playwright/test";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { alphaOf, composite, contrast, pageGrounds } from "../test/colour.js";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
@@ -9,6 +9,74 @@ const { harness, openApp } = setupHarness();
 
 async function pulseCount(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { headerPulses: number }).headerPulses);
+}
+
+async function expectNoRing(dot: Locator): Promise<void> {
+  await expect.poll(() => dot.evaluate((node) => ({
+    animations: node.getAnimations({ subtree: true }).length,
+    opacity: getComputedStyle(node, "::after").opacity,
+    name: getComputedStyle(node, "::after").animationName,
+  }))).toEqual({ animations: 0, opacity: "0", name: "none" });
+}
+
+/** Sample the CSS separately from sync events, without racing the pulse cleanup timer. */
+async function inspectRing(page: Page, info: TestInfo): Promise<void> {
+  const dot = page.locator(".ub-sync-dot");
+  const geometry = () => page.locator(".ub-sync-dot, .ub-last-updated, .ub-doc-rev").evaluateAll((nodes) =>
+    nodes.map((node) => ({ rect: node.getBoundingClientRect().toJSON(), colour: getComputedStyle(node).backgroundColor })));
+  const resting = await geometry();
+  await dot.evaluate((node) => {
+    node.classList.add("ub-sync-dot--pulse");
+    for (const animation of node.getAnimations({ subtree: true })) {
+      animation.pause();
+      animation.currentTime = 0;
+    }
+  });
+  const row = await page.locator(".ub-status").boundingBox();
+  if (row === null) throw new Error("Missing header row");
+  const samples = [];
+  for (const time of [0, 250, 500]) {
+    const paint = await dot.evaluate((node, currentTime) => {
+      const animations = node.getAnimations({ subtree: true });
+      if (animations.length !== 1) throw new Error("Expected one ring animation");
+      const animation = animations[0];
+      if (animation === undefined) throw new Error("Missing ring animation");
+      animation.currentTime = currentTime;
+      const ring = getComputedStyle(node, "::after");
+      return {
+        inset: Number.parseFloat(ring.top), opacity: Number(ring.opacity), border: ring.borderTopWidth,
+        duration: animation.effect?.getTiming().duration, iterations: animation.effect?.getTiming().iterations,
+        endOpacity: animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes().at(-1)?.opacity : null,
+        dotAnimation: getComputedStyle(node).animationName,
+      };
+    }, time);
+    expect(paint.duration).toBe(650);
+    expect(paint.iterations).toBe(1);
+    expect(paint.endOpacity).toBe("0");
+    expect(paint.dotAnimation).toBe("none");
+    expect(paint.border).toBe("1px");
+    expect(await geometry()).toEqual(resting);
+    samples.push(paint);
+    const path = info.outputPath(`sync-ring-${time}ms.png`);
+    await page.screenshot({ path, clip: { x: Math.max(0, row.x - 8), y: row.y - 8, width: row.width + 16, height: row.height + 16 } });
+    await info.attach(`sync ring ${time}ms`, { path, contentType: "image/png" });
+  }
+  expect(samples[0]?.inset).toBe(0);
+  expect(samples[1]?.inset).toBeLessThan(samples[0]?.inset ?? 0);
+  expect(samples[2]?.inset).toBeLessThan(samples[1]?.inset ?? 0);
+  expect(samples[0]?.opacity).toBeGreaterThan(0);
+  expect(samples[1]?.opacity).toBeLessThan(samples[0]?.opacity ?? 0);
+  expect(samples[2]?.opacity).toBeLessThan(samples[1]?.opacity ?? 0);
+  // A red state cancels even a ring that was already playing.
+  for (const state of ["offline", "error"]) {
+    await dot.evaluate((node, value) => { node.setAttribute("data-state", value); }, state);
+    await expectNoRing(dot);
+  }
+  await dot.evaluate((node) => {
+    node.classList.remove("ub-sync-dot--pulse");
+    node.setAttribute("data-state", "resting");
+  });
+  await expectNoRing(dot);
 }
 
 async function expectDotContrast(dot: Locator): Promise<void> {
@@ -67,7 +135,8 @@ for (const scheme of ["light", "dark"] as const) {
         state.headerPulses = 0;
         state.revisionCopies = [];
         document.addEventListener("animationstart", (event) => {
-          if (event.target instanceof Element && event.target.matches(".ub-sync-dot")) state.headerPulses += 1;
+          if (event.target instanceof Element && event.target.matches(".ub-sync-dot")
+            && event.animationName === "ub-sync-ring" && event.pseudoElement === "::after") state.headerPulses += 1;
         });
         Object.defineProperty(navigator, "clipboard", {
           configurable: true,
@@ -97,8 +166,8 @@ for (const scheme of ["light", "dark"] as const) {
     await expect.poll(() => pulseCount(page)).toBe(1);
     await expect.poll(() => pulseCount(observer)).toBe(1);
     await expect(page.locator(".ub-sync-announcement")).toHaveText("");
-    await expect.poll(() => dot.evaluate((node) => node.getAnimations().filter((animation) => animation.playState === "running").length)).toBe(0);
-    await expect.poll(() => observer.locator(".ub-sync-dot").evaluate((node) => node.getAnimations().filter((animation) => animation.playState === "running").length)).toBe(0);
+    await expectNoRing(dot);
+    await expectNoRing(observer.locator(".ub-sync-dot"));
 
     await page.emulateMedia({ reducedMotion: "reduce" });
     await placeCaret(page);
@@ -107,7 +176,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(trigger).toHaveAttribute("aria-label", /^Synced with hub /);
     await expect.poll(() => pulseCount(observer)).toBe(2);
     expect(await pulseCount(page), "reduced motion removes the pulse").toBe(1);
-    await expect(dot).toHaveCSS("animation-name", "none");
+    await expectNoRing(dot);
 
     for (const width of [810, 767, 744]) {
       await page.setViewportSize({ width, height: 1080 });
@@ -172,5 +241,7 @@ for (const scheme of ["light", "dark"] as const) {
     await expectDotContrast(dot);
     await expect(observer.locator(".ub-status-sync")).toHaveAttribute("aria-label", /^Synced with hub /, { timeout: 40_000 });
     expect(await pulseCount(observer), "reconnect handshakes stay quiet").toBe(observerPulses);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await inspectRing(page, info);
   });
 }
