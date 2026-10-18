@@ -125,7 +125,6 @@ mark.sel { background: oklch(0.85 0.12 75 / 55%); color: inherit; border-radius:
 .flow.loop { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto; }
 .flow .arr.back { width: 22px; height: 22px; background: none; border: 2px solid var(--line); border-radius: 50%; border-right-color: transparent; }
 .flow .arr.back::after { right: 2px; top: -4px; border-color: var(--line); transform: rotate(-20deg); }
-.flow-cap { font-size: 14px; color: var(--muted); margin: 0 0 14px; }
 @media (max-width: 899px) {
   .flow, .flow.loop { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .flow .arr { justify-self: center; width: 2px; height: 18px; }

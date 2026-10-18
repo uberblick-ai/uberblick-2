@@ -8,7 +8,7 @@
   <h1>Local-first documents for people and agents.</h1>
   <p class="lede">A workspace for the plans, research and decisions behind your software. You write in a browser; your coding agent reads and edits the same documents over MCP. Everything is stored on your computer, and a hub syncs it to the people you share with.</p>
   <div class="cta"><div class="tabs"><div class="tablist" role="tablist" aria-label="Install"><button role="tab" id="t-brew" aria-selected="true" aria-controls="p-brew" type="button">Homebrew</button><button role="tab" id="t-cc" aria-selected="false" aria-controls="p-cc" type="button">Claude Code</button><button role="tab" id="t-cx" aria-selected="false" aria-controls="p-cx" type="button">Codex</button></div><div class="panel sh" role="tabpanel" id="p-brew" aria-labelledby="t-brew"><code>brew install uberblick-ai/tap/uberblick</code><button class="copy" type="button">Copy</button></div><div class="panel sh" role="tabpanel" id="p-cc" aria-labelledby="t-cc" hidden><code>ub mcp install claude</code><button class="copy" type="button">Copy</button></div><div class="panel sh" role="tabpanel" id="p-cx" aria-labelledby="t-cx" hidden><code>ub mcp install codex</code><button class="copy" type="button">Copy</button></div></div><a href="#demo">See a document →</a></div>
-  <div class="stats"><div class="stat"><b>26</b><span>tools over MCP</span></div><div class="stat"><b>4</b><span>commands to install</span></div><div class="stat"><b>0</b><span>accounts to start</span></div><div class="stat"><b>1</b><span>container to share</span></div></div>
+  <div class="stats"><div class="stat"><b>26</b><span>tools over MCP</span></div><div class="stat"><b>3</b><span>commands to install</span></div><div class="stat"><b>0</b><span>accounts to start</span></div><div class="stat"><b>1</b><span>container to share</span></div></div>
 </div>
 
 <section class="blk" id="why"><h2>The docs folder is where context goes to die.</h2>
@@ -71,7 +71,11 @@
   <span class="arr" aria-hidden="true"></span>
   <div class="step ok"><span class="k">4 · server</span><b>Accepts the write</b><span>and every write for ten minutes</span></div>
 </div>
-<p class="flow-cap">With <a href="https://agents.uberblick.ai">ub-agents</a> the loop closes: the pages stay true to what ships.</p>
+</section>
+
+<section class="blk" id="ub-agents">
+<div class="blk-h"><h2>Works best with ub-agents.</h2><a href="https://agents.uberblick.ai">agents.uberblick.ai</a></div>
+<p class="blk-intro">Uberblick holds what the product should do. <a href="https://agents.uberblick.ai">ub-agents</a> is the loop that hands that to agents on GitHub: roles in a few lines of YAML, driven by labels, running on Actions with any agent and no server. Together they close the loop: every issue starts from the pages, and every pull request brings them up to date. It is how Uberblick itself is built.</p>
 <div class="flow loop" role="img" aria-label="An issue is filed; the preparer links the pages it depends on; the implementer reads them over MCP and builds; the pull request carries a corpus update; the pages stay true and the next issue starts from them.">
   <div class="step"><span class="k">issue</span><b>Filed with pointers</b><span>to the pages it depends on</span></div>
   <span class="arr" aria-hidden="true"></span>
@@ -99,27 +103,22 @@
 
 <section class="blk" id="decision">
 <div class="blk-h"><h2>A decision looks like this.</h2><a href="/docs/decisions">Decisions</a></div>
-<p class="blk-intro">From our own product workspace. The answer is the first thing on the page; the reason and the links follow. When the question comes up again, a new record supersedes this one on the same topic.</p>
-<section class="block decision" aria-label="Example decision record"><div class="cap"><span>Decision · decided 10 October 2026</span><span>Uberblick product workspace</span></div>
-  <div class="body">
-    <h3>Where does the web UI use monospace?</h3>
-    <p class="answer">Only for text a person would paste somewhere: code, terminal output and ids in Settings. Everything else is set in the UI face.</p>
-    <p class="why">Mono reads as machine output. Used for labels and timestamps it made the chrome look like a debug overlay and competed with real code blocks.</p>
-    <div class="links"><span>Links</span><a href="https://github.com/uberblick-ai/uberblick-2/issues/1551">uberblick-2#1551</a><span>Web UI: typography</span></div>
-  </div>
-</section>
+<p class="blk-intro">From our own product workspace, as the editor shows it. The answer is the first thing on the page and carries who decided it and when; the reason follows. When the question comes up again, a new record supersedes this one on the same topic, and the history stays.</p>
+<figure class="shot">
+  <div class="bar"><span><b>Where does the web UI use monospace?</b> · Uberblick product</span><span>decision</span></div>
+  <img class="l" src="/img/decision-light.png" width="1424" height="924" alt="A decision record in the Uberblick editor: the question as the title, an answer marked In force and decided by Ben, the reason below it, and a history row for the record.">
+  <img class="d" src="/img/decision-dark.png" width="1424" height="924" alt="The same decision record in dark mode.">
+</figure>
 </section>
 
 <section class="blk" id="install">
-<div class="blk-h"><h2>Start in four commands.</h2><a href="/docs/install">Install and update</a></div>
-<p class="blk-intro">Homebrew on Apple Silicon macOS or Linux x86_64. No account, no server. The last command registers the MCP server with Claude Code; use <code>codex</code> for Codex. To share a workspace, run a hub on a computer the team can reach: one Docker release, see <a href="/docs/hub">Run a hub</a>.</p>
+<div class="blk-h"><h2>Start in three commands.</h2><a href="/docs/install">Install and update</a></div>
+<p class="blk-intro">Homebrew on Apple Silicon macOS or Linux x86_64, run in your repository's directory. No account, no server. The last command registers the MCP server with Claude Code; use <code>codex</code> for Codex. To share a workspace, run a hub on a computer the team can reach: one Docker release, see <a href="/docs/hub">Run a hub</a>.</p>
 <section class="block terminal"><div class="cap"><span>Terminal</span><span class="capx"><button type="button" id="replay">Replay</button><button type="button" data-copy="brew install uberblick-ai/tap/uberblick
-mkdir uberblick-notes &amp;&amp; cd uberblick-notes
 ub workspace create &quot;My Workspace&quot;
 ub open
 ub mcp install claude">Copy</button></span></div>
 <pre id="term"><span class="p">$</span> brew install uberblick-ai/tap/uberblick
-<span class="p">$</span> mkdir uberblick-notes &amp;&amp; cd uberblick-notes
 <span class="p">$</span> ub workspace create "My Workspace"
 <span class="p">$</span> ub open
 <span class="o">Editor at http://127.0.0.1:… Keep this terminal open.</span>
