@@ -6,7 +6,9 @@ import type { SignInCollection } from "../src/github-sign-in.js";
 import type { HubLogRecord } from "../src/log.js";
 import { HubDatabase } from "../src/persistence.js";
 import type { TeamHub as Hub } from "../src/team.js";
-import { importCredentialKey, mintToken } from "@uberblick/schema/token";
+import { importCredentialKey, mintRequestProof, mintToken } from "@uberblick/schema/token";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
+import { GithubDeviceFlow } from "../src/github-device-flow.js";
 import { removeTempDatabases, startHub, tempDatabasePath, TEST_SECRET, WORKSPACE } from "./helpers.js";
 
 const CLIENT_ID = "Iv23AbCdEF0123456789";
@@ -26,6 +28,7 @@ class GithubFake {
   tokenResult: Record<string, unknown> = { access_token: GITHUB_TOKEN, refresh_token: REFRESH_TOKEN, token_type: "bearer", scope: "" };
   calls: { url: string; body: URLSearchParams; headers: Headers }[] = [];
   pauseIdentity: (() => Promise<void>) | undefined;
+  pauseStart: (() => Promise<void>) | undefined;
   failedUrl: string | undefined;
   failedResponse: { url: string; status: number; body: Record<string, unknown> } | undefined;
   lifetime = 900;
@@ -39,6 +42,7 @@ class GithubFake {
       return Response.json(this.failedResponse.body, { status: this.failedResponse.status });
     }
     if (url === "https://github.com/login/device/code") {
+      await this.pauseStart?.();
       return Response.json({ device_code: DEVICE_CODE, user_code: "ABCD-EFGH", verification_uri: "https://github.com/login/device", expires_in: this.lifetime, interval: 5 });
     }
     if (url === "https://github.com/login/oauth/access_token") {
@@ -52,10 +56,10 @@ class GithubFake {
   };
 }
 
-async function rig(databasePath = tempDatabasePath()) {
+async function rig(databasePath = tempDatabasePath(), behindReleaseProxy = false) {
   const github = new GithubFake();
   const logs: HubLogRecord[] = [];
-  const hub = await startHub({ databasePath, github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time }, log: (line) => logs.push(line) });
+  const hub = await startHub({ databasePath, behindReleaseProxy, github: { clientId: CLIENT_ID, fetch: github.fetch, now: () => github.time }, log: (line) => logs.push(line) });
   hubs.push(hub);
   return { hub, github, logs, databasePath };
 }
@@ -242,6 +246,25 @@ describe("hub-driven GitHub identity", () => {
 });
 
 describe("bounded device requests", () => {
+  it("bounds start history and GitHub calls across many clients even when every start fails", async () => {
+    let now = 1000;
+    let calls = 0;
+    const flow = new GithubDeviceFlow({ clientId: CLIENT_ID, now: () => now,
+      fetch: async () => { calls++; throw new Error("provider unavailable"); } }, () => ({}), () => {});
+    try {
+      for (let index = 0; index < 1000; index++) {
+        expect(await flow.start(undefined, undefined, `client-${index}`)).toEqual({ status: "failed" });
+      }
+      for (let index = 1000; index < 1100; index++) {
+        expect(await flow.start(undefined, undefined, `client-${index}`)).toEqual({ status: "busy" });
+      }
+      expect(calls).toBe(1000);
+      now += 900_000;
+      expect(await flow.start(undefined, undefined, "next-client")).toEqual({ status: "failed" });
+      expect(calls).toBe(1001);
+    } finally { flow.stop(); }
+  });
+
   it("obeys pending and slow_down intervals while early polling never contacts GitHub", async () => {
     const testRig = await rig();
     const request = await start(testRig.hub);
@@ -308,9 +331,9 @@ describe("bounded device requests", () => {
   });
 
   it("bounds active attempts independently of retained outcomes and caps GitHub lifetimes", async () => {
-    const testRig = await rig();
+    const testRig = await rig(tempDatabasePath(), true);
     testRig.github.lifetime = 86_400;
-    const requests = await Promise.all(Array.from({ length: 105 }, () => post(testRig.hub, "start", {})));
+    const requests = await Promise.all(Array.from({ length: 105 }, (_, index) => post(testRig.hub, "start", {}, { "X-Forwarded-For": `192.0.2.${index + 1}` })));
     expect(requests.filter((response) => response.code === 200)).toHaveLength(100);
     expect(requests.filter((response) => response.code === 429)).toHaveLength(5);
     expect(requests[0]!.result.expiresIn).toBe(900);
@@ -335,6 +358,82 @@ describe("bounded device requests", () => {
     await start(testRig.hub);
     expect(await post(testRig.hub, "collect", next)).toMatchObject({ code: 404 });
     expect(privateRows(testRig.databasePath).credentials).toHaveLength(1);
+  });
+
+  it("bounds one client's concurrent starts before GitHub replies and leaves another client available", async () => {
+    const r = await rig(tempDatabasePath(), true);
+    let resume!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>(resolve => { resume = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    r.github.pauseStart = async () => { if (r.github.calls.length === 6) entered(); await waiting; };
+    const headers = { "X-Forwarded-For": "192.0.2.1" };
+    const starting = Array.from({ length: 6 }, () => post(r.hub, "start", {}, headers));
+    try {
+      await started;
+      expect(await post(r.hub, "start", {}, headers)).toEqual({ code: 429, result: { status: "busy" } });
+      expect(r.github.calls).toHaveLength(6);
+    } finally { resume(); }
+    const pending = await Promise.all(starting);
+    expect(pending.every(response => response.code === 200)).toBe(true);
+    expect(await post(r.hub, "start", {}, { "X-Forwarded-For": "192.0.2.2" })).toMatchObject({ code: 200 });
+    expect(await post(r.hub, "collect", {
+      requestId: pending[0]!.result.requestId, collectionSecret: pending[0]!.result.collectionSecret,
+    })).toMatchObject({ code: 200, result: { status: "pending" } });
+    expect(await post(r.hub, "cancel", {
+      requestId: pending[0]!.result.requestId, collectionSecret: pending[0]!.result.collectionSecret,
+    })).toMatchObject({ code: 200, result: { status: "abandoned" } });
+    expect(await post(r.hub, "start", {}, headers)).toMatchObject({ code: 200 });
+  });
+
+  it("retains start-rate debt after cancellation and upstream failure, then expires it", async () => {
+    const r = await rig(tempDatabasePath(), true);
+    const headers = { "X-Forwarded-For": "192.0.2.1" };
+    for (let index = 0; index < 11; index++) {
+      const response = await post(r.hub, "start", {}, headers);
+      expect(response.code).toBe(200);
+      expect(await post(r.hub, "cancel", {
+        requestId: response.result.requestId, collectionSecret: response.result.collectionSecret,
+      })).toMatchObject({ result: { status: "abandoned" } });
+    }
+    r.github.failedUrl = "https://github.com/login/device/code";
+    expect(await post(r.hub, "start", {}, headers)).toMatchObject({ code: 502 });
+    r.github.failedUrl = undefined;
+    expect(await post(r.hub, "start", {}, headers)).toEqual({ code: 429, result: { status: "busy" } });
+    expect(r.github.calls).toHaveLength(12);
+    expect(await post(r.hub, "start", {}, { "X-Forwarded-For": "192.0.2.2" })).toMatchObject({ code: 200 });
+    r.github.time += 899_999;
+    expect(await post(r.hub, "start", {}, headers)).toMatchObject({ code: 429 });
+    r.github.time++;
+    expect(await post(r.hub, "start", {}, headers)).toMatchObject({ code: 200 });
+  });
+
+  it("ignores spoofed HTTP peer and forwarding headers without release-proxy configuration", async () => {
+    const r = await rig();
+    for (let index = 0; index < 6; index++) {
+      expect(await post(r.hub, "start", {}, { "X-Forwarded-For": `192.0.2.${index}`, "x-uberblick-peer-address": `192.0.2.${index}` })).toMatchObject({ code: 200 });
+    }
+    expect(await post(r.hub, "start", {}, { "X-Forwarded-For": "192.0.2.99", "x-uberblick-peer-address": "192.0.2.99" }))
+      .toEqual({ code: 429, result: { status: "busy" } });
+    expect(r.github.calls).toHaveLength(6);
+    expect((await fetch(`http://127.0.0.1:${r.hub.port}/auth/claim-state`)).status).toBe(200);
+  });
+
+  it("renews an existing credential while its client's new starts are at their bound", async () => {
+    const r = await rig();
+    const signed = (await complete(r)).result;
+    for (let index = 0; index < 6; index++) await start(r.hub);
+    expect(await post(r.hub, "start", {})).toMatchObject({ code: 429 });
+    const token = await mintRequestProof(await importCredentialKey(Buffer.from(signed.credential.key, "base64url")), {
+      kid: signed.credential.record.id, operation: "renew-credential", lifetimeSeconds: 60,
+    });
+    const response = await fetch(`http://127.0.0.1:${r.hub.port}/auth/credential/renew`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, protocolVersion: SYNC_PROTOCOL_VERSION }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "renewed" });
+    expect(r.github.calls).toHaveLength(9);
   });
 
   it("GitHub start or identity failure fails that request without changing hub availability", async () => {

@@ -4,6 +4,46 @@ import { GithubAccountLookup } from "../src/github-account-lookup.js";
 
 afterEach(() => { vi.restoreAllMocks(); });
 
+describe("public GitHub lookup budget", () => {
+  it("counts failed requests and restores capacity only after the sliding hour", async () => {
+    let now = 1_000;
+    const transport = vi.fn<typeof fetch>(async () => Response.json({}, { status: 500 }));
+    const lookup = new GithubAccountLookup(transport, () => now);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      expect(await lookup.lookup({ githubAccountId: "5678" }, "admin", "workspace"))
+        .toEqual({ status: "lookup-unavailable" });
+    }
+    expect(transport).toHaveBeenCalledTimes(12);
+    now += 3_599_999;
+    expect(await lookup.lookup({ githubAccountId: "5678" }, "admin", "workspace"))
+      .toEqual({ status: "lookup-unavailable" });
+    expect(transport).toHaveBeenCalledTimes(12);
+    now++;
+    expect(await lookup.lookup({ githubAccountId: "5678" }, "admin", "workspace"))
+      .toEqual({ status: "lookup-unavailable" });
+    expect(transport).toHaveBeenCalledTimes(13);
+    lookup.stop();
+  });
+
+  it("bounds all public lookups to sixty calls per sliding hour even with distinct actors and workspaces", async () => {
+    let now = 1_000;
+    const transport = vi.fn<typeof fetch>(async () => Response.json({ id: 5678, login: "new-account", type: "User" }));
+    const lookup = new GithubAccountLookup(transport, () => now);
+    for (let attempt = 0; attempt < 60; attempt++) {
+      expect(await lookup.lookup({ githubAccountId: "5678" }, `admin-${attempt}`, `workspace-${attempt}`))
+        .toMatchObject({ status: "ok" });
+    }
+    expect(await lookup.lookup({ githubAccountId: "5678" }, "another-admin", "another-workspace"))
+      .toEqual({ status: "lookup-unavailable" });
+    expect(transport).toHaveBeenCalledTimes(60);
+    now += 3_600_000;
+    expect(await lookup.lookup({ githubAccountId: "5678" }, "another-admin", "another-workspace"))
+      .toMatchObject({ status: "ok" });
+    expect(transport).toHaveBeenCalledTimes(61);
+    lookup.stop();
+  });
+});
+
 describe("public GitHub lookup lifecycle", () => {
   it.each(["timeout", "stop"] as const)("aborts a stalled body on %s after receiving successful headers", async reason => {
     const timeout = new AbortController();
@@ -27,14 +67,14 @@ describe("public GitHub lookup lifecycle", () => {
     const lookup = new GithubAccountLookup(transport);
     let pending: Promise<unknown> | undefined;
     try {
-      pending = lookup.lookup({ githubAccountId: "5678" });
+      pending = lookup.lookup({ githubAccountId: "5678" }, "admin", "workspace");
       await headers;
       expect(deadline).toHaveBeenCalledWith(10_000);
       if (reason === "timeout") timeout.abort(new DOMException("provider-private", "TimeoutError"));
       else lookup.stop();
       expect(await pending).toEqual({ status: "lookup-unavailable" });
       lookup.stop();
-      expect(await lookup.lookup({ githubAccountId: "5678" })).toEqual({ status: "lookup-unavailable" });
+      expect(await lookup.lookup({ githubAccountId: "5678" }, "admin", "workspace")).toEqual({ status: "lookup-unavailable" });
       expect(transport).toHaveBeenCalledTimes(1);
     } finally {
       lookup.stop();

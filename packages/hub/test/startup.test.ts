@@ -47,6 +47,13 @@ afterEach(async () => {
 });
 
 describe("bind address", () => {
+  it("trusts the release proxy only when explicitly enabled", () => {
+    const env = { HUB_AUTH_TOKEN: "secret" };
+    expect(resolveCoreHubConfig(env, ":memory:").behindReleaseProxy).toBeUndefined();
+    expect(resolveCoreHubConfig({ ...env, HUB_RELEASE_PROXY: "0" }, ":memory:").behindReleaseProxy).toBeUndefined();
+    expect(resolveCoreHubConfig({ ...env, HUB_RELEASE_PROXY: "1" }, ":memory:").behindReleaseProxy).toBe(true);
+  });
+
   it("is loopback unless HUB_HOST says otherwise", () => {
     const env = { HUB_AUTH_TOKEN: "secret" };
 

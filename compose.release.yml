@@ -5,6 +5,8 @@ services:
     image: __HUB_IMAGE__
     platform: linux/amd64
     environment:
+      # Only Caddy reaches the hub; its final forwarded hop identifies clients.
+      HUB_RELEASE_PROXY: "1"
       # Unset/empty uses public Uberblick Login: no app registration is needed.
       # Optionally use your own Device Flow app to control its settings/budget.
       # Remove and recreate to use the default again. GitHub names the app, not

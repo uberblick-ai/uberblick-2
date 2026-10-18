@@ -584,6 +584,24 @@ that the host shell does not still export the override when you recreate it.
 
 ### Shared app limits and controls
 
+Each hub keeps separate CLI and browser sign-in pools. Each pool allows 100
+pending attempts, including starts awaiting GitHub, with at most 6 per client.
+A client can start 12 attempts in any 15 minutes; cancelling or failing an
+attempt does not restore that allowance. Each pool also admits at most 1,000
+starts in that window, keeping its rate history bounded. A refusal is
+`429 {"status":"busy"}` before contacting GitHub. The CLI says the hub is busy
+with sign-in attempts; the browser says it could not start. Wait before retrying.
+Collection, cancellation, credential renewal, claim state and browser session
+routes remain available at the start limit.
+
+The release deployment enables `HUB_RELEASE_PROXY=1`: the client is the last
+address Caddy appended to `X-Forwarded-For`. Other deployments use the TCP peer
+and ignore forwarding headers. IPv4-mapped IPv6 addresses count as IPv4; IPv6
+addresses in one /64 share a client allowance. Shared-address Docker paths,
+including some Docker Desktop, IPv6 publishing and host-loopback routes, put
+everyone in one client bucket. Many independent addresses can still fill a
+pool's hub-wide bound. These limits and pending attempts reset on restart.
+
 These GitHub limits cover CLI and browser sign-in, first-admin setup and member lookup:
 
 - [Device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#rate-limits-for-the-device-flow)
@@ -609,8 +627,15 @@ These GitHub limits cover CLI and browser sign-in, first-admin setup and member 
   The [unauthenticated budget](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-unauthenticated-users)
   is 60 requests per hour per originating IP, shared with other unauthenticated
   calls from that IP. An operator-owned app does not change this budget.
-  A rate-limited lookup returns `lookup-unavailable` and grants nothing; retry
-  after the GitHub budget recovers.
+  Before contacting GitHub, the hub allows 12 lookups in any hour per signed-in
+  account across all its devices and workspaces, 12 per workspace across all
+  its admins, and 60 hub-wide. Resolve and confirmed grant each consume one,
+  including failed GitHub calls; only current workspace admins consume these
+  allowances. A refused lookup returns `503 {"status":"lookup-unavailable"}`
+  and grants nothing. The CLI and web report that the GitHub account lookup
+  is unavailable; retry after the hub's allowance or GitHub budget recovers.
+  The hub's allowances reset on restart and do not reserve GitHub capacity
+  against other callers on the same originating IP.
 - The app owner controls its
   [Device Flow, name and permissions](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration),
   [visibility](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/making-a-github-app-public-or-private)

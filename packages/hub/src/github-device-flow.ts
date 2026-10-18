@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { type HubLogger, stderrLogger } from "./log.js";
+import { RequestBudget } from "./request-budget.js";
 
 export interface GithubSignInConfig {
   clientId: string;
@@ -12,6 +13,7 @@ export interface GithubSignInConfig {
 
 const MAX_LIFETIME_MS = 15 * 60_000;
 const MAX_REQUESTS = 100;
+const MAX_CLIENT_REQUESTS = 6;
 const MAX_TERMINAL_REQUESTS = 100;
 type TerminalStatus = "denied" | "expired" | "abandoned" | "failed" | "collected";
 interface SignInRequest<Context> {
@@ -19,6 +21,7 @@ interface SignInRequest<Context> {
   deviceCode?: string;
   deviceName?: string;
   context?: Context;
+  client?: string;
   expiresAt: number;
   intervalMs: number;
   nextPollAt: number;
@@ -60,6 +63,8 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
   private readonly requests = new Map<string, SignInRequest<Context>>();
   private readonly closed = new AbortController();
   private starting = 0;
+  private readonly startingClients = new Map<string, number>();
+  private readonly starts: RequestBudget;
   private readonly now: () => number;
   private readonly fetch: typeof globalThis.fetch;
 
@@ -71,6 +76,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
   ) {
     this.now = config.now ?? Date.now;
     this.fetch = config.fetch ?? globalThis.fetch;
+    this.starts = new RequestBudget(12, MAX_LIFETIME_MS, 1000, this.now);
   }
 
   stop(): void {
@@ -78,16 +84,20 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
     this.requests.clear();
   }
 
-  async start(deviceName?: string, context?: Context) {
+  async start(deviceName?: string, context?: Context, client?: string) {
     if (this.closed.signal.aborted) return { status: "failed" } as const;
     // Active requests and retained outcomes have separate bounds. Outcomes
     // last at most another lifetime; oldest ones may be evicted at capacity.
     // There is no durable request/token record, and restart refuses requests.
     let pending = 0;
+    let clientPending = client === undefined ? 0 : (this.startingClients.get(client) ?? 0);
     let terminal = 0;
     for (const [id, request] of this.requests) {
       if (this.now() >= request.expiresAt + MAX_LIFETIME_MS) this.requests.delete(id);
-      else if (this.active(request)) pending++;
+      else if (this.active(request)) {
+        pending++;
+        if (client !== undefined && request.client === client) clientPending++;
+      }
       else terminal++;
     }
     for (const [id, request] of this.requests) {
@@ -98,7 +108,11 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       }
     }
     if (pending + this.starting >= MAX_REQUESTS) return { status: "busy" } as const;
+    if (client !== undefined && (clientPending >= MAX_CLIENT_REQUESTS || !this.starts.take(client))) {
+      return { status: "busy" } as const;
+    }
     this.starting++;
+    if (client !== undefined) this.startingClients.set(client, (this.startingClients.get(client) ?? 0) + 1);
     const startedAt = this.now();
     try {
       const result = await this.github("https://github.com/login/device/code", {
@@ -119,6 +133,7 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
         secret: collectionSecret, deviceCode: result.device_code, expiresAt,
         ...(deviceName === undefined ? {} : { deviceName }),
         ...(context === undefined ? {} : { context }),
+        ...(client === undefined ? {} : { client }),
         intervalMs, nextPollAt: this.now() + intervalMs, polling: false, status: "pending",
       });
       return {
@@ -132,6 +147,11 @@ export class GithubDeviceFlow<Result extends object, Context = undefined> {
       return { status: "failed" } as const;
     } finally {
       this.starting--;
+      if (client !== undefined) {
+        const remaining = (this.startingClients.get(client) ?? 1) - 1;
+        if (remaining === 0) this.startingClients.delete(client);
+        else this.startingClients.set(client, remaining);
+      }
     }
   }
 

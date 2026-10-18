@@ -66,7 +66,7 @@ function createTeamExtension(
       credentials = new CredentialRegistry(database);
       promotions = new WorkspacePromotions(database, memberships, hasLiveDocuments, hubAdmins);
       signIn = new GithubSignIn(config.github, database, principals, credentials, memberships, log, claims, workspaceNames);
-      accounts = new GithubAccountLookup(config.github.fetch);
+      accounts = new GithubAccountLookup(config.github.fetch, config.github.now);
     }
   }
   if (deviceCredentials && credentials !== undefined && memberships !== undefined) {
@@ -86,8 +86,8 @@ function createTeamExtension(
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
       if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins)) return true;
-      if (await handleBrowserSignIn(signIn, request, response)) return true;
-      return handleGithubSignIn(signIn, request, response);
+      if (await handleBrowserSignIn(signIn, request, response, config.behindReleaseProxy)) return true;
+      return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },
     async start() {
       if (options.operatorSetup) {
