@@ -16,6 +16,7 @@ import { readSyncStatus, renderStatus, shortStatusReport } from "../src/status.j
 import { fixture } from "./auth-fixtures.js";
 import { runUb, DEAD_HUB_URL, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 
 afterAll(removeTempDirs);
 
@@ -427,6 +428,7 @@ describe("the real project's short report", () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl },
       credentials: { signingSecret: "pending-status-test-secret" },
     });
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
     const store = new MirrorStore(defaultWorkspaceDatabasePath(WORKSPACE, box.env), WORKSPACE);
     const settings = new Y.Doc();
     try {

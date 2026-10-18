@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../src/config.js";
 import { resolveProjectBinding, writeProjectBinding } from "../src/project-binding.js";
-import { rememberWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding, readWorkspaceHub, workspaceRegistryPath } from "../src/workspace-registry.js";
 import { runUb, sandbox, unboundSandbox, removeTempDirs } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 
@@ -92,7 +92,7 @@ describe("atomic project bindings", () => {
 
   it.each([null, "wss://recorded.example.test/ws"])("resolves id-only overrides by machine record (%s) and keeps child environments complete", async (hubUrl) => {
     const box = sandbox({ projectBinding: { workspaceId: second, hubUrl: "https://project.example.test" } });
-    await rememberWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: first, hubUrl }, box.env);
     vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
     for (const id of [first, `notes-${first}`]) {
       const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: id });
@@ -109,8 +109,8 @@ describe("atomic project bindings", () => {
   it("takes registry roots from the process even when checking an MCP entry's partial env", async () => {
     const box = sandbox();
     const wrong = sandbox();
-    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: "wss://recorded.example.test/ws" }, box.env);
-    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, wrong.env);
+    await ensureWorkspaceBinding({ workspaceId: first, hubUrl: "wss://recorded.example.test/ws" }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: first, hubUrl: null }, wrong.env);
     vi.stubEnv("XDG_CONFIG_HOME", box.configHome);
     expect(resolveProjectBinding({ env: { UB_WORKSPACE_ID: `notes-${first}`, XDG_CONFIG_HOME: wrong.configHome } }).binding)
       .toEqual({ workspaceId: `notes-${first}`, hubUrl: "wss://recorded.example.test/ws" });
@@ -128,7 +128,7 @@ describe("atomic project bindings", () => {
 
   it("complete overrides keep precedence without rewriting a conflicting record", async () => {
     const box = sandbox();
-    await rememberWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: first, hubUrl: null }, box.env);
     const before = readFileSync(workspaceRegistryPath(box.env));
     const run = await runInProcess(["workspace", "status"], box, { UB_WORKSPACE_ID: first, UB_HUB_URL: "https://explicit.example.test" });
     expect(run.status, run.output).toBe(0);

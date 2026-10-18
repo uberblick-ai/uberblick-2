@@ -94,19 +94,25 @@ interface ProjectContext {
   root: string;
   path: string;
   selected: boolean;
+  bindingProblem?: string;
 }
 
 /** Use identical binding validation for target and report, excluding shell overrides. */
 function projectContext(cwd: string): ProjectContext {
   let path = join(cwd, PROJECT_CONFIG_FILE);
   let selected = false;
+  let bindingProblem: string | undefined;
   try {
     path = findProjectConfig(cwd) ?? path;
-    selected = resolveProjectBinding({ cwd, env: {} }).binding !== null;
+    const resolved = resolveProjectBinding({ cwd, env: {} });
+    selected = resolved.binding !== null;
+    bindingProblem = resolved.bindingProblem;
   } catch {
     // Binding contents and parser diagnostics may contain private values.
   }
-  return { root: selected ? dirname(path) : cwd, path, selected };
+  return { root: selected ? dirname(path) : cwd, path, selected,
+    ...(bindingProblem === undefined ? {} : { bindingProblem }),
+  };
 }
 
 function workspaceReport(project: ProjectContext | null, io: Io): string {
@@ -270,6 +276,7 @@ export async function installCommand(
 
   const cwd = process.cwd();
   const project = flags.scope === "project" ? projectContext(cwd) : null;
+  if (project?.bindingProblem !== undefined) io.err(`ub mcp install: ${project.bindingProblem}\n`);
   const root = project?.root ?? cwd;
   const file = targetFile(flags.target, flags.scope, root);
   const where = `${flags.target} (${flags.scope})`;

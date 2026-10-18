@@ -20,7 +20,7 @@ import type { Check, DoctorReport } from "../src/doctor.js";
 import { doctorCommand, doctorReport, renderDoctor } from "../src/doctor.js";
 import * as open from "../src/open.js";
 import * as probes from "../src/probes.js";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import type { Run, Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { DEAD_HUB_URL, freePort, pointAt, removeTempDirs, sandbox, unboundSandbox } from "./helpers.js";
@@ -283,7 +283,7 @@ describe("ub doctor", () => {
 
   it("names only UB_WORKSPACE_ID when the machine's hub record selects the workspace", async () => {
     const box = sandbox({ projectBinding: { workspaceId: PINNED, hubUrl: null } });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
     const { checks } = await mcpDoctor(box, { UB_WORKSPACE_ID: WORKSPACE });
     expect(check(checks, "workspace").reason).toBe(`${WORKSPACE}, from UB_WORKSPACE_ID`);
   });
@@ -1035,7 +1035,7 @@ describe("ub doctor MCP setup", () => {
     { hubUrl: null, workspaceId: `a-workspace-${WORKSPACE}` },
   ])("resolves an id-only MCP pin through this machine's record ($hubUrl)", async ({ hubUrl, workspaceId }) => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl } });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
     wireMcp(box, { ...UNPINNED, env: { UB_WORKSPACE_ID: workspaceId } });
     const { checks } = await mcpDoctor(box);
 
@@ -1054,7 +1054,7 @@ describe("ub doctor MCP setup", () => {
 
   it("warns when an id-only MCP pin's recorded hub differs from the project", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: DEAD_HUB_URL } });
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
     wireMcp(box, { ...UNPINNED, env: { UB_WORKSPACE_ID: WORKSPACE } });
     const { checks } = await mcpDoctor(box);
 

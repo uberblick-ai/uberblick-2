@@ -1,9 +1,10 @@
 import { parseArgs } from "node:util";
 import { isGithubUsername } from "@uberblick/schema/github-identity";
+import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
-import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readWorkspaceName } from "@uberblick/mcp-server";
+import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredSyncStatus, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
 import { displayUsername } from "./auth.js";
 import { resolveMcpConfig } from "./budget.js";
@@ -15,6 +16,7 @@ import { processIo } from "./io.js";
 import { NO_BINDING, type ProjectBinding } from "./project-binding.js";
 import { cliVersion } from "./version.js";
 import { recentDevicesNotice, requestRecentDevices, type RecentDevice } from "./recent-devices.js";
+import { ensureWorkspaceBinding, WorkspaceBindingMismatch } from "./workspace-registry.js";
 
 /** Diagnostic paths contain no credentials or values read from them. */
 export interface StorageReport {
@@ -43,6 +45,7 @@ export interface StatusReport {
   hubUrl: string;
   /** Validated local refusal, kept separate from untrusted hub reasons. */
   hubTransportProblem?: { reason: string; fix: string };
+  bindingProblem?: { reason: string; fix: string };
   /** The account stored on this computer, independent of live hub acceptance. */
   account: { login: string; provider: "github" } | null;
   databasePath: string;
@@ -136,20 +139,33 @@ export async function statusReport(
   if (resolved.binding === null) {
     return { warnings: resolved.warnings, report: {
       version: cliVersion(), workspace: null, binding: null, hubUrl: null,
-      account: null, lastSync: null, projectConfig: null, message: NO_BINDING,
+      account: null, lastSync: null, projectConfig: null, message: resolved.bindingProblem ?? NO_BINDING,
     } };
   }
   const config = resolveMcpConfig(resolved.env);
+  let bindingProblem: WorkspaceBindingMismatch | undefined;
+  try {
+    await ensureWorkspaceBinding(resolved.binding, resolved.env, resolved.paths.projectConfig ?? "environment");
+  } catch (error) {
+    if (!(error instanceof WorkspaceBindingMismatch)) throw error;
+    bindingProblem = error;
+  }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
+  const stored = bindingProblem === undefined ? undefined : readStoredSyncStatus(config.databasePath, config.workspaceId);
   let caughtUp = false;
   const [sync, recentDevices] = await Promise.all([
-    readSyncStatus(config, options.workspaceStatus === true
-      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined),
-    options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
+    stored === undefined ? readSyncStatus(config, options.workspaceStatus === true
+      ? replicas => { caughtUp = workspaceCaughtUp(replicas); } : undefined) : {
+      hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
+      rooms: [], unsyncedChanges: stored.pendingRooms.length, pendingRooms: stored.pendingRooms,
+      lastSync: stored.lastSync === null ? null : new Date(stored.lastSync).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      inFlightUpdates: 0, logEntries: stored.logEntries, persistence: null,
+    } satisfies Partial<SyncStatus>,
+    bindingProblem !== undefined || options.workspaceStatus === true || config.deviceLogin === undefined || transport !== null ? null
       : requestRecentDevices({ ...resolved.binding, env: resolved.env }, AbortSignal.timeout(Math.floor(config.connectTimeoutMs))),
   ]);
   // Read the stored account without login or renewal, even after a hub refusal.
-  const deviceLogin = config.deviceLogin === undefined &&
+  const deviceLogin = bindingProblem !== undefined || config.deviceLogin === undefined &&
     !(options.workspaceStatus === true && resolved.binding.hubUrl !== null)
     ? undefined : readDeviceLogin(config.hubUrl, config.workspaceId, resolved.env);
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
@@ -167,6 +183,7 @@ export async function statusReport(
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
       ...(transport === null ? {} : { hubTransportProblem: transport }),
+      ...(bindingProblem === undefined ? {} : { bindingProblem: { reason: bindingProblem.reason, fix: bindingProblem.fix } }),
       account: accountOrigin !== undefined && deviceLogin?.status === "ready"
         ? { login: deviceLogin.login.identity.githubUsername, provider: "github" } : null,
       databasePath: config.databasePath,
@@ -183,7 +200,7 @@ export async function statusReport(
       rooms: sync.rooms,
       unsyncedChanges: sync.unsyncedChanges,
       pendingRooms: sync.pendingRooms,
-      lastSync: resolved.binding.hubUrl === null ? null : sync.lastSync,
+      lastSync: resolved.binding.hubUrl === null && bindingProblem === undefined ? null : sync.lastSync,
       inFlightUpdates: sync.inFlightUpdates,
       logEntries: sync.logEntries,
       persistence: sync.persistence,
@@ -242,7 +259,7 @@ function olderHub(hub: SyncStatus["hub"]): boolean {
 }
 
 function connectionState(report: StatusReport): NonNullable<ShortStatusReport["connection"]>["state"] {
-  if (report.hubTransportProblem !== undefined) return "refused";
+  if (report.bindingProblem !== undefined || report.hubTransportProblem !== undefined) return "refused";
   if (report.hub.status === "connected") return "connected";
   if (report.hub.status === "auth-failed" || report.hub.status === "update-required") return "refused";
   return "failed";
@@ -252,13 +269,16 @@ export function shortStatusReport(
   report: StatusReport, workspaceName: string | null = null, recentDevices: RecentDevice[] | null = null,
 ): ShortStatusReport {
   const origin = report.binding.hubUrl === null ? null : authenticationOrigin(report.binding.hubUrl);
+  const local = origin === null && report.bindingProblem === undefined;
   const hub = report.hub;
   const state = connectionState(report);
   // The shared formatter validates the locally recorded evidence. Neither the
   // raw reason nor malformed detail can reach text or JSON.
   const recorded = state !== "connected" && formatHubFailure(hub) !== undefined;
   const problems: ShortStatusReport["problems"] = [];
-  if (origin !== null) {
+  if (report.bindingProblem !== undefined) {
+    problems.push({ name: "workspace-hub-mismatch", fix: `${report.bindingProblem.reason} ${report.bindingProblem.fix}` });
+  } else if (origin !== null) {
     if (report.hubTransportProblem !== undefined) {
       problems.push({ name: "insecure-hub", fix: report.hubTransportProblem.fix });
     } else switch (hub.status) {
@@ -297,19 +317,20 @@ export function shortStatusReport(
     workspace: { id: report.workspaceUuid, name: workspaceName },
     hub: origin,
     account: origin === null ? null : report.account,
-    connection: origin === null ? null : {
+    connection: origin === null && report.bindingProblem === undefined ? null : {
       state,
       cause: recorded ? hub.cause ?? null : null,
       detail: recorded ? hub.detail ?? null : null,
     },
-    pending: { count: origin === null ? 0 : report.unsyncedChanges },
-    lastSync: origin === null ? null : report.lastSync,
+    pending: { count: local ? 0 : report.unsyncedChanges },
+    lastSync: local ? null : report.lastSync,
     recentDevices: origin === null ? null : recentDevices,
     problems,
   };
 }
 
 function connectionText(report: StatusReport): string {
+  if (report.bindingProblem !== undefined) return "refused: workspace hub mismatch";
   if (report.hubTransportProblem !== undefined) return report.hubTransportProblem.reason;
   const hub = report.hub;
   switch (hub.status) {
@@ -323,6 +344,7 @@ function connectionText(report: StatusReport): string {
 }
 
 const PROBLEM_PHRASES: Record<string, string> = {
+  "workspace-hub-mismatch": "workspace hub does not match this machine",
   "insecure-hub": "unencrypted hub connection refused",
   "hub-unreachable": "hub unreachable",
   "not-signed-in": "not signed in",
@@ -362,12 +384,12 @@ export function renderStatus(
   } else if (accountOrigin !== undefined) {
     text += field("account", `not signed in to ${short.hub}`);
   }
-  if (short.hub !== null) {
+  if (short.hub !== null || report.bindingProblem !== undefined) {
     text += field("connection", connectionText(report));
     text += field("pending", short.pending.count === 0
       ? "none" : `${plural(short.pending.count, "change")} not yet on the hub`);
     text += field("last sync", lastSyncAge(short.lastSync));
-    text += recentDevicesNotice(recentDevices, short.hub);
+    if (short.hub !== null) text += recentDevicesNotice(recentDevices, short.hub);
   }
   if (short.problems.length === 0) return text + field("problems", "none");
   for (const [index, problem] of short.problems.entries()) {
@@ -375,7 +397,7 @@ export function renderStatus(
       ? `hub unreachable: ${UNREACHABLE_CAUSES[short.connection.cause]}`
       : PROBLEM_PHRASES[problem.name] ?? "sync refused";
     text += field(index === 0 ? "problems" : "", phrase);
-    text += `              → ${problem.fix}\n`;
+    text += `              → ${problem.fix.replace(/\n/g, "\n                ")}\n`;
   }
   return text;
 }
@@ -421,7 +443,7 @@ export async function statusCommand(
     io.err(`ub: warning: ${warning}\n`);
   }
   if (report.binding === null) {
-    io.err("no .uberblick.json here or in any parent directory\n" +
+    io.err(`${report.message === NO_BINDING ? "no .uberblick.json here or in any parent directory" : report.message}\n` +
       "  → ub workspace create <name>, or ub workspace use <link|id>\n");
     return 1;
   }

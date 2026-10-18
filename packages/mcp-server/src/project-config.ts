@@ -41,6 +41,7 @@ export interface ResolvedConfig {
   /** Resolved environment for MCP configuration and workspace-dependent children. */
   env: NodeJS.ProcessEnv;
   binding: ProjectBinding | null;
+  bindingProblem?: string;
   origins: {
     workspace: Origin;
     hubUrl: Origin;
@@ -414,6 +415,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
   return {
     env: resolvedEnv,
     binding: selection.binding,
+    ...(selection.bindingProblem === undefined ? {} : { bindingProblem: selection.bindingProblem }),
     origins: {
       workspace: workspace.origin,
       hubUrl: hubUrl.origin,
@@ -513,6 +515,7 @@ export function ensureLocalSigningSecret(env: NodeJS.ProcessEnv = process.env): 
 
 /** Refuse before opening a database or spawning a workspace-dependent child. */
 export function requireBinding(resolved: ResolvedConfig): ProjectBinding {
-  if (resolved.binding === null) throw new Error(NO_BINDING);
+  if (resolved.binding === null) throw new Error(resolved.bindingProblem === undefined
+    ? NO_BINDING : `${resolved.bindingProblem} ${NO_BINDING}`);
   return resolved.binding;
 }

@@ -78,7 +78,7 @@ function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
     hubUrl: resolved.binding?.hubUrl ?? null,
-    warnings: resolved.warnings,
+    warnings: resolved.bindingProblem === undefined ? resolved.warnings : [...resolved.warnings, resolved.bindingProblem],
   };
 }
 
@@ -398,7 +398,8 @@ the verified snapshot.
 An id uses the hub this machine recorded for the workspace, or local; it moves
 no documents, verifies no membership and never replaces that hub record.
 An unknown workspace must first be fetched with \`ub workspace use <link>\`.
-UB_WORKSPACE_ID and UB_HUB_URL environment overrides still take priority.
+UB_WORKSPACE_ID selects the workspace for this shell; a differing UB_HUB_URL
+is refused. Clear both variables to follow the project binding again.
 `;
 
 async function useCommand(argv: string[], io: Io): Promise<number> {
@@ -466,7 +467,7 @@ async function useCommand(argv: string[], io: Io): Promise<number> {
       "ub workspace use: this machine has no hub record for that workspace. " +
       "Fetch a shared workspace with `ub workspace use <link>`. " +
       `To register an existing local replica, serve it once with \`UB_WORKSPACE_ID=${id} UB_HUB_URL=local ub mcp serve\`; ` +
-      "set `UB_HUB_URL=<hub>` for a hub replica.\n",
+      "use an explicit hub link to reconnect a hub replica.\n",
     );
     return 1;
   }

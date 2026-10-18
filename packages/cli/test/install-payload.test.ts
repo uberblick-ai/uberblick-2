@@ -21,6 +21,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { acquireInitLock } from "../src/init-lock.js";
+import { rememberWorkspaceBindings } from "../src/workspace-registry.js";
 import {
   REPO_ROOT,
   freePort,
@@ -316,6 +318,11 @@ describe("the versioned install payload", () => {
 
     const hubPort = await freePort();
     const webPort = await freePort();
+    const workspaceId = JSON.parse(status.stdout).workspace.id as string;
+    const lock = await acquireInitLock(box.env);
+    try {
+      rememberWorkspaceBindings([{ workspaceId, hubUrl: `ws://127.0.0.1:${hubPort}` }], box.env, workspaceId);
+    } finally { lock.release(); }
     pointAt(box, `ws://127.0.0.1:${hubPort}`);
     const opened = spawn("ub", ["open", "--no-browser", "--port", String(webPort)], {
       cwd: box.cwd,
@@ -334,9 +341,12 @@ describe("the versioned install payload", () => {
     );
     let outcome: Awaited<typeof closed>;
     try {
-      await waitUntil("the installed web app to start", () =>
-        stdout.includes(`web        http://127.0.0.1:${webPort}/`),
-      );
+      await waitUntil("the installed web app to start", () => {
+        if (opened.exitCode !== null || opened.signalCode !== null) {
+          throw new Error(`the installed web app exited before startup: ${stderr}`);
+        }
+        return stdout.includes(`web        http://127.0.0.1:${webPort}/`);
+      });
       expect(await (await fetch(`http://127.0.0.1:${webPort}/`)).text()).toContain(
         "payload web",
       );

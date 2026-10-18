@@ -143,6 +143,10 @@ describe("workspace creation and promotion", () => {
     expect(readFileSync(join(box.cwd, ".mcp.json"), "utf8")).toBe(mcpEntry);
     expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
+    const connected = await runInProcess(["status", "--json"], box);
+    expect(connected.status, connected.output).toBe(0);
+    expect(JSON.parse(connected.stdout).connection.state).toBe("connected");
+    expect(JSON.parse(connected.stdout).problems).toEqual([]);
     await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
     const status = await runInProcess(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
     expect(JSON.parse(status.stdout).connection.state).toBe("refused");

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runChild } from "./child.js";
 import { resolveConfig, requireBinding } from "./config.js";
 import { isInstallPayload } from "./installation.js";
-import { rememberWorkspaceBinding } from "./workspace-registry.js";
+import { ensureWorkspaceBinding } from "./workspace-registry.js";
 
 /**
  * Resolve the source loader from this package, not the caller's directory.
@@ -49,7 +49,7 @@ export async function serveCommand(
     args = ["--import", tsxLoader(), mcpServerMain()];
   }
 
-  await rememberWorkspaceBinding(binding);
+  await ensureWorkspaceBinding(binding, resolved.env, resolved.paths.projectConfig ?? "environment");
   // The server takes only environment and stdio; runChild preserves signals and exit status.
   return await runChild(process.execPath, args, resolved.env);
 }

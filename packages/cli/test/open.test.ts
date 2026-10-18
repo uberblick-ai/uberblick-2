@@ -30,7 +30,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { localBrowserKey } from "../src/browser-key.js";
 import { acquireInitLock } from "../src/init-lock.js";
 import { probePort } from "../src/probes.js";
-import { readWorkspaceHub, rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { UB_BIN, pointAt, runUbAsync, sandbox, unboundSandbox, sleep } from "./helpers.js";
 import {
   BANNER,
@@ -105,16 +105,18 @@ describe("ub open", () => {
     } finally { expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("preserves a different recorded hub while serving the project's binding", async () => {
+  it("refuses a project's hub when this machine records the workspace as local", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
-    await rememberWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
-    const app = await open(box, ["--port", String(await freePort())], env);
-    try {
-      const document = await (await get(`${app.url}uberblick-config.json`)).json() as { remoteHubUrl: string };
-      expect(document.remoteHubUrl).toBe(FIRST_REMOTE);
-      expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
-    } finally { expect((await app.interrupt()).status).toBe(0); }
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: null }, box.env);
+    const refused = await openFails(box, ["--port", String(await freePort())], env);
+    expect(refused.status).toBe(1);
+    expect(refused.output).toContain(WORKSPACE);
+    expect(refused.output).toContain("local");
+    expect(refused.output).toContain(FIRST_REMOTE);
+    expect(refused.output).toContain(join(box.cwd, ".uberblick.json"));
+    expect(refused.output).toContain("ub workspace use");
+    expect(readWorkspaceHub(WORKSPACE, box.env)).toBeNull();
   });
 
   it("records nothing when a complete binding cannot serve its bundle", async () => {
@@ -704,11 +706,12 @@ it("opens a newly created local workspace in the browser without login or promot
 
 it.each([false, true])("uses the served database's workspace name beside its external hub address (verbose %s)", async verbose => {
   const { box, env } = configured();
+  const hubUrl = "wss://named.example.ts.net/ws";
+  await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl }, box.env);
   const selected = { ...box.env, WORKSPACE_ID: WORKSPACE };
   storeWorkspaceName(resolveMcpConfig(selected), "Default replica");
   const databasePath = join(box.cwd, "named-serving.sqlite");
   storeWorkspaceName(resolveMcpConfig({ ...selected, UBERBLICK_DB: databasePath }), "Served replica");
-  const hubUrl = "wss://named.example.ts.net/ws";
   pointAt(box, hubUrl);
   const running = await open(box, [...(verbose ? ["--verbose"] : []), "--port", String(await freePort())], {
     ...env, UBERBLICK_DB: databasePath,

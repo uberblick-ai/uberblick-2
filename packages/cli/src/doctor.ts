@@ -107,7 +107,7 @@ function workspaceCheck(
 ): Check {
   if (config === null || resolved === null) {
     // Keep a configured value's refusal and its source; absence gets its own message.
-    const reason = error ?? "no .uberblick.json here or in any parent directory";
+    const reason = error ?? resolved?.bindingProblem ?? "no .uberblick.json here or in any parent directory";
     return fail("workspace", reason, WORKSPACE_REMEDY);
   }
   const name = workspaceName

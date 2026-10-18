@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { localBrowserKey } from "../src/browser-key.js";
 import { probePort } from "../src/probes.js";
-import { rememberWorkspaceBinding } from "../src/workspace-registry.js";
+import { readWorkspaceHub, ensureWorkspaceBinding } from "../src/workspace-registry.js";
 import { pointAt, runUbAsync, waitUntil, type Sandbox } from "./helpers.js";
 import { authMessage, bearer, cleanUp, configured, FIRST_REMOTE, freePort, get, hubs, open, openFails,
   openStore, SECRET, WORKSPACE, type Running } from "./open-fixtures.js";
@@ -98,9 +98,10 @@ describe("ub open: this machine's workspaces", () => {
   it("omits a secondary with a refused browser key while startup and healthy secondaries still serve", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: FIRST_REMOTE }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: LOCAL, hubUrl: null }, box.env);
     await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Refused key"), seed(box, LOCAL, "Healthy local")]);
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }, box.env);
-    await rememberWorkspaceBinding({ workspaceId: LOCAL, hubUrl: null }, box.env);
     const key = localBrowserKey(SECOND, box.env);
     const path = join(box.configHome, "uberblick", "browser-keys", `${SECOND}.key`);
     chmodSync(path, 0o644);
@@ -141,10 +142,10 @@ describe("ub open: this machine's workspaces", () => {
     pointAt(box, FIRST_REMOTE);
     const secondaryPort = await freePort();
     const secondaryHub = `ws://127.0.0.1:${secondaryPort}`;
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondaryHub }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: NO_REPLICA, hubUrl: FIRST_REMOTE }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: LOCAL, hubUrl: null }, box.env);
     await Promise.all([seed(box, SECOND, "Secondary"), seed(box, UNKNOWN, "Unknown"), seed(box, LOCAL, "Local")]);
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondaryHub }, box.env);
-    await rememberWorkspaceBinding({ workspaceId: NO_REPLICA, hubUrl: FIRST_REMOTE }, box.env);
-    await rememberWorkspaceBinding({ workspaceId: LOCAL, hubUrl: null }, box.env);
     const binding = readFileSync(join(box.cwd, ".uberblick.json"), "utf8");
     const app = await open(box, ["--port", String(await freePort())], env);
     try {
@@ -177,11 +178,12 @@ describe("ub open: this machine's workspaces", () => {
 
   it("serves each replica and hub with its own key, search, account and access while both tabs keep syncing", async () => {
     const { box, env } = configured();
-    await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Secondary")]);
     const primary = await deviceHub(box, WORKSPACE, "primary-person");
     const secondary = await deviceHub(box, SECOND, "secondary-person");
     pointAt(box, primary.endpoint);
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: primary.endpoint }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Secondary")]);
     const binding = readFileSync(join(box.cwd, ".uberblick.json"), "utf8");
     const app = await open(box, ["--port", String(await freePort())], env);
     const tabs = await Promise.all([browser(app, box, WORKSPACE, roomForDoc(WORKSPACE, DOC)),
@@ -263,7 +265,7 @@ describe("ub open: this machine's workspaces", () => {
     } finally { for (const tab of tabs) tab.close(); expect((await app.interrupt()).status).toBe(0); }
   });
 
-  it("makes an older replica with no record switchable after its first bound open", async () => {
+  it("makes an older unrecorded replica switchable after its first local bound open", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
     await seed(box, SECOND, "Older replica");
@@ -274,9 +276,10 @@ describe("ub open: this machine's workspaces", () => {
       expect((await app.interrupt()).status).toBe(0);
       const cwd = join(box.cwd, "older-project");
       mkdirSync(cwd);
-      writeFileSync(join(cwd, ".uberblick.json"), JSON.stringify({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }));
+      writeFileSync(join(cwd, ".uberblick.json"), JSON.stringify({ workspaceId: SECOND, hubUrl: null }));
       app = await open({ ...box, cwd }, ["--port", String(await freePort())], env);
       expect((await config(app)).workspaces).toEqual([SECOND, WORKSPACE]);
+      expect(readWorkspaceHub(SECOND, box.env)).toBeNull();
       expect((await app.interrupt()).status).toBe(0);
       app = await open(box, ["--port", String(await freePort())], env);
       expect((await config(app)).workspaces).toEqual([WORKSPACE, SECOND]);
@@ -287,8 +290,8 @@ describe("ub open: this machine's workspaces", () => {
   it("keeps serving the startup workspace when another serving replica holds a secondary", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }, box.env);
     await seed(box, SECOND, "Held secondary");
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: FIRST_REMOTE }, box.env);
     const holder = await createMcpEngine(resolveMcpConfig({ ...box.env,
       WORKSPACE_ID: SECOND, HUB_URL: FIRST_REMOTE }), { serving: true });
     const app = await open(box, ["--port", String(await freePort())], env);
@@ -303,11 +306,12 @@ describe("ub open: this machine's workspaces", () => {
 
   it("contains a secondary replica quarantine while the startup replica keeps syncing", async () => {
     const { box, env } = configured();
-    await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Secondary")]);
     const primary = await deviceHub(box, WORKSPACE, "healthy-person");
     const secondary = await deviceHub(box, SECOND, "quarantined-person");
     pointAt(box, primary.endpoint);
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: WORKSPACE, hubUrl: primary.endpoint }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await Promise.all([seed(box, WORKSPACE, "Primary"), seed(box, SECOND, "Secondary")]);
     const app = await open(box, ["--port", String(await freePort())], env);
     const tabs = await Promise.all([browser(app, box, WORKSPACE, roomForDoc(WORKSPACE, DOC)),
       browser(app, box, SECOND, roomForDoc(SECOND, DOC))]);
@@ -345,9 +349,9 @@ describe("ub open: this machine's workspaces", () => {
   it("reports a secondary hub's refusal without stopping other workspaces", async () => {
     const { box, env } = configured();
     pointAt(box, FIRST_REMOTE);
-    await seed(box, SECOND, "Refused secondary");
     const secondary = await deviceHub(box, SECOND, "refused-person", false);
-    await rememberWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await ensureWorkspaceBinding({ workspaceId: SECOND, hubUrl: secondary.endpoint }, box.env);
+    await seed(box, SECOND, "Refused secondary");
     const app = await open(box, ["--port", String(await freePort())], env);
     const selected = await browser(app, box, SECOND, roomForDoc(SECOND, DOC));
     try {

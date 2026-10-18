@@ -122,6 +122,7 @@ describe("ub workspace status", () => {
 
   it("names pending rooms when the hub cannot acknowledge local changes", async () => {
     const box = sandbox({ projectBinding: { workspaceId: WORKSPACE, hubUrl: "ws://127.0.0.1:1" } });
+    record(box, WORKSPACE, "ws://127.0.0.1:1");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Pending notes");
     const shown = await runInProcess(["workspace", "status"], box, { HUB_AUTH_TOKEN: "synthetic-pending-secret" });
     expect(shown.status, shown.output).toBe(0);
@@ -676,7 +677,7 @@ describe("ub workspace use", () => {
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("ub workspace use <link>");
     expect(run.stderr).toContain(`UB_WORKSPACE_ID=${OTHER} UB_HUB_URL=local ub mcp serve`);
-    expect(run.stderr).toContain("set `UB_HUB_URL=<hub>` for a hub replica");
+    expect(run.stderr).toContain("use an explicit hub link to reconnect a hub replica");
     expect(binding(box)).toEqual({ workspaceId: WORKSPACE, hubUrl: HUB });
   });
 
@@ -724,6 +725,7 @@ describe("ub workspace use", () => {
   it("prints the named selections and an id command that restores the previous binding", async () => {
     const box = sandbox();
     bind(box);
+    record(box, WORKSPACE, HUB);
     record(box, OTHER, null);
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: WORKSPACE }), "Project notes");
     storeWorkspaceName(resolveMcpConfig({ ...box.env, WORKSPACE_ID: OTHER }), "Research notes");
@@ -737,8 +739,7 @@ describe("ub workspace use", () => {
       `switch back with: ub workspace use ${WORKSPACE}\n`,
     );
     expect(selected.stderr).toBe("");
-    // Publication fills the previous binding's missing record before choosing
-    // the command. Running exactly what it printed restores the entire pair.
+    // Running exactly what it printed restores the entire recorded pair.
     expect(readWorkspaceHub(WORKSPACE, box.env)).toBe(HUB);
     const registryBeforeRecovery = readFileSync(workspaceRegistryPath(box.env));
     const command = selected.stdout.split("switch back with: ub ")[1]?.trim();

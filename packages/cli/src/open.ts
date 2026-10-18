@@ -51,7 +51,7 @@ import { monitorOpenHub, waitForOpenHubState } from "./open-hub-output.js";
 import { openBanner } from "./open-output.js";
 import { requestRecentDevices } from "./recent-devices.js";
 import { BrowserReplicas, BrowserReplicaUnavailable, browserWorkspaces, type ServedWorkspace } from "./open-workspaces.js";
-import { rememberWorkspaceBinding } from "./workspace-registry.js";
+import { assertWorkspaceBinding, rememberWorkspaceBindings } from "./workspace-registry.js";
 import { displayWorkspaceHub } from "./workspace-use-output.js";
 import {
   endpointOf,
@@ -423,8 +423,11 @@ async function initialConfig(env: NodeJS.ProcessEnv, ensureSecret = false, defau
   const lock = await acquireInitLock(env, { command: "ub open" });
   try {
     let resolved = resolveConfig({ env });
+    const binding = requireBinding(resolved);
+    assertWorkspaceBinding(binding, resolved.env, resolved.paths.projectConfig ?? "environment");
     let secretCreated: string | null = null;
     if (ensureSecret) {
+      rememberWorkspaceBindings([binding], resolved.env);
       const hubUrl = trimmed(resolved.env.HUB_URL) ?? DEFAULT_HUB_URL;
       const endpoint = endpointOf(hubUrl);
       // A device-authenticated deployment stays external even on localhost.
@@ -1374,13 +1377,6 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
 
   if (foreground.interrupted()) {
     return await foreground.shutdown(0);
-  }
-
-  try {
-    await rememberWorkspaceBinding(projectBinding, startupEnv);
-  } catch (error) {
-    io.err(`ub open: could not record this workspace: ${message(error)}\n`);
-    return await foreground.shutdown(1);
   }
 
   const url = servedUrl.href;
