@@ -401,6 +401,8 @@ describe("host-only first-admin setup", () => {
     await request.client.closed;
     const before = new SetupReceipts(testRig.database).find(request.setupId);
     expect(before).toMatchObject({ status: "complete", workspaceId: WORKSPACE, hadDocuments: false });
+    const identity = testRig.principals.getByGithubAccountId("1234")!;
+    expect(testRig.principals.hasSignedIn(identity.id)).toBe(false);
     const databasePath = testRig.database.databasePath;
     await testRig.stop();
     const restarted = await rig({ databasePath });

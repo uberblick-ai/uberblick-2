@@ -13,6 +13,10 @@ export function snapshotHubDatabase(db, privateTables) {
 			issued_at, revoked_at, replaced_at FROM hub_credentials ORDER BY id` :
 			`SELECT * FROM ${table} ORDER BY 1, 2`).all();
 	}
+	if (!privateTables.includes("hub_browser_sessions")) {
+		const browserSessions = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'hub_browser_sessions'").get();
+		result.hub_browser_sessions = browserSessions === undefined ? [] : db.prepare("SELECT * FROM hub_browser_sessions ORDER BY 1, 2").all();
+	}
 	return result;
 }
 
@@ -27,11 +31,20 @@ export function seedReleaseCredential(db, principalId, workspaceId) {
 }
 
 export function assertHubDatabaseUpgrade(actual, original) {
-	if (original.credentialKeyColumn !== "signing_key" || actual.credentialKeyColumn !== "public_key") {
-		assert.deepEqual(actual, original);
+	let expected = original;
+	if (original.hub_principals.every((row) => !Object.hasOwn(row, "has_signed_in")) &&
+		actual.hub_principals.some((row) => Object.hasOwn(row, "has_signed_in"))) {
+		// The release fixture seeds device sign-ins only; browser-expiry migration is proved by hub tests.
+		assert.deepEqual(original.hub_browser_sessions, [], "release fixture contains no unmodeled browser sign-in evidence");
+		const signedIn = new Set(original.hub_credentials.map((row) => row.principal_id));
+		expected = { ...original, hub_principals: original.hub_principals.map((row) =>
+			({ ...row, has_signed_in: signedIn.has(row.id) ? 1 : 0 })) };
+	}
+	if (expected.credentialKeyColumn !== "signing_key" || actual.credentialKeyColumn !== "public_key") {
+		assert.deepEqual(actual, expected);
 		return;
 	}
-	const { credentialKeyColumn: _oldKey, hub_credentials: oldCredentials, ...oldState } = original;
+	const { credentialKeyColumn: _oldKey, hub_credentials: oldCredentials, ...oldState } = expected;
 	const { credentialKeyColumn: _newKey, hub_credentials: credentials, ...state } = actual;
 	assert.deepEqual(state, oldState, "documents and other private tables survive credential migration");
 	assert.equal(credentials.length, oldCredentials.length, "credential history survives migration");

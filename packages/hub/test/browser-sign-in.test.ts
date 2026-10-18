@@ -106,6 +106,7 @@ describe("browser-only hub identity", () => {
     expect(Object.keys(result).sort()).toEqual(["claimedWorkspaceId", "session", "status"]);
     const snapshot = rows(r.path);
     const principal = r.hub.principals!.getByGithubAccountId("1234")!;
+    expect(r.hub.principals!.hasSignedIn(principal.id)).toBe(true);
     expect(snapshot.hub_credentials).toEqual([]);
     expect(r.hub.credentials!.listDevices(principal.id)).toEqual([]);
     expect(snapshot.hub_browser_sessions).toEqual([{ token_hash: expect.stringMatching(/^[0-9a-f]{64}$/), principal_id: principal.id,
@@ -223,6 +224,7 @@ describe("browser session durability and claim atomicity", () => {
   it("keeps sessions across restart, enforces exact expiry and cleans expired rows on another sign-in", async () => {
     const first = await rig();
     const signed = await complete(first);
+    const principalId = first.hub.principals!.getByGithubAccountId("1234")!.id;
     const port = first.hub.port;
     await first.hub.stop();
     const restarted = await rig(first.path, port);
@@ -230,10 +232,13 @@ describe("browser session durability and claim atomicity", () => {
     expect(await post(restarted.hub, "browser/session", {}, sessionHeaders(signed.session.token))).toMatchObject({ code: 200 });
     restarted.github.time++;
     expect(await post(restarted.hub, "browser/session", {}, sessionHeaders(signed.session.token))).toEqual({ code: 401, result: { status: "signed-out" } });
+    expect(restarted.hub.principals!.hasSignedIn(principalId)).toBe(true);
+    restarted.github.account = { id: 5678, login: "another-person" };
     const next = await complete(restarted);
     expect(next).not.toHaveProperty("claimedWorkspaceId");
     expect(rows(first.path).hub_browser_sessions).toHaveLength(1);
     expect(await post(restarted.hub, "browser/session", {}, sessionHeaders(signed.session.token))).toMatchObject({ code: 401 });
+    expect(restarted.hub.principals!.hasSignedIn(principalId)).toBe(true);
   });
 
   it("confirms durable sign-out only after successful revocation and rejects replay after restart", async () => {
