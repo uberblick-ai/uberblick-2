@@ -9,10 +9,10 @@ export const getDocOperation = operation("get_doc", inputSchema, (context, { uui
   const { replicas, requireDoc, decisionAuthorityJson, documentTags, decisionEntryJson, topicJson, decisionReadJson, blocksJson, annotationJson, briefing } = context;
 
   const replica = requireDoc(uuid);
-  const meta = getMeta(replica.doc);
+  const meta = getMeta(replica.doc, replica.id);
   const collections = summarizeDocData(replica.doc);
   const directory = replicas.directory().doc;
-  const related = readDecisions(replica.doc, directory);
+  const related = readDecisions(replica.doc, directory, replica.id);
   const relatedTopics = new Set(related.map(topic => topic.topic));
   const backlinks = meta.kind === "decision" ? new Set<string>() :
     new Set(replicas.store.backlinks(uuid).map(entry => entry.uuid));

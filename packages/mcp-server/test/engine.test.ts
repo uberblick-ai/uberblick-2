@@ -11,6 +11,7 @@ import type { Hub } from "@uberblick/hub";
 import {
   appendBlock,
   getBlocks,
+  getDirectoryMap,
   initDoc,
   isTagCatalogSeeded,
   listTagCatalog,
@@ -90,6 +91,27 @@ function tickAfter(engine: UberblickMcpEngine, action: () => void): Promise<void
 }
 
 describe("transport-free MCP engine", () => {
+  it("keeps refreshing valid documents after malformed directory keys arrive", async () => {
+    const engine = await createMcpEngine(testConfig(), { refreshIntervalMs: 10 });
+    engines.push(engine);
+    const uuid = randomUUID();
+    const room = roomForDoc(WORKSPACE, uuid);
+    await tickAfter(engine, () => {
+      engine.store.appendUpdate(room, encodedDoc(uuid, "before malformed directory"), "local");
+    });
+    await tickAfter(engine, () => {
+      getDirectoryMap(engine.replicas.directory().doc).set("evil/key", { title: "Malformed", tags: [] });
+    });
+    await tickAfter(engine, () => {
+      appendBlock(engine.replicas.replica(uuid).doc, { type: "paragraph", text: "after malformed directory" });
+    });
+    expect(engine.refreshStatus).toEqual({ status: "running" });
+    expect(engine.health).toEqual({ status: "healthy" });
+    expect(engine.store.search("malformed", 10)).toMatchObject([{ uuid }]);
+    expect(engine.replicas.attachedReplicas().map((replica) => replica.id)).not.toContain("evil/key");
+    expect(engine.store.isIndexed("evil/key")).toBe(false);
+  });
+
   it("keeps an idle caught-up timestamp fresh without refreshing unchanged replicas", async () => {
     let wall = Date.UTC(2031, 0, 1);
     let elapsed = 0;

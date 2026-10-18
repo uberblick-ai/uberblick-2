@@ -23,6 +23,7 @@ import {
   getMeta,
   initDoc,
   isDirectoryEntryDeleted,
+  parseRoom,
   readSidebar,
   relatedDecisionTopics,
   restoreDirectoryEntry,
@@ -997,7 +998,7 @@ export function App(): ReactElement {
    */
   useEffect(() => {
     if (doc === null || directory === null) return;
-    return watchDocumentStub(doc.ydoc, directory.ydoc, {
+    return watchDocumentStub(doc.ydoc, directory.ydoc, parseRoom(doc.room).uuid, {
       writable: () => directory.status.writable,
       synchronized: () => directory.status.synced,
       subscribe: (listener) => directory.onStatusChange(() => listener()),

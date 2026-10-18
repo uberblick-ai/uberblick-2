@@ -9,7 +9,14 @@ import {
 import { z } from "zod";
 
 // Refuse identities that cannot resolve as document UUIDs.
-export const uuidArg = z.uuid().describe("Document UUID.");
+export const uuidArg = z.uuid().transform((value, ctx) => {
+  const uuid = canonicalDocumentUuid(value);
+  if (uuid === null) {
+    ctx.addIssue({ code: "custom", message: "not a document UUID" });
+    return z.NEVER;
+  }
+  return uuid;
+}).describe("Document UUID.");
 
 /**
  * Trim before measuring and storing; whitespace must not satisfy the minimum

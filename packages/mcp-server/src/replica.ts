@@ -15,6 +15,8 @@ import {
   getDirectoryEntry,
   getDirectoryMap,
   getMeta,
+  isDocId,
+  readSyncedDocId,
   isProseBlockType,
   isDirectoryEntryDeleted,
   listDeletedDirectoryUuids,
@@ -387,12 +389,12 @@ export class Replicas {
 
   /** Whether a replica for this document is already attached. */
   known(uuid: string): boolean {
-    return this.replicas.has(roomForDoc(this.config.workspaceId, uuid));
+    return isDocId(uuid) && this.replicas.has(roomForDoc(this.config.workspaceId, uuid));
   }
 
   /** Whether the log holds anything for this document's room. */
   hasLog(uuid: string): boolean {
-    return this.store.hasRoom(roomForDoc(this.config.workspaceId, uuid));
+    return isDocId(uuid) && this.store.hasRoom(roomForDoc(this.config.workspaceId, uuid));
   }
 
   private ensureRoom(room: string, id: string): Replica {
@@ -432,6 +434,7 @@ export class Replicas {
     if (replica.isDirectory) {
       getDirectoryMap(doc).observe((event) => {
         for (const uuid of event.keysChanged) {
+          if (readSyncedDocId(uuid, "directory key") === null) continue;
           this.staleStubs.add(uuid);
           const first = getDirectoryEntry(doc, uuid);
           if (first?.kind === "decision" && (first.topic ?? first.uuid) === uuid) {
@@ -609,20 +612,20 @@ export class Replicas {
         ) {
           continue;
         }
-        const meta = getMeta(document.doc);
+        const meta = getMeta(document.doc, document.id);
         if (meta.uuid === "") continue;
         try {
           if (
-            decisionTopicArchived(this.directory().doc, meta.uuid)
+            decisionTopicArchived(this.directory().doc, document.id)
           ) {
-            if (this.store.isIndexed(meta.uuid)) this.store.unindexDoc(meta.uuid);
+            if (this.store.isIndexed(document.id)) this.store.unindexDoc(document.id);
             continue;
           }
           this.indexRows(document, meta);
         } catch (error) {
           // The catalog update is already applied and will not replay; queue
           // this cache repair explicitly so it gets a paced retry on settle.
-          this.recordStubFailure(meta.uuid, error);
+          this.recordStubFailure(document.id, error);
         }
       }
       return;
@@ -636,17 +639,17 @@ export class Replicas {
     }
     this.repairDuplicates(replica);
     try {
-      const meta = getMeta(replica.doc);
+      const meta = getMeta(replica.doc, replica.id);
       if (meta.uuid === "") {
         return;
       }
       // Live updates and rebuilds must keep archived documents out of the index.
-      if (meta.kind === "decision") this.repairStub(meta, authored);
-      if (decisionTopicArchived(this.directory().doc, meta.uuid)) {
-        this.store.unindexDoc(meta.uuid);
+      if (meta.kind === "decision") this.repairStub(replica, meta, authored);
+      if (decisionTopicArchived(this.directory().doc, replica.id)) {
+        this.store.unindexDoc(replica.id);
         return;
       }
-      if (meta.kind !== "decision") this.repairStub(meta, authored);
+      if (meta.kind !== "decision") this.repairStub(replica, meta, authored);
       this.indexRows(replica, meta);
     } catch (error) {
       log.warn("failed to mirror a document change", error);
@@ -664,7 +667,7 @@ export class Replicas {
     const tags = resolveTagAssignments(this.settings().doc, meta.tags);
     this.store.indexDoc(
       {
-        uuid: meta.uuid,
+        uuid: replica.id,
         title: meta.title,
         kind: meta.kind === "decision" ? "decision" : "regular",
         tags: tags.map((entry) => entry.id),
@@ -750,7 +753,7 @@ export class Replicas {
         return;
       }
       const replica = this.replica(uuid);
-      const meta = getMeta(replica.doc);
+      const meta = getMeta(replica.doc, replica.id);
       if (meta.uuid !== "") {
         this.indexRows(replica, meta);
       }
@@ -790,7 +793,8 @@ export class Replicas {
       return false;
     }
     // Restore repairs metadata without stamping a new document edit.
-    this.repairStub(getMeta(this.replica(uuid).doc), false);
+    const replica = this.replica(uuid);
+    this.repairStub(replica, getMeta(replica.doc, replica.id), false);
     return true;
   }
 
@@ -828,15 +832,15 @@ export class Replicas {
    * Cache comparisons are shared with web, which uses transaction.local,
    * its own clock and its own coarseness window for authored stamping.
    */
-  private repairStub(meta: DocMeta, authored: boolean): void {
+  private repairStub(replica: Replica, meta: DocMeta, authored: boolean): void {
     const directory = this.directory();
-    if (isDirectoryEntryDeleted(directory.doc, meta.uuid)) return;
-    const stub = getDirectoryEntry(directory.doc, meta.uuid);
+    if (isDirectoryEntryDeleted(directory.doc, replica.id)) return;
+    const stub = getDirectoryEntry(directory.doc, replica.id);
     if (meta.kind !== "decision" && stub?.deleted === true) {
       return;
     }
     const now = Date.now();
-    const fields = documentDirectoryFields(this.replica(meta.uuid).doc);
+    const fields = documentDirectoryFields(replica.doc, replica.id);
     const metaChanged = directoryStubDiffers(stub, meta, fields);
     const staleStamp =
       stub?.updatedAt === undefined ||
@@ -852,7 +856,7 @@ export class Replicas {
       return;
     }
     upsertDirectoryEntry(directory.doc, {
-      uuid: meta.uuid,
+      uuid: replica.id,
       title: meta.title,
       tags: meta.tags,
       // State this replica's answer, including absence. Stubs converge LWW;

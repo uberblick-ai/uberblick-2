@@ -9,6 +9,8 @@ import {
   decisionDirectoryFields,
   directoryRoom,
   getBlocks,
+  getDirectoryEntry,
+  getDirectoryMap,
   getMeta,
   getMetaMap,
   initDoc,
@@ -253,6 +255,33 @@ async function copy(host: HTMLElement): Promise<void> {
 }
 
 describe("decision topic navigation and history", () => {
+  it("keeps a topic usable when a malformed synced key claims to join it", async () => {
+    story();
+    getDirectoryMap(directory()).set("evil/key", {
+      title: "Forged record", kind: "decision", status: "decided", topic: FIRST,
+      supersedes: CURRENT, createdAt: CREATED + 10_000,
+    });
+    const view = await open();
+    expect(answer(view.container).textContent).toContain("Use the current answer.");
+    expect(timeline(view.container).querySelectorAll("li[data-record]")).toHaveLength(5);
+    expect(view.container.textContent).not.toContain("Forged record");
+    expect(acquired).not.toContain(`${WORKSPACE}/evil/key`);
+  });
+
+  it("uses the current room's identity when its metadata names another record", async () => {
+    story();
+    const otherBefore = getDirectoryEntry(directory(), FIRST);
+    getMetaMap(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).set("uuid", FIRST);
+    const view = await open();
+    expect(answer(view.container).textContent).toContain("Use the current answer.");
+    const title = within(view.container).getByRole("textbox", { name: "Document title" });
+    expect(title).toHaveProperty("readOnly", false);
+    await act(async () => fireEvent.change(title, { target: { value: "A corrected title" } }));
+    expect(getDirectoryEntry(directory(), CURRENT)?.title).toBe("A corrected title");
+    expect(getDirectoryEntry(directory(), FIRST)).toEqual(otherBefore);
+    expect(getMetaMap(room(roomForDoc(WORKSPACE, CURRENT)).ydoc).get("uuid")).toBe(FIRST);
+  });
+
   it.each(["open", "decided", "rejected", "withdrawn"] as const)("renames the current %s record while its answer stays read-only", async (status) => {
     const ydoc = record(FIRST, "Original question", status, "Stored answer.");
     const host = (await open()).container;

@@ -2,6 +2,7 @@
 
 import type * as Y from "yjs";
 import type { SidebarGroup } from "./types.js";
+import { readSyncedDocId } from "./synced-doc-id.js";
 
 export const SIDEBAR_GROUPS_KEY = "groups";
 
@@ -79,11 +80,15 @@ function pinsOfGroup(sidebarDoc: Y.Doc, groupId: string): Y.Array<Pin> {
 
 /** Pins are plain values so moves can reinsert them without cloning Y types. */
 function readPin(value: unknown): Pin | null {
-  if (typeof value !== "object" || value === null) return null;
+  if (typeof value !== "object" || value === null) {
+    readSyncedDocId(value, "sidebar pin");
+    return null;
+  }
   const candidate = value as Partial<Pin>;
-  if (typeof candidate.uuid !== "string" || candidate.uuid === "") return null;
+  const uuid = readSyncedDocId(candidate.uuid, "sidebar pin");
+  if (uuid === null) return null;
   const since = typeof candidate.since === "number" ? candidate.since : 0;
-  return { uuid: candidate.uuid, since };
+  return { uuid, since };
 }
 
 function unpinLevels(sidebarDoc: Y.Doc): Map<string, number> {

@@ -26,6 +26,7 @@ export const exportMarkdownOperation = operation("export_markdown", inputSchema,
   return {
     uuid,
     markdown: exportMarkdown(replica.doc, {
+      uuid: replica.id,
       tagCatalog: tagCatalog(),
       directory: replicas.directory().doc,
       ...(frontmatter === undefined ? {} : { frontmatter }),

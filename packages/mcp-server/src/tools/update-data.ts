@@ -24,7 +24,7 @@ export const inputSchema = strictInput({ uuid: uuidArg, operations: z.array(oper
 
 /** Both transports validate the same batch before any proposed keys are written. */
 export function prepareDataUpdate(context: ToolContext, args: z.infer<typeof inputSchema>, replica: Replica) {
-  return prepareDocData(replica.doc, context.replicas.directory().doc, args.operations as DataOperation[]);
+  return prepareDocData(replica.doc, context.replicas.directory().doc, args.operations as DataOperation[], replica.id);
 }
 
 export const updateDataOperation = documentOperation("update_data", inputSchema, (context, args, _request, replica) => {

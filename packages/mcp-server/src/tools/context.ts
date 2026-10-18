@@ -132,7 +132,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     }
 
     const replica = replicas.replica(uuid);
-    if (getMeta(replica.doc).uuid !== "") {
+    if (getMeta(replica.doc, replica.id).uuid !== "") {
       // Touch only tools that access the document room; directory/index reads
       // and archive/restore do not announce document activity.
       replicas.touch(replica);
@@ -179,7 +179,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       );
     }
     const replica = requireDoc(uuid);
-    const meta = getMeta(replica.doc);
+    const meta = getMeta(replica.doc, replica.id);
     if (contentMutation && decisionContentLocked(meta)) {
       throw new ToolError("decision_read_only", "A decided record's answer blocks and structured data are read-only; decisions have no TL;DR. Create a superseding record.", { uuid, kind: meta.kind, status: meta.status });
     }
@@ -196,7 +196,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
   };
 
   const decisionAuthorityJson = (replica: Replica) => {
-    const meta = getMeta(replica.doc);
+    const meta = getMeta(replica.doc, replica.id);
     if (meta.kind !== "decision") return {};
     return {
       ...(meta.agentStance === undefined ? {} : { agentStance: meta.agentStance }),
@@ -353,7 +353,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
     if (replica.isDirectory || replica.isSidebar || replica.isSettings) {
       return {};
     }
-    if (getMeta(replica.doc).description !== null) {
+    if (getMeta(replica.doc, replica.id).description !== null) {
       return {};
     }
     return { description: null, descriptionHint: DESCRIPTION_NUDGE };
@@ -365,7 +365,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
       return {};
     }
     if (
-      getMeta(replica.doc).tags.length > 0 ||
+      getMeta(replica.doc, replica.id).tags.length > 0 ||
       activeTagCatalog(tagCatalog()).length === 0
     ) {
       return {};
@@ -375,7 +375,7 @@ export function createToolContext(replicas: Replicas, briefing: GuidanceBriefing
 
   /** A non-blocking reminder returned only after document content changes. */
   const tldrReview = (replica: Replica): Record<string, unknown> => {
-    const meta = getMeta(replica.doc);
+    const meta = getMeta(replica.doc, replica.id);
     return meta.kind === "decision" || meta.tldrOptOut === true ? {} : meta.tldr === null
       ? { tldr: null, tldrHint: TLDR_MISSING_NUDGE }
       : { tldrHint: TLDR_AFTER_CONTENT_CHANGE };

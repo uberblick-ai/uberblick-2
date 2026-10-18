@@ -110,9 +110,9 @@ export function relatedDecisionTopics(
 }
 
 /** Related-page membership may be on any record; topics stay oldest first. */
-export function readDecisions(doc: Y.Doc, directory?: Y.Doc): DecisionTopicResolution[] {
+export function readDecisions(doc: Y.Doc, directory?: Y.Doc, authoritativeUuid?: string): DecisionTopicResolution[] {
   if (directory === undefined) return [];
-  return relatedDecisionTopics(resolveDecisionTopics(directory), getMeta(doc));
+  return relatedDecisionTopics(resolveDecisionTopics(directory), getMeta(doc, authoritativeUuid));
 }
 
 /** All predecessors and direct successors, each carrying its own cached status. */

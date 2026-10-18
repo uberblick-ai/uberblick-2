@@ -45,7 +45,7 @@ export function registerGuidanceResources(
         contents: [{
           uri: uri.href,
           mimeType: "text/markdown",
-          text: exportMarkdown(replicas.replica(uuid).doc, { tagCatalog: replicas.settings().doc, directory: replicas.directory().doc }),
+          text: exportMarkdown(replicas.replica(uuid).doc, { uuid, tagCatalog: replicas.settings().doc, directory: replicas.directory().doc }),
         }],
       };
     }),

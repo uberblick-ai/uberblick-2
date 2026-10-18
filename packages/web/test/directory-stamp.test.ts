@@ -100,7 +100,7 @@ function open(title: string, options: { stub?: string } = {}): Rig {
     doc,
     peer,
     crossed: () => crossed,
-    stop: watchDocumentStub(doc, directory),
+    stop: watchDocumentStub(doc, directory, UUID),
   };
 }
 
@@ -134,6 +134,28 @@ afterEach(() => {
 });
 
 describe("directory stamps from the web", () => {
+  it("repairs only the room's stub when metadata claims another document", () => {
+    const other = "b5ae329f-d53d-44b2-829f-fb180c00aaca";
+    const document = new Y.Doc();
+    const directory = new Y.Doc();
+    upsertDirectoryEntry(directory, { uuid: other, title: "Other document" });
+    const otherBefore = getDirectoryEntry(directory, other);
+    const stop = watchDocumentStub(document, directory, UUID);
+    try {
+      expect(getDirectoryEntry(directory, UUID)).toBeNull();
+      initDoc(document, { uuid: other, title: "This room's document" });
+      expect(getDirectoryEntry(directory, UUID)?.title).toBe("This room's document");
+      setTitle(document, "Edited here");
+      expect(getDirectoryEntry(directory, UUID)?.title).toBe("Edited here");
+      expect(getDirectoryEntry(directory, other)).toEqual(otherBefore);
+      expect([...getDirectoryMap(directory).keys()].sort()).toEqual([UUID, other].sort());
+    } finally {
+      stop();
+      document.destroy();
+      directory.destroy();
+    }
+  });
+
   it.each([false, true])("never repairs a permanently deleted document, including decisions: %s", (decision) => {
     const document = new Y.Doc();
     const directory = new Y.Doc();
@@ -141,7 +163,7 @@ describe("directory stamps from the web", () => {
     if (decision) setKind(document, "decision");
     deleteDirectoryEntry(directory, UUID);
     const before = Y.encodeStateAsUpdate(directory);
-    const stop = watchDocumentStub(document, directory);
+    const stop = watchDocumentStub(document, directory, UUID);
     try {
       setTitle(document, "Late rename");
       setTags(document, ["late"]);
@@ -184,7 +206,7 @@ describe("directory stamps from the web", () => {
     });
     tombstoneDirectoryEntry(directory, UUID);
     const peer = peerOf(directory);
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
     try {
       expect(getDirectoryEntry(peer, UUID)).toMatchObject({
         title: "Lease duration", governs, topic: predecessor, supersedes: predecessor,
@@ -277,7 +299,7 @@ describe("directory stamps from the web", () => {
         uuid: UUID, title: "Existing comments", createdAt: T0, updatedAt: T0,
       });
       const peer = peerOf(directory);
-      const stop = watchDocumentStub(doc, directory);
+      const stop = watchDocumentStub(doc, directory, UUID);
       try {
         vi.setSystemTime(T0 + WINDOW * 3);
         if (hydrate) Y.applyUpdate(doc, Y.encodeStateAsUpdate(source));
@@ -322,7 +344,7 @@ describe("directory stamps from the web", () => {
       const remote = new Y.Doc();
       remote.clientID = remoteClientId;
       Y.applyUpdate(remote, Y.encodeStateAsUpdate(base));
-      const stop = watchDocumentStub(browserDoc, browser);
+      const stop = watchDocumentStub(browserDoc, browser, UUID);
       try {
         vi.setSystemTime(T0 + 1_000);
         setAnnotationResolved(source, thread.id, true);
@@ -353,7 +375,7 @@ describe("directory stamps from the web", () => {
     });
     let writable = false;
     const listeners = new Set<() => void>();
-    const stop = watchDocumentStub(doc, directory, {
+    const stop = watchDocumentStub(doc, directory, UUID, {
       writable: () => writable,
       synchronized: () => true,
       subscribe: (listener) => {
@@ -395,7 +417,7 @@ describe("directory stamps from the web", () => {
       browser.clientID = browserClientId;
       let synchronized = false;
       const listeners = new Set<() => void>();
-      const stop = watchDocumentStub(doc, browser, {
+      const stop = watchDocumentStub(doc, browser, UUID, {
         // Admission precedes the first sync, which is the race this guards.
         writable: () => true,
         synchronized: () => synchronized,
@@ -428,7 +450,7 @@ describe("directory stamps from the web", () => {
     const directory = new Y.Doc();
     let synchronized = false;
     const listeners = new Set<() => void>();
-    const stop = watchDocumentStub(doc, directory, {
+    const stop = watchDocumentStub(doc, directory, UUID, {
       writable: () => true,
       synchronized: () => synchronized,
       subscribe: (listener) => {
@@ -510,7 +532,7 @@ describe("directory stamps from the web", () => {
     peer.on("update", () => {
       crossed += 1;
     });
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
 
     vi.setSystemTime(T0 + WINDOW * 3);
     Y.applyUpdate(doc, Y.encodeStateAsUpdate(source));
@@ -585,7 +607,7 @@ describe("directory stamps from the web", () => {
       crossed += 1;
     });
     vi.setSystemTime(T0 + WINDOW * 3);
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
 
     expect(getDirectoryEntry(peer, UUID)).toMatchObject({
       description: "Current description",
@@ -630,7 +652,7 @@ describe("directory stamps from the web", () => {
     });
 
     vi.setSystemTime(T0 + WINDOW * 3);
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
     expect(getDirectoryEntry(peer, UUID)).toMatchObject({
       createdAt: T0 + WINDOW * 3,
       updatedAt: T0,
@@ -668,7 +690,7 @@ describe("directory stamps from the web", () => {
     peer.on("update", () => {
       crossed += 1;
     });
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
     setDescription(doc, "Authored after archive");
     expect(getDirectoryEntry(peer, UUID)).toEqual({
       uuid: UUID,
@@ -707,7 +729,7 @@ describe("directory stamps from the web", () => {
       updatedAt: T0,
     });
     const directoryPeer = peerOf(directory);
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
     expect(getDirectoryEntry(directoryPeer, UUID)).toMatchObject({
       kind: "decision",
       status: "open",
@@ -740,7 +762,7 @@ describe("directory stamps from the web", () => {
       updatedAt: T0,
     });
     const peer = peerOf(directory);
-    const stop = watchDocumentStub(doc, directory);
+    const stop = watchDocumentStub(doc, directory, UUID);
     expect(getDirectoryEntry(peer, UUID)).toEqual({
       uuid: UUID, title: "Legacy page", tags: [], updatedAt: T0,
       openThreadCount: 0, code_check: [], createdAt: T0,
@@ -789,7 +811,7 @@ describe("directory stamps from the web", () => {
         kind: "decision",
         status: "open",
       });
-      const stop = watchDocumentStub(doc, browser);
+      const stop = watchDocumentStub(doc, browser, UUID);
 
       Y.applyUpdate(browser, Y.encodeStateAsUpdate(remote));
       Y.applyUpdate(remote, Y.encodeStateAsUpdate(browser));
