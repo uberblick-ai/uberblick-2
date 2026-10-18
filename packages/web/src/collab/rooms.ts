@@ -365,18 +365,46 @@ function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => 
   };
 }
 
-function openRoom(room: string, identity: AwarenessUser): Entry {
-  const ydoc = new Y.Doc();
-  const socket = sharedSocket();
+function createRoomProvider(room: string, identity: AwarenessUser, onSettingsReset: () => void): PacedRoomProvider {
   const parsed = parseRoom(room);
+  let settingsGeneration: number | null = null;
+  let syncReady = parsed.uuid !== SETTINGS_SUFFIX;
   const provider = new PacedRoomProvider(admission, {
     name: room,
-    document: ydoc,
-    websocketProvider: socket,
+    document: new Y.Doc(),
+    websocketProvider: sharedSocket(),
     sessionAwareness: parsed.uuid === SETTINGS_SUFFIX,
     // Async callable form: re-minted on every (re)connect.
-    token: () => hubToken(room, identity),
+    token: async () => {
+      const config = await resolveClientConfig();
+      syncReady = parsed.uuid !== SETTINGS_SUFFIX || config.servedWorkspaces === undefined;
+      return hubToken(room, identity);
+    },
+  }, () => syncReady);
+  provider.on("stateless", settingsRefusalNotifier(parsed.uuid));
+  provider.on("stateless", ({ payload }: { payload: string }) => {
+    if (parsed.uuid !== SETTINGS_SUFFIX) return;
+    let notice: { type?: unknown; generation?: unknown } | null;
+    try { notice = JSON.parse(payload); }
+    catch { return; }
+    if (notice?.type !== "settings-generation" ||
+      typeof notice.generation !== "number" || !Number.isSafeInteger(notice.generation) || notice.generation < 0) return;
+    if (settingsGeneration !== null && settingsGeneration !== notice.generation) {
+      onSettingsReset();
+      return;
+    }
+    settingsGeneration = notice.generation;
+    syncReady = true;
+    provider.startSync();
   });
+  return provider;
+}
+
+function openRoom(room: string, identity: AwarenessUser): Entry {
+  const parsed = parseRoom(room);
+  const provider = createRoomProvider(room, identity, () => replaceSettingsRoom(room, identity, connection));
+  const ydoc = provider.document;
+  const socket = provider.configuration.websocketProvider;
 
   // Injected sockets require attach(): the provider constructor attaches only
   // sockets it owns. destroy() detaches without destroying the shared socket.
@@ -513,8 +541,6 @@ function openRoom(room: string, identity: AwarenessUser): Entry {
   });
   provider.on("unsyncedChanges", refresh);
   provider.on("close", refresh);
-
-  provider.on("stateless", settingsRefusalNotifier(parsed.uuid));
 
   provider.on("close", (event: { event?: { reason?: string } }) => {
     // Unsolicited document CLOSE resets sync but leaves the socket up; only a

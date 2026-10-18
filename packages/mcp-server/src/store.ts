@@ -804,6 +804,20 @@ export class MirrorStore {
     return row === undefined ? null : JSON.parse(String(row.value)) as SettingsReset;
   }
 
+  /** Claim a refusal notice once across local processes without clearing its generation. */
+  takeSettingsResetNotice(expectedSeq: number): string | null {
+    this.assertWorkspacePresent();
+    return transactional(this.db, () => {
+      const reset = this.settingsReset();
+      if (reset === null || reset.seq !== expectedSeq) return null;
+      const delivered = this.db.prepare("SELECT value FROM meta WHERE key = 'settings_reset_notice_seq'").get();
+      if (delivered !== undefined && Number(delivered.value) === reset.seq) return null;
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('settings_reset_notice_seq', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+        .run(String(reset.seq));
+      return reset.notice;
+    }, "immediate")();
+  }
+
   /** Replace refused history atomically; a monotonic cut fences stale peers. */
   replaceSettings(state: Uint8Array, notice: string, expectedResetSeq = this.settingsReset()?.seq ?? 0): void {
     this.assertWorkspacePresent();

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import type { WebSocketLike } from "@hocuspocus/server";
+import type { Connection, WebSocketLike } from "@hocuspocus/server";
 import { OutgoingMessage, Server } from "@hocuspocus/server";
 import { parseRoom, SETTINGS_SUFFIX } from "@uberblick/schema";
 import {
@@ -127,6 +127,8 @@ export interface LocalBrowserServerConfig {
   assertRoomAvailable?(room: string): void;
   /** The caller owns the store; load rooms from its update log. */
   readRoom(room: string, afterSeq: number): LocalRoomSlice;
+  /** Claim a persisted refusal notice once across serving processes. */
+  takeSettingsResetNotice(room: string, seq: number): string | null;
   /** Commit browser bytes before Hocuspocus applies or acknowledges them. */
   appendUpdate(room: string, payload: Uint8Array, settingsResetSeq?: number): void;
   /** Pair each served room's awareness with its full upstream replica. */
@@ -227,6 +229,12 @@ export async function createLocalBrowserServer(
   const appliedThrough = new WeakMap<Y.Doc, number>();
   const settingsGenerations = new WeakMap<Y.Doc, number>();
   const retryRooms = new Set<string>();
+  const sendSettingsNotice = (connection: Connection<HubContext>, room: string, seq: number): void => {
+    // Disconnected tabs leave their notice pending for the next live reader.
+    if (connection.webSocket.readyState !== WebSocket.OPEN) return;
+    const notice = config.takeSettingsResetNotice(room, seq);
+    if (notice !== null) connection.sendStateless(JSON.stringify({ type: "settings-reset", message: notice }));
+  };
 
   const server = new Server<HubContext>({
     port: config.port,
@@ -318,6 +326,13 @@ export async function createLocalBrowserServer(
       if (instance.documents.get(documentName) !== document) return Promise.reject();
     },
 
+    async connected({ connection, documentName }) {
+      if (parseRoom(documentName).uuid !== SETTINGS_SUFFIX) return;
+      const reset = config.readRoom(documentName, 0).reset;
+      if (reset !== undefined) sendSettingsNotice(connection, documentName, reset.seq);
+      connection.sendStateless(JSON.stringify({ type: "settings-generation", generation: reset?.seq ?? 0 }));
+    },
+
     async beforeSync({ connection, document, documentName, type, payload }) {
       try {
         // Check even read-only handshakes before any stale room state is served.
@@ -328,7 +343,7 @@ export async function createLocalBrowserServer(
           }
           const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
           if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
-            resetSettings(documentName, document, reset.notice);
+            resetSettings(documentName, document, reset.seq);
             throw refused("uberblick:settings-reset", "obsolete settings replica");
           }
         }
@@ -364,7 +379,7 @@ export async function createLocalBrowserServer(
         if (parseRoom(documentName).uuid === SETTINGS_SUFFIX) {
           const reset = config.readRoom(documentName, appliedThrough.get(document) ?? 0).reset;
           if (reset !== undefined && reset.seq !== settingsGenerations.get(document)) {
-            resetSettings(documentName, document, reset.notice);
+            resetSettings(documentName, document, reset.seq);
             throw refused("uberblick:settings-reset", error);
           }
         }
@@ -389,7 +404,7 @@ export async function createLocalBrowserServer(
 
   let retryTimer: NodeJS.Timeout | null = null;
   let stopped = false;
-  const resetSettings = (room: string, document: Y.Doc, notice: string): void => {
+  const resetSettings = (room: string, document: Y.Doc, seq: number): void => {
     const served = server.hocuspocus.documents.get(room);
     if (served !== document) return;
     const connections = served.getConnections();
@@ -401,7 +416,7 @@ export async function createLocalBrowserServer(
     appliedThrough.delete(document);
     retryRooms.delete(room);
     for (const connection of connections) {
-      connection.sendStateless(JSON.stringify({ type: "settings-reset", message: notice }));
+      sendSettingsNotice(connection, room, seq);
       connection.close({ code: 1000, reason: "uberblick:settings-reset" });
     }
     served.destroy();
@@ -416,7 +431,7 @@ export async function createLocalBrowserServer(
       try {
         const slice = config.readRoom(room, afterSeq);
         if (slice.reset !== undefined && slice.reset.seq !== settingsGenerations.get(document)) {
-          resetSettings(room, document, slice.reset.notice);
+          resetSettings(room, document, slice.reset.seq);
           continue;
         }
         appliedThrough.set(

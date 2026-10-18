@@ -1299,6 +1299,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
           (collectingServedRooms ?? observedServedRooms).add(room);
           return engineForRoom(room).store.readSince(room, afterSeq);
         },
+        takeSettingsResetNotice: (room, seq) => engineForRoom(room).store.takeSettingsResetNotice(seq),
         appendUpdate: (room, payload, settingsResetSeq) => {
           engineForRoom(room).store.appendUpdate(room, payload, "local", settingsResetSeq);
         },

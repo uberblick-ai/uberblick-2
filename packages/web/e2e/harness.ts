@@ -34,6 +34,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect } from "@playwright/test";
 import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } from "@playwright/test";
@@ -41,6 +42,7 @@ import { silentLogger } from "@uberblick/hub";
 import { createTeamHub as createHub } from "@uberblick/hub/team";
 import type { TeamHub as Hub } from "@uberblick/hub/team";
 import type { TeamHubConfig as HubConfig } from "@uberblick/hub/team-config";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
 import { getBlocks, getWorkspaceMainRepository, getWorkspaceName, listTagCatalog, seedTagCatalog, settingsRoom } from "@uberblick/schema";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
 import { preview } from "vite";
@@ -206,6 +208,8 @@ export interface Harness {
   /** Inspect public document content received by one of the fixture hubs. */
   hubText(room: string, secondary?: boolean): string | null;
   hubWorkspaceSettings(): { name: string | null; mainRepository: string | null; tags: string[] } | null;
+  /** Observe completed refusal recovery without connecting a browser that claims its notice. */
+  localSettingsReset(): { seq: number; notice: string } | null;
   /** Record upstream admission synchronously across local credential changes. */
   observeHubText(room: string): HubTextHistory;
   /** Verify browser navigation left the project's startup binding untouched. */
@@ -214,6 +218,8 @@ export interface Harness {
   startHub(): Promise<void>;
   /** Flush and stop upstream, leaving `ub open` and the browser alone. */
   stopHub(): Promise<void>;
+  /** Stop local serving while retaining this machine's credentials and replica. */
+  stopOpen(): Promise<void>;
   /** Restart local serving on the same address after changing hub credentials. */
   restartOpen(options: { authenticated: boolean }): Promise<void>;
   /** Serve the second project on another port using the same machine's replicas. */
@@ -561,6 +567,11 @@ export async function startHarness(options: {
       hub = null;
       await running.stop();
     };
+    const stopOpen = async (): Promise<void> => {
+      const child = open;
+      open = null;
+      if (child !== null) await stopChild(child);
+    };
 
     return {
       ...(access === undefined ? {} : { access }),
@@ -601,6 +612,14 @@ export async function startHarness(options: {
         return document === undefined ? null : { name: getWorkspaceName(document),
           mainRepository: getWorkspaceMainRepository(document), tags: listTagCatalog(document).map((tag) => tag.name) };
       },
+      localSettingsReset() {
+        const storage = resolveStorage({ env: openEnvironment(runDir, bundleDir) });
+        const db = new DatabaseSync(join(storage.workspaceDir, `${workspaceUuid}.sqlite`), { readOnly: true });
+        try {
+          const row = db.prepare("SELECT value FROM meta WHERE key = 'settings_reset'").get();
+          return row === undefined ? null : JSON.parse(String(row.value)) as { seq: number; notice: string };
+        } finally { db.close(); }
+      },
       observeHubText(room) {
         const document = hub?.hocuspocus.documents.get(room);
         if (document === undefined) throw new Error("e2e: hub history needs a loaded document");
@@ -621,15 +640,14 @@ export async function startHarness(options: {
         hub = await createHub({ ...config, port }, accessRole === undefined ? {} : { deviceCredentials: true });
       },
       stopHub,
+      stopOpen,
       setStoredLogin,
       rebindProject(reboundHubUrl) {
         writeFileSync(join(runDir, ".uberblick.json"),
           `${JSON.stringify({ workspaceId: workspace, hubUrl: reboundHubUrl }, null, 2)}\n`, { mode: 0o600 });
       },
       async restartOpen({ authenticated }) {
-        const child = open;
-        open = null;
-        if (child !== null) await stopChild(child);
+        await stopOpen();
         setStoredLogin(authenticated);
         const restarted = await startOpen(runDir, bundleDir, Number(new URL(appUrl).port));
         open = restarted.child;

@@ -58,6 +58,48 @@ it("replaces refused history atomically, fences stale peers and preserves other 
   expect(reopened.pendingRooms()).toEqual([{ room: otherRoom, seq: otherSeq }]);
 });
 
+it("keeps each refusal notice pending until one process claims it, including across restart", () => {
+  const config = testConfig();
+  const first = new MirrorStore(config.databasePath, WORKSPACE);
+  const peer = new MirrorStore(config.databasePath, WORKSPACE);
+  stores.push(first, peer);
+  expect(first.takeSettingsResetNotice(0)).toBeNull();
+  first.replaceSettings(named("Hub settings"), "Workspace name refused");
+  const reset = first.settingsReset()!;
+  const history = first.readSince(settingsRoom(WORKSPACE), 0);
+  expect(peer.takeSettingsResetNotice(reset.seq)).toBe("Workspace name refused");
+  expect(first.takeSettingsResetNotice(reset.seq)).toBeNull();
+  const reopened = new MirrorStore(config.databasePath, WORKSPACE);
+  stores.push(reopened);
+  expect(reopened.takeSettingsResetNotice(reset.seq)).toBeNull();
+  expect(reopened.settingsReset()).toEqual(reset);
+  expect(reopened.readSince(settingsRoom(WORKSPACE), 0)).toEqual(history);
+
+  first.replaceSettings(named("Later hub settings"), "Main repository refused");
+  const laterReset = first.settingsReset()!;
+  expect(laterReset.seq).toBeGreaterThan(reset.seq);
+  expect(peer.takeSettingsResetNotice(reset.seq)).toBeNull();
+  expect(reopened.takeSettingsResetNotice(laterReset.seq)).toBe("Main repository refused");
+  expect(first.takeSettingsResetNotice(laterReset.seq)).toBeNull();
+});
+
+it("leaves the refusal notice pending if claiming it cannot commit", () => {
+  const config = testConfig();
+  const store = new MirrorStore(config.databasePath, WORKSPACE);
+  stores.push(store);
+  store.replaceSettings(named("Hub settings"), "Workspace name refused");
+  const reset = store.settingsReset()!;
+  const db = (store as unknown as { db: DatabaseSync }).db;
+  db.setAuthorizer((action, table) => action === constants.SQLITE_INSERT && table === "meta"
+    ? constants.SQLITE_DENY : constants.SQLITE_OK);
+  try {
+    expect(() => store.takeSettingsResetNotice(reset.seq)).toThrow();
+  } finally { db.setAuthorizer(null); }
+  expect(store.takeSettingsResetNotice(reset.seq)).toBe("Workspace name refused");
+  expect(store.settingsReset()).toEqual(reset);
+  expect(readName(store)).toBe("Hub settings");
+});
+
 it("rebuilds already-open peer replicas with fresh clocks instead of merging refused updates back", () => {
   const config = testConfig();
   const first = openWorkspaceReplicas(config, { hubFree: true });
