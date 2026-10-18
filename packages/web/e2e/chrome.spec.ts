@@ -1997,7 +1997,7 @@ async function exerciseDocumentActions(browser: Browser, scheme: "light" | "dark
           await page.keyboard.press("Tab");
           await copy.focus();
           await expectFocusIndicator(copy);
-          await copy.press(key);
+          await activateCopy(page, copy, key);
           await expect(copyNotice(page, "Link copied")).toBeVisible();
           await expect(copy).toBeFocused();
           await expect(page.getByRole("menu")).toHaveCount(0);
@@ -2065,9 +2065,9 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
 }
 
 /** Wait for native dismissal before inspecting the replacement's content. */
-async function activateCopy(page: Page, control: Locator, keyboard = false): Promise<void> {
+async function activateCopy(page: Page, control: Locator, key?: "Enter" | "Space"): Promise<void> {
   const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
-  if (keyboard) await control.press("Enter");
+  if (key !== undefined) await control.press(key);
   else await control.click();
   if (previous !== undefined) {
     await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
@@ -2157,7 +2157,7 @@ for (const scheme of ["light"] as const) {
       await expect(link).toHaveAttribute("title", "Copy link");
       await activateCopy(page, link);
       await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
-      await activateCopy(page, link, true);
+      await activateCopy(page, link, "Enter");
       await expect(copyNotice(page, "Link copied")).toHaveAttribute("data-type", "success");
       expect(await copiedTexts(page)).toEqual([canonicalUrl, canonicalUrl]);
       await expect(page.locator(".ub-copied")).toHaveCount(0);
@@ -2253,7 +2253,7 @@ for (const scheme of ["light"] as const) {
     expect(await copiedTexts(waiting)).toEqual([new URL(`/${harness().workspace}/${waitingId}`, waiting.url()).href]);
     await expect(waiting.locator(".ub-copied")).toHaveCount(0);
     await clipboardMode(waiting, "failed");
-    await activateCopy(waiting, waitingCopy, true);
+    await activateCopy(waiting, waitingCopy, "Enter");
     await expect(copyNotice(waiting, "Couldn't copy the link. Select it in the address bar instead.")).toHaveAttribute("data-type", "error");
     await expect(waiting.locator("[data-sonner-toast]:not([data-removed=true])")).toHaveCount(1);
   });
