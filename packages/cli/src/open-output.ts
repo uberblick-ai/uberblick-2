@@ -19,6 +19,7 @@ interface OpenBanner {
   hubUrl: string;
   hubState: HubState | null;
   recentDevices?: RecentDevice[] | null;
+  transportProblem?: { reason: string; fix: string } | null;
 }
 
 export function openBanner(input: OpenBanner): string {
@@ -50,7 +51,10 @@ export function openBanner(input: OpenBanner): string {
   } else {
     banner += useField("workspace", `${name} (${displayWorkspaceHub(input.binding.hubUrl)})`);
   }
-  if (!input.verbose && input.signInRequired) {
+  if (input.transportProblem != null) {
+    banner += useField("hub", input.transportProblem.reason);
+    banner += useField("", `  → ${input.transportProblem.fix}`);
+  } else if (!input.verbose && input.signInRequired) {
     banner += useField("hub", "not signed in, changes stay on this machine");
     banner += useField("", "  → ub auth login");
   } else if (unreachable) {

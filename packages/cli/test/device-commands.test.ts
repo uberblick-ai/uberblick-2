@@ -25,6 +25,7 @@ async function rig(access: boolean) {
     credentials: { signingSecret: SECRET, hubLogins: { [authenticationOrigin(endpoint)]: login } },
   });
   box.env.UB_TEST_MAX_WAIT_MS = "1500";
+  box.env.UB_INSECURE_HUBS = `0.0.0.0:${hub.port}`;
   return { hub, endpoint, login, box };
 }
 function file(box: Sandbox, name: string) { return join(box.configHome, "uberblick", name); }

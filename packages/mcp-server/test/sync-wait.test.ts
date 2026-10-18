@@ -140,7 +140,7 @@ it("keeps reconnect grace after open, but ends it once a re-dial fails", async (
 });
 
 it("records only the DNS code and dialled host", async () => {
-  const instance = new HubSync(testConfig({ hubUrl: "ws://missing.invalid/ws" }), () => {}, { silent: true });
+  const instance = new HubSync(testConfig({ hubUrl: "wss://missing.invalid/ws" }), () => {}, { silent: true });
   cleanup.push(() => instance.destroy());
   await waitUntil("DNS failure", () => instance.state().cause === "dns");
   const reading = instance.state();

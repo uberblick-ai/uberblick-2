@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { type StoredHubLogin, isHubLogin, readHubLogins, replaceHubLogin } from "./auth-store.js";
 import { LockWaitTimeoutError, acquireInitLock } from "./init-lock.js";
 import { SYNC_PROTOCOL_VERSION, isProtocolVersion, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
-import { authenticationOrigin } from "./remote-url.js";
+import { authenticationOrigin, hubTransportProblem } from "./remote-url.js";
 import { publishOwnerOnly } from "./safe-write.js";
 import { credentialsPath } from "./storage.js";
 import { importCredentialKey, mintRequestProof, REQUEST_PROOF_LIFETIME_SECONDS } from "@uberblick/schema/token";
@@ -201,6 +201,9 @@ async function renew(origin: string, login: StoredHubLogin, ifWorkspacesChanged:
 export async function ensureDeviceLogin(endpoint: string, workspace: string, options: DeviceLoginOptions = {}): Promise<DeviceLoginResult> {
   const env = options.env ?? process.env;
   options.signal?.throwIfAborted();
+  const transport = hubTransportProblem(endpoint, env);
+  if (transport !== null) return { status: "hub-down", origin: authenticationOrigin(endpoint),
+    message: `${transport.reason}; ${transport.fix}`, reason: transport.reason, fix: transport.fix };
   let current = readDeviceLogin(endpoint, workspace, env);
   if (current.status !== "ready") return current;
   const origin = current.origin;

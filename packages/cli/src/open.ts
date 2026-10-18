@@ -17,7 +17,7 @@ import {
 } from "@uberblick/schema/protocol";
 import { clampToken } from "@uberblick/schema/token";
 import { WEB_CONTENT_SECURITY_POLICY } from "@uberblick/schema/web-policy";
-import { isLoopbackHost } from "@uberblick/mcp-server/remote-url";
+import { hubTransportProblem, isLoopbackHost } from "@uberblick/mcp-server/remote-url";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
 import {
   DIRECTORY_SUFFIX,
@@ -897,6 +897,10 @@ async function ensureHub(
   }
   // Preserve the scheme and explicit port for the startup eligibility check.
   const parsed = new URL(hubUrl);
+  const transport = hubTransportProblem(hubUrl, resolved);
+  if (transport !== null) {
+    return { started: null, note: `${transport.reason}; ${transport.fix}`, showNote: true };
+  }
   const workspace = trimmed(resolved.WORKSPACE_ID);
   const displayHub = isLocalHost(endpoint.host) ? hubUrl : displayWorkspaceHub(hubUrl);
   const signInRequired = workspace !== null && readDeviceLogin(hubUrl, workspace, resolved).status === "sign-in-required";
@@ -1039,6 +1043,7 @@ interface EngineMonitor {
 }
 
 function openHubSource(engine: UberblickMcpEngine, hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean) {
+  if (hubTransportProblem(hubUrl, env) !== null) return null;
   const sync = engine.replicas.sync;
   return {
     state: (): HubState => {
@@ -1056,6 +1061,7 @@ function openHubSource(engine: UberblickMcpEngine, hubUrl: string, env: NodeJS.P
 }
 
 function missingHubLogin(hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: boolean): boolean {
+  if (hubTransportProblem(hubUrl, env) !== null) return false;
   const workspace = trimmed(env.WORKSPACE_ID);
   return workspace !== null && deviceHub &&
     readDeviceLogin(hubUrl, workspace, env).status === "sign-in-required";
@@ -1063,14 +1069,13 @@ function missingHubLogin(hubUrl: string, env: NodeJS.ProcessEnv, deviceHub: bool
 
 /** Both readings share the startup connection budget, including response bodies. */
 async function openStartupReadings(
-  sync: ReturnType<typeof openHubSource> | null,
+  sync: ReturnType<typeof openHubSource>,
   connectTimeoutMs: number,
   binding: AccessBinding,
-  deviceHub: boolean,
 ) {
   return await Promise.all([
     sync === null ? null : waitForOpenHubState(sync, connectTimeoutMs),
-    !(sync?.deviceAuthenticated() ?? deviceHub) || connectTimeoutMs <= 0 ? null
+    sync === null || !sync.deviceAuthenticated() || connectTimeoutMs <= 0 ? null
       : requestRecentDevices(binding, AbortSignal.timeout(Math.floor(connectTimeoutMs))),
   ]);
 }
@@ -1381,7 +1386,7 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
   const url = servedUrl.href;
   const sync = owned.engine === null ? null : openHubSource(owned.engine, hubUrl, env, hubDeviceAuthenticated);
   const connectTimeoutMs = owned.engine?.replicas.config.connectTimeoutMs ?? 0;
-  const [hubState, recentDevices] = await openStartupReadings(sync, connectTimeoutMs, { ...projectBinding, env }, hubDeviceAuthenticated);
+  const [hubState, recentDevices] = await openStartupReadings(sync, connectTimeoutMs, { ...projectBinding, env });
   if (foreground.interrupted()) return await foreground.shutdown(0);
   const earlyFailure = owned.engineMonitor?.failure() ?? null;
   if (earlyFailure !== null) {
@@ -1389,13 +1394,14 @@ async function serveOpen(options: Options, io: Io): Promise<number> {
     return await foreground.shutdown(1);
   }
   const deviceHub = sync?.deviceAuthenticated() ?? hubDeviceAuthenticated;
+  const transport = hubTransportProblem(hubUrl, env);
   const hubSignInRequired = missingHubLogin(hubUrl, env, deviceHub);
   const unreachable = !hubSignInRequired && hubState?.status === "hub-down";
   io.out(openBanner({
     url, verbose: options.verbose, secretCreated: initial.secretCreated,
     binding: projectBinding, databasePath: owned.engine?.replicas.config.databasePath,
     hubNote, signInRequired: hubSignInRequired, showHubNote,
-    deviceHub, hubUrl, hubState, recentDevices,
+    deviceHub, hubUrl, hubState, recentDevices, transportProblem: transport,
   }));
   if (sync !== null) {
     owned.hubMonitor = monitorOpenHub(sync, displayWorkspaceHub(hubUrl), text => io.err(text), {

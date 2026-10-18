@@ -17,7 +17,7 @@ import { budget } from "./budget.js";
 import { resolveProjectBinding } from "./project-binding.js";
 import { openBrowser } from "./browser.js";
 import { type Io, shellArgument } from "./io.js";
-import { authenticationOrigin, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
+import { assertHubTransport, authenticationOrigin, hubTransportProblem, normalizeRemoteUrl } from "@uberblick/mcp-server/remote-url";
 import { SYNC_PROTOCOL_VERSION, protocolSkew, readProtocolMismatch, wrapToken } from "@uberblick/schema/protocol";
 import { manageRequest, ManagementResponseError, sanitizeManagementReply } from "./access-management.js";
 export { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
@@ -287,6 +287,8 @@ class DeviceFailure extends Error {}
 type DeviceAction = { operation: "list-devices" } | { operation: "revoke-device"; deviceId: string };
 
 async function deviceRequest(origin: string, action: DeviceAction, login: StoredHubLogin, io: Io) {
+  const transport = hubTransportProblem(origin);
+  if (transport !== null) throw new DeviceFailure(`${transport.reason}; ${transport.fix}`);
   let reply: Awaited<ReturnType<typeof manageRequest>>;
   try { reply = await manageRequest(origin, action, login); } catch (error) {
     throw new DeviceFailure(error instanceof ManagementResponseError
@@ -437,6 +439,7 @@ async function readResponse(
 }
 
 async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean> {
+  assertHubTransport(origin);
   try {
     const response = await fetch(`${origin}/auth/claim-state`, {
       method: "GET", redirect: "error",
@@ -455,6 +458,7 @@ async function isUnclaimed(origin: string, signal: AbortSignal): Promise<boolean
 
 /** Released sign-in hubs check version before the empty token, without changing state. */
 async function checkSignInProtocol(origin: string, signal: AbortSignal): Promise<void> {
+  assertHubTransport(origin);
   const response = await fetch(`${origin}/auth/credential/renew`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: wrapToken(""), redirect: "error",
@@ -479,6 +483,7 @@ async function post(
   signal: AbortSignal, timeoutMs: number,
   received?: (result: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
+  assertHubTransport(origin);
   const response = await fetch(`${origin}/auth/github/${route}`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body), redirect: "error",
@@ -703,6 +708,15 @@ export async function authCommand(argv: string[], io: Io, options: { loginNextAc
     }
     io.err(`ub auth: ${selection.guidance}\n`);
     return selection.exitCode;
+  }
+  const transport = hubTransportProblem(hub ?? selection.endpoint);
+  if (transport !== null && (hub !== undefined || sub !== "logout")) {
+    const guidance = `${transport.reason}; ${transport.fix}`;
+    if (sub === "status" && hub === undefined) {
+      return printAuthStatus(selection.origin, "binding-invalid", null, io, json, guidance);
+    }
+    io.err(`ub auth: ${guidance}\n`);
+    return hub === undefined ? 1 : 2;
   }
   if (sub === "login") {
     authField(io, "hub", selection.origin);

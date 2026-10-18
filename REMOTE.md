@@ -372,7 +372,7 @@ candidate_ub() {
   docker run --rm --interactive --name "$candidate_client-command" --network "$candidate_network" \
     --mount "type=volume,src=$candidate_client,dst=/data" \
     --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
-    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --env XDG_CACHE_HOME=/data/cache --env UB_INSECURE_HUBS=candidate-hub:1234 --workdir /data \
     --entrypoint node "$candidate_client_image" /source/packages/cli/bin/ub.mjs "$@"
 }
 candidate_mcp_launcher() {
@@ -380,7 +380,7 @@ candidate_mcp_launcher() {
   printf '%q ' docker run --rm --interactive --name "$1-mcp" --network "$candidate_network" \
     --mount "type=volume,src=$1,dst=/data" \
     --env XDG_CONFIG_HOME=/data/config --env XDG_DATA_HOME=/data/data \
-    --env XDG_CACHE_HOME=/data/cache --workdir /data \
+    --env XDG_CACHE_HOME=/data/cache --env UB_INSECURE_HUBS=candidate-hub:1234 --workdir /data \
     --entrypoint node "$candidate_client_image" /source/packages/cli/bin/ub.mjs mcp serve
   printf '\n'
 }
