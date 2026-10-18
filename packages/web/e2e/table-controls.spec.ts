@@ -132,9 +132,14 @@ async function compactTable(table: Locator): Promise<void> {
     if (wrapper === null || paragraph === null || paragraph === undefined) throw new Error("e2e: table or paragraph is absent");
     const table = element.getBoundingClientRect();
     const frame = wrapper.getBoundingClientRect();
-    return { right: Math.min(table.right, frame.right), frameRight: frame.right, paragraphRight: paragraph.getBoundingClientRect().right, top: table.top, frameTop: frame.top };
+    const text = paragraph.getBoundingClientRect();
+    return { left: table.left, right: table.right, frameLeft: frame.left, frameRight: frame.right,
+      paragraphLeft: text.left, paragraphRight: text.right, top: table.top, frameTop: frame.top };
   });
-  expect(Math.abs(geometry.right - geometry.paragraphRight)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.left - geometry.paragraphLeft)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.frameLeft - geometry.paragraphLeft)).toBeLessThanOrEqual(1);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.paragraphRight + 1);
+  expect(geometry.right).toBeGreaterThan(geometry.left);
   expect(Math.abs(geometry.frameRight - geometry.paragraphRight)).toBeLessThanOrEqual(1);
   expect(Math.abs(geometry.top - geometry.frameTop)).toBeLessThanOrEqual(1);
 }

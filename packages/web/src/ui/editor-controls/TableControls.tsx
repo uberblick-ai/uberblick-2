@@ -198,7 +198,7 @@ function TableControlSurface({ tableId, editor, host }: {
       }
       const base = frame.getBoundingClientRect();
       const box = wrapper.getBoundingClientRect();
-      const width = box.width;
+      const width = Math.min(box.width, table.getBoundingClientRect().width);
       const header = table.rows[0];
       const cells = Array.from(header?.cells ?? []);
       const first = cells[0];
