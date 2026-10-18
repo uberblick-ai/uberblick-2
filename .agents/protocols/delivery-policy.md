@@ -135,7 +135,8 @@ validation and merge gates remain unchanged.
   or break in persisted-data compatibility; a change to CRDT or concurrency
   semantics; a change to decided architecture or to guarantees defined by
   their owning corpus documents; a new *runtime* dependency, subject to the
-  web UI exception below; auth or token semantics; overruling a major reviewer
+  web UI exception below; auth or token semantics; any change to
+  `SYNC_PROTOCOL_VERSION`; overruling a major reviewer
   finding; a process change that alters
   authority, eligibility, merge or approval rules, or destructive automation;
   and a diff that adds or changes the user-facing command surface — new
@@ -163,6 +164,11 @@ that shape, its conforming fix-ups and non-rewriting synchronization with the
 base. A tier-3 trigger that fired only in implementation is outside it unless
 the answer named it, and so is later work that materially expands the design
 or scope: escalate again, naming the difference.
+
+A `SYNC_PROTOCOL_VERSION` change is covered only by a maintainer's comment that
+names the version change and approves it (owner decision, 2026-10-18). Issue or
+PR body text does not cover it, even when filed on a maintainer's behalf, and
+neither does an answer that covers the shape without naming the version.
 
 ### Library and custom-mechanism choices
 
