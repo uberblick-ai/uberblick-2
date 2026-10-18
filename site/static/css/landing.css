@@ -1,23 +1,39 @@
-/* Landing page: one reading column, questions as headings, figures that break the column. */
-.hero { padding: 56px 0 24px; display: grid; grid-template-columns: minmax(0, var(--measure)); gap: 18px; }
-.hero h1 { font-size: 44px; line-height: 50px; }
-.hero .lede { font-size: 18px; line-height: 29px; color: var(--prose); }
-.col { max-width: var(--measure); display: flex; flex-direction: column; gap: 18px; }
-.wide { margin: 10px 0 18px; }
-.q { padding-top: 34px; display: flex; flex-direction: column; gap: 14px; }
-.q h2 { font: 500 26px/32px var(--font-display); }
-.col ul { margin: 0; padding-left: 1.2em; color: var(--prose); display: flex; flex-direction: column; gap: 4px; }
-.decision .body { padding: 14px 16px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
-.decision .body h3 { font: 500 20px/26px var(--font-display); }
-.decision .answer { padding-left: 12px; border-left: 2px solid var(--fg); color: var(--fg); }
-.decision .links { display: flex; flex-wrap: wrap; gap: 8px 14px; font: 400 13px/18px var(--font-sans); color: var(--muted); }
-.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-.capx { display: inline-flex; gap: 4px; }
-@media (max-width: 700px) { .hero { padding-top: 32px; } .hero h1 { font-size: 32px; line-height: 38px; } .q h2 { font-size: 23px; line-height: 29px; } }
+/* Landing page: the demo frame, the terminal and the parts only this page has. */
+/* Geist 1.7.2 and Fraunces v38, the web app's own files (packages/web/src/assets/fonts),
+   SIL Open Font License 1.1: see /fonts/LICENSE-Geist.txt and /fonts/LICENSE-Fraunces.txt.
+   Only the demo frame uses them, because it shows the editor as it is. */
+@font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+/* Fraunces needs all three unicode subsets; declaration order decides which serves the combining marks they share. */
+@font-face { font-family: "Fraunces"; src: url("/fonts/Fraunces-Variable-vietnamese.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap;
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB; }
+@font-face { font-family: "Fraunces"; src: url("/fonts/Fraunces-Variable-latin-ext.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Fraunces"; src: url("/fonts/Fraunces-Variable-latin.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 
+/* The frame shows the web app, so it carries the app's own tokens (packages/web/src/ui/styles.css),
+   not the site's. Everything inside it reads these. */
+.frame {
+  --bg: oklch(0.96 0.008 75); --fg: oklch(0.145 0 0); --prose: oklch(0.3 0 0); --muted: oklch(0.511 0 0);
+  --card: oklch(0.97 0.005 75); --sidebar: oklch(0.94 0.01 65); --sidebar-selected: oklch(0.89 0.015 65);
+  --border: oklch(0.922 0 0); --rule: oklch(0.88 0.006 65); --brand: oklch(0.75 0.15 65); --bar-chart: oklch(0.6 0.13 240);
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --radius: 0.625rem; --radius-sm: calc(var(--radius) - 4px);
+  color: var(--fg); font-family: var(--font-sans);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .frame {
+  --bg: oklch(0.145 0 0); --fg: oklch(0.985 0 0); --prose: oklch(0.92 0 0); --muted: oklch(0.708 0 0);
+  --card: oklch(0.205 0 0); --sidebar: oklch(0.22 0.01 65); --sidebar-selected: oklch(0.28 0.015 65);
+  --border: oklch(1 0 0 / 10%); --rule: oklch(1 0 0 / 12%); --brand: oklch(0.8 0.18 65); --bar-chart: oklch(0.72 0.12 240); } }
+:root[data-theme="dark"] .frame {
+  --bg: oklch(0.145 0 0); --fg: oklch(0.985 0 0); --prose: oklch(0.92 0 0); --muted: oklch(0.708 0 0);
+  --card: oklch(0.205 0 0); --sidebar: oklch(0.22 0.01 65); --sidebar-selected: oklch(0.28 0.015 65);
+  --border: oklch(1 0 0 / 10%); --rule: oklch(1 0 0 / 12%); --brand: oklch(0.8 0.18 65); --bar-chart: oklch(0.72 0.12 240); }
 
 /* Demo frame: the web UI's shell at reduced scale. Sidebar, document pane, contents and comments rail. */
-.frame { margin: 8px 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; box-shadow: 0 18px 40px oklch(0 0 0 / 8%); font-size: 14px; line-height: 21px; }
+.frame { margin: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); overflow: hidden; box-shadow: 0 18px 40px oklch(0 0 0 / 8%); font-size: 14px; line-height: 21px; }
 .fbar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--sidebar); font: 400 12px/16px var(--font-sans); color: var(--muted); }
 .fdots { display: inline-flex; gap: 5px; } .fdots i { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); }
 .furl { flex: 1; text-align: center; }
@@ -26,7 +42,6 @@
 .fbody { display: grid; grid-template-columns: 13rem minmax(0, 1fr) 13rem; min-height: 400px; }
 .fside { background: var(--sidebar); border-right: 1px solid var(--border); padding: 14px 10px; display: flex; flex-direction: column; gap: 14px; font: 400 13px/18px var(--font-sans); }
 .fws { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; } .fws span:last-child { font-weight: 500; }
-.small-brand { font-size: 15px; line-height: 18px; }
 .fgroup { display: flex; flex-direction: column; gap: 1px; }
 .flabel { font: 400 11px/16px var(--font-sans); color: var(--muted); padding: 0 8px 4px; }
 .fgroup .frow, .ffoot .frow { display: block; padding: 4px 8px; border-radius: var(--radius-sm); color: var(--fg); position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -83,57 +98,14 @@ mark.sel { background: oklch(0.85 0.12 75 / 55%); color: inherit; border-radius:
 .fcomment.resolved { transition: opacity .45s, transform .45s; opacity: 0; transform: translateY(-4px); }
 @media (prefers-reduced-motion: reduce) { .fcomment.resolved { transition: none; } }
 
-.mini svg .pie-a { fill: oklch(0.6 0.13 240 / 35%); }
-.mini svg .pie-b { fill: var(--bar-chart); }
-.mini svg .pie-c { fill: oklch(0.6 0.13 240 / 65%); }
-.mini svg .f1 { fill: oklch(0.65 0.2 25); } .mini svg .f2 { fill: oklch(0.7 0.17 300); } .mini svg .f3 { fill: oklch(0.8 0.15 145); } .mini svg .f4 { fill: oklch(0.7 0.17 30); } .mini svg .f5 { fill: oklch(0.7 0.15 230); }
-.mini svg .shot { fill: var(--sidebar); stroke: var(--rule); stroke-width: 1; }
-.mini svg .sb { fill: var(--rule); }
-.mini svg .wf { fill: none; stroke: var(--fg); stroke-width: 1; opacity: .6; }
-.mini svg .wl { stroke: var(--fg); stroke-width: 1; opacity: .6; }
-.mini svg .wb { fill: var(--muted); opacity: .55; }
-.mini svg .wbtn { fill: none; stroke: var(--fg); stroke-width: 1; opacity: .6; }
+/* The frame is the only place on the page with the brand mark and the app's block frame. */
+.frame .brand { display: inline-flex; align-items: baseline; gap: 2px; font: 500 15px/18px var(--font-display); color: var(--fg); }
+.frame .brand i { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); display: inline-block; align-self: center; }
+.frame .block { border-color: var(--border); background: var(--card); border-radius: var(--radius); margin: 0; }
+.frame .block .cap { font: 400 12px/16px var(--font-sans); border-color: var(--border); }
+.frame p { margin: 0; max-width: none; }
+.frame h2 { margin: 0; }
 
-/* Block gallery: eight miniature blocks, each with its margin colour. */
-.gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.mini { margin: 0; display: flex; flex-direction: column; gap: 6px; }
-.mini .art { position: relative; height: 72px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); overflow: hidden; padding: 12px 12px 12px 16px; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
-.mini .art::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--bar); }
-.mini figcaption { font: 400 13px/18px var(--font-sans); color: var(--muted); }
-.mini .art i { display: block; height: 5px; border-radius: 3px; background: var(--rule); }
-.mini .art.code i:nth-child(1) { background: oklch(0.55 0.13 305 / 70%); }
-.mini .art.code i:nth-child(3) { background: oklch(0.5 0.1 145 / 70%); }
-.mini .art.term { background: var(--term-screen); border-color: oklch(1 0 0 / 10%); font: 400 10px/14px var(--font-mono); color: var(--term-ink); gap: 1px; }
-.mini .art.term span:first-child::first-letter, .mini .art.term .cur { color: var(--term-green); }
-.mini .art.term .o { color: var(--term-muted); }
-.mini .art.term em { display: inline-block; width: 6px; height: 11px; background: var(--term-green); vertical-align: -2px; animation: blink 1s steps(2) infinite; }
-@keyframes blink { to { opacity: 0; } }
-.mini .art.quote { padding-left: 24px; }
-.mini .art.quote::after { content: ""; position: absolute; left: 14px; top: 16px; bottom: 16px; width: 2px; background: var(--bar); }
-.mini .art.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; align-content: center; }
-.mini .art.grid i { height: 12px; border-radius: 2px; background: var(--sidebar); }
-.mini .art.grid i:nth-child(-n+3) { background: oklch(0.6 0.13 240 / 35%); }
-.mini .art.rules { gap: 0; }
-.mini .art.rules i { height: 0; border-top: 1px solid var(--rule); border-radius: 0; background: none; margin: 6px 0; }
-.mini .art.rules i:first-child { border-top-width: 2px; }
-.mini .art.list i { position: relative; margin-left: 12px; }
-.mini .art.list i::before { content: ""; position: absolute; left: -12px; top: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); }
-.mini svg { width: 100%; height: 48px; }
-.mini svg rect { fill: var(--sidebar); stroke: var(--bar); stroke-width: 1; }
-.mini svg .ln { fill: none; stroke: var(--bar); stroke-width: 1.5; }
-.mini svg .ax { stroke: var(--rule); stroke-width: 1; }
-.mini svg .gr { stroke: var(--rule); stroke-width: 1; stroke-dasharray: 2 3; }
-.mini svg .pt { fill: var(--bar); }
-@media (max-width: 700px) { .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); } .meta { flex-direction: column; align-items: flex-start; gap: 4px; } }
-@media (prefers-reduced-motion: reduce) { .mini .art.term em { animation: none; } }
-
-.cases, .doclinks { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.cases a, .doclinks a { display: flex; flex-direction: column; gap: 4px; text-decoration: none; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); }
-.cases .t, .doclinks .t { font: 500 16px/22px var(--font-sans); color: var(--fg); }
-.cases .d, .doclinks .d { font: 400 14px/21px var(--font-sans); color: var(--prose); }
-.doclinks a { padding: 10px 14px; }
-.cases a:hover, .doclinks a:hover { border-color: var(--muted); }
-.doclinks .t { font-size: 15px; }
-.doclinks .d { font-size: 13px; line-height: 18px; color: var(--muted); }
-.mini .art.decision b { display: block; height: 7px; width: 60%; border-radius: 3px; background: var(--fg); opacity: .6; }
-@media (max-width: 700px) { .cases, .doclinks { grid-template-columns: 1fr; } }
+/* Terminal replay. */
+#term { min-height: 198px; }
+.blk .block { margin: 0; }

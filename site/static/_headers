@@ -1,4 +1,4 @@
-# Cloudflare Pages headers. agents.uberblick.ai and skills.uberblick.ai load
+# Cloudflare Pages headers. agents.uberblick.ai and skills.uberblick.ai may load
 # the shared stylesheet and the fonts from here, and a browser fetches fonts
 # with CORS, so these files allow any origin. They change rarely; the fonts
 # never, so they are cached for a year.

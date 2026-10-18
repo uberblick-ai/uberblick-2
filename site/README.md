@@ -11,17 +11,23 @@ python3 -m http.server 8000 --directory site/out  # then open http://127.0.0.1:8
 ```
 
 - `pages/<path>.html` is the page served at `/<path>`: a `<head>` block with
-  the title, description and the page's own stylesheet, then the body.
-  `pages/index.html` is `/`; `pages/404.html` is the not-found page.
-- `static/` is copied as it is: `shared.css` (tokens, fonts, the block frame,
-  shared by the sibling sites), `css/` (one stylesheet per page kind), `fonts/`
-  (the web app's Geist and Fraunces files with their licences) and `_headers`.
+  the title, description and the page's own stylesheet, then the page's main
+  content. The build adds the shell every page shares (top bar with the newest
+  release tag, the docs sidebar, the "Who builds this" footer); the sidebar
+  links and the footer text live in `build.py`. `pages/index.html` is `/`;
+  `pages/404.html` is the not-found page.
+- `static/` is copied as it is: `shared.css` (the look the site shares with
+  agents.uberblick.ai and skills.uberblick.ai: IBM Plex from Google Fonts, the
+  violet accent, the shell, the block frame), `css/` (one stylesheet per page
+  kind), `fonts/` (the web app's Geist and Fraunces files with their licences,
+  used only by the landing page's demo frame, which shows the editor as it is)
+  and `_headers`.
 - Links are root-relative, so serve the output rather than opening the files.
   The build lists links to pages that are not written yet.
 
-agents.uberblick.ai and skills.uberblick.ai link `https://uberblick.ai/shared.css`
-and keep only their own overrides and navigation, so the three sites read as
-one.
+The three sites share one layout and one footer text; agents.uberblick.ai and
+skills.uberblick.ai carry their own copies of the stylesheet until they switch
+to linking this one.
 
 ## Deploying
 

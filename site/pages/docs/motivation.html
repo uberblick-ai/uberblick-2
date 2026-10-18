@@ -1,0 +1,38 @@
+<head>
+<title>Motivation · Uberblick docs</title>
+<meta name="description" content="Why Uberblick, ub-agents, the skills and the small libraries beside them exist: one team's answer to running software teams of people and coding agents on GitHub alone.">
+<link rel="stylesheet" href="/css/sub.css">
+</head>
+<div class="hero sub">
+  <p class="crumb"><a href="/">Uberblick</a> / Docs / Start</p>
+  <h1>Motivation</h1>
+  <p class="lede">Uberblick, ub-agents, the skills and the small libraries beside them come from one team in Berlin running its own software with coding agents. Each exists because something in that work kept hurting. This page says what, once, so the other pages don't have to.</p>
+</div>
+<article class="col">
+  <section class="q" id="premise"><h2>The premise</h2>
+  <p>A software team now has people and coding agents working in the same codebase. The agents are capable, but they are only as good as the context they get: what the product should do, what was decided and why, what the numbers say. That context is scattered across Notion, Linear, Jira, chat and stale Markdown, and no agent reads all of it.</p>
+  <p>Our bet is that one place is enough, and that GitHub is already it: issues, pull requests, labels and Actions are where the work happens, and every agent can read and write them today. What GitHub lacks is a home for the reasoning and the records. That is what we build, and we build it so a team can run on GitHub alone, with nothing else to keep in sync.</p>
+  </section>
+
+  <section class="q" id="uberblick"><h2>Uberblick</h2>
+  <p>The docs folder is where context goes to die: nobody reads it, so nobody keeps it true. Uberblick is a workspace of documents that both people and agents edit, so the plan, the decision and the delivery report stay where the work is. It is local first because the documents belong on the team's own computers, and MCP first because an agent should get the same documents, through the same tools, as a person in the browser.</p>
+  <p>Decisions are records rather than paragraphs, so an agent can ask which decisions touch the issue it is working on before it changes anything. Numbers live inside the document that explains them, so a chart is the data, not a screenshot of it. A hub, one Docker container, syncs a workspace to the people you share with. <a href="/">Start here</a>.</p>
+  </section>
+
+  <section class="q" id="ub-agents"><h2>ub-agents</h2>
+  <p>Once agents can read the context, somebody has to hand them the work. Doing that by hand, issue by issue, is the new bottleneck. <a href="https://agents.uberblick.ai">ub-agents</a> is a loop engineering framework for GitHub: roles defined in a few lines of YAML, driven by labels, so issues get prepared, implemented, reviewed and merged by agents, and a person steps in only where a label says so. It runs on GitHub Actions with any agent and no server, because the loop should live where the issues live.</p>
+  <p>Uberblick is built this way. Its product intent sits in an Uberblick workspace, and the loop's agents read it over MCP before they prepare, implement or review an issue.</p>
+  </section>
+
+  <section class="q" id="skills"><h2>Skills</h2>
+  <p>A loop that needs a person for every item isn't a loop. The evidence of how it did is already on GitHub, in claims, outcomes, retries and retrospectives, but reading it by hand takes longer than the runs did. <a href="https://skills.uberblick.ai">The skills</a> read it for you: they report what the loop delivered, what it cost, what it is waiting on, and propose the smallest change that fixes it, usually by removing scope or text rather than adding another rule. They follow the Agent Skills specification, so they work in Claude Code, Codex and the other agents that support it.</p>
+  </section>
+
+  <section class="q" id="libraries"><h2>The small libraries: ablauf and wireframe</h2>
+  <p>Some things a team needs to say are drawings: how a flow runs, what a screen looks like. The diagram formats we tried were either too hard for an agent to write without breaking them or too hard for a person to read as text. <b>ablauf</b> is a small text format for flow diagrams that an agent can write and a person can read in the source; it replaces Mermaid in Uberblick. <b>wireframe</b> aims at the same for screen sketches, starting from the ASCII sketches people already draw in issues. Both are early, and both exist to keep drawings inside the document, next to the words.</p>
+  </section>
+
+  <section class="q" id="variant"><h2>Build your own variant</h2>
+  <p>None of this is meant as the one right answer. It is what held up for one team, released as a framework and a few products under the MIT license so you can take the parts that fit and change the rest. The repositories are on <a href="https://github.com/uberblick-ai">GitHub</a>.</p>
+  </section>
+</article>
