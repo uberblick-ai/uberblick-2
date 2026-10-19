@@ -18,6 +18,7 @@ import type { Mark, Schema } from "@tiptap/pm/model";
 import type { MarkView, ViewMutationRecord } from "@tiptap/pm/view";
 import type * as Y from "yjs";
 import { singleLine } from "./table-text.js";
+import { inlineIconAnchorLabel } from "../inline-icons.js";
 import {
   decisionTopicArchived,
   canonicalDocumentUuid,
@@ -212,6 +213,21 @@ function paintDocLink(
  * so availability changes need this subscription and its teardown.
  */
 function docLinkMarkViews(context: DocLinkContext): Plugin {
+  const anchors = new Set<HTMLAnchorElement>();
+  const repaint = (): void => {
+    for (const anchor of anchors) {
+      const label = inlineIconAnchorLabel(anchor);
+      if (label) anchor.setAttribute("aria-label", label);
+      else anchor.removeAttribute("aria-label");
+      if (label === "") {
+        anchor.setAttribute("aria-hidden", "true");
+        anchor.tabIndex = -1;
+      } else {
+        anchor.removeAttribute("aria-hidden");
+        anchor.removeAttribute("tabindex");
+      }
+    }
+  };
   return new Plugin({
     props: {
       markViews: {
@@ -226,17 +242,19 @@ function docLinkMarkViews(context: DocLinkContext): Plugin {
           }
           const paint = (): void => paintDocLink(dom, docId, context);
           paint();
+          anchors.add(dom);
           const unsubscribe = context.subscribe(paint);
           return {
             dom,
             // Ignore presentation attribute mutations so repaint cannot become an edit.
             ignoreMutation: (mutation: ViewMutationRecord) =>
               mutation.type === "attributes",
-            destroy: unsubscribe,
+            destroy: () => { anchors.delete(dom); unsubscribe(); },
           };
         },
       },
     },
+    view: () => { repaint(); return { update: repaint }; },
   });
 }
 

@@ -1,5 +1,5 @@
 /** Built-in product concepts. No workspace content or replica state enters these pages. */
-import { BLOCK_TYPES, DATA_LIMITS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
+import { BLOCK_TYPES, DATA_LIMITS, INLINE_ICONS, MAX_DESCRIPTION_LENGTH, MAX_TLDR_LENGTH } from "@uberblick/schema";
 import { GUIDANCE_INSTRUCTIONS } from "./briefing.js";
 import { FAILURE_INSTRUCTIONS } from "./failures.js";
 import { TLDR_AFTER_CONTENT_CHANGE } from "./tools/descriptions.js";
@@ -144,6 +144,12 @@ A \`\`\`\` \`\`\`wireframe \`\`\`\` fence is an ordinary code block that the web
 
 Prose supports \`**bold**\`, \`*italic*\`, \`~~strikethrough~~\`, inline code, \`[label](https://example.com)\` and \`[label](document-uuid)\` document links. Underscore emphasis (\`__bold__\` and \`_italic_\`) is also read; export uses asterisks. Source blocks keep literal text. Tables read inline Markdown inside cells and escape literal punctuation and pipes. Alignment markers are accepted but not stored. Table rows are projected to the widest row with virtual empty padding.
 
+### Inline icons
+
+Write \`:name:\` to show a curated icon in the web app. Available names are ${Object.keys(INLINE_ICONS).map((name) => `\`:${name}:\``).join(", ")}. Names use lowercase kebab case. Icons use the surrounding text's size and color in paragraphs, headings, list items, quotes, table cells, all four card prose parts, Figma captions and card button labels. For example, \`button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)\` shows the Claude mark beside its label.
+
+Unknown names such as \`:rocket:\` stay literal, unchanged text, as do \`10:30:15\` and \`note:this:\`. Inline code and code, terminal and chart source never render icons; use inline code to show a known name literally. Stored text, MCP reads and writes, search, decision approval and Markdown import/export keep the literal \`:name:\` source. This is presentation only, without an icon node or mark; MCP does not validate icon names.
+
 ## Cards
 
 A card holds prose in four parts: optional label, required title, optional body and optional footer, plus any number of link buttons. Its container opens with a line exactly \`:::card\` and closes with a line exactly \`:::\`; separate adjacent cards with blank lines. This is a Markdown container, distinct from literal code, terminal and chart source fences.
@@ -160,7 +166,7 @@ The header uses lowercase \`label:\`, \`title:\`, \`footer:\` and \`button:\` ke
     The body supports prose and inline code.
     :::
 
-Each \`button: [Text](destination)\` value has exactly one link with nonempty plain text: no formatting, document links or comments in its text. Its destination is an \`https://\` URL or exactly \`claude://code/new\`, \`claude-cli://open\` or \`codex://new\`, alone or followed by \`?\` and an opaque query. After the link, at most one style word (\`outline\` or \`filled\`) and at most one color word (\`neutral\`, \`blue\`, \`green\` or \`violet\`) are accepted in either order, with no other text. Defaults are \`outline neutral\`. Other destinations, including other routes of those app schemes, are invalid. Ordinary inline links still accept only http(s). Buttons show their author's text as written in a compact, right-aligned group below the footer; content-sized buttons wrap onto further right-aligned rows. An https button opens a new tab without opener or referrer; an app button opens its route without leaving the document or opening a blank tab.
+Each \`button: [Text](destination)\` value has exactly one link with nonempty plain text: no formatting, document links or comments in its text. Inline icon source such as \`:claude:\` is plain text and renders as its icon. Its destination is an \`https://\` URL or exactly \`claude://code/new\`, \`claude-cli://open\` or \`codex://new\`, alone or followed by \`?\` and an opaque query. After the link, at most one style word (\`outline\` or \`filled\`) and at most one color word (\`neutral\`, \`blue\`, \`green\` or \`violet\`) are accepted in either order, with no other text. Defaults are \`outline neutral\`. Other destinations, including other routes of those app schemes, are invalid. Ordinary inline links still accept only http(s). Buttons show their author's label with inline icons in a compact, right-aligned group below the footer; content-sized buttons wrap onto further right-aligned rows. An https button opens a new tab without opener or referrer; an app button opens its route without leaving the document or opening a blank tab.
 
 Export and get_doc order label, title, footer, then every button in authored order. Button output writes style before color and omits \`outline\` and \`neutral\`; import restores the same buttons and appearances. Empty prose keys are omitted and prose header-value newlines fold to spaces. Export escapes any prose or body line starting \`:::\` with a backslash; import restores the literal text. A missing or empty title, invalid button, unknown key, duplicate prose key or non-key header line is invalid. MCP refuses invalid cards with \`invalid_card\` before writing; import keeps an invalid container as plain paragraphs, including its delimiters. Emptying the title in the web editor therefore makes its later export invalid on import.
 

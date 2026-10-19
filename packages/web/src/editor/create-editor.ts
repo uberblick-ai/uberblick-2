@@ -16,6 +16,7 @@ import { DocLinks } from "./doc-links.js";
 import type { DocLinkContext } from "./doc-links.js";
 import { ExternalLinks } from "./external-links.js";
 import { GitHubLinks } from "./github-links.js";
+import { InlineIcons } from "./inline-icons.js";
 import { BlockInputRules } from "./input-rules.js";
 import { ListBlocks } from "./list-keys.js";
 import { ChartBlock, paletteExtensions } from "./nodes.js";
@@ -100,6 +101,7 @@ export function createUberblickEditor(options: CreateEditorOptions): Editor {
     DocLinks.configure({ context: options.docLinks ?? null }),
     ExternalLinks,
     GitHubLinks.configure({ settings: options.workspaceSettings ?? null }),
+    InlineIcons,
     // Read resolved state from annotations rather than duplicating it in marks.
     CommentAnchors.configure({ ydoc: options.fragment.doc }),
     Collaboration.configure({
