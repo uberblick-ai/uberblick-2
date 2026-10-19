@@ -99,6 +99,7 @@ import {
   useDocMeta,
   useHubEndpoint,
   useIdentity,
+  useLocalSessionMissing,
   usePresence,
   useTitlePresence,
   useRoom,
@@ -119,6 +120,23 @@ const REPLICA_UNAVAILABLE_DETAIL = {
   "replica-quarantined": "This workspace’s replica is quarantined. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
   "replica-failed": "This workspace’s replica could not be served. Run ub doctor in a project bound to this workspace and follow its recovery steps.",
 };
+
+/** ub open admits a browser only through the address it printed. */
+function LocalSessionNotice(): ReactElement {
+  return (
+    <PaneNotice>
+      <section className="mx-auto w-full max-w-xl p-6 text-(--foreground)" aria-label="Connect this page">
+        <div role="status">
+          <h1 className="m-0 ub-type-h2 font-semibold">This page is not connected to ub open</h1>
+          <p className="mt-3">
+            Open the address <code>ub open</code> printed in your terminal to connect this
+            browser to it.
+          </p>
+        </div>
+      </section>
+    </PaneNotice>
+  );
+}
 
 /** The frozen serving process is still useful; this notice only names its binding. */
 export function ReboundNotice({
@@ -381,6 +399,7 @@ export function App(): ReactElement {
   const workspaceUuid = workspace?.uuid ?? null;
   const serving = hubReady && workspaceUuid !== null ? localServing(workspaceUuid) : null;
   const remoteSignIn = hubReady && browserSignInRequired();
+  const sessionMissing = useLocalSessionMissing(hubReady && servedWorkspaceNames() !== null);
   const roomReady = hubReady && !remoteSignIn;
   /** Which hub the room providers dial. */
   const endpoint = hubReady ? hubEndpoint() : null;
@@ -1014,6 +1033,13 @@ export function App(): ReactElement {
     return (
       <main className="ub-app">
         <RemoteHubGuide />
+      </main>
+    );
+  }
+  if (sessionMissing) {
+    return (
+      <main className="ub-app">
+        <LocalSessionNotice />
       </main>
     );
   }

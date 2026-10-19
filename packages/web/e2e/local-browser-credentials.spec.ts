@@ -90,8 +90,8 @@ test("local-only edits survive a restart and reach the hub after authentication 
     await expect(page.locator(".ub-status")).toHaveAttribute("data-upstream-sync", "offline");
     const localGeometry = await statusGeometry(page);
 
-    // This page retains its original imported browser key on another local-only
-    // boot, as well as across both authentication transitions below.
+    // This page keeps its ub open session on another local-only boot, as well
+    // as across both authentication transitions below.
     await harness().restartOpen({ authenticated: false });
     await waitForAcknowledged(page, { path: "relay" });
     await expect(saved).not.toBeVisible();

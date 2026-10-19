@@ -161,7 +161,7 @@ describe("ub open: sharing through the upstream hub", () => {
     try {
       expect(requested).toBe(true);
       expect(Date.now() - started).toBeLessThan(5_000);
-      expect(app.stdout()).toBe(`web        ${app.url}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`);
+      expect(app.stdout()).toBe(`web        ${app.printed}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`);
       expect(app.stderr()).toBe("");
       expect(readFileSync(credentialsPath, "utf8")).toBe(credentialsBefore);
       expect((await get(app.url)).status).toBe(200);
@@ -241,7 +241,7 @@ describe("ub open: sharing through the upstream hub", () => {
     const app = await open(box, ["--port", String(await freePort())], { ...env, NODE_NO_WARNINGS: "1" });
     try {
       expect(app.stdout()).toBe(
-        `web        ${app.url}\n` +
+        `web        ${app.printed}\n` +
         `workspace  Product intent (${origin})\n` +
         "hub        unreachable, changes stay on this machine until it is back\n\n" +
         "Ctrl-C to stop.\n",
@@ -313,7 +313,7 @@ describe("ub open: sharing through the upstream hub", () => {
     });
     try {
       expect(app.stdout()).toBe(
-        `web        ${app.url}\n` +
+        `web        ${app.printed}\n` +
         `workspace  ${WORKSPACE} (${origin}/custom-proxy-path)\n` +
         "hub        not signed in, changes stay on this machine\n" +
         "             → ub auth login\n" +
@@ -367,7 +367,7 @@ describe("ub open: sharing through the upstream hub", () => {
     let app = await open(box, ["--port", String(webPort)], env);
 
     expect(app.stdout()).toBe(
-      `web        ${app.url}\n` +
+      `web        ${app.printed}\n` +
       `workspace  ${WORKSPACE} (${origin})\n` +
       "hub        not signed in, changes stay on this machine\n" +
       "             → ub auth login\n" +
@@ -429,7 +429,7 @@ describe("ub open: sharing through the upstream hub", () => {
       expect((await app.interrupt()).status).toBe(0);
       app = await open(box, ["--port", String(webPort)], env);
       expect(app.stdout()).toBe(
-        `web        ${app.url}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`,
+        `web        ${app.printed}\nworkspace  ${WORKSPACE} (${origin})\n\nCtrl-C to stop.\n`,
       );
       await waitUntil("restart resumes stored login", async () => (await status()).caughtUp);
       expect(localBrowserKey(WORKSPACE, box.env)).toBe(localKey);
@@ -467,7 +467,7 @@ describe("ub open: sharing through the upstream hub", () => {
     let app = await open(box, ["--port", String(webPort)], env);
 
     expect(app.stdout()).toBe(
-      `web        ${app.url}\n` +
+      `web        ${app.printed}\n` +
       `workspace  ${WORKSPACE} (https://first.example.ts.net)\n` +
       "hub        not signed in, changes stay on this machine\n" +
       "             → ub auth login\n" +
@@ -630,8 +630,7 @@ describe("ub open: sharing through the upstream hub", () => {
         const hub = await startHub(box);
         const hubUrl = `ws://127.0.0.1:${hub.port}`;
         writeCredentials(box, SECRET);
-        expect(await (await get(`${app.url}uberblick-config.json`)).json())
-          .toMatchObject({ hubAuthToken: key });
+        expect(await (await get(`${app.url}uberblick-config.json`)).text()).not.toContain(key);
         expect((await app.interrupt()).status).toBe(0);
         const moved = await runUbAsync(["workspace", "use", `${hubUrl}/${WORKSPACE}`], box, env);
         expect(moved.status, moved.output).toBe(0);
@@ -660,7 +659,7 @@ describe("ub open: sharing through the upstream hub", () => {
         // The still-open local providers keep their original key after losing hub auth too.
         rmSync(join(configDir(box), "credentials.json"));
         expect(await (await get(`${app.url}uberblick-config.json`)).json())
-          .toMatchObject({ hubAuthToken: key, rebound: true });
+          .toMatchObject({ hubAuthToken: "", rebound: true });
         expect((await app.interrupt()).status).toBe(0);
         app = await open(box, ["--port", String(webPort)], env);
         await waitUntil("the same browser room to resume local-only after restart", () =>

@@ -370,7 +370,6 @@ describe("credential admission on a composed server", () => {
       { token: await credentialToken(laptop, WORKSPACE, { kid: randomUUID() }), room: testRoom(), cause: "unknown-credential" },
       { token: await credentialToken(revoked), room: testRoom(), cause: "revoked-credential" },
       { token: "not-a-token", room: testRoom(), cause: "unparseable" },
-      { token: await credentialToken(laptop), room: "not-a-room", cause: "workspace-mismatch" },
     ];
     for (const vector of vectors) {
       const client = connect({ port: rig.port, room: vector.room, token: vector.token });

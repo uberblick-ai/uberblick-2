@@ -29,7 +29,7 @@ afterEach(cleanUp);
 
 interface BrowserConfig {
   workspaces: string[];
-  servedWorkspaces: Record<string, { name: string | null; browserKey: string; remoteHubUrl: string | null }>;
+  servedWorkspaces: Record<string, { name: string | null; remoteHubUrl: string | null }>;
 }
 
 async function config(app: Running): Promise<BrowserConfig> {
@@ -153,10 +153,10 @@ describe("ub open: this machine's workspaces", () => {
       const document = await config(app);
       expect(document.workspaces).toEqual([WORKSPACE, UNKNOWN, SECOND, LOCAL]);
       expect(document.servedWorkspaces).toEqual({
-        [WORKSPACE]: { name: null, browserKey: localBrowserKey(WORKSPACE, box.env), remoteHubUrl: FIRST_REMOTE },
-        [UNKNOWN]: { name: null, browserKey: localBrowserKey(UNKNOWN, box.env), remoteHubUrl: null },
-        [SECOND]: { name: null, browserKey: localBrowserKey(SECOND, box.env), remoteHubUrl: secondaryHub },
-        [LOCAL]: { name: null, browserKey: localBrowserKey(LOCAL, box.env), remoteHubUrl: null },
+        [WORKSPACE]: { name: null, remoteHubUrl: FIRST_REMOTE },
+        [UNKNOWN]: { name: null, remoteHubUrl: null },
+        [SECOND]: { name: null, remoteHubUrl: secondaryHub },
+        [LOCAL]: { name: null, remoteHubUrl: null },
       });
       const selected = await browser(app, box, SECOND, directoryRoom(SECOND));
       const local = await browser(app, box, LOCAL, directoryRoom(LOCAL));

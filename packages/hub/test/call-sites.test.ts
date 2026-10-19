@@ -49,6 +49,7 @@ describe("production token minting sites", () => {
   it("are exactly the files these lists name", () => {
     // Root-secret room tokens: the shared local secret (see token.ts).
     expect(mentioning("mintToken(")).toEqual([
+      "packages/cli/src/open-session.ts",
       "packages/mcp-server/src/sync.ts",
       "packages/web/scripts/agent-cursor-demo.ts",
       "packages/web/src/collab/rooms.ts",

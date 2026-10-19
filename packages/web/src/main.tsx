@@ -7,6 +7,7 @@
 
 import "@vitejs/plugin-react/preamble";
 import { createRoot } from "react-dom/client";
+import { takeLaunchSecret } from "./collab/local-session.js";
 import { resolveClientConfig } from "./config.js";
 import { App } from "./ui/App.js";
 import { NotificationToaster } from "./ui/shadcn/sonner.js";
@@ -22,6 +23,9 @@ const container = document.getElementById("root");
 if (!container) {
   throw new Error("uberblick web: #root container is missing from index.html");
 }
+
+// Before routing can rewrite the address that carries it.
+takeLaunchSecret();
 
 // Startup and room hooks share config.ts's non-rejecting read.
 void resolveClientConfig();

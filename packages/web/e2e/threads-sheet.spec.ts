@@ -7,7 +7,7 @@
 import { chromium, expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
-import { placeCaret } from "./harness.js";
+import { authorizeBrowser, placeCaret } from "./harness.js";
 
 const { harness } = setupHarness();
 
@@ -67,6 +67,7 @@ test.describe("fractional layout", () => {
       args: ["--force-device-scale-factor=1.25", "--window-size=1279,1000"],
     });
     try {
+      await authorizeBrowser(browser);
       const context = await browser.newContext({ viewport: null });
       const page = await context.newPage();
       expect(await page.evaluate(() =>

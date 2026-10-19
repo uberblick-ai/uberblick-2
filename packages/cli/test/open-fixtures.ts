@@ -4,6 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createConnection, createServer } from "node:net";
@@ -16,6 +17,8 @@ import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "@uberbl
 import { createHub, silentLogger } from "@uberblick/hub";
 import { SYNC_PROTOCOL_VERSION, wrapToken } from "@uberblick/schema/protocol";
 import { resolveMcpConfig } from "@uberblick/mcp-server";
+import { resolveStorage } from "@uberblick/mcp-server/storage";
+import { SESSION_HEADER } from "../src/open-session.js";
 import { probeHub } from "../src/probes.js";
 import type { Sandbox } from "./helpers.js";
 import {
@@ -166,7 +169,12 @@ export async function hubAnswers(box: Sandbox, hubUrl: string): Promise<boolean>
 // --- the running command -----------------------------------------------------
 
 export interface Running {
+  /** The served origin's root, without the printed launch fragment. */
   url: string;
+  /** The address exactly as the banner printed it. */
+  printed: string;
+  /** The printed address's one-time launch secret; null for unbound serving. */
+  launch: string | null;
   stdout: () => string;
   stderr: () => string;
   /** The command's own terminal outcome, without sending it a signal. */
@@ -189,6 +197,7 @@ export async function open(
   extraEnv: NodeJS.ProcessEnv = {},
   cliBin = UB_BIN,
 ): Promise<Running> {
+  seedSession({ ...box.env, ...extraEnv });
   const child = spawn(process.execPath, [cliBin, "open", ...args], {
     cwd: box.cwd,
     env: { ...box.env, ...extraEnv },
@@ -224,10 +233,13 @@ export async function open(
     throw new Error(`${said}:\n${stdout}${stderr}`);
   }
 
-  const url = BANNER.exec(stdout)?.[1];
-  if (url === undefined) throw new Error(`ub open named no URL:\n${stdout}`);
+  const printed = BANNER.exec(stdout)?.[1];
+  if (printed === undefined) throw new Error(`ub open named no URL:\n${stdout}`);
+  const [url = printed, fragment] = printed.split("#");
   return {
     url,
+    printed,
+    launch: fragment === undefined ? null : new URLSearchParams(fragment).get("launch"),
     stdout: () => stdout,
     stderr: () => stderr,
     wait: () => exited,
@@ -420,21 +432,20 @@ export function servingDocumentOf(
   appUrl: string,
   remoteHubUrl: string,
   workspace: string,
-  secret: string,
   rebound = false,
-  otherWorkspaces: Record<string, { browserKey: string; remoteHubUrl: string | null }> = {},
+  otherWorkspaces: Record<string, { remoteHubUrl: string | null }> = {},
 ): string {
   const hubUrl = appUrl.replace(/^http:/, "ws:").replace(/\/$/, "");
   return JSON.stringify({
     hubUrl,
     workspaces: [workspace, ...Object.keys(otherWorkspaces)],
-    hubAuthToken: secret,
+    hubAuthToken: "",
     remoteHubUrl,
     ...(rebound ? { rebound: true } : {}),
     servedWorkspaces: {
-      [workspace]: { browserKey: secret, name: null, remoteHubUrl },
+      [workspace]: { name: null, remoteHubUrl },
       ...Object.fromEntries(Object.entries(otherWorkspaces).map(([id, entry]) => [id, {
-        browserKey: entry.browserKey, name: null, remoteHubUrl: entry.remoteHubUrl,
+        name: null, remoteHubUrl: entry.remoteHubUrl,
       }])),
     },
     defaultPresenceName: userInfo().username,
@@ -474,6 +485,19 @@ export async function forgedAuthMessage(key: string, claims: TokenClaims): Promi
   return wrapToken(`${payload}.${Buffer.from(signature).toString("base64url")}`);
 }
 
+/**
+ * A browser session these suites' API requests name, stored the way `ub open`
+ * persists one, so tests about other API contracts need not trade a launch.
+ */
+export const SESSION = "open-test-session-0123456789abcdefghijklmno";
+
+export function seedSession(env: NodeJS.ProcessEnv): void {
+  const directory = join(resolveStorage({ env }).configDir, "browser-sessions");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, createHash("sha256").update(SESSION).digest("hex"));
+  writeFileSync(path, `${Date.now() + 24 * 60 * 60_000}\n`, { mode: 0o600 });
+}
+
 export function bearer(auth: string): Record<string, string> {
-  return { authorization: `Bearer ${auth}` };
+  return { authorization: `Bearer ${auth}`, [SESSION_HEADER]: SESSION };
 }

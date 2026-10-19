@@ -8,6 +8,7 @@ import {
   directoryRoom,
   isDirectoryEntryDeleted,
   parseRoom,
+  tombstoneDirectoryEntry,
 } from "@uberblick/schema";
 import { DOC_DELETED_REASON } from "@uberblick/schema/protocol";
 import { HubDatabase } from "../src/persistence.js";
@@ -76,6 +77,8 @@ describe("permanent room deletion", () => {
     await acknowledged(directory, "surviving entry");
     await started.flush();
 
+    tombstoneDirectoryEntry(directory.doc, parseRoom(room).uuid);
+    await acknowledged(directory, "archive");
     deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
     await acknowledged(directory, "deletion");
     expect(storedText(databasePath, room)).toBeNull();
@@ -107,6 +110,7 @@ describe("permanent room deletion", () => {
     try {
       database.exec("CREATE TRIGGER fail_store BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT, 'injected store failure'); END");
       const loaded = started.hocuspocus.documents.get(directoryRoom(WORKSPACE))!;
+      tombstoneDirectoryEntry(loaded, parseRoom(room).uuid);
       expect(() => deleteDirectoryEntry(loaded, parseRoom(room).uuid)).toThrow("injected store failure");
       const persistence = started.hocuspocus.configuration.extensions.find(extension => extension instanceof HubDatabase)!;
       expect(persistence.isDeletedRoom(room)).toBe(true);
@@ -149,6 +153,8 @@ describe("permanent room deletion", () => {
     const connecting = await client(started, room);
     try {
       await waitUntil("the admission to pause during loading", () => entered);
+      tombstoneDirectoryEntry(directory.doc, parseRoom(room).uuid);
+      await acknowledged(directory, "archive");
       deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
       await acknowledged(directory, "deletion");
       release();
@@ -186,6 +192,8 @@ describe("permanent room deletion", () => {
       await waitUntil("the update to pause after authorization", () => paused !== undefined);
       writer.text.insert(writer.text.length, " queued update");
       if (detached) paused!.close({ code: 1000, reason: "unrelated closure" });
+      tombstoneDirectoryEntry(directory.doc, parseRoom(room).uuid);
+      await acknowledged(directory, "archive");
       deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
       await acknowledged(directory, "deletion");
       expect(paused!.readOnly).toBe(true);
@@ -254,6 +262,8 @@ describe("permanent room deletion", () => {
     writer.text.insert(0, "old content");
     await acknowledged(writer);
     const staleState = Y.encodeStateAsUpdate(writer.doc);
+    tombstoneDirectoryEntry(directory.doc, parseRoom(room).uuid);
+    await acknowledged(directory, "archive");
     deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
     await acknowledged(directory, "deletion");
     for (const created of clients.splice(0)) created.destroy();
@@ -271,6 +281,49 @@ describe("permanent room deletion", () => {
     expect(await reconnect.denied).toBe(DOC_DELETED_REASON);
     expect(second.hocuspocus.documents.has(room)).toBe(false);
   });
+
+  it.each(["leaves the live entry in place", "removes the live entry in the same change", "removed the live entry earlier"])(
+    "reverses a deletion mark for a live, unarchived document when the writer %s", async (shape) => {
+      const databasePath = tempDatabasePath();
+      const started = await hub(databasePath);
+      const room = testRoom();
+      const uuid = parseRoom(room).uuid;
+      const writer = await client(started, room);
+      const directory = await client(started, directoryRoom(WORKSPACE));
+      await Promise.all([writer.synced, directory.synced]);
+      writer.text.insert(0, "live content");
+      await acknowledged(writer);
+      const live = { title: "Live, never archived", tags: [] };
+      directory.doc.getMap("docs").set(uuid, live);
+      await acknowledged(directory, "live entry");
+
+      if (shape === "removed the live entry earlier") {
+        directory.doc.getMap("docs").delete(uuid);
+        await acknowledged(directory, "entry removal");
+      }
+      if (shape === "removes the live entry in the same change") deleteDirectoryEntry(directory.doc, uuid);
+      else directory.doc.getMap("deleted-docs").set(uuid, true);
+      await acknowledged(directory, "unarchived deletion mark");
+      await waitUntil("the reversal to reach the writer", () => !isDirectoryEntryDeleted(directory.doc, uuid));
+
+      const held = started.hocuspocus.documents.get(directoryRoom(WORKSPACE))!;
+      expect(isDirectoryEntryDeleted(held, uuid)).toBe(false);
+      if (shape !== "removed the live entry earlier") {
+        expect(held.getMap("docs").get(uuid)).toEqual(live);
+        expect(directory.doc.getMap("docs").get(uuid)).toEqual(live);
+      }
+      expect(started.hocuspocus.documents.has(room)).toBe(true);
+      writer.text.insert(writer.text.length, ", still writable");
+      await acknowledged(writer);
+      await started.flush();
+      expect(storedText(databasePath, room)).toBe("live content, still writable");
+      const persisted = new Y.Doc();
+      try {
+        Y.applyUpdate(persisted, storedDirectoryState(databasePath));
+        expect(isDirectoryEntryDeleted(persisted, uuid)).toBe(false);
+      } finally { persisted.destroy(); }
+    },
+  );
 
   it("keeps stored rooms when the directory is missing or empty", async () => {
     const databasePath = tempDatabasePath();

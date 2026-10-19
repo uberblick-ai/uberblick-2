@@ -1,7 +1,7 @@
 import { deviceFetch as fetch } from "./device-credentials.js";
 import { issueCredential, mintDeviceRequestProof as mintRequestProof, type TestCredential as IssuedCredential } from "./device-credentials.js";
 import { randomUUID } from "node:crypto";
-import { deleteDirectoryEntry, directoryRoom, parseRoom } from "@uberblick/schema";
+import { deleteDirectoryEntry, directoryRoom, parseRoom, tombstoneDirectoryEntry } from "@uberblick/schema";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveCoreHubConfig } from "../src/config.js";
 
@@ -75,6 +75,8 @@ describe("remote createHub admission", () => {
     await Promise.all([writer.synced, directory.synced]);
     writer.text.insert(0, "remote private content");
     await waitUntil("the remote edit to be acknowledged", () => !writer.provider.hasUnsyncedChanges);
+    tombstoneDirectoryEntry(directory.doc, parseRoom(room).uuid);
+    await waitUntil("the archive to be acknowledged", () => !directory.provider.hasUnsyncedChanges);
     await hub.flush();
     deleteDirectoryEntry(directory.doc, parseRoom(room).uuid);
     await expect(writer.denied).resolves.toBe(DOC_DELETED_REASON);

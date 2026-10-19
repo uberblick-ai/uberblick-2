@@ -3,13 +3,16 @@ import { expectOpenPages, expectUpstreamHub, waitForAcknowledged } from "./settl
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { createDoc, docTitle, editor } from "./app-helpers.js";
-import { placeCaret, startHarness } from "./harness.js";
+import { authorizeBrowser, placeCaret, startHarness } from "./harness.js";
 import type { Harness } from "./harness.js";
 
 let running: Harness;
 const contexts: BrowserContext[] = [];
 
-test.beforeAll(async () => { running = await startHarness({ multiWorkspace: true }); });
+test.beforeAll(async ({ browser }) => {
+  running = await startHarness({ multiWorkspace: true });
+  await authorizeBrowser(browser);
+});
 test.afterEach(async () => { await Promise.all(contexts.splice(0).map((context) => context.close())); });
 test.afterAll(async () => { await running?.stop(); });
 

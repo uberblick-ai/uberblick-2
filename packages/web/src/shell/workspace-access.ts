@@ -1,5 +1,6 @@
-/** Live access requests use the local browser key; hub credentials stay in ub open. */
+/** Live access requests use the page's ub open session; hub credentials stay in ub open. */
 import { mintHubAuthMessage } from "../collab/rooms.js";
+import { localSessionHeaders } from "../collab/local-session.js";
 import type { RequestAction } from "@uberblick/schema/token";
 import { sanitizeDeviceName } from "@uberblick/schema/device-name";
 import { validateWorkspaceName } from "@uberblick/schema";
@@ -177,6 +178,7 @@ export function createWorkspaceAccessClient(workspace: string, subject: string) 
         Accept: "application/json",
         "Content-Type": "application/json",
         Authorization: `Bearer ${await mintHubAuthMessage(workspace, subject)}`,
+        ...await localSessionHeaders(),
       },
       body: JSON.stringify(action),
       signal: AbortSignal.any([signal, AbortSignal.timeout(40_000)]),

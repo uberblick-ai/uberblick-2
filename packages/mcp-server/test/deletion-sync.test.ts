@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
-import { deleteDirectoryEntry, directoryRoom, getMeta, initDoc, isDirectoryEntryDeleted, roomForDoc, setTitle } from "@uberblick/schema";
+import { deleteDirectoryEntry, directoryRoom, getMeta, initDoc, isDirectoryEntryDeleted, roomForDoc, setTitle, tombstoneDirectoryEntry } from "@uberblick/schema";
 import type { Hub } from "@uberblick/hub";
 import { HubSync } from "../src/sync.js";
 import { compareCorpus, inspectRemote, isIdentical, syncWorkspace } from "../src/remote.js";
@@ -24,6 +24,12 @@ afterEach(async () => {
 
 function configuration(port: number) {
   return testConfig({ authSecret: TEST_SECRET, hubUrl: hubUrl(port), ...LIVE_HUB_SETTLE });
+}
+
+/** The hub honours a deletion mark only for a document it holds archived. */
+async function archive(workspace: WorkspaceReplicaSet, uuid: string): Promise<void> {
+  tombstoneDirectoryEntry(workspace.replicas.directory().doc, uuid);
+  expect(await workspace.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
 }
 
 async function documentOnHub() {
@@ -49,6 +55,7 @@ it("purges a connected replica and retains deletion evidence after reopening its
   const room = roomForDoc(config.workspaceId, uuid);
   expect(observer.store.hasRoom(room)).toBe(true);
 
+  await archive(workspace, uuid);
   deleteDirectoryEntry(workspace.replicas.directory().doc, uuid);
   await waitUntil("the connected replica to learn the deletion", () => observer.replicas.isDeleted(uuid));
   observer.replicas.refresh();
@@ -66,6 +73,7 @@ it("purges a connected replica and retains deletion evidence after reopening its
 
 it("treats a refused deleted room as deletion while other rooms keep syncing", async () => {
   const { hub, workspace, uuid } = await documentOnHub();
+  await archive(workspace, uuid);
   deleteDirectoryEntry(workspace.replicas.directory().doc, uuid);
   expect(await workspace.replicas.waitForSettled({ deadline: performance.now() + WAIT_TIMEOUT_MS })).toMatchObject({ caughtUp: true });
   const deletedRoom = roomForDoc(workspace.replicas.config.workspaceId, uuid);
