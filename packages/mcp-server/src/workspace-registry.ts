@@ -2,7 +2,7 @@
 import { lstatSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { normalizeRemoteUrl } from "./remote-url.js";
+import { hubIdentity, normalizeRemoteUrl } from "./remote-url.js";
 import { resolveStorage } from "./storage.js";
 import { parseWorkspaceId } from "@uberblick/schema";
 import { acquireInitLock } from "./init-lock.js";
@@ -47,11 +47,6 @@ export function readWorkspaceHub(id: string, env: NodeJS.ProcessEnv = process.en
 
 export function recordedWorkspaceIds(env: NodeJS.ProcessEnv = process.env): string[] {
   return Object.keys(readRegistry(env).hubs);
-}
-
-function sameHub(left: string | null, right: string | null): boolean {
-  return left === null || right === null ? left === right
-    : new URL(normalizeRemoteUrl(left)).href === new URL(normalizeRemoteUrl(right)).href;
 }
 
 export function hasWorkspaceReplica(id: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -110,7 +105,9 @@ export function assertWorkspaceBinding(
 ): boolean {
   const recorded = readWorkspaceHub(binding.workspaceId, env);
   if (recorded !== undefined) {
-    if (!sameHub(recorded, binding.hubUrl)) throw new WorkspaceBindingMismatch(binding, recorded, source);
+    const matches = recorded === null || binding.hubUrl === null
+      ? recorded === binding.hubUrl : hubIdentity(recorded) === hubIdentity(binding.hubUrl);
+    if (!matches) throw new WorkspaceBindingMismatch(binding, recorded, source);
     return true;
   } else if (binding.hubUrl !== null && hasWorkspaceReplica(binding.workspaceId, env)) {
     throw new WorkspaceBindingMismatch(binding, undefined, source);

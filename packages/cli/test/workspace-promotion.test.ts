@@ -239,7 +239,7 @@ describe("workspace creation and promotion", () => {
     expect(selected(box)).toEqual({ workspaceId: selected(box).workspaceId, hubUrl: endpoint });
     expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
     const privateConfig = JSON.parse(readFileSync(join(box.configHome, "uberblick", "config.json"), "utf8"));
-    expect(privateConfig.hubAdmissions).toEqual({ [endpoint]: "device" });
+    expect(privateConfig.hubAdmissions).toEqual({ [`${endpoint}/`]: "device" });
     const remote = await inspectRemote(resolveMcpConfig({ ...box.env, WORKSPACE_ID: selected(box).workspaceId, HUB_URL: endpoint, HUB_ADMISSION: "device" }), { documents: true, workspace: true });
     expect(remote.missing).toEqual([]);
     expect(remote.entries.filter(entry => entry.deleted)).toHaveLength(1);

@@ -60,6 +60,32 @@ describe("resolveMcpConfig", () => {
     expect(bridgeConfig(proxy, { hubUrl: "ws://localhost:1234" }).deviceLogin).toBeUndefined();
   });
 
+  it.each(["WS://LOCALHOST:8080/ws", "ws://localhost:8080/a/../ws"])(
+    "retains device admission and login options for an equivalent bridge target: %s", hubUrl => {
+      const original = resolveMcpConfig(env({ HUB_URL: "ws://localhost:8080/ws", HUB_ADMISSION: "device", HUB_AUTH_TOKEN: "never-send-this" }));
+      const bridged = bridgeConfig(original, { hubUrl, authSecret: "never-send-this-either" });
+      expect(bridged.hubUrl).toBe(hubUrl);
+      expect(bridged.authEnv?.HUB_ADMISSION).toBe("device");
+      expect(bridged.deviceLogin).toBe(original.deviceLogin);
+      expect(bridged.authSecret).toBeNull();
+      expect(original.authEnv?.HUB_ADMISSION).toBe("device");
+
+      const fixture = { ...original, authEnv: env(), deviceLogin: { env: env() } };
+      expect(bridgeConfig(fixture, { hubUrl }).deviceLogin).toBe(fixture.deviceLogin);
+    },
+  );
+
+  it.each(["ws://localhost:8080/ws/", "ws://localhost:8080/WS", "ws://localhost:8080/w%73",
+    "ws://127.0.0.1:8080/ws", "ws://[::1]:8080/ws"])(
+    "does not carry device admission or login options to a distinct bridge target: %s", hubUrl => {
+      const original = resolveMcpConfig(env({ HUB_URL: "ws://localhost:8080/ws", HUB_ADMISSION: "device" }));
+      const bridged = bridgeConfig(original, { hubUrl });
+      expect(bridged.authEnv?.HUB_ADMISSION).toBeUndefined();
+      expect(bridged.deviceLogin).toBeUndefined();
+      expect(original.authEnv?.HUB_ADMISSION).toBe("device");
+    },
+  );
+
   it("reclassifies bridge endpoint overrides without moving a login between hubs", () => {
     const local = resolveMcpConfig(env({ HUB_AUTH_TOKEN: "local-only-secret" }));
     const remote = bridgeConfig(local, { hubUrl: "wss://hub.example/ws", authSecret: "never-send-this" });
