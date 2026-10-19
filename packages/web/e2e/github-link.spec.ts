@@ -369,7 +369,7 @@ test("light and dark pills keep the same typography in prose, table headers and 
   }
 });
 
-test("hovering a pill underlines its text and lifts its fill; the issue icon is a ring around a dot", { tag: "@webkit" }, async ({ page }, info) => {
+test("hovering a pill shows the link cursor, underlines its text and lifts its fill; the issue icon is a ring around a dot", { tag: "@webkit" }, async ({ page }, info) => {
   test.skip(info.project.use.hasTouch === true, "Hover needs a pointer.");
   await newDoc(page);
   await page.keyboard.type(`[${STORED}](${TARGET}) and [#7](https://github.com/Example/SomeRepo/issues/7)`);
@@ -383,6 +383,9 @@ test("hovering a pill underlines its text and lifts its fill; the issue icon is 
   await expect(number).toHaveCSS("text-decoration-line", "none");
   const resting = await pill.evaluate(element => getComputedStyle(element).backgroundColor);
   await pill.hover();
+  for (const part of [pill, number, pill.locator(".ub-github-pill-repo"), pill.locator("svg")]) {
+    await expect(part).toHaveCSS("cursor", "pointer");
+  }
   await expect(number).toHaveCSS("text-decoration-line", "underline");
   await expect(pill.locator(".ub-github-pill-repo")).toHaveCSS("text-decoration-line", "underline");
   await expect.poll(() => pill.evaluate(element => getComputedStyle(element).backgroundColor)).not.toBe(resting);

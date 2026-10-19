@@ -1645,6 +1645,8 @@ h6.ub-heading {
   text-transform: none;
   vertical-align: baseline;
   white-space: nowrap;
+  /* The pill is a link, not editable text, even inside the contenteditable editor. */
+  cursor: pointer;
 }
 
 .ub-github-pill svg { width: 1em; height: 1em; }
