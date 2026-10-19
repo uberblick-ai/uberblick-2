@@ -91,6 +91,9 @@ const SCHEMA = {
 interface PaintedText { canvas: number; text: string; x: number; y: number; width: number; left: number; right: number; font: string; rotated: boolean }
 interface PaintedPoint { canvas: number; x: number; y: number; radius: number }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
+interface PaintedRectangle { left: number; right: number; top: number; bottom: number }
+interface PaintedBar extends PaintedRectangle { canvas: number; color: string; clip: PaintedRectangle | null; sequence: number }
+interface BarPaintProbe { bars: PaintedBar[]; points: { canvas: number; sequence: number }[] }
 
 /** Tick anchors and point anchors are observed independently from canvas calls. */
 async function expectObservationGeometry(
@@ -417,6 +420,222 @@ async function installProbe(page: Page, uuid: string): Promise<void> {
     });
   }, uuid);
 }
+
+/** Observe the native bar fill and its clipping rectangle, independently of Chart.js state. */
+async function installBarProbe(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const probe: BarPaintProbe = { bars: [], points: [] };
+    (window as unknown as { barProbe: BarPaintProbe }).barProbe = probe;
+    let sequence = 0;
+    const states = new WeakMap<CanvasRenderingContext2D, {
+      path: PaintedRectangle[]; clip: PaintedRectangle | null; saved: (PaintedRectangle | null)[];
+    }>();
+    const state = (context: CanvasRenderingContext2D) => {
+      let current = states.get(context);
+      if (current === undefined) {
+        current = { path: [], clip: null, saved: [] };
+        states.set(context, current);
+      }
+      return current;
+    };
+    const canvasIndex = (context: CanvasRenderingContext2D): number =>
+      [...document.querySelectorAll(".ub-chart canvas")].indexOf(context.canvas);
+    const prototype = CanvasRenderingContext2D.prototype;
+    const { save, restore, beginPath, rect, clip, fill, arc, clearRect } = prototype;
+    prototype.save = function (): void { state(this).saved.push(state(this).clip); save.call(this); };
+    prototype.restore = function (): void { state(this).clip = state(this).saved.pop() ?? null; restore.call(this); };
+    prototype.beginPath = function (): void { state(this).path = []; beginPath.call(this); };
+    prototype.rect = function (...args: Parameters<typeof rect>): void {
+      if (canvasIndex(this) >= 0) {
+        const transform = this.getTransform();
+        const first = transform.transformPoint({ x: args[0], y: args[1] });
+        const last = transform.transformPoint({ x: args[0] + args[2], y: args[1] + args[3] });
+        const box = this.canvas.getBoundingClientRect();
+        state(this).path.push({
+          left: Math.min(first.x, last.x) * box.width / this.canvas.width,
+          right: Math.max(first.x, last.x) * box.width / this.canvas.width,
+          top: Math.min(first.y, last.y) * box.height / this.canvas.height,
+          bottom: Math.max(first.y, last.y) * box.height / this.canvas.height,
+        });
+      }
+      rect.apply(this, args);
+    };
+    prototype.clip = function (path?: CanvasFillRule | Path2D, fillRule?: CanvasFillRule): void {
+      const rectangle = state(this).path.at(-1);
+      if (rectangle !== undefined) state(this).clip = rectangle;
+      Reflect.apply(clip, this, path === undefined ? [] : [path, fillRule]);
+    };
+    prototype.fill = function (path?: CanvasFillRule | Path2D, fillRule?: CanvasFillRule): void {
+      const canvas = canvasIndex(this);
+      if (canvas >= 0) {
+        for (const rectangle of state(this).path) {
+          probe.bars.push({ ...rectangle, canvas, clip: state(this).clip,
+            color: String(this.fillStyle), sequence: sequence++ });
+        }
+      }
+      Reflect.apply(fill, this, path === undefined ? [] : [path, fillRule]);
+    };
+    prototype.arc = function (...args: Parameters<typeof arc>): void {
+      const canvas = canvasIndex(this);
+      if (canvas >= 0 && state(this).clip !== null && args[2] > 0) probe.points.push({ canvas, sequence: sequence++ });
+      arc.apply(this, args);
+    };
+    prototype.clearRect = function (...args: Parameters<typeof clearRect>): void {
+      if (args[0] === 0 && args[1] === 0 && args[2] === this.canvas.width && args[3] === this.canvas.height) {
+        const canvas = canvasIndex(this);
+        probe.bars = probe.bars.filter(entry => entry.canvas !== canvas);
+        probe.points = probe.points.filter(entry => entry.canvas !== canvas);
+      }
+      clearRect.apply(this, args);
+    };
+    addEventListener("pagehide", () => Object.assign(prototype, { save, restore, beginPath, rect, clip, fill, arc, clearRect }));
+  });
+}
+
+async function barGeometry(page: Page): Promise<PaintedBar[]> {
+  const bars = await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.bars);
+  return bars.filter(bar => bar.clip !== null && bar.clip.bottom - bar.clip.top > 40 && bar.right > bar.left && bar.bottom > bar.top);
+}
+
+function expectContainedBars(bars: PaintedBar[]): void {
+  expect(bars.length).toBeGreaterThan(0);
+  for (const bar of bars) {
+    if (bar.clip === null) throw new Error("e2e: bar has no plot clip");
+    expect(bar.left).toBeGreaterThanOrEqual(bar.clip.left - 0.5);
+    expect(bar.right).toBeLessThanOrEqual(bar.clip.right + 0.5);
+    expect(bar.top).toBeGreaterThanOrEqual(bar.clip.top - 0.5);
+    expect(bar.bottom).toBeLessThanOrEqual(bar.clip.bottom + 0.5);
+  }
+}
+
+test("mixed charts paint grouped bars behind lines with ordered legend and shared tooltips", { tag: "@webkit" }, async ({ browser }, info) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "line", collection: "measurements", title: "Monthly survey", missing: "connect",
+    x: { field: "day", type: "date" }, y: [
+      { field: "responses", label: "Responses", unit: "responses", type: "bar" },
+      { field: "score", label: "Score", unit: "%" },
+      { field: "returning", label: "Returning", unit: "responses", type: "bar" },
+    ],
+  };
+  const uuid = await chartDoc(session, "Survey with observation counts", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+    schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "first", value: { day: "2026-01-01", score: 42, responses: 320, returning: 120 } },
+      { id: "middle", value: { day: "2026-02-01", score: 58, responses: 45, returning: 22 } },
+      { id: "last", value: { day: "2026-03-01", score: 65, responses: 410, returning: 240 } },
+    ],
+  }] });
+  for (const appearance of ["light", "dark"] as const) {
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: async loading => { await installProbe(loading, uuid); await installBarProbe(loading); },
+      contextOptions: { viewport: { width: 1366, height: 900 }, locale: "en-US", colorScheme: appearance },
+    });
+    await waitForDocumentDraw(page, session, uuid);
+    const image = page.getByRole("img", { name: "Monthly survey", exact: true });
+    await expect(image).toBeVisible();
+    const bars = await barGeometry(page);
+    expect(bars).toHaveLength(6);
+    expectContainedBars(bars);
+    const probe = await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe);
+    expect(probe.points).toHaveLength(3);
+    expect(Math.max(...bars.map(bar => bar.sequence))).toBeLessThan(Math.min(...probe.points.map(point => point.sequence)));
+    const ink = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+    const legend = ink.filter(entry => ["Responses (responses)", "Score (%)", "Returning (responses)"].includes(entry.text));
+    expect(legend.map(entry => entry.text)).toEqual(["Responses (responses)", "Score (%)", "Returning (responses)"]);
+    const swatches = probe.bars.filter(bar => bar.clip !== null && bar.clip.bottom - bar.clip.top <= 40 && bar.bottom > bar.top);
+    expect(swatches).toHaveLength(2);
+    expect(swatches[0]?.color).not.toBe(swatches[1]?.color);
+    const responses = bars.filter(bar => bar.color === swatches[0]?.color).sort((a, b) => a.left - b.left);
+    const returning = bars.filter(bar => bar.color === swatches[1]?.color).sort((a, b) => a.left - b.left);
+    expect(responses).toHaveLength(3);
+    expect(returning).toHaveLength(3);
+    responses.forEach((bar, index) => { expect(bar.right).toBeLessThan(returning[index]?.left ?? -Infinity); });
+    const leftTicks = ink.filter(entry => /^\d+%$/.test(entry.text));
+    const rightTicks = ink.filter(entry => /^\d+ responses$/.test(entry.text));
+    expect(leftTicks.length).toBeGreaterThan(0);
+    expect(rightTicks.length).toBeGreaterThan(0);
+    expect(Math.max(...leftTicks.map(entry => entry.right))).toBeLessThan(Math.min(...bars.map(bar => bar.left)));
+    expect(Math.min(...rightTicks.map(entry => entry.left))).toBeGreaterThan(Math.max(...bars.map(bar => bar.right)));
+    const block = page.locator(".ub-chart");
+    await canvasEvidence(block, info, `chart-mixed-desktop-${appearance}`);
+    const box = await image.boundingBox();
+    if (box === null) throw new Error("e2e: mixed chart has no canvas box");
+    const middle = responses[1];
+    if (middle === undefined) throw new Error("e2e: grouped bar is missing");
+    await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+    await page.mouse.move(box.x + (middle.left + middle.right) / 2, box.y + box.height / 3);
+    const tooltip = ["Responses: 45 responses", "Score: 58 %", "Returning: 22 responses"];
+    await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts
+      .filter(text => /^(Responses|Score|Returning):/.test(text)))).toEqual(tooltip);
+  }
+});
+
+test("bar charts keep negative endpoints, missing values and a lone x inside the plot in overlay and panels", async ({ browser }) => {
+  const session = writer();
+  const mapping = {
+    version: 1, type: "line", collection: "measurements", missing: "connect",
+    x: { field: "day", type: "number" }, y: [
+      { field: "a", label: "First", unit: "responses", type: "bar" },
+      { field: "b", label: "Second", unit: "responses", type: "bar" },
+    ],
+  };
+  const uuid = await chartDoc(session, "Grouped bar extremes", mapping);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+    schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+      { id: "first", value: { day: 1, a: -5, b: -10 } },
+      { id: "middle", value: { day: 4, a: null, b: "wrong" } },
+      { id: "last", value: { day: 10, a: -20, b: -40 } },
+      { id: "absent", value: { day: 20 } },
+    ],
+  }] });
+  const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+    beforeNavigate: async loading => { await installProbe(loading, uuid); await installBarProbe(loading); },
+    contextOptions: { viewport: { width: 1366, height: 900 }, locale: "en-US" },
+  });
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(page.getByRole("img", { name: /^Bar chart of/ })).toBeVisible();
+  const bars = await barGeometry(page);
+  expect(bars).toHaveLength(4);
+  expectContainedBars(bars);
+  expect(await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.points)).toHaveLength(0);
+  const zero = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink.find(entry => entry.text === "0 responses")?.y);
+  expect(zero).toBeDefined();
+  for (const bar of bars) expect(Math.abs(bar.top - (zero ?? NaN))).toBeLessThanOrEqual(0.5);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
+    { id: "narrow-first", value: { day: 123456789.1, a: -5, b: -10 } },
+    { id: "narrow-middle", value: { day: 123456789.2, a: -8, b: -20 } },
+    { id: "narrow-last", value: { day: 123456789.3, a: -10, b: -30 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  await page.locator(".ub-chart-screen").evaluate(element => { (element as HTMLElement).style.width = "320px"; });
+  await expect.poll(() => page.locator(".ub-chart canvas").evaluate(element => element.getBoundingClientRect().width)).toBe(320);
+  await expect.poll(async () => {
+    const labels = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink
+      .filter(entry => /^123,456,789\.[123]$/.test(entry.text)).sort((a, b) => a.x - b.x));
+    return labels.length > 0 && labels.every((label, index) => label.left >= 0 && label.right <= 320
+      && (index === 0 || label.left >= (labels[index - 1]?.right ?? Infinity)));
+  }).toBe(true);
+  expectContainedBars(await barGeometry(page));
+  await page.locator(".ub-chart-screen").evaluate(element => { (element as HTMLElement).style.removeProperty("width"); });
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
+    { id: "only", value: { day: 10, a: -5, b: -10 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  const lone = await barGeometry(page);
+  expect(lone).toHaveLength(2);
+  expectContainedBars(lone);
+  await editMapping(session, uuid, JSON.stringify({ ...mapping, layout: "panels" }));
+  await waitForDocumentDraw(page, session, uuid);
+  await expect(page.locator(".ub-chart-series-panel")).toHaveCount(2);
+  const panels = await barGeometry(page);
+  expect(panels).toHaveLength(2);
+  expectContainedBars(panels);
+  expect(panels[0]?.top).toBeCloseTo(panels[1]?.top ?? NaN, 5);
+  expect(await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.points)).toHaveLength(0);
+  await proveMcpArrival(page, session, uuid, { path: "upstream" });
+  expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
+});
 
 test("editor insertion and the source control work by pointer and keyboard in both appearances", async ({ browser }, info) => {
   const session = writer();
@@ -1168,14 +1387,16 @@ interface Timings {
   bytes: number; records: number; series: number; cpuThrottle: number;
 }
 
-async function workload(session: McpSession, bounded: boolean, layout: "overlay" | "panels" = "overlay"): Promise<{ uuid: string; bytes: number }> {
+async function workload(session: McpSession, bounded: boolean, layout: "overlay" | "panels" = "overlay", bars = false): Promise<{ uuid: string; bytes: number }> {
   const series = bounded ? 8 : 3;
   const collection = "summaries";
   const mapping = {
     version: 1, type: "line", collection, title: bounded ? "Bound chart" : "API health year",
     ...(layout === "panels" ? { layout } : {}),
     x: { field: "day", type: "date", label: "Day" },
-    y: Array.from({ length: series }, (_, index) => ({ field: `value${index}`, label: `Metric ${index}`, unit: "ms" })),
+    y: Array.from({ length: series }, (_, index) => ({
+      field: `value${index}`, label: `Metric ${index}`, unit: "ms", ...(bars ? { type: "bar" } : {}),
+    })),
   };
   const uuid = await chartDoc(session, bounded ? "Bounded chart timing" : "Representative chart timing", mapping);
   const properties = Object.fromEntries([
@@ -1265,18 +1486,21 @@ async function publishTimings(info: TestInfo, result: Timings, label: string): P
   // Shared-host load is not a product failure. Keep measurements in the
   // required workload gate and reserve wall-clock budgets for an explicit benchmark.
   if (process.env.UB_CHART_TIMING_BUDGETS !== "1") return;
-  expect(result.first).toBeLessThanOrEqual(label === "representative" ? 500 : 1000);
-  expect(median).toBeLessThanOrEqual(label === "representative" ? 250 : 1000);
-  if (label.startsWith("bound")) expect(Math.max(...result.redraws)).toBeLessThanOrEqual(1000);
+  expect.soft(result.first).toBeLessThanOrEqual(label === "representative" ? 500 : 1000);
+  expect.soft(median).toBeLessThanOrEqual(label === "representative" ? 250 : 1000);
+  if (label.startsWith("bound")) expect.soft(Math.max(...result.redraws)).toBeLessThanOrEqual(1000);
 }
 
 test("whole-area validation and Chart.js record representative and bounded Chromium redraw timings", { tag: "@workload" }, async ({ browser }, info) => {
   test.setTimeout(120_000);
   const session = writer();
-  for (const { bounded, layout } of [
-    { bounded: false, layout: "overlay" }, { bounded: true, layout: "overlay" }, { bounded: true, layout: "panels" },
+  for (const { bounded, layout, bars } of [
+    { bounded: false, layout: "overlay", bars: false },
+    { bounded: true, layout: "overlay", bars: false },
+    { bounded: true, layout: "panels", bars: false },
+    { bounded: true, layout: "overlay", bars: true },
   ] as const) {
-    const { uuid, bytes } = await workload(session, bounded, layout);
+    const { uuid, bytes } = await workload(session, bounded, layout, bars);
     const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
       beforeNavigate: async (loading) => {
         // A conservative CPU allowance on shared CI hardware, with the actual
@@ -1288,6 +1512,7 @@ test("whole-area validation and Chart.js record representative and bounded Chrom
       contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
     });
     const result = await timingEvidence(page, session, uuid, bounded, bytes);
-    await publishTimings(info, result, bounded ? layout === "panels" ? "bound-panels" : "bound" : "representative");
+    await publishTimings(info, result, bars ? "bound-bars" : bounded ? layout === "panels" ? "bound-panels" : "bound" : "representative");
+    await page.context().close();
   }
 });

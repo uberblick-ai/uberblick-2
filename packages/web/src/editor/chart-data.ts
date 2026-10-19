@@ -5,7 +5,7 @@ import { bindCollection, incompatible, keys, name, numeric, object, optionalText
 
 export const CHART_RECORD_LIMIT = 5_000;
 
-export interface ChartSeriesMapping { field: string; label?: string; unit?: string }
+export interface ChartSeriesMapping { field: string; label?: string; unit?: string; type?: "line" | "bar" }
 export interface ChartConfig {
   version: 1;
   type: "line";
@@ -18,7 +18,7 @@ export interface ChartConfig {
   missing: "gap" | "connect";
 }
 export interface ChartPoint { x: number; y: number | null; id: string }
-export interface ChartSeries { field: string; label: string; unit?: string; points: ChartPoint[] }
+export interface ChartSeries { field: string; label: string; unit?: string; type: "line" | "bar"; points: ChartPoint[] }
 export interface ChartDiagnostics {
   invalidSchema: number;
   missingX: number;
@@ -60,8 +60,9 @@ export function parseChartConfig(source: string):
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
       !optionalText(value.x, "label") || !Array.isArray(value.y) || value.y.length < 1 || value.y.length > 8 ||
-      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit"]) &&
-        name(series.field) && optionalText(series, "label") && optionalText(series, "unit")) ||
+      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit", "type"]) &&
+        name(series.field) && optionalText(series, "label") && optionalText(series, "unit") &&
+        (!Object.hasOwn(series, "type") || series.type === "line" || series.type === "bar")) ||
       !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "layout") && value.layout !== "overlay" && value.layout !== "panels") ||
@@ -69,7 +70,11 @@ export function parseChartConfig(source: string):
     return { ok: false, message: "Invalid chart configuration: expected a version 1 line mapping with one x field, one to eight y series and optional positive integer limit; unknown keys are not supported." };
   }
   // Defaulting is a detached view value, never a write to the source block.
-  return { ok: true, config: { ...value, missing: value.missing ?? "gap", layout: value.layout ?? "overlay" } as ChartConfig };
+  return { ok: true, config: {
+    ...value,
+    y: value.y.map((series) => ({ ...series, type: series.type ?? "line" })),
+    missing: value.missing ?? "gap", layout: value.layout ?? "overlay",
+  } as ChartConfig };
 }
 
 const DAY = 86_400_000;
@@ -154,6 +159,7 @@ export function projectChart(config: ChartConfig, data: DocData | null): ChartPr
   const series: ChartSeries[] = config.y.map((mapping, index) => ({
     field: mapping.field,
     label: mapping.label || mapping.field,
+    type: mapping.type ?? "line",
     ...(mapping.unit !== undefined ? { unit: mapping.unit } : {}),
     points: selected.flatMap((row): ChartPoint[] => {
       const value = row.values[index];
@@ -161,7 +167,7 @@ export function projectChart(config: ChartConfig, data: DocData | null): ChartPr
       const count = diagnostics.series[index];
       if (value === undefined || value === null) {
         if (count !== undefined) count.missing += 1;
-        return config.missing === "connect" ? [] : [{ x: row.x, y: null, id: row.id }];
+        return mapping.type !== "bar" && config.missing === "connect" ? [] : [{ x: row.x, y: null, id: row.id }];
       }
       if (count !== undefined) count.invalid += 1;
       // Wrong types never become zero or a bridge authorized only for absence.
@@ -219,7 +225,9 @@ export function formatChartX(value: number, type: ChartConfig["x"]["type"], loca
   return type === "number" ? formatChartNumber(value, locale) : chartDateFormatter(locale)(value);
 }
 export function chartAccessibleName(config: ChartConfig): string {
-  return config.title || `Line chart of ${config.y.map((series) => series.label || series.field).join(", ")} by ${config.x.label || config.x.field}`;
+  const bars = config.y.filter((series) => series.type === "bar").length;
+  const kind = bars === config.y.length ? "Bar" : bars > 0 ? "Line and bar" : "Line";
+  return config.title || `${kind} chart of ${config.y.map((series) => series.label || series.field).join(", ")} by ${config.x.label || config.x.field}`;
 }
 export function chartAccessibleDescription(chart: ChartReady, locale?: string): string {
   const latest = chart.series.map((series) => {

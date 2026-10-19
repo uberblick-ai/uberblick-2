@@ -474,16 +474,31 @@ it("documents optional record limits for both views through data and insert_bloc
   }
 });
 
-it("documents opt-in line panels through data and insert_block help", async () => {
+it("documents opt-in chart panels through data and insert_block help", async () => {
   const rig = await local();
   for (const topic of ["data", "insert_block"]) {
     const { text } = await rig.ok("get_help", { topic });
     for (const guidance of [
       "Optional layout is overlay or panels, default overlay",
-      "panels draws one compact line chart per y series in mapping order, in a responsive grid",
+      "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid",
       "each panel shows its label and latest plotted value",
       "Panels share the x range and share y ranges within each unit group",
       "layout is invalid for table mappings",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
+});
+
+it("documents opt-in bar series through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Optional y series type is line or bar, default line",
+      "Bars-only charts keep top-level type line and draw grouped bars from zero",
+      "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis",
+      "Missing, null or wrong-type bar values draw no bar",
     ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
     expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
       .toMatchObject({ text });

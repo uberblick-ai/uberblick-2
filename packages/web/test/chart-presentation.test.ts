@@ -3,8 +3,8 @@ import { chartAxes, chartPanelRanges, chartPointRadius, formatChartTick } from "
 import type { ChartSeries } from "../src/editor/chart-data.js";
 
 describe("panel unit ranges", () => {
-  const series = (values: (number | null)[], unit?: string): ChartSeries => ({
-    field: "value", label: "Value", ...(unit !== undefined ? { unit } : {}),
+  const series = (values: (number | null)[], unit?: string, type: ChartSeries["type"] = "line"): ChartSeries => ({
+    field: "value", label: "Value", type, ...(unit !== undefined ? { unit } : {}),
     points: values.map((y, x) => ({ x, y, id: String(x) })),
   });
 
@@ -23,6 +23,18 @@ describe("panel unit ranges", () => {
   it("retains empty panels and shares degenerate extrema for native scale expansion", () => {
     const ranges = chartPanelRanges([series([null]), series([0], "%"), series([-10], "ms"), series([null], "ms")]);
     expect(ranges).toEqual([{ min: 0, max: 1 }, { min: 0, max: 0 }, { min: -10, max: -10 }, { min: -10, max: -10 }]);
+  });
+
+  it("includes zero in negative unit groups containing any bar panel, including empty bars", () => {
+    expect(chartPanelRanges([
+      series([-10, -2], "ms"), series([-8], "ms", "bar"),
+      series([-20], "%"), series([null], "%", "bar"),
+      series([-4], undefined, "bar"), series([-1], ""), series([-9], "s"),
+    ])).toEqual([
+      { min: -10, max: 0 }, { min: -10, max: 0 },
+      { min: -20, max: 0 }, { min: -20, max: 0 },
+      { min: -4, max: 0 }, { min: -4, max: 0 }, { min: -9, max: -9 },
+    ]);
   });
 });
 
@@ -68,6 +80,42 @@ describe("chart axis and legend units", () => {
   it("uses one unitless axis for three or more distinct units, including no unit", () => {
     expect(chartAxes([{ field: "latency", unit: "ms" }, { field: "count" }, { field: "rate", unit: "%" }])).toEqual({
       seriesAxes: ["y", "y", "y"], leftUnit: "", legendLabels: ["latency (ms)", "count", "rate (%)"],
+    });
+  });
+
+  it("uses the existing unit rules for grouped bars", () => {
+    expect(chartAxes([{ field: "first", type: "bar", unit: "ms" }, { field: "second", type: "bar", unit: "requests" }])).toEqual({
+      seriesAxes: ["y", "yRight"], leftUnit: "ms", rightUnit: "requests", legendLabels: ["first (ms)", "second (requests)"],
+    });
+    expect(chartAxes([{ field: "first", type: "bar" }, { field: "second", type: "bar", unit: "" }])).toEqual({
+      seriesAxes: ["y", "y"], leftUnit: "", legendLabels: ["first", "second"],
+    });
+  });
+
+  it("puts bars right and lines left regardless of order or shared unit", () => {
+    expect(chartAxes([
+      { field: "responses", type: "bar", unit: "count" }, { field: "score", unit: "count" },
+      { field: "other", type: "line", unit: "count" }, { field: "more", type: "bar", unit: "count" },
+    ])).toEqual({
+      seriesAxes: ["yRight", "y", "y", "yRight"], leftUnit: "count", rightUnit: "count",
+      legendLabels: ["responses", "score", "other", "more"],
+    });
+  });
+
+  it("labels mixed axes only when their own series share a unit, normalizing absent and empty", () => {
+    expect(chartAxes([
+      { field: "score", unit: "%" }, { field: "responses", type: "bar" },
+      { field: "time", unit: "ms" }, { field: "other", type: "bar", unit: "" },
+    ])).toEqual({
+      seriesAxes: ["y", "yRight", "y", "yRight"], leftUnit: "", rightUnit: "",
+      legendLabels: ["score (%)", "responses", "time (ms)", "other"],
+    });
+    expect(chartAxes([
+      { field: "responses", type: "bar", unit: "count" }, { field: "score", unit: "%" },
+      { field: "time", type: "bar", unit: "ms" }, { field: "other", type: "line", unit: "%" },
+    ])).toEqual({
+      seriesAxes: ["yRight", "y", "yRight", "y"], leftUnit: "%", rightUnit: "",
+      legendLabels: ["responses (count)", "score (%)", "time (ms)", "other (%)"],
     });
   });
 });

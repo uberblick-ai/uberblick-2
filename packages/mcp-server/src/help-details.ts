@@ -357,9 +357,12 @@ export const toolHelpDetails = {
     "text is a JSON mapping, for example " +
     "`{\"version\":1,\"type\":\"line\",\"collection\":\"observations\",\"x\":{\"field\":\"day\",\"type\":\"date\"}," +
     "\"y\":[{\"field\":\"count\"}]}`. It names top-level record fields: x type is number or date, " +
-    "and y has one to eight numeric series. Optional x and y labels, y units, title and " +
+    "and y has one to eight numeric series. Optional y series type is line or bar, default line. " +
+    "Bars-only charts keep top-level type line and draw grouped bars from zero. " +
+    "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis. " +
+    "Missing, null or wrong-type bar values draw no bar; missing affects only lines. Optional x and y labels, y units, title and " +
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
-    "panels draws one compact line chart per y series in mapping order, in a responsive grid; each panel shows its label " +
+    "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
     "layout is invalid for table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
