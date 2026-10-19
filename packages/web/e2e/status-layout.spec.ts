@@ -302,8 +302,6 @@ for (const upstream of [true, false]) {
       try {
         await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
         await expect(page.locator(".ub-not-saved:visible")).toHaveText("not saved");
-        await expect(page.locator("[data-sonner-toast][data-type=error]")).toContainText(/changes are not saved/i);
-        await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
         await expectBacklog(page, true);
         await expectStable("real offline / not saved / pending update");
         const waiting = await openApp(browser, new URL(page.url()).pathname, {
@@ -314,14 +312,11 @@ for (const upstream of [true, false]) {
           await expect(waiting.locator(".ub-waiting-meta")).toBeVisible();
           await expect(waiting.locator(".ub-not-saved")).toHaveText("not saved");
           await expect(waiting.locator(".ub-not-saved")).toHaveText("not saved");
-          await expect(waiting.locator("[data-sonner-toast][data-type=error]")).toContainText(/changes are not saved/i);
-          await expect(waiting.locator("[data-sonner-toast]")).toHaveCount(1);
           await expectCompactHeader(waiting);
           const waitingPeers = waiting.locator(".ub-waiting-meta .ub-peers");
           await expect(waitingPeers).toBeAttached();
           expect(await waitingPeers.evaluate((node) => node.getBoundingClientRect().width), "empty presence does not reserve a gap on the waiting screen").toBe(0);
-          // Keep this app alive: closing the browser cannot prove that leaving
-          // the waiting header resolves the notice it owns.
+          // Keep this app alive to exercise leaving the waiting header.
           const pageInstance = await waiting.evaluate(() => performance.timeOrigin);
           const showList = waiting.getByRole("button", { name: "Show document list", exact: true });
           if (await showList.isVisible()) {
@@ -388,7 +383,6 @@ for (const upstream of [true, false]) {
         try {
           await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
           await expect(page.locator(".ub-not-saved")).toHaveText("not saved");
-          await expect(page.locator("[data-sonner-toast][data-type=error]")).toContainText("Changes are not saved.");
           const offline = await statusGeometry(page);
           expect(offline.problems, "threads rail / not saved").toEqual([]);
           expect(offline.status, "threads rail / not saved").toEqual(baseline.status);

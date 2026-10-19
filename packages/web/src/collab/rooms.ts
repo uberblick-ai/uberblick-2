@@ -31,7 +31,7 @@ import {
 import { HUB_CONFIG_PATH, hubAuthToken, hubUrl, resolveClientConfig, servedLocally } from "../config.js";
 import { localRoomToken } from "./local-session.js";
 import { getSetting, subscribeSettings } from "../settings.js";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { MAX_TOKEN_LIFETIME_SECONDS, importRootSecret, mintToken } from "./token.js";
 import { WEB_CLIENT } from "./identity.js";
 import type { AwarenessUser } from "./identity.js";
@@ -377,7 +377,7 @@ function settingsRefusalNotifier(uuid: string): (event: { payload: string }) => 
     if (notice === null || typeof notice !== "object" || !("type" in notice) ||
       notice.type !== "settings-reset" || !("message" in notice) || typeof notice.message !== "string") return;
     notified = true;
-    notifyTransient({ key: "workspace-settings-refused", message: notice.message, severity: "error" });
+    toast.error(notice.message, { id: "workspace-settings-refused" });
   };
 }
 

@@ -15,11 +15,11 @@ import { codeBlockChrome, sourceBlockView, writeToClipboard } from "../src/edito
 import type { NodeViewRendererProps } from "@tiptap/core";
 import { DecorationSet } from "@tiptap/pm/view";
 import { mountEditor, snapshotFragment } from "./helpers.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast } from "sonner";
 
-vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-beforeEach(() => vi.mocked(notifyTransient).mockClear());
+beforeEach(() => { vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); });
 
 const SHELL = "pnpm install\npnpm -r build\n";
 const DIAGRAM = "graph TD;\n  A-->B;";
@@ -128,9 +128,9 @@ describe("copying a source block", () => {
     expect(transactions).toBe(0);
     expect(editor.isFocused).toBe(false);
     expect(snapshotFragment(ydoc)).toEqual(before);
-    await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledTimes(2));
-    for (const [notice] of vi.mocked(notifyTransient).mock.calls) {
-      expect(notice).toEqual({ key: "clipboard", message: "Source copied", severity: "success" });
+    await vi.waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    for (const call of vi.mocked(toast.success).mock.calls) {
+      expect(call).toEqual(["Source copied", { id: "clipboard" }]);
     }
     expect(buttons.map(button => button.textContent)).toEqual(["Copy", "Copy"]);
 
@@ -229,9 +229,7 @@ describe("copying a source block", () => {
       element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
       await vi.waitFor(() => expect(execCommand).toHaveBeenCalled());
       expect(copied).toBe(SHELL);
-      await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
-        key: "clipboard", message: "Source copied", severity: "success",
-      }));
+      await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Source copied", { id: "clipboard" }));
       expect(document.activeElement).toBe(origin);
       expect([origin.selectionStart, origin.selectionEnd]).toEqual([2, 7]);
       expect(editor.state.selection.eq(selection)).toBe(true);
@@ -258,9 +256,7 @@ describe("copying a source block", () => {
     const { editor, element } = mountEditor(documentWithSourceBlocks());
     try {
       element.querySelector<HTMLButtonElement>(".ub-copy")!.click();
-      await vi.waitFor(() => expect(notifyTransient).toHaveBeenCalledWith({
-        key: "clipboard", message: "Couldn't copy the source. Select the source text and copy it instead.", severity: "error",
-      }));
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't copy the source. Select the source text and copy it instead.", { id: "clipboard" }));
       expect(execCommand).toHaveBeenCalledWith("copy");
       expect(element.querySelector<HTMLButtonElement>(".ub-copy")!.textContent).toBe("Copy");
       expect(document.querySelector("textarea")).toBeNull();
