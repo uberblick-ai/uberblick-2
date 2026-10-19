@@ -8,6 +8,7 @@ import {
   InvalidTableError,
   InvalidCardError,
   InvalidFigmaError,
+  InvalidListAttributesError,
   InvalidTableMappingError,
   InvalidTagAssignmentError,
   InlineLinkRangeError,
@@ -217,6 +218,10 @@ const RECOVERIES: Record<string, Recovery> = {
     recoveryClass: "manual",
     guidance:
       "Correct table_mapping for this table: match the new dimensions, keep header row 0, and use unique increasing old indices in bounds or null for new positions. No table change was written.",
+  },
+  invalid_list_attributes: {
+    recoveryClass: "manual",
+    guidance: "Supply list or indent only when editing a list-item block, with list bullet or ordered and indent an integer from 0 to 3. Nothing was written.",
   },
   annotation_cell: {
     recoveryClass: "manual",
@@ -574,6 +579,9 @@ export function toFailure(tool: string, error: unknown): ToolFailure {
   }
   if (error instanceof InvalidTableMappingError) {
     return stamped(tool, { error: "invalid_table_mapping", message: error.message });
+  }
+  if (error instanceof InvalidListAttributesError) {
+    return stamped(tool, { error: "invalid_list_attributes", message: error.message });
   }
   if (error instanceof InvalidTableError) {
     return stamped(tool, { error: "invalid_table", message: error.message });

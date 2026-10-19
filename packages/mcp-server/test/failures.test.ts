@@ -114,6 +114,7 @@ const EXPECTED: Record<
   annotation_figma: { recoveryClass: "manual", detail: ["blockId"] },
   table_mapping_required: { recoveryClass: "manual", detail: [] },
   invalid_table_mapping: { recoveryClass: "manual", detail: [] },
+  invalid_list_attributes: { recoveryClass: "manual", detail: [] },
   annotation_cell: { recoveryClass: "manual", detail: ["blockId", "reason"] },
   invalid_github_reference: { recoveryClass: "manual", detail: ["github_ref"] },
   unknown_help_topic: { recoveryClass: "manual", detail: ["topics"] },
@@ -279,6 +280,10 @@ describe("the failure contract", () => {
     const record = (payload: any): void => {
       failures.set(payload.error, payload);
     };
+
+    record((await rig.call("edit_block", {
+      uuid: doc.uuid, block_id: doc.blockId, old_text: "one", new_text: "two", list: "ordered",
+    })).payload);
 
     record((await rig.call("get_doc", { uuid: randomUUID() })).payload);
     record((await rig.call("get_data", { uuid: doc.uuid, collection: "missing" })).payload);

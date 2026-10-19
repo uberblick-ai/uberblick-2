@@ -21,6 +21,7 @@ import {
   ConflictingLinkMarksError,
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
+  InvalidListAttributesError,
   InvalidTableMappingError,
   MarksNotAllowedError,
   OldTextMismatchError,
@@ -634,8 +635,25 @@ export interface EditBlockOptions {
    * Refuse a stale rev even if oldText matches; attributes also affect the hash.
    */
   rev?: string;
+  /** List marker to set in place; omitted markers remain unchanged. */
+  list?: ListStyle;
+  /** List depth, an integer from 0 to 3; omitted depth remains unchanged. */
+  indent?: ListIndent;
   /** Surviving old GFM positions, or null for newly created rows and columns. */
   tableMapping?: TableMapping;
+}
+
+function validateListAttributes(type: BlockType, options: EditBlockOptions): void {
+  if (options.list === undefined && options.indent === undefined) return;
+  if (type !== "list-item") {
+    throw new InvalidListAttributesError("list and indent apply only to list-item blocks");
+  }
+  if (options.list !== undefined && !isListStyle(options.list)) {
+    throw new InvalidListAttributesError("list must be bullet or ordered");
+  }
+  if (options.indent !== undefined && (!Number.isInteger(options.indent) || options.indent < 0 || options.indent > MAX_LIST_INDENT)) {
+    throw new InvalidListAttributesError("indent must be an integer from 0 to 3");
+  }
 }
 
 /**
@@ -647,6 +665,7 @@ export interface EditBlockOptions {
  * Table edits compare marked GFM and retain unchanged cell text and mark keys.
  * StaleBlockError guards only the local replica; a current rev with wrong
  * oldText yields OldTextMismatchError. Both carry current text/rev for retry.
+ * List attributes update the existing element without replacing its text child.
  */
 export function editBlock(
   ydoc: Y.Doc,
@@ -682,6 +701,7 @@ export function editBlock(
       }
       throw new StaleBlockError(details);
     }
+    validateListAttributes(current.type, options);
     if (current.type === "table") {
       const parsedOld = parseTableInput(oldText);
       const parsedNew = parseTableInput(newText);
@@ -699,6 +719,8 @@ export function editBlock(
       editCard(element, cardTextParts(element), after);
       return;
     }
+    if (options.list !== undefined) element.setAttribute("list", options.list);
+    if (options.indent !== undefined) element.setAttribute("indent", String(options.indent));
     if (oldText === newText) return;
 
     const text = requireBlockText(ydoc, element, blockId);

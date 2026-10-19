@@ -2,7 +2,9 @@ import {
   BLOCK_TYPES,
   DECISION_STATUSES,
   DOCUMENT_KINDS,
+  LIST_STYLES,
   MAX_DESCRIPTION_LENGTH,
+  MAX_LIST_INDENT,
   MAX_TLDR_LENGTH,
   canonicalDocumentUuid,
 } from "@uberblick/schema";
@@ -138,6 +140,9 @@ export const inlineArg = z
   .optional()
   .describe(INLINE_RUNS);
 
+export const listStyleArg = z.enum(LIST_STYLES);
+export const listIndentArg = z.number().int().min(0).max(MAX_LIST_INDENT);
+
 export const blockShape = {
   type: z.enum([...BLOCK_TYPES]),
   text: z.string().optional().describe(
@@ -154,6 +159,8 @@ export const blockShape = {
     .string()
     .optional()
     .describe("Code language, e.g. \"ts\". Code blocks only."),
+  list: listStyleArg.optional().describe("List style. List items only; omitted means bullet."),
+  indent: listIndentArg.optional().describe("List depth, an integer from 0 to 3. List items only; omitted means 0."),
   inline: inlineArg,
 };
 
