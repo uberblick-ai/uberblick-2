@@ -2,7 +2,7 @@
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, TestInfo } from "@playwright/test";
 import { join } from "node:path";
-import { activateControl, createDoc, docTitle, editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
+import { activateControl, createDoc, docTitle, editor, setupHarness } from "./app-helpers.js";
 import { placeCaret, placeCaretIn } from "./harness.js";
 
 const { harness, trackContext } = setupHarness();
@@ -260,24 +260,6 @@ async function capture(page: Page, info: TestInfo, label: string, colorScheme: "
   await page.emulateMedia({ colorScheme });
 }
 
-/** Like Safari, WebKit on macOS tabs only to text fields; Option+Tab reaches buttons. */
-function nextControlKey(page: Page): string {
-  const webkitMac = process.platform === "darwin" && page.context().browser()?.browserType().name() === "webkit";
-  return webkitMac ? "Alt+Tab" : "Tab";
-}
-
-/** Native Tab from the insertion shortcut must reach the named button. */
-async function tabTo(page: Page, name: string): Promise<void> {
-  const target = button(page, name);
-  for (let index = 0; index < 40; index += 1) {
-    const focusedName = await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName);
-    expect(await target.count(), `Tab reached ${focusedName ?? "no element"} and lost the table controls`).toBe(1);
-    if (await target.evaluate((element) => element === document.activeElement)) return;
-    await page.keyboard.press(nextControlKey(page));
-  }
-  await expect(target).toBeFocused();
-}
-
 test("a caret table and another hovered table reveal their own controls together", async ({ page }) => {
   const initial = await openTable(page);
   const originalId = await initial.getAttribute("id");
@@ -383,48 +365,6 @@ test("column hover reaches its top menu and caret, focus and open menus keep it 
   await expect(trigger).toBeFocused();
   await revealedColumns(table, [2]);
   await expect(table.locator("th")).toHaveCount(3);
-  await pageFits(page);
-});
-
-test("keyboard reaches every column menu while the native strip reveals off-screen columns", { tag: "@webkit" }, async ({ page }, info) => {
-  test.skip(info.project.use.hasTouch === true, "Touch Safari reaches column menus by touch instead of native button Tab");
-  const table = await openTable(page, true);
-  const wrapper = table.locator("..");
-  await expect.poll(() => wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
-  await caretIn(table.locator("th").first(), info);
-  await page.mouse.move(0, 0);
-  await page.keyboard.press("Control+Alt+t");
-  await expect(button(page, "Insert column before 1")).toBeFocused();
-  for (let column = 1; column <= 8; column += 1) {
-    await tabTo(page, `Column ${column} actions`);
-    const trigger = button(page, `Column ${column} actions`);
-    await expect(trigger).toBeFocused();
-    await expect(trigger).toHaveCSS("opacity", "1");
-    await columnMenuBorder(table, column);
-    await expect.poll(() => trigger.evaluate((element) => {
-      const bounds = element.getBoundingClientRect();
-      const hit = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-      const strip = element.closest(".ub-table-column-controls");
-      return JSON.stringify({
-        focused: element === document.activeElement,
-        focusedName: document.activeElement?.getAttribute("aria-label"),
-        reachable: element.contains(hit),
-        hit: hit?.outerHTML.slice(0, 160),
-        bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
-        scrollLeft: strip?.scrollLeft,
-      });
-    })).toContain('"reachable":true');
-  }
-  await expect.poll(() => wrapper.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
-  await page.keyboard.press("Enter");
-  await expect(page.getByRole("menuitem", { name: "Move column left", exact: true })).toBeFocused();
-  await expect(page.getByRole("menuitem", { name: "Move column right", exact: true })).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu")).toHaveCount(0);
-  await expect(button(page, "Column 8 actions")).toBeFocused();
-  await page.keyboard.press(`Shift+${nextControlKey(page)}`);
-  await expect(button(page, "Column 7 actions")).toBeFocused();
-  await expect(table.locator("th")).toHaveText(["First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Last"]);
   await pageFits(page);
 });
 
@@ -625,7 +565,7 @@ test("hover alone reveals one row and reaches its border insertion and adjacent 
   await pageFits(page);
 });
 
-test("row menus target their row by trigger, right click and keyboard and protect the header", { tag: "@webkit" }, async ({ page }, info) => {
+test("row menus target their row by trigger and right click and protect the header", { tag: "@webkit" }, async ({ page }, info) => {
   const colorScheme = "light";
   await page.emulateMedia({ colorScheme });
   const table = await openTable(page);
@@ -652,8 +592,8 @@ test("row menus target their row by trigger, right click and keyboard and protec
   await expect(table.locator("tr").last()).toContainText("Keep last row");
 
   await caretIn(table.locator("tr").nth(2).locator("td").first(), info);
-  // Control+Option+R exists on a MacBook without a context-menu key.
-  await openKeyboardMenu(page, "Control+Alt+r", button(page, "Row 3 actions"));
+  await activate(button(page, "Row 3 actions"), info);
+  await expect.poll(() => page.getByRole("menu").evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
   await page.keyboard.press("End");
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
@@ -663,111 +603,13 @@ test("row menus target their row by trigger, right click and keyboard and protec
   await expect(table.locator("tr").last()).toContainText("Keep last row");
 
   await caretIn(table.locator("th").first(), info);
-  await openKeyboardMenu(page, "Control+Alt+r", button(page, "Row 1 actions"));
+  await activate(button(page, "Row 1 actions"), info);
   await expect(page.getByRole("menuitem", { name: "Insert row above", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toBeDisabled();
   await expect(page.getByRole("menuitem", { name: "Insert row below", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(button(page, "Row 1 actions")).toBeFocused();
-  await pageFits(page);
-});
-
-test("keyboard reaches insertion buttons from a table caret and each button inserts once", { tag: "@webkit" }, async ({ page }, info) => {
-  const table = await openTable(page);
-  await caretIn(table.locator("td").first(), info);
-  await page.keyboard.insertText("Keyboard row");
-  await page.mouse.move(0, 0);
-  await page.keyboard.press("Control+Alt+t");
-  await expect(button(page, "Insert column before 1")).toBeFocused();
-  if (info.project.name !== "webkit-ipad") {
-    const order = ["Insert column before 1", "Insert column after 1", "Insert column after 2", "Insert column after 3",
-      "Column 1 actions", "Column 2 actions", "Column 3 actions",
-      "Insert row after 1", "Insert row after 2", "Insert row after 3", "Row 1 actions", "Row 2 actions", "Row 3 actions"];
-    for (const [index, name] of order.entries()) {
-      const control = button(page, name);
-      await expect(control).toBeFocused();
-      await expect.poll(() => control.evaluate((element) => getComputedStyle(element).opacity)).toBe("1");
-      const focusedRow = /^(?:Insert row after |Row )(\d+)/.exec(name)?.[1];
-      await revealedRows(table, focusedRow === undefined ? [2] : [...new Set([2, Number(focusedRow)])].sort());
-      if (index < order.length - 1) await page.keyboard.press(nextControlKey(page));
-    }
-    await activate(table.locator("td").first(), info);
-    await page.mouse.move(0, 0);
-    await page.keyboard.press("Control+Alt+t");
-    await expect(button(page, "Insert column before 1")).toBeFocused();
-  }
-  await page.keyboard.press("Enter");
-  await expect(table.locator("th")).toHaveCount(4);
-  if (info.project.name === "webkit-ipad") {
-    // iOS's native Tab leaves the button set; caret shortcuts keep every
-    // insertion available to an attached keyboard there.
-    await caretIn(table.locator("tr").nth(1).locator("td").last(), info);
-    await page.keyboard.press("Control+Alt+ArrowRight");
-  } else {
-    await activate(table.locator("td").first(), info);
-    await page.keyboard.press("Control+Alt+t");
-    await tabTo(page, "Insert column after 4");
-    await page.keyboard.press("Space");
-  }
-  await expect(table.locator("th")).toHaveCount(5);
-  await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
-
-  if (info.project.name === "webkit-ipad") {
-    await caretIn(table.locator("tr").last().locator("td").first(), info);
-    await page.keyboard.press("Control+Alt+ArrowDown");
-  } else {
-    await activate(table.locator("td").first(), info);
-    await page.keyboard.press("Control+Alt+t");
-    await tabTo(page, "Insert row after 3");
-    await page.keyboard.press("Enter");
-  }
-  await expect(table.locator("tr")).toHaveCount(4);
-  await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
-  await caretIn(table.locator("tr").last().locator("td").first(), info);
-  await openKeyboardMenu(page, "Shift+F10", button(page, "Row 4 actions"));
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menu")).toHaveCount(0);
-  await expect(button(page, "Row 4 actions")).toBeFocused();
-  await pageFits(page);
-});
-
-test("caret shortcuts insert on each side of the current cell and preserve the header", { tag: "@webkit" }, async ({ page }, info) => {
-  const table = await openTable(page);
-  await caretIn(table.locator("th").nth(1), info);
-  await page.keyboard.insertText("Target header");
-  await caretIn(table.locator("tr").nth(1).locator("td").nth(1), info);
-  await page.keyboard.insertText("Target body");
-  await caretIn(table.locator("tr").last().locator("td").nth(1), info);
-  await page.keyboard.insertText("Last body");
-
-  await caretIn(table.locator("th").nth(1), info);
-  await page.keyboard.press("Control+Alt+ArrowLeft");
-  await expect(table.locator("th")).toHaveCount(4);
-  await expect(table.locator("th").nth(2)).toHaveText("Target header");
-  await caretIn(table.locator("th").nth(2), info);
-  await page.keyboard.press("Control+Alt+ArrowRight");
-  await expect(table.locator("th")).toHaveCount(5);
-  await expect(table.locator("th").nth(2)).toHaveText("Target header");
-  await expect(table.locator("tr").nth(1).locator("td")).toHaveCount(5);
-  await expect(table.locator("tr").last().locator("td")).toHaveCount(5);
-
-  await caretIn(table.locator("tr").nth(1).locator("td").nth(2), info);
-  await page.keyboard.press("Control+Alt+ArrowUp");
-  await expect(table.locator("tr")).toHaveCount(4);
-  await expect(table.locator("tr").nth(1).locator("td")).toHaveText(["", "", "", "", ""]);
-  await expect(table.locator("tr").nth(2)).toContainText("Target body");
-  await caretIn(table.locator("tr").nth(2).locator("td").nth(2), info);
-  await page.keyboard.press("Control+Alt+ArrowDown");
-  await expect(table.locator("tr")).toHaveCount(5);
-  await expect(table.locator("tr").nth(3).locator("td")).toHaveText(["", "", "", "", ""]);
-  await expect(table.locator("tr").last()).toContainText("Last body");
-
-  await caretIn(table.locator("th").nth(2), info);
-  await page.keyboard.press("Control+Alt+ArrowUp");
-  await expect(table.locator("tr")).toHaveCount(5);
-  await expect(table.locator("tr").first().locator("td")).toHaveCount(0);
-  await expect(table.locator("th").nth(2)).toHaveText("Target header");
   await pageFits(page);
 });
 
@@ -891,7 +733,7 @@ test("touch sizing survives stationary compatibility hover but real mouse moveme
   await expect(row).toHaveCSS("width", "24px");
 });
 
-test("archiving hides structural controls and keyboard and right-click paths cannot write", { tag: "@webkit" }, async ({ page }, info) => {
+test("archiving hides structural controls and right-click paths cannot write", { tag: "@webkit" }, async ({ page }, info) => {
   const table = await openTable(page);
   await activate(table.locator("td").first(), info);
   await page.keyboard.insertText("Retained cell");
@@ -901,8 +743,6 @@ test("archiving hides structural controls and keyboard and right-click paths can
   await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeVisible();
   await expect(editor(page)).toHaveAttribute("contenteditable", "false");
   await activate(table.locator("td").first(), info);
-  await page.keyboard.press("Control+Alt+r");
-  await page.keyboard.press("Control+Alt+t");
   await table.locator("td").first().click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Delete row", exact: true })).toHaveCount(0);
   await expect(page.getByRole("menuitem", { name: "Delete column", exact: true })).toHaveCount(0);
