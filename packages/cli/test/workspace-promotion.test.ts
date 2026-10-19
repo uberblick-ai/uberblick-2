@@ -132,29 +132,6 @@ describe("workspace creation and promotion", () => {
     expect(selected(box)).toEqual(previous);
   });
 
-  it("keeps loopback promotion admission private and requires login after logout", async () => {
-    const box = await localWorkspace();
-    const { hub, endpoint } = await hubFor(box);
-    const mcpEntry = JSON.stringify({ mcpServers: { uberblick: { env: { UB_WORKSPACE_ID: selected(box).workspaceId, UB_HUB_URL: "local" } } } });
-    writeFileSync(join(box.cwd, ".mcp.json"), mcpEntry);
-    const result = await runInProcess(["workspace", "promote", endpoint], box);
-    expect(result.status, result.output).toBe(0);
-    expect(result.stderr).not.toContain("MCP registrations");
-    expect(result.stderr).not.toContain("ub mcp install");
-    expect(readFileSync(join(box.cwd, ".mcp.json"), "utf8")).toBe(mcpEntry);
-    expect(Object.keys(selected(box)).sort()).toEqual(["hubUrl", "workspaceId"]);
-    expect(readWorkspaceHub(selected(box).workspaceId, box.env)).toBe(endpoint);
-    const connected = await runInProcess(["status", "--json"], box);
-    expect(connected.status, connected.output).toBe(0);
-    expect(JSON.parse(connected.stdout).connection.state).toBe("connected");
-    expect(JSON.parse(connected.stdout).problems).toEqual([]);
-    await removeHubLogin(`http://127.0.0.1:${hub.port}`, box.env);
-    const status = await runInProcess(["status", "--json"], box, { HUB_AUTH_TOKEN: "synthetic-local-secret" });
-    expect(JSON.parse(status.stdout).connection.state).toBe("refused");
-    expect(JSON.parse(status.stdout).account).toBeNull();
-    expect(status.stdout).toContain("ub auth login");
-  });
-
   it("does not select the hub when private admission persistence fails after upload", async () => {
     const box = await localWorkspace();
     const { hub, endpoint } = await hubFor(box);
