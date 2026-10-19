@@ -20,8 +20,8 @@
   </section>
 
   <section class="q" id="ub-agents"><h2>ub-agents</h2>
-  <p>Once agents can read the context, somebody has to hand them the work. Doing that by hand, issue by issue, is the new bottleneck. <a href="https://agents.uberblick.ai">ub-agents</a> is a loop engineering framework for GitHub: roles defined in a few lines of YAML, driven by labels, so issues get prepared, implemented, reviewed and merged by agents, and a person steps in only where a label says so. It runs on GitHub Actions with any agent and no server, because the loop should live where the issues live.</p>
-  <p>Uberblick is built this way. Its product intent sits in an Uberblick workspace, and the loop's agents read it over MCP before they prepare, implement or review an issue.</p>
+  <p>Autonomous agents are the reality for an engineering team now. Guiding a model through an interactive session is worth it only where a decision or a person's feedback matters in the moment; most work can be dispatched as a workflow. <a href="https://agents.uberblick.ai">ub-agents</a> is a loop engineering framework for GitHub: roles defined in a few lines of YAML, driven by labels, so issues get prepared, implemented, reviewed and merged by agents, and a person steps in only where a label says so. It runs on GitHub Actions with any agent and no server, because the loop should live where the issues live.</p>
+  <p>Every run starts with fresh context. The agents have no memory, only what their local Markdown files and Uberblick hand them, so a gap in the documentation shows up in the next run instead of staying hidden. Each agent ends its run with a short retrospective on what would have made it more efficient, and the loop feeds that into the next run, so it learns from its own work. Uberblick is built this way: its product intent sits in an Uberblick workspace, and the loop's agents read it over MCP before they prepare, implement or review an issue.</p>
   </section>
 
   <section class="q" id="skills"><h2>Skills</h2>
