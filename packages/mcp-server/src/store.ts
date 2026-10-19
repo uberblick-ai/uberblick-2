@@ -172,6 +172,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5 (
 
 const SEARCH_RELEVANCE = "bm25(docs_fts, 0, 2, 1, 1, 1)";
 
+const FRAGMENT_FTS_SCHEMA = `
+CREATE VIRTUAL TABLE docs_fragment_fts USING fts5 (
+  uuid UNINDEXED,
+  title,
+  body,
+  description,
+  tag_names,
+  indexed_through_seq UNINDEXED,
+  catalog_through_seq UNINDEXED,
+  tokenize = 'trigram remove_diacritics 1'
+);
+`;
+
+function foldFragment(text: string): string {
+  return text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS updates (
   seq     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -476,9 +493,12 @@ export class MirrorStore {
     putGithubRef: Prepared<[string, string]>;
     dropFts: Prepared<[string]>;
     putFts: Prepared<[string, string, string, string, string]>;
+    dropFragmentFts: Prepared<[string]>;
+    putFragmentFts: Prepared<[number | bigint, string, string, string, string, string, number, number]>;
     markSearch: Prepared<[number | bigint, string]>;
     search: Prepared<[string, string, string | null, string | null, number]>;
     searchUuids: Prepared<[string]>;
+    shortSearchRows: Prepared<[]>;
     backlinks: Prepared<[string]>;
     decisionsForGithub: Prepared<[string]>;
   };
@@ -570,6 +590,7 @@ export class MirrorStore {
     this.migrateCatalogIndexSequence();
     this.migrateGithubRefsIndexSequence();
     this.migrateSearchIndex();
+    this.migrateFragmentSearchIndex();
 
     const prepare = <P extends SQLInputValue[]>(sql: string): Prepared<P> =>
       this.db.prepare(sql) as Prepared<P>;
@@ -631,7 +652,12 @@ export class MirrorStore {
           "OR doc_index_seq.github_refs_indexed = 0 " +
           // An older peer can replace the row using only the original columns.
           "OR NOT EXISTS (SELECT 1 FROM docs_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
-          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL))",
+          "AND f.uuid = excluded.uuid AND f.description IS NOT NULL AND f.tag_names IS NOT NULL) " +
+          // A peer can fill the Porter row completely and reuse its rowid;
+          // the fragment row must also represent both current source cuts.
+          "OR NOT EXISTS (SELECT 1 FROM docs_fragment_fts f WHERE f.rowid = doc_index_seq.search_rowid " +
+          "AND f.uuid = excluded.uuid AND f.indexed_through_seq = excluded.indexed_through_seq " +
+          "AND f.catalog_through_seq = excluded.catalog_through_seq))",
       ),
       putDoc: prepare(
         "INSERT INTO doc_index (uuid, title, description, kind) VALUES (?, ?, ?, ?) " +
@@ -657,6 +683,12 @@ export class MirrorStore {
       putFts: prepare(
         "INSERT INTO docs_fts (uuid, title, body, description, tag_names) VALUES (?, ?, ?, ?, ?)",
       ),
+      dropFragmentFts: prepare("DELETE FROM docs_fragment_fts WHERE uuid = ?"),
+      putFragmentFts: prepare(
+        "INSERT OR REPLACE INTO docs_fragment_fts " +
+          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ),
       markSearch: prepare("UPDATE doc_index_seq SET search_rowid = ? WHERE uuid = ?"),
       // Pack unambiguous JSON IDs into each hit to keep search to one query.
       search: prepare(
@@ -674,8 +706,13 @@ export class MirrorStore {
           "f.uuid LIMIT ?",
       ),
       searchUuids: prepare(
-        "SELECT f.uuid AS uuid FROM docs_fts f JOIN doc_index d ON d.uuid = f.uuid " +
-          `WHERE docs_fts MATCH ? ORDER BY ${SEARCH_RELEVANCE}, f.uuid`,
+        "SELECT f.uuid AS uuid, bm25(docs_fragment_fts, 0, 2, 1, 1, 1) AS relevance " +
+          "FROM docs_fragment_fts f JOIN doc_index d ON d.uuid = f.uuid " +
+          "WHERE docs_fragment_fts MATCH ?",
+      ),
+      shortSearchRows: prepare(
+        "SELECT f.uuid AS uuid, f.title AS title, f.tag_names AS tag_names " +
+          "FROM docs_fragment_fts f JOIN doc_index d ON d.uuid = f.uuid",
       ),
       backlinks: prepare(
         "SELECT l.source AS uuid, COALESCE(d.title, '') AS title, " +
@@ -802,11 +839,17 @@ export class MirrorStore {
         doc.description,
         (doc.tagNames ?? []).join("\n"),
       );
+      this.statements.dropFragmentFts.run(doc.uuid);
+      this.statements.putFragmentFts.run(
+        indexed.lastInsertRowid, doc.uuid, doc.title, doc.body, doc.description,
+        (doc.tagNames ?? []).join("\n"), throughSeq, catalogThroughSeq,
+      );
       this.statements.markSearch.run(indexed.lastInsertRowid, doc.uuid);
     });
 
     this.unindexTx = transactional(this.db, (uuid: string) => {
       this.statements.dropFts.run(uuid);
+      this.statements.dropFragmentFts.run(uuid);
       this.statements.dropTags.run(uuid);
       this.statements.dropLinks.run(uuid);
       this.statements.dropGithubRefs.run(uuid);
@@ -1047,6 +1090,7 @@ export class MirrorStore {
     ).get(value) !== undefined)) return;
     transactional(this.db, () => {
       this.statements.dropFts.run(uuid);
+      this.statements.dropFragmentFts.run(uuid);
       this.statements.dropTags.run(uuid);
       this.statements.dropLinks.run(uuid);
       this.statements.dropGithubRefs.run(uuid);
@@ -1064,7 +1108,8 @@ export class MirrorStore {
     transactional(this.db, () => {
       this.db.exec(
         "DELETE FROM doc_index; DELETE FROM doc_index_seq; DELETE FROM doc_tags; " +
-          "DELETE FROM doc_links; DELETE FROM decision_github_refs; DELETE FROM docs_fts;",
+          "DELETE FROM doc_links; DELETE FROM decision_github_refs; DELETE FROM docs_fts; " +
+          "DELETE FROM docs_fragment_fts;",
       );
     })();
   }
@@ -1105,10 +1150,33 @@ export class MirrorStore {
 
   /** Complete relevance order for callers that filter using directory metadata. */
   searchUuids(query: string): string[] {
-    const match = ftsQuery(query);
-    if (match === null) return [];
-    const rows = this.statements.searchUuids.all(match) as { uuid: string }[];
-    return rows.map(({ uuid }) => uuid);
+    const words = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])];
+    if (words.length === 0) return [];
+    const long = words.filter((word) => [...word].length >= 3);
+    const short = [...new Set(words.filter((word) => [...word].length < 3).map(foldFragment))];
+    return transactional(this.db, () => {
+      const relevance = new Map<string, number>();
+      if (long.length > 0) {
+        for (const row of this.statements.searchUuids.all(long.map((word) => `"${word}"`).join(" OR "))) {
+          relevance.set(String(row.uuid), Number(row.relevance));
+        }
+      }
+      if (short.length > 0) {
+        for (const row of this.statements.shortSearchRows.all()) {
+          const title = foldFragment(String(row.title));
+          const tags = foldFragment(String(row.tag_names ?? ""));
+          const weight = short.reduce((sum, word) => sum +
+            (title.includes(word) ? 2 : 0) + (tags.includes(word) ? 1 : 0), 0);
+          if (weight === 0) continue;
+          const uuid = String(row.uuid);
+          // FTS5 floors common-term IDF at 1e-6; use that scale for short
+          // fragments while retaining the title's double field weight.
+          relevance.set(uuid, (relevance.get(uuid) ?? 0) - weight * 1e-6);
+        }
+      }
+      return [...relevance].sort(([a, ar], [b, br]) => ar - br || (a < b ? -1 : a > b ? 1 : 0))
+        .map(([uuid]) => uuid);
+    })();
   }
 
   /** Documents whose `links` name `uuid`. */
@@ -1286,6 +1354,25 @@ export class MirrorStore {
             "DROP TABLE search_upgrade;",
         );
       }
+    }, "immediate")();
+  }
+
+  /** Create and backfill together so another opener cannot see a partial index. */
+  private migrateFragmentSearchIndex(): void {
+    const current = (): boolean => this.db.prepare(
+      "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'docs_fragment_fts'",
+    ).get() !== undefined;
+    if (current()) return;
+    transactional(this.db, () => {
+      if (current()) return;
+      this.db.exec(FRAGMENT_FTS_SCHEMA);
+      this.db.exec(
+        "INSERT INTO docs_fragment_fts " +
+          "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
+          "SELECT f.rowid, f.uuid, f.title, f.body, f.description, f.tag_names, " +
+          "COALESCE(s.indexed_through_seq, 0), COALESCE(s.catalog_through_seq, 0) " +
+          "FROM docs_fts f LEFT JOIN doc_index_seq s ON s.uuid = f.uuid",
+      );
     }, "immediate")();
   }
 

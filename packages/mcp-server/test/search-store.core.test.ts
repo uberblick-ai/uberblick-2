@@ -92,25 +92,90 @@ describe("title-weighted search relevance", () => {
   });
 });
 
-describe("complete UUID search", () => {
-  it("keeps full-hit matching and relevance without limiting matches or reading their metadata", () => {
+describe("web fragment UUID search", () => {
+  it("matches long fragments anywhere in all four fields and gives title matches more weight", () => {
     const store = open();
     [
-      row("title", "Launching guide", { body: "Background details." }),
-      row("description", "Delivery guide", { description: "Launched changes." }),
-      row("body", "Delivery overview", { body: "Launch details." }),
-      row("tags", "Interface notes", { tagNames: ["protocol"], body: "École worktree workspace" }),
-      row("decision", "What is the launch plan?", { kind: "decision" }),
+      row("title", "ub workspace use"),
+      row("description", "Other guide", { description: "workspace" }),
+      row("tags", "Other guide", { tagNames: ["workspace"] }),
+      row("body", "Other guide", { body: "workspace" }),
     ].forEach((doc) => { store.indexDoc(doc, 1); });
+    for (const query of ["worksp", "space"]) {
+      const hits = store.searchUuids(query);
+      expect(hits[0]).toBe("title");
+      expect(hits.toSorted()).toEqual(["body", "description", "tags", "title"]);
+    }
+  });
+
+  it("matches one- and two-character fragments only in titles and tag names, with titles first", () => {
+    const store = open();
+    [
+      row("title", "MCP server tools"),
+      row("tags", "Guide", { tagNames: ["mcp"] }),
+      row("description", "Reference", { description: "MCP" }),
+      row("body", "Notes", { body: "MCP" }),
+    ].forEach((doc) => { store.indexDoc(doc, 1); });
+    expect(store.searchUuids("m")).toEqual(["title", "tags"]);
+    expect(store.searchUuids("mc")).toEqual(["title", "tags"]);
+    expect(store.searchUuids("mcp").toSorted()).toEqual(["body", "description", "tags", "title"]);
+  });
+
+  it("folds case and accents for every fragment length and eligible field", () => {
+    const store = open();
+    [
+      row("title", "ÜBERBLICK"),
+      row("tags", "Notes", { tagNames: ["ÜBERBLICK"] }),
+      row("description", "Reference", { description: "ÜBERBLICK" }),
+      row("body", "Notes", { body: "ÜBERBLICK" }),
+      row("accent", "Café"),
+    ].forEach((doc) => { store.indexDoc(doc, 1); });
+    for (const query of ["u", "Ü", "ub", "ÜB"]) {
+      expect(store.searchUuids(query)).toEqual(["title", "tags"]);
+    }
+    for (const query of ["uber", "ÜBER"]) {
+      expect(store.searchUuids(query).toSorted()).toEqual(["body", "description", "tags", "title"]);
+    }
+    expect(store.searchUuids("cafe")).toEqual(["accent"]);
+  });
+
+  it("matches any query word while applying each word's fragment-length rule", () => {
+    const store = open();
+    [
+      row("title", "MCP server tools"),
+      row("tags", "Guide", { tagNames: ["mcp"] }),
+      row("short-description", "Reference", { description: "MCP" }),
+      row("short-body", "Notes", { body: "MCP" }),
+      row("long-body", "Details", { body: "workspace" }),
+    ].forEach((doc) => { store.indexDoc(doc, 1); });
+    expect(store.searchUuids("mc, worksp neverindexedword").toSorted())
+      .toEqual(["long-body", "tags", "title"]);
+  });
+
+  it("uses unstemmed fragments while MCP keeps whole-word and wildcard matching", () => {
+    const store = open();
+    store.indexDoc(row("workspace", "Workspace"), 1);
+    store.indexDoc(row("singular", "Decision"), 1);
+    store.indexDoc(row("plural", "Decisions"), 1);
+    expect(store.searchUuids("worksp")).toEqual(["workspace"]);
+    expect(store.search("worksp", 100)).toEqual([]);
+    expect(store.search("worksp*", 100).map((hit) => hit.uuid)).toEqual(["workspace"]);
+    expect(store.searchUuids("decision").toSorted()).toEqual(["plural", "singular"]);
+    expect(store.searchUuids("decisions")).toEqual(["plural"]);
+    expect(store.search("decisions", 100).map((hit) => hit.uuid).toSorted())
+      .toEqual(["plural", "singular"]);
+  });
+
+  it("returns every match, including decisions, without a result limit", () => {
+    const store = open();
+    store.indexDoc(row("decision", "What is the sync plan?", { kind: "decision" }), 1);
     for (let n = 0; n < 150; n++) {
       store.indexDoc(row(`sync-${String(n).padStart(3, "0")}`, "Sync", { body: "Sync" }), 1);
     }
-    for (const query of ["launch neverindexedword", "launched", "protocol", "ecole", "work*", "sync"]) {
-      expect(store.searchUuids(query)).toEqual(store.search(query, 1_000).map(({ uuid }) => uuid));
-    }
-    expect(store.searchUuids("sync")).toHaveLength(150);
-    expect(store.searchUuids("sync")[149]).toBe("sync-149");
-    expect(store.searchUuids("launch")).toContain("decision");
+    const hits = store.searchUuids("sync");
+    expect(hits).toHaveLength(151);
+    expect(hits).toContain("sync-149");
+    expect(hits).toContain("decision");
     expect(store.searchUuids("🌿")).toEqual([]);
     expect(store.searchUuids("missingword")).toEqual([]);
   });
