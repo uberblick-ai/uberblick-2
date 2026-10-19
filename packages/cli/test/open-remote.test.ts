@@ -884,17 +884,28 @@ describe("ub open: sharing through the upstream hub", () => {
         fixtureUuids.push((result.structuredContent as { uuid: string }).uuid);
       }
 
-      for (const query of ["launch neverindexedword", "launched", "mcp", "ecole", "work*", "badg*"]) {
+      for (const [query, expectedUuids] of [
+        ["launched", [fixtureUuids[1]]],
+        ["mcp", [fixtureUuids[3]]],
+        ["mc", [fixtureUuids[3]]],
+        ["ecole", [fixtureUuids[3]]],
+        ["worksp", [fixtureUuids[3]]],
+        ["space", [fixtureUuids[3]]],
+        ["work*", [fixtureUuids[3]]],
+        ["badg*", [created.uuid]],
+      ] as const) {
         const served = await servedSearch(query);
-        expect(served.hits.map(({ uuid }) => uuid)).toEqual(await mcpUuids(query, 100));
+        expect(served.hits.map(({ uuid }) => uuid)).toEqual(expectedUuids);
         expect(served).toMatchObject({ capped: false });
-        expect(served.hits.length).toBeGreaterThan(0);
       }
       const launchUuids = (await servedSearch("launch neverindexedword")).hits.map(({ uuid }) => uuid);
       expect(launchUuids).toHaveLength(3);
       expect(launchUuids[0]).toBe(fixtureUuids[0]);
       expect(new Set(launchUuids)).toEqual(new Set(fixtureUuids.slice(0, 3)));
-      expect((await servedSearch("mcp")).hits).toEqual([{ uuid: fixtureUuids[3] }]);
+      expect(await mcpUuids("worksp", 100)).toEqual([]);
+      expect(await mcpUuids("worksp*", 100)).toEqual([fixtureUuids[3]]);
+      expect(new Set(await mcpUuids("launched", 100)))
+        .toEqual(new Set(fixtureUuids.slice(0, 3)));
 
       for (let index = 0; index < 150; index += 1) {
         instance.store.indexDoc(
@@ -919,8 +930,9 @@ describe("ub open: sharing through the upstream hub", () => {
       };
       expect(completeBody.capped).toBe(false);
       expect(completeBody.hits).toHaveLength(150);
-      expect(completeBody.hits.slice(0, 100).map(({ uuid }) => uuid)).toEqual(await mcpUuids("capacityneedle", 100));
+      expect(completeBody.hits[0]).toEqual({ uuid: "10000000-0000-4000-8000-000000000000" });
       expect(completeBody.hits[149]).toEqual({ uuid: "10000000-0000-4000-8000-000000000149" });
+      expect(await mcpUuids("capacityneedle", 100)).toHaveLength(100);
       expect(await mcpUuids("capacityneedle")).toHaveLength(20);
       expect(completeBody.hits.every((hit) => Object.keys(hit).join() === "uuid"))
         .toBe(true);
