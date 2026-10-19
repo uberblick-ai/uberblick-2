@@ -3,20 +3,12 @@
 <meta name="description" content="Register the Uberblick MCP server with Claude Code or Codex, which workspace the agent sees, the tools an agent actually uses, and what to tell your agent.">
 <link rel="stylesheet" href="/css/sub.css">
 </head>
-<div class="wrap docs">
-<header class="top"><a class="brand" href="/">uberblick<i></i></a><nav aria-label="Site"><a href="/">Uberblick</a><a href="/#usecases">Use cases</a><a href="/compare">Compare</a><a href="/#docs" aria-current="page">Docs</a><a href="https://agents.uberblick.ai">ub-agents</a><a href="https://skills.uberblick.ai">Skills</a></nav><a class="gh" href="https://github.com/uberblick-ai/uberblick-2">GitHub</a></header>
-<div class="dbody">
-<nav class="dnav" aria-label="Documentation">
-  <div class="dgroup"><span class="dlabel">Start</span><a href="/docs/install">Install and update</a><a href="/docs/workspaces">Workspaces</a><a href="/docs/editor">The editor</a></div>
-  <div class="dgroup"><span class="dlabel">Agents</span><a href="/docs/agents" aria-current="page">Agents over MCP</a><a href="/docs/decisions">Decisions</a></div>
-  <div class="dgroup"><span class="dlabel">Sharing</span><a href="/docs/hub">Run a hub</a><a href="/docs/access">Access and membership</a></div>
-  <div class="dgroup"><span class="dlabel">Reference</span><a href="/docs/cli">CLI reference</a><a href="/docs/configuration">Configuration</a><a href="/docs/markdown-data">Markdown and data</a></div>
-</nav>
-<main class="dmain">
-<article class="col">
-  <p class="crumb">Docs / Agents</p>
+<div class="hero sub">
+  <p class="crumb"><a href="/">Uberblick</a> / Docs / Agents</p>
   <h1>Agents over MCP</h1>
   <p class="lede">Uberblick is built MCP first. The agent writes most of what is in a workspace: it searches, reads, edits block by block, keeps the data current and comments. The browser is where you review, adjust and settle what the agent should not decide. Register the server once with your agent's client and that is the whole setup.</p>
+</div>
+<article class="col">
 
   <section class="q" id="install"><h2>Register the server</h2>
   <p>Run this in the project directory, with Claude Code or Codex installed:</p>
@@ -36,7 +28,7 @@
   </section>
 
   <section class="q" id="tools"><h2>The tools an agent actually uses</h2>
-  <p>There are 25 tools; most sessions use these eight. Each tool's own description is the authority, and <code>get_help</code> returns the product help an agent should read before it writes. The full list, with every parameter, is in the <a href="/docs/mcp">MCP reference</a>.</p>
+  <p>There are 26 tools; most sessions use these eight. Each tool's own description is the authority, and <code>get_help</code> returns the product help an agent should read before it writes. The full list, with every parameter, is in the <a href="/docs/mcp">MCP reference</a>.</p>
   </section>
 </article>
 <div class="tablewrap tools"><table>
@@ -53,7 +45,7 @@
   </tbody>
 </table></div>
 <article class="col">
-  <p class="small">The rest: <code>create_doc</code>, <code>list_docs</code>, <code>backlinks</code>, <code>list_tags</code>, <code>delete_block</code>, <code>link_range</code>, <code>set_metadata</code>, <code>set_status</code>, <code>get_data</code>, <code>export_markdown</code>, <code>pin_doc</code>, <code>unpin_doc</code>, <code>sidebar_group</code>, <code>archive_doc</code>, <code>restore_doc</code>, <code>sync_status</code>, <code>get_help</code>.</p>
+  <p class="small">The rest: <code>create_doc</code>, <code>list_docs</code>, <code>backlinks</code>, <code>list_tags</code>, <code>delete_block</code>, <code>delete_doc</code>, <code>link_range</code>, <code>set_metadata</code>, <code>set_status</code>, <code>get_data</code>, <code>export_markdown</code>, <code>pin_doc</code>, <code>unpin_doc</code>, <code>sidebar_group</code>, <code>archive_doc</code>, <code>restore_doc</code>, <code>sync_status</code>, <code>get_help</code>.</p>
   <section class="q" id="rules"><h2>What to tell your agent</h2>
   <p>The server does not decide how an agent should behave; your instructions do. Three rules that have held up for us:</p>
   <ul>
@@ -63,16 +55,3 @@
   </ul>
   </section>
 </article>
-</main>
-</div>
-</div>
-<div class="toast" role="status" aria-live="polite"></div>
-<script>
-const toast = document.querySelector('.toast');
-for (const b of document.querySelectorAll('[data-copy]')) b.addEventListener('click', async () => {
-  const t = b.getAttribute('data-copy');
-  try { await navigator.clipboard.writeText(t); toast.textContent = 'Copied'; }
-  catch { const r = document.createRange(); r.selectNodeContents(b.closest('.block').querySelector('pre')); getSelection().removeAllRanges(); getSelection().addRange(r); toast.textContent = 'Select and copy'; }
-  toast.classList.add('show'); setTimeout(() => toast.classList.remove('show'), 1400);
-});
-</script>
