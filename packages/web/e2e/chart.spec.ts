@@ -7,11 +7,12 @@ import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { Editor } from "@tiptap/core";
 import { writeFileSync } from "node:fs";
+import { composite, pageGrounds } from "../test/colour.js";
 import { createDoc, editor, setupHarness } from "./app-helpers.js";
 import { setNativeSelection } from "./native-selection.js";
 import { McpAgent } from "./mcp-agent.js";
 import type { McpSession } from "./mcp-agent.js";
-import { renderedText } from "./contrast-helpers.js";
+import { renderedText, strokeSeparation } from "./contrast-helpers.js";
 import { expectMcp, proveMcpArrival, waitForDocumentDraw } from "./settle.js";
 
 const { harness, openApp } = setupHarness();
@@ -180,6 +181,46 @@ async function expectPanelTickGeometry(
     expect(point.y + radius, "marker has no headroom below the plotted value").toBeLessThan(bottom);
   }
   return ticks;
+}
+
+/** Read a full-width neutral stroke at the value recovered from painted ticks. */
+async function referenceInk(page: Page, canvasIndex: number, value: number, unit: string): Promise<number> {
+  return page.evaluate(({ canvasIndex, value, unit }) => {
+    const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
+    const canvas = document.querySelectorAll<HTMLCanvasElement>(".ub-chart canvas")[canvasIndex];
+    const colourProbe = document.querySelector(".ub-chart-probe");
+    if (canvas === undefined || colourProbe === null) throw new Error("e2e: reference canvas is missing");
+    const ticks = probe.ink.filter(entry => entry.canvas === canvasIndex && entry.text.endsWith(unit))
+      .map(entry => ({ y: entry.y, value: Number(entry.text.slice(0, -unit.length).trim().replaceAll(",", "")) }))
+      .filter(entry => Number.isFinite(entry.value)).sort((a, b) => a.value - b.value);
+    const first = ticks[0], last = ticks.at(-1);
+    const points = probe.points.filter(entry => entry.canvas === canvasIndex);
+    if (first === undefined || last === undefined || first.value === last.value || points.length === 0) {
+      throw new Error(`e2e: reference geometry is missing: ${JSON.stringify({ ticks, points: points.length })}`);
+    }
+    const y = first.y + (value - first.value) / (last.value - first.value) * (last.y - first.y);
+    const box = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / box.width, scaleY = canvas.height / box.height;
+    const left = Math.ceil((Math.min(...points.map(point => point.x)) + 8) * scaleX);
+    const right = Math.floor((Math.max(...points.map(point => point.x)) - 8) * scaleX);
+    const context = canvas.getContext("2d");
+    const sample = document.createElement("canvas").getContext("2d");
+    if (context === null || sample === null) throw new Error("e2e: reference pixels are unavailable");
+    sample.fillStyle = getComputedStyle(colourProbe).color;
+    sample.fillRect(0, 0, 1, 1);
+    const neutral = sample.getImageData(0, 0, 1, 1).data;
+    let coverage = 0;
+    for (let row = Math.floor(y * scaleY) - 2; row <= Math.ceil(y * scaleY) + 2; row += 1) {
+      const pixels = context.getImageData(left, row, right - left, 1).data;
+      let matching = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if ((pixels[offset + 3] ?? 0) >= 100 && [0, 1, 2].every(channel =>
+          Math.abs((pixels[offset + channel] ?? 0) - (neutral[channel] ?? 0)) < 20)) matching += 1;
+      }
+      coverage = Math.max(coverage, matching / (right - left));
+    }
+    return coverage;
+  }, { canvasIndex, value, unit });
 }
 
 /** One caption holds the chart label, title and controls in every state. */
@@ -913,6 +954,129 @@ test("each value axis keeps a zero baseline only while its plotted values are no
     });
   }
 });
+
+for (const layout of ["overlay", "panels"] as const) {
+  test(`declared ranges and neutral references preserve survey scale in ${layout} in both appearances`, async ({ browser }, info) => {
+    const session = writer();
+    const mapping = { ...MAPPING, title: "Monthly survey", layout, y: [
+      { field: "score", label: "Survey score", unit: "points", range: [-100, 100], reference: 0 },
+      { field: "comparison", label: "Comparison", unit: "points", range: [-80, 80], reference: 17 },
+      { field: "uptime", label: "Uptime", unit: "%", range: [50, 100], reference: 73 },
+    ] };
+    const uuid = await chartDoc(session, `Survey ranges ${layout}`, mapping);
+    await session.call("update_data", { uuid, operations: [{ collection: "measurements",
+      schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
+        { id: "jan", value: { day: "2026-01-01", score: -39, comparison: -5, uptime: 60 } },
+        { id: "feb", value: { day: "2026-02-01", score: -10, comparison: 40, uptime: 75 } },
+        { id: "mar", value: { day: "2026-03-01", score: 15, comparison: 25, uptime: 90 } },
+      ],
+    }] });
+    for (const appearance of ["light", "dark"] as const) {
+      const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+        beforeNavigate: loading => installProbe(loading, uuid),
+        contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US", colorScheme: appearance },
+      });
+      await waitForDocumentDraw(page, session, uuid);
+      const image = page.getByRole("img", { name: "Monthly survey", exact: true });
+      await expect(image).toBeVisible();
+      await expect(image).toHaveAccessibleDescription(/Survey score: 15 points/);
+      await expect(image).toHaveAccessibleDescription(/Comparison: 25 points/);
+      await expect(image).toHaveAccessibleDescription(/Uptime: 90 %/);
+      await expect(image).not.toHaveAccessibleDescription(/reference|range|73|17/i);
+      const geometry = await page.evaluate(() => {
+        const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
+        return { ink: probe.ink, points: probe.points };
+      });
+      const ends = (canvas: number, unit: string): number[] => geometry.ink
+        .filter(entry => entry.canvas === canvas && entry.text.endsWith(unit))
+        .map(entry => Number(entry.text.slice(0, -unit.length).trim().replaceAll(",", "")))
+        .filter(Number.isFinite).sort((a, b) => a - b);
+      for (const canvas of layout === "panels" ? [0, 1] : [0]) {
+        const ticks = ends(canvas, "points");
+        expect(ticks[0]).toBe(-100);
+        expect(ticks.at(-1)).toBe(100);
+      }
+      const rightCanvas = layout === "panels" ? 2 : 0;
+      const rightTicks = ends(rightCanvas, "%");
+      expect(rightTicks[0]).toBe(50);
+      expect(rightTicks.at(-1)).toBe(100);
+      expect(rightTicks).not.toContain(73);
+      expect(await referenceInk(page, 0, 0, "points")).toBeGreaterThan(0.75);
+      expect(await referenceInk(page, layout === "panels" ? 1 : 0, 17, "points")).toBeGreaterThan(0.75);
+      expect(await referenceInk(page, rightCanvas, 73, "%")).toBeGreaterThan(0.75);
+      if (layout === "panels") {
+        expect(await referenceInk(page, 0, 17, "points")).toBeLessThan(0.1);
+        expect(await referenceInk(page, 1, 0, "points")).toBeLessThan(0.1);
+        await expect(page.locator(".ub-chart-series-header")).toHaveText([
+          "Survey score15 points", "Comparison25 points", "Uptime90 %",
+        ]);
+      } else {
+        expect(geometry.ink.filter(entry => ["Survey score (points)", "Comparison (points)", "Uptime (%)"].includes(entry.text)))
+          .toHaveLength(3);
+      }
+      const colours = await page.locator(".ub-chart-probe").evaluate(element => ({
+        reference: getComputedStyle(element).color, grid: getComputedStyle(element).borderTopColor,
+        background: getComputedStyle(document.body).backgroundColor,
+        image: getComputedStyle(document.body).backgroundImage,
+        tint: getComputedStyle(element.closest(".ub-chart") ?? element).backgroundColor,
+      }));
+      for (const backing of pageGrounds(colours.image, colours.background)) {
+        const ground = composite(colours.tint, backing);
+        expect(await strokeSeparation(page, colours.reference, ground))
+          .toBeGreaterThan(await strokeSeparation(page, colours.grid, ground));
+      }
+      await canvasEvidence(page.locator(".ub-chart"), info, `chart-survey-${layout}-${appearance}`);
+      const canvas = page.locator(".ub-chart canvas").nth(rightCanvas);
+      const box = await canvas.boundingBox();
+      const ticks = geometry.ink.filter(entry => entry.canvas === rightCanvas && entry.text.endsWith("%"));
+      const low = ticks.find(entry => entry.text === "50%"), high = ticks.find(entry => entry.text === "100%");
+      const firstX = Math.min(...geometry.points.filter(point => point.canvas === rightCanvas).map(point => point.x));
+      if (box === null || low === undefined || high === undefined) throw new Error("e2e: reference hover geometry is missing");
+      await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+      await page.mouse.move(box.x + firstX + 1, box.y + low.y + (73 - 50) / 50 * (high.y - low.y));
+      await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts))
+        .toContain("Uptime: 60 %");
+      const hoverText = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts);
+      expect(hoverText.some(text => /: (0 points|17 points|73 %)$/u.test(text))).toBe(false);
+      if (layout === "panels" && appearance === "dark") {
+        await page.mouse.move(0, 0);
+        await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+          { id: "jan", value: { day: "2026-01-01", score: -39, comparison: -5 } },
+        ] }] });
+        await waitForDocumentDraw(page, session, uuid);
+        await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+        await page.mouse.move(box.x + firstX + 1, box.y + low.y + (73 - 50) / 50 * (high.y - low.y));
+        await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts))
+          .toContain("Uptime: 75 %");
+      }
+      if (appearance === "dark") {
+        await page.mouse.move(0, 0);
+        await editMapping(session, uuid, JSON.stringify({ ...mapping, y: [
+          { ...mapping.y[0], reference: 130 }, mapping.y[1],
+          { field: "uptime", label: "Uptime", unit: "%", reference: 120 },
+        ] }));
+        await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+          { id: "jan", value: { day: "2026-01-01", score: -140, comparison: -5, uptime: 60 } },
+        ] }] });
+        await waitForDocumentDraw(page, session, uuid);
+        const widened = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+        for (const panel of layout === "panels" ? [0, 1] : [0]) {
+          const values = widened.filter(entry => entry.canvas === panel && entry.text.endsWith(" points"))
+            .map(entry => Number(entry.text.slice(0, -7).replaceAll(",", "")));
+          expect(Math.min(...values)).toBe(-140);
+          expect(Math.max(...values)).toBe(130);
+        }
+        const automatic = widened.filter(entry => entry.canvas === rightCanvas && entry.text.endsWith("%"))
+          .map(entry => Number(entry.text.slice(0, -1).replaceAll(",", "")));
+        expect(Math.min(...automatic)).toBe(0);
+        expect(Math.max(...automatic)).toBeGreaterThanOrEqual(120);
+        expect(await referenceInk(page, 0, 130, "points")).toBeGreaterThan(0.75);
+        expect(await referenceInk(page, rightCanvas, 120, "%")).toBeGreaterThan(0.75);
+      }
+      await page.close();
+    }
+  });
+}
 
 test("narrow-band compact ticks preserve the step on both value axes in both appearances", async ({ browser }) => {
   const session = writer();

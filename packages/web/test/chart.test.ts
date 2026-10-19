@@ -291,6 +291,93 @@ describe("the chart's derived lifecycle", () => {
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 
+  it.each(["overlay", "panels"])("uses exact combined spans and native noninteractive references in %s", layout => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), layout, y: [
+      { field: "value", label: "Delivery", unit: "ms", range: [50, 100], reference: 73 },
+      { field: "secondary", label: "Second", unit: "ms", range: [40, 90], reference: 120 },
+      { field: "right", label: "Rate", unit: "%", range: [1, 7], reference: 3 },
+      { field: "value", label: "Again", unit: "ms", reference: 73 },
+    ] });
+    editBlock(doc, id, mapping, source);
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [
+        { id: "first", value: { day: 1, value: 60, secondary: 90, right: 4 } },
+        { id: "last", value: { day: 3, value: 110, secondary: -5, right: 5 } },
+      ],
+    }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(charts.instances).toHaveLength(layout === "panels" ? 4 : 1);
+    const instance = charts.instances[0]!;
+    expect(instance.options).toMatchObject({ scales: {
+      y: { min: -5, max: 120, beginAtZero: false },
+      referenceX: { type: "linear", axis: "x", display: false, min: 0, max: 1 },
+    } });
+    const percentChart = layout === "panels" ? charts.instances[2]! : instance;
+    expect((percentChart.options as { scales: Record<string, unknown> }).scales[layout === "panels" ? "y" : "yRight"])
+      .toMatchObject({ min: 1, max: 7, beginAtZero: false });
+    const data = instance.data as ChartConfiguration<"line", { x: number; y: number | null }[]>["data"];
+    const realCount = layout === "panels" ? 1 : 4;
+    const references = data.datasets.slice(realCount);
+    expect(references).toHaveLength(layout === "panels" ? 1 : 3);
+    expect(references[0]).toMatchObject({
+      yAxisID: "y", xAxisID: "referenceX", data: [{ x: -1, y: 73 }, { x: 2, y: 73 }],
+      pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 0, clip: { left: 0, right: 0, top: 1, bottom: 1 },
+    });
+    expect(data.datasets[0]?.clip).toEqual({ left: 0, right: 0, top: 5, bottom: 5 });
+    const options = instance.options as { plugins: {
+      legend: { labels: { filter: (item: { datasetIndex: number }) => boolean } };
+      tooltip: { filter: (item: { datasetIndex: number }) => boolean;
+        callbacks: { label: (item: { datasetIndex: number; parsed: { y: number } }) => string } };
+    } };
+    expect(options.plugins.legend.labels.filter({ datasetIndex: realCount - 1 })).toBe(true);
+    expect(options.plugins.legend.labels.filter({ datasetIndex: realCount })).toBe(false);
+    expect(options.plugins.tooltip.filter({ datasetIndex: realCount - 1 })).toBe(true);
+    expect(options.plugins.tooltip.filter({ datasetIndex: realCount })).toBe(false);
+    expect(options.plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 60 } })).toBe("Delivery: 60 ms");
+    if (layout === "panels") {
+      expect(panelOptions(percentChart).plugins.tooltip.callbacks.label({ datasetIndex: 0, parsed: { y: 4 } })).toBe("Rate: 4 %");
+      expect(editor.view.dom.querySelectorAll(".ub-chart-series-header")).toHaveLength(4);
+    } else expect(references[2]?.yAxisID).toBe("yRight");
+    expect(editor.view.dom.querySelector(".ub-chart-description")?.textContent).not.toContain("73");
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source);
+
+    applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "outside", value: { day: 5, value: 200, secondary: 0, right: -2 } }] }]);
+    flush();
+    expect(instance.options).toMatchObject({ scales: { y: { min: -5, max: 200 } } });
+    expect((percentChart.options as { scales: Record<string, unknown> }).scales[layout === "panels" ? "y" : "yRight"])
+      .toMatchObject({ min: -2, max: 7 });
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it.each(["overlay", "panels"])("widens automatic %s scales for reference-only values", layout => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), layout, y: [{ field: "value", reference: -100 }] });
+    editBlock(doc, id, mapping, source);
+    const { editor } = mountEditor(doc);
+    flush();
+    const options = charts.instances[0]?.options as { scales: { y: Record<string, unknown> } };
+    expect(options.scales.y).toMatchObject({ suggestedMin: -100, suggestedMax: 3, beginAtZero: false });
+    expect(options.scales.y).not.toHaveProperty("min");
+    expect(options.scales.y).not.toHaveProperty("max");
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it("keeps invalid range source intact without constructing a chart", () => {
+    const { doc, directory, id } = fixture();
+    const source = JSON.stringify({ ...JSON.parse(mapping), y: [{ field: "value", range: [7, 1] }] });
+    editBlock(doc, id, mapping, source);
+    const before = Y.encodeStateAsUpdate(doc);
+    const { editor } = mountEditor(doc);
+    flush();
+    expect(editor.view.dom.querySelector(".ub-chart-panel")?.getAttribute("data-state")).toBe("invalid-configuration");
+    expect(charts.instances).toHaveLength(0);
+    expect(Y.encodeStateAsUpdate(doc)).toEqual(before);
+    expect(getBlocks(doc).find(block => block.id === id)?.text).toBe(source);
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
   it("uses only plotted values for the baseline, ignoring null gaps and negative records rejected by x or schema", () => {
     const doc = new Y.Doc(), directory = new Y.Doc();
     initDoc(doc, { uuid: "filtered-baseline", title: "Filtered baseline" });
