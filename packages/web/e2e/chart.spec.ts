@@ -187,8 +187,8 @@ async function expectPanelTickGeometry(
 }
 
 /** Read a full-width neutral stroke at the value recovered from painted ticks. */
-async function referenceInk(page: Page, canvasIndex: number, value: number, unit: string): Promise<number> {
-  return page.evaluate(({ canvasIndex, value, unit }) => {
+async function referenceInk(page: Page, canvasIndex: number, value: number, unit: string, bounds?: PaintedRectangle): Promise<number> {
+  return page.evaluate(({ canvasIndex, value, unit, bounds }) => {
     const probe = (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe;
     const canvas = document.querySelectorAll<HTMLCanvasElement>(".ub-chart canvas")[canvasIndex];
     const colourProbe = document.querySelector(".ub-chart-probe");
@@ -198,14 +198,14 @@ async function referenceInk(page: Page, canvasIndex: number, value: number, unit
       .filter(entry => Number.isFinite(entry.value)).sort((a, b) => a.value - b.value);
     const first = ticks[0], last = ticks.at(-1);
     const points = probe.points.filter(entry => entry.canvas === canvasIndex);
-    if (first === undefined || last === undefined || first.value === last.value || points.length === 0) {
+    if (first === undefined || last === undefined || first.value === last.value || (bounds === undefined && points.length === 0)) {
       throw new Error(`e2e: reference geometry is missing: ${JSON.stringify({ ticks, points: points.length })}`);
     }
     const y = first.y + (value - first.value) / (last.value - first.value) * (last.y - first.y);
     const box = canvas.getBoundingClientRect();
     const scaleX = canvas.width / box.width, scaleY = canvas.height / box.height;
-    const left = Math.ceil((Math.min(...points.map(point => point.x)) + 8) * scaleX);
-    const right = Math.floor((Math.max(...points.map(point => point.x)) - 8) * scaleX);
+    const left = Math.ceil(((bounds?.left ?? Math.min(...points.map(point => point.x))) + 8) * scaleX);
+    const right = Math.floor(((bounds?.right ?? Math.max(...points.map(point => point.x))) - 8) * scaleX);
     const context = canvas.getContext("2d");
     const sample = document.createElement("canvas").getContext("2d");
     if (context === null || sample === null) throw new Error("e2e: reference pixels are unavailable");
@@ -223,7 +223,7 @@ async function referenceInk(page: Page, canvasIndex: number, value: number, unit
       coverage = Math.max(coverage, matching / (right - left));
     }
     return coverage;
-  }, { canvasIndex, value, unit });
+  }, { canvasIndex, value, unit, bounds });
 }
 
 /** One caption holds the chart label, title and controls in every state. */
@@ -643,7 +643,7 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   const zero = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink.find(entry => entry.text === "0 responses")?.y);
   expect(zero).toBeDefined();
   for (const bar of bars) expect(Math.abs(bar.top - (zero ?? NaN))).toBeLessThanOrEqual(0.5);
-  expect(await referenceInk(page, 0, -15, "responses")).toBeGreaterThan(0.75);
+  expect(await referenceInk(page, 0, -15, "responses", bars[0]?.clip ?? undefined)).toBeGreaterThan(0.75);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
     { id: "narrow-first", value: { day: 123456789.1, a: -5, b: -10 } },
     { id: "narrow-middle", value: { day: 123456789.2, a: -8, b: -20 } },
