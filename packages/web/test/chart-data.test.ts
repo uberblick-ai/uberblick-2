@@ -34,6 +34,41 @@ function ready(data: DocData, config = mapping): ChartReady {
 }
 
 describe("chart mapping", () => {
+  it.each([
+    { range: [-100, 100] }, { range: [50, 100] }, { reference: 0 },
+    { range: [-Number.MAX_VALUE, Number.MAX_VALUE], reference: Number.MAX_VALUE },
+  ])("accepts optional per-series value-axis settings %j at version 1", (settings) => {
+    const config = { ...mapping, y: [{ ...mapping.y[0], ...settings }] };
+    expect(parseChartConfig(JSON.stringify(config))).toMatchObject({ ok: true, config: { version: 1, y: config.y } });
+  });
+
+  it.each([
+    null, [], [1], [1, 2, 3], [2, 1], [1, 1], [null, 2], [1, null],
+    ["1", 2], [1, "2"], [false, 2], "1,2", {}, 1,
+  ])("refuses an invalid per-series range %j", (range) => {
+    expect(prepareChart(JSON.stringify({ ...mapping, y: [{ field: "y", range }] }), null))
+      .toMatchObject({ status: "invalid-configuration", message: expect.stringContaining("Invalid chart configuration") });
+  });
+
+  it.each([null, "0", true, [], [0], {}])("refuses an invalid per-series reference %j", (reference) => {
+    expect(prepareChart(JSON.stringify({ ...mapping, y: [{ field: "y", reference }] }), null).status)
+      .toBe("invalid-configuration");
+  });
+
+  it.each(['"range":[-1e400,100]', '"range":[-100,1e400]', '"reference":1e400', '"reference":-1e400'])
+    ("refuses non-finite JSON numbers in %s", (settings) => {
+      const source = `{"version":1,"type":"line","collection":"observations","x":{"field":"x","type":"number"},"y":[{"field":"y",${settings}}]}`;
+      expect(prepareChart(source, null).status).toBe("invalid-configuration");
+    });
+
+  it.each([{ range: [-100, 100] }, { reference: 0 }])("rejects series settings %j on other mapping positions", (settings) => {
+    expect(parseChartConfig(JSON.stringify({ ...mapping, ...settings }))).toMatchObject({ ok: false });
+    expect(parseChartConfig(JSON.stringify({ ...mapping, x: { ...mapping.x, ...settings } }))).toMatchObject({ ok: false });
+    const table = { version: 1, type: "table", collection: "observations", columns: [{ field: "y" }] };
+    expect(parseTableConfig(JSON.stringify({ ...table, ...settings }))).toMatchObject({ ok: false });
+    expect(parseTableConfig(JSON.stringify({ ...table, columns: [{ field: "y", ...settings }] }))).toMatchObject({ ok: false });
+  });
+
   it.each(["overlay", "panels"] as const)("accepts line layout %s and rejects it for tables", (layout) => {
     expect(parseChartConfig(JSON.stringify({ ...mapping, layout }))).toMatchObject({ ok: true, config: { layout } });
     expect(parseTableConfig(JSON.stringify({

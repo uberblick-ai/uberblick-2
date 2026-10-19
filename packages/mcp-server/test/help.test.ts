@@ -515,6 +515,27 @@ it("documents opt-in line panels through data and insert_block help", async () =
   }
 });
 
+it("documents per-series ranges and references through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Each y series optionally accepts range [min, max], exactly two finite numbers with min lower than max",
+      "reference, one finite number",
+      "In overlay, both apply to the series' left or right value axis",
+      "In panels, range applies to the series' unit group and reference draws only on that series' own panel",
+      "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis",
+      "A declared range replaces the zero-baseline rule",
+      "A reference draws a horizontal line across the plot",
+      "each distinct reference value appears once per axis or panel",
+      "A panel's reference value also widens its unit group's shared range",
+      "range and reference are invalid on x and in table mappings",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
+});
+
 it("makes the portable creation threshold discoverable through tools and identical help resources", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();

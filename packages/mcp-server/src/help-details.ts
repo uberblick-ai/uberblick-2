@@ -376,7 +376,13 @@ export const toolHelpDetails = {
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
     "panels draws one compact line chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
-    "layout is invalid for table mappings. Optional limit is an integer of 1 or more " +
+    "layout is invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
+    "with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. " +
+    "In panels, range applies to the series' unit group and reference draws only on that series' own panel. " +
+    "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. " +
+    "A declared range replaces the zero-baseline rule. A reference draws a horizontal line across the plot; " +
+    "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
+    "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
