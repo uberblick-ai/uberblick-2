@@ -331,6 +331,8 @@ export function readCredentials(env: NodeJS.ProcessEnv = process.env): {
 export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** Inventory callers can omit selection setup advice; other warnings remain. */
+  warnLegacySelection?: boolean;
 }
 
 export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
@@ -351,7 +353,7 @@ export function resolveConfig(options: ResolveOptions = {}): ResolvedConfig {
 
   const workspace = { value: selection.binding?.workspaceId ?? null, origin: selection.origin ?? "default" } as const;
   const hubUrl = { value: selection.binding?.hubUrl ?? null, origin: selection.origin ?? "default" } as const;
-  if (selection.binding === null &&
+  if (options.warnLegacySelection !== false && selection.binding === null &&
       (env.WORKSPACE_ID !== undefined || env.HUB_URL !== undefined ||
        userConfig?.workspace !== undefined || userConfig?.hubUrl !== undefined)) {
     warnings.push(`Legacy machine workspace/endpoint settings are not used. ${NO_BINDING}`);

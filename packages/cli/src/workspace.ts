@@ -67,24 +67,28 @@ interface InForce {
   origin: Origin;
   hubUrl: string | null;
   warnings: string[];
+  selectionNote: string | null;
 }
 
 /** Read the current selection and source without opening the database. */
 function inForce(options: { env?: NodeJS.ProcessEnv } = {}): InForce {
-  const resolved = resolveConfig(options);
+  const resolved = resolveConfig({ ...options, warnLegacySelection: false });
   const configured = resolved.env.WORKSPACE_ID ?? null;
   return {
     configured,
     uuid: configured === null ? null : parseWorkspaceId(configured).uuid,
     origin: resolved.origins.workspace,
     hubUrl: resolved.binding?.hubUrl ?? null,
-    warnings: resolved.bindingProblem === undefined ? resolved.warnings : [...resolved.warnings, resolved.bindingProblem],
+    warnings: resolved.warnings,
+    selectionNote: configured !== null ? null : resolved.bindingProblem === undefined
+      ? "No workspace selected (no .uberblick.json found)."
+      : `No workspace selected. ${resolved.bindingProblem}`,
   };
 }
 
 export function listWorkspaces(
   options: { env?: NodeJS.ProcessEnv } = {},
-): { entries: WorkspaceEntry[]; warnings: string[] } {
+): { entries: WorkspaceEntry[]; warnings: string[]; selectionNote: string | null } {
   const env = options.env ?? process.env;
   const current = inForce(options);
 
@@ -118,7 +122,7 @@ export function listWorkspaces(
       databasePath,
     };
   });
-  return { entries, warnings: current.warnings };
+  return { entries, warnings: current.warnings, selectionNote: current.selectionNote };
 }
 
 function warn(io: Io, warnings: readonly string[]): void {
@@ -278,7 +282,7 @@ function listCommand(argv: string[], io: Io): number {
     return 2;
   }
 
-  let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[] };
+  let listed: { entries: (WorkspaceEntry & { hub: string })[]; warnings: string[]; selectionNote: string | null };
   try {
     const inventory = listWorkspaces();
     const current = inForce();
@@ -298,8 +302,9 @@ function listCommand(argv: string[], io: Io): number {
     io.err(`ub workspace list: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
-  const { entries, warnings } = listed;
+  const { entries, warnings, selectionNote } = listed;
   warn(io, warnings);
+  if (selectionNote !== null) io.err(`${selectionNote}\n`);
 
   if (json) {
     io.out(`${JSON.stringify(entries, null, 2)}\n`);
