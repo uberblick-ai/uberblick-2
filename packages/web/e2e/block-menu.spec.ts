@@ -25,6 +25,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { createDoc, setupHarness } from "./app-helpers.js";
 import { placeCaret } from "./harness.js";
+import { waitForAcknowledged } from "./settle.js";
 
 const { harness } = setupHarness();
 
@@ -141,24 +142,34 @@ test("the pointer can walk from the prose onto the gutter + and press it", async
 
   const button = page.getByRole("button", { name: "Insert block below", includeHidden: true });
   const block = blocks(page).first();
+  const selectionProse = await block.boundingBox();
+  if (selectionProse === null) throw new Error("e2e: the first block has no box");
+  const selectionLineHeight = await block.evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).lineHeight),
+  );
+  const firstLine = selectionProse.y + selectionLineHeight / 2;
+
+  // Whatever the gutter claims, it claims none of the prose: caret placement
+  // and a real pointer selection still belong to the editor.
+  await page.mouse.click(selectionProse.x + 1, firstLine);
+  await page.keyboard.type("X", { delay: 15 });
+  await expect(block).toContainText(/^Xreach me/);
+  await page.mouse.move(selectionProse.x + 2, firstLine);
+  await page.mouse.down();
+  await page.mouse.move(selectionProse.x + 70, firstLine, { steps: 12 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
+    0,
+  );
+
+  // The offline notice clears after acknowledgement and can move the prose.
+  // Read the walk's geometry only once the status line has settled.
+  await waitForAcknowledged(page, { path: "upstream" });
+  await expect(page.locator(".ub-status-offline")).toHaveCount(0);
   const prose = await block.boundingBox();
   if (prose === null) throw new Error("e2e: the first block has no box");
   const lineHeight = await block.evaluate((element) =>
     Number.parseFloat(getComputedStyle(element).lineHeight),
-  );
-  const firstLine = prose.y + lineHeight / 2;
-
-  // Whatever the gutter claims, it claims none of the prose: caret placement
-  // and a real pointer selection still belong to the editor.
-  await page.mouse.click(prose.x + 1, firstLine);
-  await page.keyboard.type("X", { delay: 15 });
-  await expect(block).toContainText(/^Xreach me/);
-  await page.mouse.move(prose.x + 2, firstLine);
-  await page.mouse.down();
-  await page.mouse.move(prose.x + 70, firstLine, { steps: 12 });
-  await page.mouse.up();
-  expect(await page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(
-    0,
   );
 
   // The ordinary hard case: a multi-line paragraph, approached from its last
