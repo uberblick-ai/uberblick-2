@@ -74,6 +74,7 @@ export async function handleAccessManagement(
   promotions?: WorkspacePromotions,
   accounts?: GithubAccountLookup,
   hubAdmins?: HubAdminRegistry,
+  hubVersion?: string,
 ): Promise<boolean> {
   if (request.url !== "/auth/manage") return false;
   const reply = (status: number, body: unknown): void => {
@@ -199,7 +200,7 @@ export async function handleAccessManagement(
         break;
       }
       case "list-devices":
-        reply(200, { status: "ok", devices: credentials.listDevices(current.principalId)
+        reply(200, { status: "ok", ...(hubVersion === undefined ? {} : { hubVersion }), devices: credentials.listDevices(current.principalId)
           .map(device => ({ ...device, current: device.deviceId === current.deviceId })) });
         break;
       case "revoke-device": {

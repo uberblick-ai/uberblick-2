@@ -11,6 +11,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEAD_HUB_URL, removeTempDirs, runUb, sandbox, unboundSandbox } from "./helpers.js";
+import { cliVersion } from "../src/version.js";
 
 afterAll(removeTempDirs);
 
@@ -59,6 +60,7 @@ describe("ub status", () => {
     expect(run.stdout).toBe(
       `workspace   ${WORKSPACE}\n` +
       "hub         local, this computer only\n" +
+      `version     client ${cliVersion()}\n` +
       "account     none needed for a local workspace\n" +
       `chosen by   project config in ${box.cwd}\n` +
       `stored in   ${join(box.dataHome, "uberblick", `${WORKSPACE}.sqlite`)}\n` +
@@ -115,7 +117,7 @@ describe("ub status", () => {
 
     const report = JSON.parse(run.stdout);
     expect(Object.keys(report)).toEqual([
-      "workspace", "hub", "account", "chosenBy", "storedIn", "connection", "pending", "lastSync", "recentDevices", "problems",
+      "workspace", "hub", "version", "account", "chosenBy", "storedIn", "connection", "pending", "lastSync", "recentDevices", "problems",
     ]);
     expect(report.workspace).toEqual({ id: WORKSPACE, name: null });
     expect(report.hub).toBe("http://127.0.0.1:1");

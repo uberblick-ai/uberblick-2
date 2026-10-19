@@ -41,11 +41,11 @@ describe("recent devices", () => {
       { deviceId: UNNAMED, signedInAt: NOW - 7 * DAY, current: false },
       { deviceId: OLD, signedInAt: NOW - 7 * DAY - 1, deviceName: "Old computer", current: false },
       { deviceId: FUTURE, signedInAt: NOW + 1, deviceName: "Future computer", current: false },
-    ], privateField: login.credential.key }));
-    const expected = [
+    ], hubVersion: "0.4.7", privateField: login.credential.key }));
+    const expected = { devices: [
       { id: NAMED, name: "This computer", signedInAt: "2026-10-17T12:00:00.000Z" },
       { id: UNNAMED, signedInAt: "2026-10-11T12:00:00.000Z" },
-    ];
+    ], hubVersion: "0.4.7" };
     expect(await read()).toEqual(expected);
     expect(await read()).toEqual(expected);
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -67,17 +67,17 @@ describe("recent devices", () => {
       { deviceId: UNNAMED, signedInAt: NOW, deviceName: "name\n\u001b[31m", current: false, key: login.credential.key },
     ] }));
     const answer = await read();
-    expect(answer).toEqual([
+    expect(answer).toEqual({ devices: [
       { id: NAMED, signedInAt: "2026-10-18T12:00:00.000Z" },
       { id: UNNAMED, signedInAt: "2026-10-18T12:00:00.000Z" },
-    ]);
+    ], hubVersion: null });
     expect(JSON.stringify(answer)).not.toContain(login.credential.key);
   });
 
   it("distinguishes a successful empty reading from an unavailable reading", async () => {
     const { own, read } = rig();
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json({ status: "ok", devices: [own] }));
-    expect(await read()).toEqual([]);
+    expect(await read()).toEqual({ devices: [], hubVersion: null });
     fetch.mockResolvedValueOnce(Response.json({ status: "forbidden", message: "private diagnostic" }, { status: 403 }));
     expect(await read()).toBeNull();
     fetch.mockResolvedValueOnce(new Response("older hub", { status: 404 }));
@@ -85,6 +85,14 @@ describe("recent devices", () => {
     fetch.mockRejectedValueOnce(new Error("private transport diagnostic"));
     expect(await read()).toBeNull();
   });
+
+  it.each(["0.4.7\n", "0.4.7\u001b[31m", "1".repeat(65), 47, null])(
+    "omits invalid hub version metadata without dropping devices: %j", async hubVersion => {
+      const { own, read } = rig();
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ status: "ok", devices: [own], hubVersion }));
+      expect(await read()).toEqual({ devices: [], hubVersion: null });
+    },
+  );
 
   it.each(["wrong current", "no current", "duplicate", "invalid time"])(
     "withholds a malformed list with %s rather than guessing device identity",

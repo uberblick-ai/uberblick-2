@@ -64,6 +64,10 @@ function object(value: unknown): value is Record<string, unknown> {
 function uuid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 }
+export function sanitizeHubVersion(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 64) return undefined;
+  return /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(value)?.[0] === value ? value : undefined;
+}
 function member(value: unknown): Record<string, unknown> {
   if (!object(value) || !uuid(value.principalId) || !isGithubAccountId(value.githubAccountId) ||
       !isGithubUsername(value.githubUsername) || (value.role !== "member" && value.role !== "admin")) {
@@ -199,7 +203,10 @@ export function sanitizeManagementReply(
         });
         if (new Set(devices.map(row => row.deviceId)).size !== devices.length ||
             devices.filter(row => row.current).length !== 1) throw new ManagementResponseError();
-        return result({ status: state, devices });
+        const version = sanitizeHubVersion(body.hubVersion);
+        const hubVersion = version !== undefined && login !== undefined && version.includes(login.credential.key)
+          ? undefined : version;
+        return result({ status: state, devices, ...(hubVersion === undefined ? {} : { hubVersion }) });
       }
       break;
     case "revoke-device":

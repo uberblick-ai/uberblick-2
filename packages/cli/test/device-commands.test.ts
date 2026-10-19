@@ -6,6 +6,7 @@ import { startDeviceSyncHub } from "../../hub/test/device-sync-hub.js";
 import { authenticationOrigin } from "@uberblick/mcp-server/remote-url";
 import { removeTempDirs, sandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
+import { cliVersion } from "../src/version.js";
 
 const WORKSPACE = "5c1f9a72-4d38-4e02-9b6a-7e3f10c85b94";
 const SECRET = "legacy-local-secret-is-never-sent-to-remote";
@@ -57,7 +58,7 @@ describe("remote device commands", () => {
     expect(readFileSync(file(box, "credentials.json"))).toEqual(before);
     const text = await runInProcess(["status"], box);
     expect(text.status, text.stderr).toBe(0);
-    expect(text.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
+    expect(text.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\nversion     client ${cliVersion()}, hub unknown\naccount     @${login.identity.githubUsername} (GitHub)\n`);
     const doctor = await runInProcess(["doctor", "--json"], box);
     const checks = JSON.parse(doctor.stdout).checks;
     expect(checks.find((check: { name: string }) => check.name === "login")).toEqual({
@@ -103,7 +104,7 @@ describe("remote device commands", () => {
         : `ub auth login ${authenticationOrigin(endpoint)}`);
       if (command === "status") {
         expect(refused.status).toBe(0);
-        expect(refused.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\naccount     @${login.identity.githubUsername} (GitHub)\n`);
+        expect(refused.stdout).toContain(`hub         ${authenticationOrigin(endpoint)}\nversion     client ${cliVersion()}, hub unknown\naccount     @${login.identity.githubUsername} (GitHub)\n`);
         const json = await runInProcess(["status", "--json"], box);
         expect(JSON.parse(json.stdout)).toMatchObject({
           account: { login: login.identity.githubUsername, provider: "github" },

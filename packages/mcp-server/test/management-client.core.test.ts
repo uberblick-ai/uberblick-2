@@ -99,6 +99,39 @@ describe("shared management transport", () => {
 });
 
 describe("management replies exposed to a browser", () => {
+  it.each(["0.0.0", "0.4.7", "12.345.6789", `${"1".repeat(60)}.2.3`])(
+    "keeps a valid release version %s in a successful device list", hubVersion => {
+      expect(sanitizeManagementReply({ operation: "list-devices" }, {
+        status: 200, body: { status: "ok", devices: [device], hubVersion },
+      }, login)).toEqual({ status: 200, body: { status: "ok", devices: [device], hubVersion } });
+    },
+  );
+
+  it.each([
+    undefined, null, 7, {}, "", "0.4", "v0.4.7", "0.4.7-rc.1", "0.4.7+build", "01.4.7", "0.04.7", "0.4.07",
+    " 0.4.7", "0.4.7 ", "0.4.7\n", "0.4.7\r", "0.4.7\r\n", "0.4.7\u2028", "0.4.7\u2029", "0.4.7\u001b[31m",
+    "０.4.7", `${"1".repeat(61)}.2.3`, login.credential.key,
+  ])("drops an invalid or missing hub version %j without dropping devices", hubVersion => {
+    expect(sanitizeManagementReply({ operation: "list-devices" }, {
+      status: 200, body: { status: "ok", devices: [device], hubVersion },
+    }, login)).toEqual({ status: 200, body: { status: "ok", devices: [device] } });
+  });
+
+  it("keeps credential text out of the hub version projection", () => {
+    const keyedLogin = { ...login, credential: { ...login.credential, key: "2.3" } };
+    expect(sanitizeManagementReply({ operation: "list-devices" }, {
+      status: 200, body: { status: "ok", devices: [device], hubVersion: "1.2.3" },
+    }, keyedLogin)).toEqual({ status: 200, body: { status: "ok", devices: [device] } });
+  });
+
+  it.each([
+    [400, "invalid-request"], [401, "sign-in-required"], [403, "forbidden"], [500, "failed"], [503, "not-configured"],
+  ])("drops release identity from %s %s device-list refusals", (status, state) => {
+    expect(sanitizeManagementReply({ operation: "list-devices" }, {
+      status, body: { status: state, hubVersion: "0.4.7" },
+    }, login)).toEqual({ status, body: { status: state } });
+  });
+
   it("adds only acceptable device names to the public projection", () => {
     const named = { ...device, deviceName: "agent-server" };
     const upstream = { status: "ok", devices: [{ ...named, key: "private-device-key",
@@ -134,6 +167,7 @@ describe("management replies exposed to a browser", () => {
     privateBody.key = login.credential.key;
     privateBody.token = "private-proof";
     privateBody.message = "private-provider-message";
+    if (action.operation !== "list-devices") privateBody.hubVersion = "0.4.7";
     if (Array.isArray(privateBody.devices)) privateBody.devices = privateBody.devices.map(value => ({ ...value as Record<string, unknown>, key: "private-device-key", workspaces: [WORKSPACE] }));
     if (Array.isArray(privateBody.members)) privateBody.members = privateBody.members.map(value => ({ ...value as Record<string, unknown>, token: "private-token" }));
     if (Array.isArray(privateBody.admins)) privateBody.admins = privateBody.admins.map(value => ({ ...value as Record<string, unknown>, credential: login.credential }));
@@ -175,7 +209,7 @@ describe("management replies exposed to a browser", () => {
 
   it("admits only the fixed protocol sentinel with a different valid version", () => {
     const action = { operation: "list-devices" } as const;
-    const reply = { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}`, key: "private" } };
+    const reply = { status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}`, key: "private", hubVersion: "0.4.7" } };
     expect(sanitizeManagementReply(action, reply)).toEqual({ status: 409, body: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION + 1}` } });
     expect(() => sanitizeManagementReply(action, { ...reply, body: { ...reply.body, reason: "private-provider-error" } })).toThrow(ManagementResponseError);
   });

@@ -14,6 +14,7 @@ import { acquireInitLock } from "../src/init-lock.js";
 import { removeTempDirs, runUb, runUbAsync, sandbox, unboundSandbox, type Sandbox } from "./helpers.js";
 import { runInProcess } from "./in-process.js";
 import { fixture } from "./auth-fixtures.js";
+import { cliVersion } from "../src/version.js";
 
 afterAll(removeTempDirs);
 const WORKSPACE = "4d8e2f11-6a73-4c95-8b20-9e1f5c3a7d64";
@@ -95,6 +96,7 @@ describe("ub status workspace selection", () => {
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toBe(
       `workspace   Project notes (${WORKSPACE})\nhub         local, this computer only\n` +
+      `version     client ${cliVersion()}\n` +
       `account     none needed for a local workspace\nchosen by   project config in ${box.cwd}\n` +
       `stored in   ${databasePath}\nproblems    none\n`,
     );
@@ -125,8 +127,8 @@ describe("ub status workspace selection", () => {
     const shown = await runInProcess(["status"], box);
     expect(shown.status, shown.output).toBe(0);
     expect(shown.stdout).toContain(signedIn
-      ? "hub         http://127.0.0.1:1\naccount     @previous-user (GitHub)\nchosen by   "
-      : "hub         http://127.0.0.1:1\nchosen by   ");
+      ? `hub         http://127.0.0.1:1\nversion     client ${cliVersion()}, hub unknown\naccount     @previous-user (GitHub)\nchosen by   `
+      : `hub         http://127.0.0.1:1\nversion     client ${cliVersion()}, hub unknown\nchosen by   `);
     expect(shown.output).not.toContain("synthetic-status-secret");
     expect(shown.output).not.toContain(login.credential.key);
     const json = await runInProcess(["status", "--json"], box);

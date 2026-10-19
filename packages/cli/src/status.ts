@@ -4,6 +4,7 @@ import { isGithubUsername } from "@uberblick/schema/github-identity";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { hubDatabasePath } from "./hub-config.js";
 import { readDeviceLogin } from "@uberblick/mcp-server/device-login";
+import { sanitizeHubVersion } from "@uberblick/mcp-server/management-client";
 import { authenticationOrigin, hubTransportProblem } from "@uberblick/mcp-server/remote-url";
 import { collectSyncStatus, formatHubFailure, openWorkspaceReplicas, readStoredSyncStatus, readWorkspaceName } from "@uberblick/mcp-server";
 import type { McpConfig, SyncStatus, WorkspaceReplicaSet } from "@uberblick/mcp-server";
@@ -38,6 +39,7 @@ export interface StatusReport {
   binding: ProjectBinding;
   projectConfig: string | null;
   version: string;
+  hubVersion?: string | null;
   /** The workspace id as configured — the spelling its owner typed. */
   workspace: string;
   /** Bare identity for room names, token claims and database paths; no display slug. */
@@ -133,7 +135,7 @@ export async function statusReport(
   }
   const transport = hubTransportProblem(config.hubUrl, resolved.env);
   const stored = bindingProblem === undefined ? undefined : readStoredSyncStatus(config.databasePath, config.workspaceId);
-  const [sync, recentDevices] = await Promise.all([
+  const [sync, deviceReading] = await Promise.all([
     stored === undefined ? readSyncStatus(config) : {
       hub: { status: "disabled", url: null, protocolVersion: SYNC_PROTOCOL_VERSION },
       rooms: [], unsyncedChanges: stored.pendingRooms.length, pendingRooms: stored.pendingRooms,
@@ -149,13 +151,14 @@ export async function statusReport(
   const accountOrigin = resolved.binding.hubUrl === null ? undefined : deviceLogin?.origin;
   return {
     warnings: resolved.warnings,
-    recentDevices,
+    recentDevices: deviceReading?.devices ?? null,
     workspaceName: readWorkspaceName(config.databasePath, config.workspaceId),
     ...(accountOrigin === undefined ? {} : { accountOrigin }),
     report: {
       binding: resolved.binding,
       projectConfig: resolved.paths.projectConfig,
       version: cliVersion(),
+      hubVersion: deviceReading?.hubVersion ?? null,
       workspace: resolved.env.WORKSPACE_ID ?? config.workspaceId,
       workspaceUuid: config.workspaceId,
       hubUrl: config.hubUrl,
@@ -219,6 +222,7 @@ function lastSyncAge(lastSync: string | null): string {
 export interface ShortStatusReport {
   workspace: { id: string; name: string | null };
   hub: string | null;
+  version: { client: string; hub: string | null };
   account: StatusReport["account"];
   chosenBy: { source: "project-config" | "environment"; path: string | null };
   storedIn: string;
@@ -248,6 +252,11 @@ function workspaceSelection(report: StatusReport): ShortStatusReport["chosenBy"]
   return report.sources.workspace === "project config" && report.projectConfig !== null
     ? { source: "project-config", path: report.projectConfig }
     : { source: "environment", path: null };
+}
+
+function statusVersion(report: StatusReport): ShortStatusReport["version"] {
+  return { client: report.version, hub: report.binding.hubUrl !== null && connectionState(report) === "connected"
+    ? sanitizeHubVersion(report.hubVersion) ?? null : null };
 }
 
 export function shortStatusReport(
@@ -301,6 +310,7 @@ export function shortStatusReport(
   return {
     workspace: { id: report.workspaceUuid, name: workspaceName },
     hub: origin,
+    version: statusVersion(report),
     account: origin === null ? null : report.account,
     chosenBy: workspaceSelection(report),
     storedIn: resolve(report.databasePath),
@@ -364,6 +374,8 @@ export function renderStatus(
   let text = field("workspace", short.workspace.name === null
     ? short.workspace.id : `${short.workspace.name} (${short.workspace.id})`);
   text += field("hub", short.hub ?? "local, this computer only");
+  text += field("version", `client ${short.version.client}` +
+    (short.connection === null ? "" : `, hub ${short.version.hub ?? "unknown"}`));
   if (short.hub === null) {
     text += field("account", "none needed for a local workspace");
   } else if (short.account !== null) {
