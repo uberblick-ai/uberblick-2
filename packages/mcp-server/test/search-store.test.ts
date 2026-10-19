@@ -236,6 +236,8 @@ describe("fragment index upgrade", () => {
     expect(store.searchUuids("worksp")).toEqual(["1"]);
     expect(store.searchUuids("replace")).toEqual([]);
     expect(titles(store, "workspace")).toEqual(["Workspace"]);
+    expect(db.prepare("SELECT indexed_through_seq, catalog_through_seq FROM doc_index_seq WHERE uuid = ?").get("1"))
+      .toEqual({ indexed_through_seq: 2, catalog_through_seq: 7 });
     store.indexDoc({ ...doc, title: "Replacement" }, 3, 8);
     expect(store.searchUuids("worksp")).toEqual([]);
     expect(store.searchUuids("replace")).toEqual(["1"]);
