@@ -20,8 +20,9 @@ python3 -m http.server 8000 --directory site/out  # then open http://127.0.0.1:8
   agents.uberblick.ai and skills.uberblick.ai: IBM Plex from Google Fonts, the
   violet accent, the shell, the block frame), `css/` (one stylesheet per page
   kind), `fonts/` (the web app's Geist and Fraunces files with their licences,
-  used only by the landing page's demo frame, which shows the editor as it is)
-  and `_headers`.
+  used only by the landing page's demo frame, which shows the editor as it is),
+  the favicon and touch icon (the same files as the web app's in
+  `packages/web/public`) and `_headers`.
 - Links are root-relative, so serve the output rather than opening the files.
   The build lists links to pages that are not written yet.
 
