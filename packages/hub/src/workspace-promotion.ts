@@ -23,20 +23,20 @@ export class WorkspacePromotions {
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {
+      const receipt = db.prepare("SELECT * FROM hub_workspace_promotions WHERE attempt_id = ?").get(attemptId);
+      const ownReceipt = receipt !== undefined && receipt.workspace_id === workspaceId && receipt.principal_id === principalId;
+      if (!ownReceipt && !this.admins.isAdmin(principalId)) {
+        db.exec("ROLLBACK");
+        return "hub-admin-required";
+      }
       if (this.admins.isSuspended(workspaceId)) {
         db.exec("ROLLBACK");
         return "workspace-suspended";
       }
-      const receipt = db.prepare("SELECT * FROM hub_workspace_promotions WHERE attempt_id = ?").get(attemptId);
       if (receipt !== undefined) {
-        const own = receipt.workspace_id === workspaceId && receipt.principal_id === principalId &&
-          this.memberships.roleFor(workspaceId, principalId) === "admin";
+        const own = ownReceipt && this.memberships.roleFor(workspaceId, principalId) === "admin";
         db.exec("ROLLBACK");
         return own ? "resumed" : "workspace-conflict";
-      }
-      if (!this.admins.isAdmin(principalId)) {
-        db.exec("ROLLBACK");
-        return "hub-admin-required";
       }
       const prefix = `${workspaceId}/`;
       if (this.memberships.hasMembership(workspaceId) || this.hasLiveDocuments(workspaceId) ||

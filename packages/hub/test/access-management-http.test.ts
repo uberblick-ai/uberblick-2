@@ -3,12 +3,14 @@ import { issueCredential, mintDeviceRequestProof as mintRequestProof, renewCrede
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as Y from "yjs";
+import { MANAGEMENT_OPERATIONS } from "../src/access-management.js";
 import { CredentialRegistry, type CredentialRenewal } from "../src/credentials.js";
 import type { HubLogRecord } from "../src/log.js";
 import type { MembershipRole } from "../src/memberships.js";
 import { SYNC_PROTOCOL_VERSION } from "@uberblick/schema/protocol";
 import { createTeamHub as createHub, type TeamHub as Hub } from "../src/team.js";
-import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, type RequestAction } from "@uberblick/schema/token";
+import { DEVICE_CREDENTIAL_LIFETIME_MS, importCredentialKey, importRootSecret, mintToken, readRequestAction, type RequestAction } from "@uberblick/schema/token";
 import { createClient, OTHER_WORKSPACE, removeTempDatabases, tempDatabasePath, TEST_SECRET, testRoom,
   type TestClient, token, waitForText, waitUntil, WORKSPACE } from "./helpers.js";
 
@@ -93,6 +95,64 @@ function expireCredential(hub: Hub, credential: IssuedCredential): void {
 }
 
 describe("authenticated hub access management", () => {
+  it.each(Object.entries(MANAGEMENT_OPERATIONS).filter(([, declaration]) =>
+    declaration.target.some(field => field === "workspaceId")))
+  ("refuses cross-workspace %s identically while active and suspended without changing the target", async (operation, declaration) => {
+    const { hub, github } = await rig();
+    const actor = person(hub, "1201", "workspace-a-admin", [[WORKSPACE, "admin"]]);
+    const owner = person(hub, "1202", "hub-admin");
+    hub.hubAdmins!.grant(owner.principal.id);
+    expect(await manage(hub, owner.issued, { operation: "promote-workspace", workspaceId: OTHER_WORKSPACE, attemptId: randomUUID() }))
+      .toMatchObject({ code: 200, result: { status: "created" } });
+    const target = person(hub, "1203", "workspace-b-member", [[OTHER_WORKSPACE, "member"]]);
+    const values = { workspaceId: OTHER_WORKSPACE, attemptId: randomUUID(), principalId: target.principal.id,
+      deviceId: target.issued.record.deviceId, githubUsername: "new-account", githubAccountId: "5678" };
+    const fields = { operation, ...Object.fromEntries(declaration.target.map(field => [field, values[field]])) };
+    const action = readRequestAction({ ...fields, role: "member" }) ?? readRequestAction(fields);
+    if (action === null || action.operation === "renew-credential") throw new Error(`Missing valid fixture for ${operation}`);
+    const document = new Y.Doc();
+    document.getText("content").insert(0, "workspace B document");
+    const db = new DatabaseSync(hub.databasePath);
+    try {
+      db.prepare("INSERT INTO documents (name, data) VALUES (?, ?)").run(testRoom(OTHER_WORKSPACE), Y.encodeStateAsUpdate(document));
+      const snapshot = () => ({
+        memberships: db.prepare("SELECT * FROM hub_memberships WHERE workspace_id = ? ORDER BY principal_id").all(OTHER_WORKSPACE),
+        suspensions: db.prepare("SELECT * FROM hub_workspace_suspensions WHERE workspace_id = ?").all(OTHER_WORKSPACE),
+        promotions: db.prepare("SELECT * FROM hub_workspace_promotions WHERE workspace_id = ?").all(OTHER_WORKSPACE),
+        documents: db.prepare("SELECT name, hex(data) AS data FROM documents WHERE substr(name, 1, ?) = ? ORDER BY name")
+          .all(OTHER_WORKSPACE.length + 1, `${OTHER_WORKSPACE}/`),
+        credential: hub.credentials!.get(target.issued.record.id),
+      });
+      let activeAnswer: Awaited<ReturnType<typeof manage>> | undefined;
+      for (const status of ["active", "suspended"] as const) {
+        hub.hubAdmins!.setWorkspaceStatus(owner.principal.id, OTHER_WORKSPACE, status);
+        const before = snapshot();
+        const answer = await manage(hub, actor.issued, action);
+        expect(answer.code).toBe(403);
+        expect(snapshot()).toEqual(before);
+        if (activeAnswer === undefined) activeAnswer = answer;
+        else expect(answer).toEqual(activeAnswer);
+      }
+    } finally {
+      db.close();
+      document.destroy();
+    }
+    expect(github).not.toHaveBeenCalled();
+  });
+
+  it("replies with a refusal when a parsed operation has no declaration", async () => {
+    const { hub } = await rig();
+    const owner = person(hub, "1234", "owner");
+    const declaration = MANAGEMENT_OPERATIONS["list-devices"];
+    Reflect.deleteProperty(MANAGEMENT_OPERATIONS, "list-devices");
+    try {
+      expect(await manage(hub, owner.issued, { operation: "list-devices" }))
+        .toEqual({ code: 400, result: { status: "invalid-request" } });
+    } finally {
+      Object.defineProperty(MANAGEMENT_OPERATIONS, "list-devices", { value: declaration, enumerable: true, configurable: true, writable: true });
+    }
+  });
+
   it("refuses expired device credentials for every management operation and omits them from device lists", async () => {
     const { hub, github } = await rig();
     const owner = person(hub, "1234", "owner", [[WORKSPACE, "admin"]]);
@@ -460,6 +520,17 @@ describe("authenticated hub access management", () => {
       .toEqual({ code: 500, result: { status: "closure-failed", applied: true } });
     expect(hub.credentials!.get(member.issued.record.id)?.revokedAt).toBeTypeOf("number");
     await expect(connect(hub, testRoom(), await roomToken(member.issued)).denied).resolves.toBe("device-credential-refused");
+  });
+
+  it("keeps a committed role change's fencing failure distinct from access-ending closure failures", async () => {
+    const { hub } = await rig();
+    const admin = person(hub, "1234", "admin", [[WORKSPACE, "admin"]]);
+    const member = person(hub, "5678", "member", [[WORKSPACE, "member"]]);
+    hub.memberships!.onRoleChange(() => { throw new Error("post-commit fencing failure"); });
+    expect(await manage(hub, admin.issued, { operation: "change-role", workspaceId: WORKSPACE,
+      principalId: member.principal.id, role: "admin" }))
+      .toEqual({ code: 500, result: { status: "failed" } });
+    expect(hub.memberships!.roleFor(WORKSPACE, member.principal.id)).toBe("admin");
   });
 
   it.each(["revoke-device", "remove-member"] as const)("%s closes and fences exactly its remote live authority while local data and unrelated access survive", async operation => {
@@ -1133,10 +1204,13 @@ describe("workspace promotion authority", () => {
     expect(await manage(hub, owner.issued, { operation: "suspend-workspace", workspaceId: action.workspaceId }))
       .toMatchObject({ code: 200, result: { workspaceStatus: "suspended" } });
     hub.hubAdmins!.remove(owner.principal.id, actor.principal.id);
-    for (const attemptId of [action.attemptId, randomUUID()]) {
-      expect(await manage(hub, actor.issued, { ...action, attemptId })).toEqual({ code: 409,
-        result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId } });
-    }
+    expect(await manage(hub, actor.issued, action)).toEqual({ code: 409,
+      result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId: action.attemptId } });
+    const freshAttempt = { ...action, attemptId: randomUUID() };
+    expect(await manage(hub, actor.issued, freshAttempt)).toEqual({ code: 403,
+      result: { status: "hub-admin-required", workspaceId: action.workspaceId, attemptId: freshAttempt.attemptId } });
+    expect(await manage(hub, owner.issued, freshAttempt)).toEqual({ code: 409,
+      result: { status: "workspace-suspended", workspaceId: action.workspaceId, attemptId: freshAttempt.attemptId } });
     expect(hub.memberships!.roleFor(action.workspaceId, actor.principal.id)).toBe("admin");
     expect(await manage(hub, owner.issued, { operation: "restore-workspace", workspaceId: action.workspaceId }))
       .toMatchObject({ code: 200, result: { workspaceStatus: "active" } });
