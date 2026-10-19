@@ -151,14 +151,14 @@ async function expectObservationGeometry(
 
 /** Data-point anchors independently recover the value at each painted y label. */
 async function expectPanelTickGeometry(
-  page: Page, canvasIndex: number, values: number[], unit: string, markerHeadroom = false,
+  page: Page, canvasIndex: number, values: number[], unit: string, markerHeadroom = false, maximumTicks = 3,
 ): Promise<PaintedText[]> {
   const probe = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe);
   const points = probe.points.filter(entry => entry.canvas === canvasIndex);
   expect(points).toHaveLength(values.length);
   const ticks = probe.ink.filter(entry => entry.canvas === canvasIndex && entry.text.endsWith(unit));
   expect(ticks.length).toBeGreaterThanOrEqual(2);
-  expect(ticks.length).toBeLessThanOrEqual(3);
+  expect(ticks.length).toBeLessThanOrEqual(maximumTicks);
   const first = points[0], last = points.at(-1), firstValue = values[0], lastValue = values.at(-1);
   if (first === undefined || last === undefined || firstValue === undefined || lastValue === undefined) {
     throw new Error("e2e: panel value anchors are missing");
@@ -956,6 +956,51 @@ test("each value axis keeps a zero baseline only while its plotted values are no
 });
 
 for (const layout of ["overlay", "panels"] as const) {
+  test(`non-round widening keeps declared-range labels on their gridline values in ${layout}`, async ({ browser }) => {
+    const session = writer();
+    const cases = [
+      { name: "upper data near declared end", range: [0, 100], values: [60, 103.7, 90], reference: undefined },
+      { name: "upper data beyond declared end", range: [0, 100], values: [60, 117.3, 90], reference: undefined },
+      { name: "lower data", range: [-100, 100], values: [-60, -139.7, -90], reference: undefined },
+      { name: "upper reference", range: [0, 100], values: [60, 75, 90], reference: 117.3 },
+      { name: "lower reference", range: [-100, 100], values: [-60, -75, -90], reference: -139.7 },
+    ];
+    const mappingFor = (fixture: typeof cases[number]) => ({ ...MAPPING, title: "Widened tick geometry", layout,
+      y: [{ field: "latency", unit: "%", range: fixture.range,
+        ...(fixture.reference === undefined ? {} : { reference: fixture.reference }) }],
+    });
+    const first = cases[0];
+    if (first === undefined) throw new Error("e2e: widened-range fixtures are empty");
+    const uuid = await chartDoc(session, `Widened tick geometry ${layout}`, mappingFor(first));
+    const replace = async (fixture: typeof cases[number]): Promise<void> => {
+      await session.call("update_data", { uuid, operations: [{ collection: "measurements", schema: SCHEMA,
+        replaceRecords: fixture.values.map((latency, index) => ({ id: `point-${index}`, value: {
+          day: `2026-01-0${index + 1}`, latency,
+        } })),
+      }] });
+    };
+    await replace(first);
+    const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
+      beforeNavigate: loading => installProbe(loading, uuid),
+      contextOptions: { viewport: { width: 1366, height: 768 }, locale: "en-US" },
+    });
+    for (const [index, fixture] of cases.entries()) {
+      await test.step(fixture.name, async () => {
+        if (index > 0) {
+          await editMapping(session, uuid, JSON.stringify(mappingFor(fixture)));
+          await replace(fixture);
+        }
+        await waitForDocumentDraw(page, session, uuid);
+        await expect(page.getByRole("img", { name: "Widened tick geometry", exact: true })).toBeVisible();
+        await expectPanelTickGeometry(page, 0, fixture.values, "%", false, layout === "panels" ? 3 : 6);
+        if (fixture.reference !== undefined) {
+          expect(await referenceInk(page, 0, fixture.reference, "%")).toBeGreaterThan(0.75);
+        }
+      });
+    }
+    await page.close();
+  });
+
   test(`declared ranges and neutral references preserve survey scale in ${layout} in both appearances`, async ({ browser }, info) => {
     const session = writer();
     const mapping = { ...MAPPING, title: "Monthly survey", layout, y: [
@@ -1060,12 +1105,15 @@ for (const layout of ["overlay", "panels"] as const) {
         ] }] });
         await waitForDocumentDraw(page, session, uuid);
         const widened = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink);
+        const groupTicks: string[][] = [];
         for (const panel of layout === "panels" ? [0, 1] : [0]) {
-          const values = widened.filter(entry => entry.canvas === panel && entry.text.endsWith(" points"))
-            .map(entry => Number(entry.text.slice(0, -7).replaceAll(",", "")));
-          expect(Math.min(...values)).toBe(-140);
-          expect(Math.max(...values)).toBe(130);
+          const ticks = widened.filter(entry => entry.canvas === panel && entry.text.endsWith(" points"));
+          const values = ticks.map(entry => Number(entry.text.slice(0, -7).replaceAll(",", "")));
+          expect(Math.min(...values)).toBeLessThanOrEqual(-140);
+          expect(Math.max(...values)).toBeGreaterThanOrEqual(130);
+          groupTicks.push(ticks.map(entry => entry.text));
         }
+        if (layout === "panels") expect(groupTicks[1]).toEqual(groupTicks[0]);
         const automatic = widened.filter(entry => entry.canvas === rightCanvas && entry.text.endsWith("%"))
           .map(entry => Number(entry.text.slice(0, -1).replaceAll(",", "")));
         expect(Math.min(...automatic)).toBe(0);

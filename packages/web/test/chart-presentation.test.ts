@@ -32,8 +32,8 @@ describe("panel unit ranges", () => {
       { field: "value", range: [50, 100] }, { field: "value", range: [1, 7] },
       { field: "value", range: [40, 80], reference: 120 }, { field: "value" },
     ])).toEqual([
-      { min: -5, max: 120, exact: true }, { min: 1, max: 7, exact: true },
-      { min: -5, max: 120, exact: true }, { min: -5, max: 120, exact: true },
+      { min: -5, max: 120, declared: [40, 100] }, { min: 1, max: 7, declared: [1, 7] },
+      { min: -5, max: 120, declared: [40, 100] }, { min: -5, max: 120, declared: [40, 100] },
     ]);
   });
 
@@ -41,7 +41,7 @@ describe("panel unit ranges", () => {
     expect(chartPanelRanges([series([60, 90]), series([null], "ms"), series([-39, 15], "%")], [
       { field: "value", range: [50, 100] }, { field: "value", range: [-7, -1] }, { field: "value", range: [-100, 100] },
     ])).toEqual([
-      { min: 50, max: 100, exact: true }, { min: -7, max: -1, exact: true }, { min: -100, max: 100, exact: true },
+      { min: 50, max: 100, declared: [50, 100] }, { min: -7, max: -1, declared: [-7, -1] }, { min: -100, max: 100, declared: [-100, 100] },
     ]);
   });
 
@@ -54,7 +54,7 @@ describe("panel unit ranges", () => {
   it("combines overlay ranges by assigned axis rather than by unit", () => {
     expect(chartValueRanges([series([3], "%"), series([4], "ms"), series([5], "requests")], [
       { field: "value", range: [1, 7] }, { field: "value", range: [-20, 20] }, { field: "value", reference: 30 },
-    ], ["y", "y", "y"])).toEqual(Array.from({ length: 3 }, () => ({ min: -20, max: 30, exact: true })));
+    ], ["y", "y", "y"])).toEqual(Array.from({ length: 3 }, () => ({ min: -20, max: 30, declared: [-20, 20] })));
   });
 });
 

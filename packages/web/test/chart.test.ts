@@ -311,9 +311,16 @@ describe("the chart's derived lifecycle", () => {
     expect(charts.instances).toHaveLength(layout === "panels" ? 4 : 1);
     const instance = charts.instances[0]!;
     expect(instance.options).toMatchObject({ scales: {
-      y: { min: -5, max: 120, beginAtZero: false },
+      y: { suggestedMin: -5, suggestedMax: 120, beginAtZero: false },
       referenceX: { type: "linear", axis: "x", display: false, min: 0, max: 1 },
     } });
+    const sharedScale = (instance.options as { scales: { y: Record<string, unknown> } }).scales.y;
+    expect(sharedScale).not.toHaveProperty("min");
+    expect(sharedScale).not.toHaveProperty("max");
+    if (layout === "panels") {
+      for (const index of [1, 3]) expect(panelOptions(charts.instances[index]!).scales.y)
+        .toMatchObject({ suggestedMin: -5, suggestedMax: 120, beginAtZero: false });
+    }
     const percentChart = layout === "panels" ? charts.instances[2]! : instance;
     expect((percentChart.options as { scales: Record<string, unknown> }).scales[layout === "panels" ? "y" : "yRight"])
       .toMatchObject({ min: 1, max: 7, beginAtZero: false });
@@ -345,9 +352,31 @@ describe("the chart's derived lifecycle", () => {
 
     applyDocData(doc, directory, [{ collection: "trend", upsert: [{ id: "outside", value: { day: 5, value: 200, secondary: 0, right: -2 } }] }]);
     flush();
-    expect(instance.options).toMatchObject({ scales: { y: { min: -5, max: 200 } } });
+    expect(instance.options).toMatchObject({ scales: { y: { suggestedMin: -5, suggestedMax: 200 } } });
     expect((percentChart.options as { scales: Record<string, unknown> }).scales[layout === "panels" ? "y" : "yRight"])
-      .toMatchObject({ min: -2, max: 7 });
+      .toMatchObject({ suggestedMin: -2, max: 7 });
+    editor.destroy(); doc.destroy(); directory.destroy();
+  });
+
+  it.each(["overlay", "panels"])("rounds only widened sides of declared %s ranges on either value axis", layout => {
+    const { doc, directory, id } = fixture();
+    editBlock(doc, id, mapping, JSON.stringify({ ...JSON.parse(mapping), layout, y: [
+      { field: "value", unit: "%", range: [0, 100], reference: 117.3 },
+      { field: "secondary", unit: "ms", range: [-100, 100] },
+    ] }));
+    applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } },
+      replaceRecords: [{ id: "first", value: { day: 1, value: 60, secondary: -139.7 } }],
+    }]);
+    const { editor } = mountEditor(doc);
+    flush();
+    const left = (charts.instances[0]!.options as { scales: Record<string, Record<string, unknown>> }).scales.y;
+    const right = (charts.instances[layout === "panels" ? 1 : 0]!.options as {
+      scales: Record<string, Record<string, unknown>>;
+    }).scales[layout === "panels" ? "y" : "yRight"];
+    expect(left).toMatchObject({ min: 0, suggestedMax: 117.3, beginAtZero: false });
+    expect(left).not.toHaveProperty("max");
+    expect(right).toMatchObject({ suggestedMin: -139.7, max: 100, beginAtZero: false });
+    expect(right).not.toHaveProperty("min");
     editor.destroy(); doc.destroy(); directory.destroy();
   });
 

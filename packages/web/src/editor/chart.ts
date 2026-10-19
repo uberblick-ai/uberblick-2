@@ -54,13 +54,18 @@ function seriesDatasets(result: ChartReady, indices: number[], axes: ChartAxes, 
         ? 0 : context => chartPointRadius(series.points, context.dataIndex, plottedValues),
       pointHoverRadius: 4, pointHitRadius: 6, spanGaps: false,
       // Explicit bounds otherwise cut off markers and strokes at the y ends.
-      ...(ranges[index]?.exact ? { clip: { left: 0, right: 0, top: 5, bottom: 5 } } : {}),
+      ...(ranges[index]?.declared ? { clip: { left: 0, right: 0, top: 5, bottom: 5 } } : {}),
     };
   });
 }
 
 function valueScaleRange(range: ChartPanelRange | undefined, panels: boolean) {
-  if (range?.exact) return { min: range.min, max: range.max, beginAtZero: false };
+  if (range?.declared) return {
+    // Widened sides use native nice ticks so their labels match the gridlines.
+    ...(range.min === range.declared[0] ? { min: range.min } : { suggestedMin: range.min }),
+    ...(range.max === range.declared[1] ? { max: range.max } : { suggestedMax: range.max }),
+    beginAtZero: false,
+  };
   return {
     beginAtZero: (range?.min ?? 0) >= 0,
     ...(panels ? { suggestedMin: range?.min, suggestedMax: range?.max } : {}),

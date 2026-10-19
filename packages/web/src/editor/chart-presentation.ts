@@ -1,6 +1,6 @@
 import type { ChartSeries, ChartSeriesMapping } from "./chart-data.js";
 
-export interface ChartPanelRange { min: number; max: number; exact?: true }
+export interface ChartPanelRange { min: number; max: number; declared?: [number, number] }
 
 /** A declared span replaces the zero rule for its whole axis or unit group. */
 export function chartValueRanges(series: ChartSeries[], mappings: ChartSeriesMapping[], groupKeys: string[]): ChartPanelRange[] {
@@ -16,7 +16,10 @@ export function chartValueRanges(series: ChartSeries[], mappings: ChartSeriesMap
     if (mapping?.range !== undefined) {
       include(mapping.range[0]);
       include(mapping.range[1]);
-      if (range !== undefined) range.exact = true;
+      if (range !== undefined) range.declared = [
+        Math.min(range.declared?.[0] ?? mapping.range[0], mapping.range[0]),
+        Math.max(range.declared?.[1] ?? mapping.range[1], mapping.range[1]),
+      ];
     }
     if (mapping?.reference !== undefined) include(mapping.reference);
     for (const point of entry.points) {
@@ -24,7 +27,7 @@ export function chartValueRanges(series: ChartSeries[], mappings: ChartSeriesMap
     }
   });
   for (const range of groups.values()) {
-    if (!range.exact && range.min >= 0) range.min = 0;
+    if (range.declared === undefined && range.min >= 0) range.min = 0;
   }
   return series.map((_, index) => groups.get(groupKeys[index] ?? "") ?? { min: 0, max: 1 });
 }
