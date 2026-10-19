@@ -21,7 +21,7 @@ export const toolHelpDetails = {
     "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
     "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
     "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
-    "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
+    "`tags` is a complete assignment set of active catalog ids or active names. Name matching ignores case. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
     "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
@@ -208,7 +208,7 @@ export const toolHelpDetails = {
     "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
-    "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or exact current name; a value this " +
+    "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or current name, ignoring name case; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
     "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
     "state.",
@@ -230,7 +230,7 @@ export const toolHelpDetails = {
     "without guaranteeing that every title match beats a body-only match or that more matched words come first. " +
     "Pass `kind: regular` for regular documents, including stored requirements, or `kind: decision` for all " +
     "decision records, including superseded, rejected and withdrawn records. Pass `tag` as one catalog id or " +
-    "exact current name, or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
+    "current name (case ignored), or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
     "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
     "refuse.\n\n" +
     "Every hit carries `kind`, `description` (null when unwritten), a snippet and canonical tag assignments " +
@@ -433,7 +433,7 @@ export const toolHelpDetails = {
     "directory answerPreview derives from the first answer paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
-    "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
+    "Tags replace the assignment set with catalog ids or active names; name matching ignores case and names resolve to canonical ids " +
     "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
     "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
     "directory or index changes.\n\n" +

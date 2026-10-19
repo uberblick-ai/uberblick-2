@@ -82,7 +82,7 @@ function refuseTagValues(
 
 /**
  * Refuse unknown filters: an empty result would falsely imply a known tag has
- * no documents. Accept an id or exact current name.
+ * no documents. Accept an id or current name, ignoring name case.
  */
 export function resolveTagFilter(
   replicas: Replicas,
@@ -91,8 +91,9 @@ export function resolveTagFilter(
   const catalog = replicas.settings().doc;
   const byIdentity = getTagCatalogEntry(catalog, selector);
   if (byIdentity !== null) return byIdentity.id;
+  const name = selector.toLowerCase();
   const byName = listTagCatalog(catalog).find(
-    (entry) => entry.name === selector,
+    (entry) => entry.name === name,
   );
   if (byName !== undefined) return byName.id;
   return refuseTagValues(replicas, [selector], []);
@@ -142,9 +143,10 @@ export function resolveTagSelectors(
     } else if (identity !== null && assigned.has(identity)) {
       id = identity;
     } else {
-      const named = activeNames.get(selector);
+      const name = selector.toLowerCase();
+      const named = activeNames.get(name);
       if (named !== undefined) id = named.id;
-      else if (retiredNames.has(selector)) retired.push(selector);
+      else if (retiredNames.has(name)) retired.push(selector);
       else unknown.push(selector);
     }
 

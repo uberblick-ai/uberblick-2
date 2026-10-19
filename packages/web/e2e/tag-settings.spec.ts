@@ -241,9 +241,12 @@ test("settings successes use shared notices and preserve native submission focus
   const field = page.getByLabel("Create a tag");
   const create = page.getByRole("button", { name: "Create", exact: true });
   const tag = `notice-${appearance}-${randomUUID().slice(0, 8)}`;
-  await field.fill(tag);
+  const draft = `  ${tag.toUpperCase()} `;
+  await field.fill(draft);
+  await expect(field).toHaveValue(draft);
   await field.press("Enter");
   await expectSuccess(page, `Created “${tag}”.`);
+  await expect(field).toHaveValue("");
   await expect(field).toBeFocused();
   await field.fill(`${tag}-two`);
   await create.click();
@@ -253,14 +256,18 @@ test("settings successes use shared notices and preserve native submission focus
   // With the preceding success expired, neither validation failure adds
   // a notice. Field edits clear alerts; later lifecycle success does too.
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await field.fill("Invalid Name");
-  await field.press("Enter");
-  await expect(page.getByRole("alert")).toContainText("1–30 lowercase letters or numbers");
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
-  await field.fill(tag);
+  for (const invalid of ["iOS app", "ios--app"]) {
+    await field.fill(invalid);
+    await field.press("Enter");
+    await expect(page.getByRole("alert")).toHaveText("Use 1–30 letters or numbers, separated by single hyphens.");
+    await expect(field).toHaveValue(invalid);
+    await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  }
+  await field.fill(draft);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await field.press("Enter");
-  await expect(page.getByRole("alert")).toContainText("already an active tag");
+  await expect(page.getByRole("alert")).toHaveText(`“${tag}” is already an active tag.`);
+  await expect(field).toHaveValue(draft);
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
 
   // The keyboard catalog test above owns the exact refocus target; shared
@@ -270,6 +277,10 @@ test("settings successes use shared notices and preserve native submission focus
   await expectSuccess(page, `Retired “${tag}”.`);
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(tagLists.locator("button:focus")).toHaveCount(1);
+  await field.fill(draft);
+  await field.press("Enter");
+  await expect(page.getByRole("alert")).toHaveText(`“${tag}” is retired. Restore it from the retired list.`);
+  await expect(field).toHaveValue(draft);
   await page.getByRole("button", { name: `Restore ${tag}`, exact: true }).press("Enter");
   await expectSuccess(page, `Restored “${tag}”.`);
   await expect(tagLists.locator("button:focus")).toHaveCount(1);

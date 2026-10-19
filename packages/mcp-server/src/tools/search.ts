@@ -13,7 +13,7 @@ export const inputSchema = strictInput({
     ),
   limit: z.number().int().min(1).max(100).optional().describe("Maximum hits, from 1 to 100; defaults to 20 after filters."),
   tag: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional()
-    .describe("One catalog tag id or exact name, or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse."),
+    .describe("One catalog tag id or name (case ignored), or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse."),
   kind: z.enum(["regular", "decision"]).optional()
     .describe("Only regular documents (including stored requirements) or decision records, including superseded, rejected and withdrawn records."),
 });

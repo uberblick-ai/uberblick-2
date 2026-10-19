@@ -502,61 +502,84 @@ it("lets an admin curate an unseeded hub catalog without creating example tags",
   room.connection.ydoc.destroy();
 });
 
-it("validates unique names and converges create, retire, and restore with a peer", async () => {
+it("folds tag drafts, validates unique names, and converges lifecycle changes with a peer", async () => {
   const room = statusRoom(SYNCED, settingsRoom(WORKSPACE.uuid));
   const peer = peerOf(room.connection.ydoc);
   const host = await mountTags(room.connection);
   const input = within(host).getByRole<HTMLInputElement>("textbox", { name: "Create a tag" });
   const submit = within(host).getByRole<HTMLButtonElement>("button", { name: "Create" });
 
-  act(() => {
-    typeInto(input, "Needs spaces");
-    submit.click();
-  });
-  expect(within(host).getByRole("alert").textContent).toBe(
-    "Use 1–30 lowercase letters or numbers, separated by single hyphens.",
-  );
+  expect(within(host).getByText(
+    "Letters and numbers, separated by hyphens; saved in lowercase; 30 characters maximum.",
+  )).toBeTruthy();
+  const initial = listTagCatalog(peer);
+  for (const draft of ["iOS app", "ios--app"]) {
+    act(() => {
+      typeInto(input, draft);
+      submit.click();
+    });
+    expect(within(host).getByRole("alert").textContent).toBe(
+      "Use 1–30 letters or numbers, separated by single hyphens.",
+    );
+    expect(input.value).toBe(draft);
+    expect(listTagCatalog(peer)).toEqual(initial);
+  }
 
-  act(() => {
-    typeInto(input, "auth");
-    submit.click();
-  });
-  expect(within(host).getByRole("alert").textContent).toBe(
-    "“auth” is already an active tag.",
-  );
-  expect(toast.success).not.toHaveBeenCalled();
-
-  act(() => typeInto(input, "product"));
+  act(() => typeInto(input, "iOS"));
+  expect(input.value).toBe("iOS");
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
-  const created = listTagCatalog(peer).find((entry) => entry.name === "product");
-  expect(created).toMatchObject({ name: "product", state: "active" });
-  expect(toast.success).toHaveBeenLastCalledWith("Created “product”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Created “product”.");
+  const created = listTagCatalog(peer).find((entry) => entry.name === "ios");
+  expect(created).toMatchObject({ name: "ios", state: "active" });
+  expect(input.value).toBe("");
+  expect(toast.success).toHaveBeenLastCalledWith("Created “ios”.", { id: "workspace-settings" });
+  expect(host.textContent).not.toContain("Created “ios”.");
 
-  act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*product$/ }).click());
+  act(() => {
+    typeInto(input, "iOS");
+    submit.click();
+  });
+  expect(within(host).getByRole("alert").textContent).toBe(
+    "“ios” is already an active tag.",
+  );
+  expect(input.value).toBe("iOS");
+  expect(listTagCatalog(peer).filter((entry) => entry.name === "ios")).toHaveLength(1);
+  expect(toast.success).toHaveBeenCalledTimes(1);
+
+  act(() => typeInto(input, "  Billing-V2 "));
+  expect(input.value).toBe("  Billing-V2 ");
+  expect(within(host).queryByRole("alert")).toBeNull();
+  act(() => submit.click());
+  expect(listTagCatalog(peer).find((entry) => entry.name === "billing-v2"))
+    .toMatchObject({ name: "billing-v2", state: "active" });
+  expect(input.value).toBe("");
+  expect(toast.success).toHaveBeenLastCalledWith("Created “billing-v2”.", { id: "workspace-settings" });
+
+  act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*ios$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "retired",
   );
-  expect(toast.success).toHaveBeenLastCalledWith("Retired “product”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Retired “product”.");
+  expect(toast.success).toHaveBeenLastCalledWith("Retired “ios”.", { id: "workspace-settings" });
+  expect(host.textContent).not.toContain("Retired “ios”.");
 
   act(() => {
-    typeInto(input, "product");
+    typeInto(input, "iOS");
     submit.click();
   });
   expect(within(host).getByRole("alert").textContent).toBe(
-    "“product” is retired. Restore it from the retired list.",
+    "“ios” is retired. Restore it from the retired list.",
   );
-  expect(toast.success).toHaveBeenCalledTimes(2);
+  expect(input.value).toBe("iOS");
+  expect(listTagCatalog(peer).filter((entry) => entry.name === "ios")).toHaveLength(1);
+  expect(toast.success).toHaveBeenCalledTimes(3);
 
-  act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*product$/ }).click());
+  act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*ios$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "active",
   );
   expect(within(host).queryByRole("alert")).toBeNull();
-  expect(toast.success).toHaveBeenLastCalledWith("Restored “product”.", { id: "workspace-settings" });
-  expect(host.textContent).not.toContain("Restored “product”.");
+  expect(toast.success).toHaveBeenLastCalledWith("Restored “ios”.", { id: "workspace-settings" });
+  expect(host.textContent).not.toContain("Restored “ios”.");
 
   act(() => {
     createTagCatalogEntry(peer, "zeta");

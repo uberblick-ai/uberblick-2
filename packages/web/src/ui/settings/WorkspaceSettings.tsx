@@ -403,22 +403,23 @@ function TagSettings({
       setError("Reconnect before changing the tag catalog.");
       return;
     }
-    if (!isTagName(draft)) {
-      setError("Use 1–30 lowercase letters or numbers, separated by single hyphens.");
+    const name = draft.trim().toLowerCase();
+    if (!isTagName(name)) {
+      setError("Use 1–30 letters or numbers, separated by single hyphens.");
       return;
     }
     const existing = listTagCatalog(connection.ydoc).find(
-      (entry) => entry.name === draft,
+      (entry) => entry.name === name,
     );
     if (existing !== undefined) {
       setError(existing.state === "retired"
-        ? `“${draft}” is retired. Restore it from the retired list.`
-        : `“${draft}” is already an active tag.`);
+        ? `“${name}” is retired. Restore it from the retired list.`
+        : `“${name}” is already an active tag.`);
       return;
     }
-    createTagCatalogEntry(connection.ydoc, draft);
+    createTagCatalogEntry(connection.ydoc, name);
     setError(null);
-    toast.success(`Created “${draft}”.`, { id: "workspace-settings" });
+    toast.success(`Created “${name}”.`, { id: "workspace-settings" });
     setDraft("");
   };
 
@@ -490,8 +491,8 @@ function TagSettings({
               </Button>
             </div>
             <p id="ub-tag-name-help" className="m-0 ub-type-small">
-              Lowercase letters and numbers, separated by hyphens; 30 characters
-              maximum.
+              Letters and numbers, separated by hyphens; saved in lowercase; 30
+              characters maximum.
             </p>
           </form>
           {!writable && (

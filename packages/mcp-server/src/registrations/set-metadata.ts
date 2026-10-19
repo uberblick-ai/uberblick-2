@@ -13,7 +13,7 @@ export function registerSetMetadata(server: ToolRegistrar, context: ToolContext)
       "refusals write nothing and field failures name field. Metadata/durability; no TL;DR hint/mark. " +
       "Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse " +
       "with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links " +
-      "replace sets; [] clears. list_tags active ids/exact names; assigned retired/unresolved ids may stay. New " +
+      "replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New " +
       "links must be directory-known; archived/unchanged accepted. Regular-only code_check: {repository, commit, " +
       "result}; replaces that case-insensitive repository's entry, writer stamps UTC checked_at. Results: matches " +
       "(agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; " +
