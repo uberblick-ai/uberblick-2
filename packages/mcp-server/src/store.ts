@@ -459,6 +459,8 @@ export class MirrorStore {
 
   private removed = false;
 
+  private fragmentPruneVersion: number | null = null;
+
   /**
    * Wake after same-process commits: data_version detects only other connections,
    * and a replica engine cannot rely on MCP calls arriving to discover changes.
@@ -1076,6 +1078,7 @@ export class MirrorStore {
   /** Only a deletion mark or authenticated room refusal authorizes removing authoritative rows. */
   purgeDoc(room: string, uuid: string): void {
     this.assertWorkspacePresent();
+    this.pruneOrphanFragments();
     const tables = [
       ["updates", "room", room], ["snapshots", "room", room],
       ["pending_rooms", "room", room], ["doc_index", "uuid", uuid],
@@ -1100,6 +1103,22 @@ export class MirrorStore {
       this.db.prepare("DELETE FROM snapshots WHERE room = ?").run(room);
       this.db.prepare("DELETE FROM pending_rooms WHERE room = ?").run(room);
     })();
+  }
+
+  private pruneOrphanFragments(): void {
+    // Only peers can orphan fragments: local index writes and removals are atomic.
+    // Sample before reading so a racing peer commit is checked on the next pass.
+    const version = this.dataVersion();
+    if (this.fragmentPruneVersion === version) return;
+    const orphans = "SELECT f.rowid FROM docs_fragment_fts f " +
+      "WHERE NOT EXISTS (SELECT 1 FROM doc_index d WHERE d.uuid = f.uuid)";
+    if (this.db.prepare(`${orphans} LIMIT 1`).get() !== undefined) {
+      // Recheck after acquiring the write lock in case a peer restored the index.
+      transactional(this.db, () => {
+        this.db.exec(`DELETE FROM docs_fragment_fts WHERE rowid IN (${orphans})`);
+      }, "immediate")();
+    }
+    this.fragmentPruneVersion = version;
   }
 
   /** All index rows are disposable caches; rebuild from log-hydrated replicas. */
@@ -1370,7 +1389,10 @@ export class MirrorStore {
         "INSERT INTO docs_fragment_fts " +
           "(rowid, uuid, title, body, description, tag_names, indexed_through_seq, catalog_through_seq) " +
           "SELECT f.rowid, f.uuid, f.title, f.body, f.description, f.tag_names, " +
-          "COALESCE(s.indexed_through_seq, 0), COALESCE(s.catalog_through_seq, 0) " +
+          // Unknown fields must remain repairable even if a peer enriches the
+          // Porter row at the same cuts and reuses its rowid before we derive it.
+          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL THEN NULL ELSE COALESCE(s.indexed_through_seq, 0) END, " +
+          "CASE WHEN f.description IS NULL OR f.tag_names IS NULL THEN NULL ELSE COALESCE(s.catalog_through_seq, 0) END " +
           "FROM docs_fts f LEFT JOIN doc_index_seq s ON s.uuid = f.uuid",
       );
     }, "immediate")();

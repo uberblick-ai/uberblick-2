@@ -156,6 +156,44 @@ describe("fragment index upgrade", () => {
     expect(open(path).searchUuids("worksp").sort()).toEqual(["body", "description", "tag", "title"]);
   });
 
+  it.each([[2, 7], [0, 0]])("repairs incomplete legacy backfill after an older peer enriches the same rowid at cuts (%i, %i)", (throughSeq, catalogThroughSeq) => {
+    const path = tempDatabasePath();
+    const doc = row("1", "Unchanged title", {
+      description: "Workspace description", tagNames: ["Protocol catalog"],
+    });
+    const before = open(path);
+    before.indexDoc(doc, throughSeq, catalogThroughSeq);
+    before.close();
+    downgrade(path);
+
+    const upgraded = open(path);
+    expect(upgraded.searchUuids("worksp")).toEqual([]);
+    expect(upgraded.searchUuids("proto")).toEqual([]);
+    const old = new DatabaseSync(path);
+    try {
+      const previousRowid = old.prepare("SELECT rowid FROM docs_fragment_fts WHERE uuid = '1'").get();
+      olderPeerIndex(old, doc, throughSeq, catalogThroughSeq);
+      expect(old.prepare("SELECT rowid FROM docs_fts WHERE uuid = '1'").get()).toEqual(previousRowid);
+      expect(titles(upgraded, "workspace")).toEqual(["Unchanged title"]);
+      expect(titles(upgraded, "protocol")).toEqual(["Unchanged title"]);
+      expect(upgraded.searchUuids("worksp")).toEqual([]);
+      expect(upgraded.searchUuids("proto")).toEqual([]);
+
+      upgraded.indexDoc(doc, throughSeq, catalogThroughSeq);
+      expect(upgraded.searchUuids("worksp")).toEqual(["1"]);
+      expect(upgraded.searchUuids("proto")).toEqual(["1"]);
+      expect(upgraded.searchUuids("pr")).toEqual(["1"]);
+      upgraded.close();
+      const reopened = open(path);
+      reopened.indexDoc({ ...doc, description: "Wrong derivation", tagNames: ["Wrong derivation"] }, throughSeq, catalogThroughSeq);
+      expect(reopened.searchUuids("worksp")).toEqual(["1"]);
+      expect(reopened.searchUuids("proto")).toEqual(["1"]);
+      expect(reopened.searchUuids("wrong")).toEqual([]);
+    } finally {
+      old.close();
+    }
+  });
+
   it.each(["document", "catalog"] as const)("repairs a newer %s cut written by an older peer even when the search rowid is reused", (changed) => {
     const path = tempDatabasePath();
     const store = open(path);
