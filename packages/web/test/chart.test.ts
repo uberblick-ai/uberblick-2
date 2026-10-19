@@ -125,6 +125,8 @@ describe("the chart's derived lifecycle", () => {
     applyDocData(doc, directory, [{ collection: "trend", schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
       { id: "a", value: { day: 1, value: -30, secondary: -10, third: -20 } },
       { id: "b", value: { day: 2, secondary: null, third: -30 } },
+      { id: "wrong", value: { day: 2.25, secondary: "wrong" } },
+      { id: "absent", value: { day: 2.5 } },
       { id: "c", value: { day: 3, value: -50, secondary: -40, third: -60 } },
     ] }]);
     const before = Y.encodeStateAsUpdate(doc);
@@ -136,6 +138,9 @@ describe("the chart's derived lifecycle", () => {
       ["bar", "yRight", 1], ["line", "y", 0], ["bar", "yRight", 1],
     ]);
     expect(datasets[0]).not.toHaveProperty("pointRadius");
+    expect(datasets[0]?.data).toEqual([
+      expect.objectContaining({ x: 1, y: -10 }), expect.objectContaining({ x: 3, y: -40 }),
+    ]);
     expect(datasets[1]).toHaveProperty("pointRadius");
     expect(instance.options).toMatchObject({
       scales: { x: { min: 1, max: 3, offset: true }, y: { beginAtZero: false }, yRight: { beginAtZero: true, grid: { drawOnChartArea: false } } },
@@ -207,7 +212,11 @@ describe("the chart's derived lifecycle", () => {
     expect(lines.options).toMatchObject({ scales: { y: { min: 20, max: 30, beginAtZero: false } } });
     const datasets = (bars.data as ChartConfiguration<"line" | "bar">["data"]).datasets;
     expect(datasets[0]).toMatchObject({ type: "bar", order: 1 });
-    expect(datasets.at(-1)).toMatchObject({ type: "line", order: 0, xAxisID: "referenceX", pointRadius: 0 });
+    expect(datasets.at(-1)).toMatchObject({ type: "line", order: 0, xAxisID: "x", pointRadius: 0,
+      data: [{ x: -Infinity, y: layout === "panels" ? -3 : 25 }, { x: Infinity, y: layout === "panels" ? -3 : 25 }],
+    });
+    expect(new Set(datasets.map(dataset => dataset.xAxisID))).toEqual(new Set(["x"]));
+    expect((bars.options as { scales: Record<string, unknown> }).scales).not.toHaveProperty("referenceX");
     expect(datasets[0]).not.toHaveProperty("clip");
     editor.destroy(); doc.destroy(); directory.destroy();
   });

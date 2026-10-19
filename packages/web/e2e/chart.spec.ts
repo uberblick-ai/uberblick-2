@@ -94,7 +94,7 @@ interface PaintedPoint { canvas: number; x: number; y: number; radius: number }
 interface ChartPaintProbe { texts: string[]; ink: PaintedText[]; points: PaintedPoint[] }
 interface PaintedRectangle { left: number; right: number; top: number; bottom: number }
 interface PaintedBar extends PaintedRectangle { canvas: number; color: string; clip: PaintedRectangle | null; sequence: number }
-interface BarPaintProbe { bars: PaintedBar[]; points: { canvas: number; sequence: number }[] }
+interface BarPaintProbe { bars: PaintedBar[]; points: { canvas: number; x: number; sequence: number }[] }
 
 /** Tick anchors and point anchors are observed independently from canvas calls. */
 async function expectObservationGeometry(
@@ -518,7 +518,11 @@ async function installBarProbe(page: Page): Promise<void> {
     };
     prototype.arc = function (...args: Parameters<typeof arc>): void {
       const canvas = canvasIndex(this);
-      if (canvas >= 0 && state(this).clip !== null && args[2] > 0) probe.points.push({ canvas, sequence: sequence++ });
+      if (canvas >= 0 && state(this).clip !== null && args[2] > 0) {
+        const position = this.getTransform().transformPoint({ x: args[0], y: args[1] });
+        probe.points.push({ canvas, x: position.x * this.canvas.getBoundingClientRect().width / this.canvas.width,
+          sequence: sequence++ });
+      }
       arc.apply(this, args);
     };
     prototype.clearRect = function (...args: Parameters<typeof clearRect>): void {
@@ -547,6 +551,18 @@ function expectContainedBars(bars: PaintedBar[]): void {
     expect(bar.top).toBeGreaterThanOrEqual(bar.clip.top - 0.5);
     expect(bar.bottom).toBeLessThanOrEqual(bar.clip.bottom + 0.5);
   }
+}
+
+function expectUnchangedBarGeometry(before: PaintedBar[], after: PaintedBar[]): void {
+  const ordered = (bars: PaintedBar[]) => bars.toSorted((a, b) => a.canvas - b.canvas || a.left - b.left);
+  const nextBars = ordered(after);
+  expect(after).toHaveLength(before.length);
+  ordered(before).forEach((bar, index) => {
+    const next = nextBars[index];
+    expect(next?.canvas).toBe(bar.canvas);
+    expect((next?.right ?? NaN) - (next?.left ?? NaN)).toBeCloseTo(bar.right - bar.left, 1);
+    expect(((next?.left ?? NaN) + (next?.right ?? NaN)) / 2).toBeCloseTo((bar.left + bar.right) / 2, 1);
+  });
 }
 
 test("mixed charts paint grouped bars behind lines with ordered legend and shared tooltips", { tag: "@webkit" }, async ({ browser }, info) => {
@@ -591,7 +607,12 @@ test("mixed charts paint grouped bars behind lines with ordered legend and share
     const returning = bars.filter(bar => bar.color === swatches[1]?.color).sort((a, b) => a.left - b.left);
     expect(responses).toHaveLength(3);
     expect(returning).toHaveLength(3);
-    responses.forEach((bar, index) => { expect(bar.right).toBeLessThan(returning[index]?.left ?? -Infinity); });
+    const anchors = probe.points.toSorted((a, b) => a.x - b.x);
+    responses.forEach((bar, index) => {
+      expect(bar.right).toBeLessThan(returning[index]?.left ?? -Infinity);
+      const groupCenter = (bar.left + (returning[index]?.right ?? NaN)) / 2;
+      expect(Math.abs(groupCenter - (anchors[index]?.x ?? NaN))).toBeLessThanOrEqual(0.5);
+    });
     const leftTicks = ink.filter(entry => /^\d+%$/.test(entry.text));
     const rightTicks = ink.filter(entry => /^\d+ responses$/.test(entry.text));
     expect(leftTicks.length).toBeGreaterThan(0);
@@ -609,6 +630,21 @@ test("mixed charts paint grouped bars behind lines with ordered legend and share
     const tooltip = ["Responses: 45 responses", "Score: 58 %", "Returning: 22 responses"];
     await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts
       .filter(text => /^(Responses|Score|Returning):/.test(text)))).toEqual(tooltip);
+    await page.mouse.move(0, 0);
+    await editMapping(session, uuid, JSON.stringify({ ...mapping,
+      y: mapping.y.map(series => series.field === "score" ? { ...series, reference: 50 } : series),
+    }));
+    await waitForDocumentDraw(page, session, uuid);
+    const referenced = await barGeometry(page);
+    expectUnchangedBarGeometry(bars, referenced);
+    const referencePoints = await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.points);
+    expect(referencePoints).toHaveLength(anchors.length);
+    expect(referencePoints).toHaveLength(anchors.length);
+    referencePoints.toSorted((a, b) => a.x - b.x).forEach((point, index) => {
+      expect(point.x).toBeCloseTo(anchors[index]?.x ?? NaN, 1);
+    });
+    expect(await referenceInk(page, 0, 50, "%", referenced[0]?.clip ?? undefined)).toBeGreaterThan(0.75);
+    await editMapping(session, uuid, JSON.stringify(mapping));
   }
 });
 
@@ -617,7 +653,7 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   const mapping = {
     version: 1, type: "line", collection: "measurements", missing: "connect",
     x: { field: "day", type: "number" }, y: [
-      { field: "a", label: "First", unit: "responses", type: "bar", range: [-40, -1], reference: -15 },
+      { field: "a", label: "First", unit: "responses", type: "bar", range: [-40, -1] },
       { field: "b", label: "Second", unit: "responses", type: "bar" },
     ],
   };
@@ -625,9 +661,7 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   await session.call("update_data", { uuid, operations: [{ collection: "measurements",
     schema: { version: 1, schema: { type: "object" } }, replaceRecords: [
       { id: "first", value: { day: 1, a: -5, b: -10 } },
-      { id: "middle", value: { day: 4, a: null, b: "wrong" } },
       { id: "last", value: { day: 10, a: -20, b: -40 } },
-      { id: "absent", value: { day: 20 } },
     ],
   }] });
   const page = await openApp(browser, `/${harness().workspace}/${uuid}`, {
@@ -643,7 +677,28 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   const zero = await page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.ink.find(entry => entry.text === "0 responses")?.y);
   expect(zero).toBeDefined();
   for (const bar of bars) expect(Math.abs(bar.top - (zero ?? NaN))).toBeLessThanOrEqual(0.5);
-  expect(await referenceInk(page, 0, -15, "responses", bars[0]?.clip ?? undefined)).toBeGreaterThan(0.75);
+  await session.call("update_data", { uuid, operations: [{ collection: "measurements", upsert: [
+    { id: "middle", value: { day: 4, a: null, b: "wrong" } },
+    { id: "absent", value: { day: 20 } },
+  ] }] });
+  await waitForDocumentDraw(page, session, uuid);
+  const omissions = await barGeometry(page);
+  expectUnchangedBarGeometry(bars, omissions);
+  const sorted = omissions.toSorted((a, b) => a.left - b.left);
+  const firstCenter = ((sorted[0]?.left ?? NaN) + (sorted[1]?.right ?? NaN)) / 2;
+  const lastCenter = ((sorted[2]?.left ?? NaN) + (sorted[3]?.right ?? NaN)) / 2;
+  const box = await page.locator(".ub-chart canvas").boundingBox();
+  if (box === null) throw new Error("e2e: bar tooltip canvas is missing");
+  await page.evaluate(() => { (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts = []; });
+  await page.mouse.move(box.x + firstCenter + (lastCenter - firstCenter) / 3, box.y + box.height / 3);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { chartProbe: ChartPaintProbe }).chartProbe.texts
+    .filter(text => /^(First|Second):/.test(text)))).toEqual(["First: -5 responses", "Second: -10 responses"]);
+  await page.mouse.move(0, 0);
+  const referenced = { ...mapping, y: mapping.y.map((series, index) => index === 0 ? { ...series, reference: -15 } : series) };
+  await editMapping(session, uuid, JSON.stringify(referenced));
+  await waitForDocumentDraw(page, session, uuid);
+  expectUnchangedBarGeometry(omissions, await barGeometry(page));
+  expect(await referenceInk(page, 0, -15, "responses", omissions[0]?.clip ?? undefined)).toBeGreaterThan(0.75);
   await session.call("update_data", { uuid, operations: [{ collection: "measurements", replaceRecords: [
     { id: "narrow-first", value: { day: 123456789.1, a: -5, b: -10 } },
     { id: "narrow-middle", value: { day: 123456789.2, a: -8, b: -20 } },
@@ -675,6 +730,11 @@ test("bar charts keep negative endpoints, missing values and a lone x inside the
   expectContainedBars(panels);
   expect(panels[0]?.top).toBeCloseTo(panels[1]?.top ?? NaN, 5);
   expect(await page.evaluate(() => (window as unknown as { barProbe: BarPaintProbe }).barProbe.points)).toHaveLength(0);
+  await editMapping(session, uuid, JSON.stringify({ ...referenced, layout: "panels" }));
+  await waitForDocumentDraw(page, session, uuid);
+  const referencedPanels = await barGeometry(page);
+  expectUnchangedBarGeometry(panels, referencedPanels);
+  expect(await referenceInk(page, 0, -15, "responses", referencedPanels.find(bar => bar.canvas === 0)?.clip ?? undefined)).toBeGreaterThan(0.75);
   await proveMcpArrival(page, session, uuid, { path: "upstream" });
   expect(await page.evaluate(() => (window as unknown as { chartProbe: { localUpdates: number } }).chartProbe.localUpdates)).toBe(1);
 });

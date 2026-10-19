@@ -50,7 +50,8 @@ function seriesDatasets(result: ChartReady, indices: number[], axes: ChartAxes, 
       label: axes.legendLabels[index] ?? series.label,
       xAxisID: "x",
       yAxisID: result.config.layout === "panels" ? "y" : axes.seriesAxes[index],
-      data: series.type === "bar" ? series.points : series.points.map(({ x, y }) => ({ x, y })),
+      // Native null bars still affect slot width and participate in hover.
+      data: series.type === "bar" ? series.points.filter(point => point.y !== null) : series.points.map(({ x, y }) => ({ x, y })),
       borderColor: palette[index], backgroundColor: palette[index], borderWidth: series.type === "bar" ? 0 : 2,
       ...(series.type === "bar" ? {} : {
         // A dense gap-free panel has no visible points. A constant lets
@@ -79,6 +80,7 @@ function valueScaleRange(range: ChartPanelRange | undefined, panels: boolean, ba
 }
 
 function referenceDatasets(result: ChartReady, indices: number[], axes: ChartAxes, color: string): ChartDataset<"line", Point[]>[] {
+  const hasBars = result.series.some(series => series.type === "bar");
   const seen = new Map<string, Set<number>>();
   return indices.flatMap(index => {
     const reference = result.config.y[index]?.reference;
@@ -90,14 +92,14 @@ function referenceDatasets(result: ChartReady, indices: number[], axes: ChartAxe
     seen.set(axis, values);
     return [{
       type: "line",
-      xAxisID: "referenceX", yAxisID: axis,
-      // Off-plot endpoints keep native nearest interaction on real series.
-      // The hidden normalized scale avoids arithmetic on arbitrary x values.
-      data: [{ x: -1, y: reference }, { x: 2, y: reference }],
+      xAxisID: hasBars ? "x" : "referenceX", yAxisID: axis,
+      // A second x axis changes native bar grouping. On their shared scale,
+      // Chart.js clamps infinite endpoints off-plot and clips the full line.
+      data: [{ x: hasBars ? -Infinity : -1, y: reference }, { x: hasBars ? Infinity : 2, y: reference }],
       borderColor: color, backgroundColor: color, borderWidth: 2,
       pointRadius: 0, pointHoverRadius: 0, pointHitRadius: 0,
       clip: { left: 0, right: 0, top: 1, bottom: 1 },
-      order: result.series.some(series => series.type === "bar") ? 0 : 1,
+      order: hasBars ? 0 : 1,
     }];
   });
 }
@@ -207,7 +209,7 @@ function lineConfigurations(result: ChartReady, colors: CSSStyleDeclaration, pal
         font,
         interaction: { mode: "nearest", axis: "x", intersect: false },
         scales: {
-          ...(references.length > 0 ? { referenceX: {
+          ...(references.length > 0 && !hasBars ? { referenceX: {
             type: "linear" as const, axis: "x" as const, display: false, min: 0, max: 1,
           } } : {}),
           x: {
