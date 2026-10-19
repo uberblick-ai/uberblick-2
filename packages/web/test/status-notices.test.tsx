@@ -5,25 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StatusLine } from "../src/ui/document/EditorPane.js";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { NotSharedReason } from "../src/shell/document-search.js";
-import type { Notice } from "../src/notifications.js";
+import { toast } from "sonner";
 import { AUTH_REJECTED } from "@uberblick/schema/protocol";
 import { STORE_REFUSED, TOKEN_MISSING } from "../src/ui/status/status-reading.js";
 
-const notices = vi.hoisted(() => {
-  const active = new Map<string, Notice>();
-  return {
-    active,
-    notifySticky: vi.fn((notice: Notice & { key: string }) => {
-      active.set(notice.key, notice);
-    }),
-    resolveSticky: vi.fn((key: string) => {
-      active.delete(key);
-    }),
-    notifyTransient: vi.fn(),
-  };
-});
-
-vi.mock("../src/notifications.js", () => notices);
+interface Notice { key: string | number; message: unknown; severity: string | undefined; }
 
 const ROOM_A = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc-a";
 const ROOM_B = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4/doc-b";
@@ -83,19 +69,25 @@ function settle(milliseconds = 5_000): void {
   act(() => void vi.advanceTimersByTime(milliseconds));
 }
 
-function onlyNotice(): Notice & { key: string } {
-  expect(notices.active.size).toBe(1);
-  return [...notices.active.values()][0] as Notice & { key: string };
+function onlyNotice(): Notice {
+  expect(toast.getToasts().length).toBe(1);
+  const notice = toast.getToasts()[0]!;
+  if (!("title" in notice)) throw new Error("Expected a published toast");
+  return { key: notice.id, message: notice.title, severity: notice.type };
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  notices.active.clear();
+  vi.spyOn(toast, "error");
+  vi.spyOn(toast, "warning");
+  vi.spyOn(toast, "dismiss");
 });
 
 afterEach(() => {
   cleanup();
+  toast.dismiss();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
@@ -108,7 +100,8 @@ describe("notices agree with the header's settled reading", () => {
       notSharedReason: "sign-in-required",
     }));
     settle(299);
-    expect(notices.notifySticky).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
     expect(view.container.textContent).not.toContain("not shared with hub");
     settle(1);
     expect(view.container.textContent).toContain("not shared with hub");
@@ -122,7 +115,8 @@ describe("notices agree with the header's settled reading", () => {
     const current = room({ synced: false, writable: false });
     const view = render(line({ connection: current.connection, hubAcked: true }));
     settle(399);
-    expect(notices.notifySticky).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
     expect(view.container.querySelector(".ub-not-saved")).toBeNull();
     settle(1);
     expect(view.container.querySelector(".ub-not-saved")?.textContent).toBe("not saved");
@@ -137,8 +131,8 @@ describe("notices agree with the header's settled reading", () => {
     expect(notice).toMatchObject({ severity: "error", message: "Changes are not saved." });
     expect(view.container.querySelector(".ub-not-saved")?.textContent).toBe("not saved");
     current.change({ writable: true });
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(notice.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(notice.key);
     expect(view.container.querySelector(".ub-not-saved")).toBeNull();
   });
 
@@ -193,13 +187,14 @@ describe("notices agree with the header's settled reading", () => {
     const props = { connection: current.connection, notSharedReason: "no-hub-credentials" as const };
     const view = render(line({ ...props, hubAcked: null }));
     settle();
-    expect(notices.notifySticky).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
     expect(view.container.textContent).not.toContain("not shared with hub");
     view.rerender(line({ ...props, hubAcked: false }));
     const notice = onlyNotice();
     view.rerender(line({ ...props, hubAcked: null }));
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(notice.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(notice.key);
   });
 
   it("does not announce not-synced-with-hub without a known cause", () => {
@@ -207,7 +202,8 @@ describe("notices agree with the header's settled reading", () => {
     const view = render(line({ connection: current.connection, hubAcked: false }));
     settle();
     expect(view.container.textContent).not.toContain("not synced with hub");
-    expect(notices.notifySticky).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 
   it.each([undefined, false])("keeps a long-lived backlog busy without a notice (hubAcked %s)", (hubAcked) => {
@@ -216,24 +212,25 @@ describe("notices agree with the header's settled reading", () => {
     settle();
     expect(view.container.querySelector(".ub-status-word")).toBeNull();
     expect(view.container.textContent).not.toContain("sync messages");
-    expect(notices.notifySticky).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
   });
 });
 
-describe("a notice follows one condition throughout its lifetime", () => {
+describe("notices publish and resolve with their conditions", () => {
   it("updates an unsaved refusal in the same slot without resolving its condition", () => {
     const current = room({ connected: false, writable: false });
     render(line({ connection: current.connection }));
     const first = onlyNotice();
-    notices.resolveSticky.mockClear();
+    vi.mocked(toast.dismiss).mockClear();
     current.change({ storeRefused: true });
     expect(onlyNotice()).toMatchObject({ key: first.key, message: STORE_REFUSED, severity: "error" });
     current.change({ storeRefused: false, tokenMissing: true });
     expect(onlyNotice()).toMatchObject({ key: first.key, message: TOKEN_MISSING, severity: "error" });
-    expect(notices.resolveSticky).not.toHaveBeenCalledWith(first.key);
+    expect(toast.dismiss).not.toHaveBeenCalledWith(first.key);
     current.change({ tokenMissing: false, writable: true });
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(first.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(first.key);
   });
 
   it("updates a hub cause in the same slot and resolves it when sharing recovers", () => {
@@ -242,17 +239,17 @@ describe("a notice follows one condition throughout its lifetime", () => {
     const view = render(line({ ...props, notSharedReason: "credential-store" }));
     settle();
     const first = onlyNotice();
-    notices.resolveSticky.mockClear();
+    vi.mocked(toast.dismiss).mockClear();
     view.rerender(line({ ...props, notSharedReason: "renewal-unavailable" }));
     expect(onlyNotice()).toMatchObject({
       key: first.key,
       message: "this hub cannot renew the login — ask its operator to configure sign-in",
       severity: "warning",
     });
-    expect(notices.resolveSticky).not.toHaveBeenCalledWith(first.key);
+    expect(toast.dismiss).not.toHaveBeenCalledWith(first.key);
     view.rerender(line({ connection: current.connection, hubAcked: true }));
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(first.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(first.key);
   });
 
   it("replaces a not-shared warning with the visible unsaved condition", () => {
@@ -268,7 +265,7 @@ describe("a notice follows one condition throughout its lifetime", () => {
     const error = onlyNotice();
     expect(error).toMatchObject({ severity: "error", message: "Changes are not saved." });
     expect(error.key).not.toBe(warning.key);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(warning.key);
+    expect(toast.dismiss).toHaveBeenCalledWith(warning.key);
     expect(view.container.textContent).not.toMatch(/saved here|shared with hub/);
   });
 
@@ -277,8 +274,8 @@ describe("a notice follows one condition throughout its lifetime", () => {
     const view = render(line({ connection: current.connection, documentLayout }));
     const notice = onlyNotice();
     view.unmount();
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(notice.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(notice.key);
   });
 
   it("clears the departed document's notice while the new document earns its reading", () => {
@@ -291,8 +288,8 @@ describe("a notice follows one condition throughout its lifetime", () => {
       hubAcked: false,
       notSharedReason: "sign-in-required",
     }));
-    expect(notices.active.size).toBe(0);
-    expect(notices.resolveSticky).toHaveBeenCalledWith(oldNotice.key);
+    expect(toast.getToasts().length).toBe(0);
+    expect(toast.dismiss).toHaveBeenCalledWith(oldNotice.key);
     settle();
     const newNotice = onlyNotice();
     expect(newNotice.key).not.toBe(oldNotice.key);

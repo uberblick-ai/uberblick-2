@@ -20,15 +20,15 @@ import {
 import { DocMetaLine } from "../src/ui/document/DocChrome.js";
 import type { RoomConnection } from "../src/collab/rooms.js";
 import { writeToClipboard } from "../src/editor/source-chrome.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast } from "sonner";
 
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
   ...await original<typeof import("../src/editor/source-chrome.js")>(),
   writeToClipboard: vi.fn().mockResolvedValue(true),
 }));
-vi.mock("../src/notifications.js", async (original) => ({
-  ...await original<typeof import("../src/notifications.js")>(),
-  notifyTransient: vi.fn(),
+vi.mock("sonner", async (original) => ({
+  ...await original<typeof import("sonner")>(),
+  toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
 }));
 
 const WORKSPACE = "6f4c8a51-2b7d-4e39-9a06-c81d3f572be4";
@@ -190,7 +190,7 @@ describe("the document identity line keeps its local controls", () => {
     const { host } = mount(fixture());
     if (name === "Copy document id") openActions(host);
     await selectCopy(name);
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message, severity: "error" });
+    expect(toast.error).toHaveBeenLastCalledWith(message, { id: "clipboard" });
   });
 
   it("names lifecycle records, omits ordinary documents and tolerates a mismatched status", () => {
@@ -259,13 +259,13 @@ describe("the document identity line keeps its local controls", () => {
     />);
     await selectCopy("Copy link");
     expect(writeToClipboard).toHaveBeenLastCalledWith(`${window.location.origin}${copyPath ?? `/${WORKSPACE}/${DOC_UUID}`}`, undefined);
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Link copied", severity: "success" });
+    expect(toast.success).toHaveBeenLastCalledWith("Link copied", { id: "clipboard" });
     expect(screen.queryByRole("menu")).toBeNull();
     openActions(host);
     expect(screen.queryByRole("menuitem", { name: "Copy link" })).toBeNull();
     if (archived) expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Copy document id"]);
     await selectCopy("Copy document id");
     expect(writeToClipboard).toHaveBeenLastCalledWith(DOC_UUID, expect.any(Promise));
-    expect(notifyTransient).toHaveBeenLastCalledWith({ key: "clipboard", message: "Document id copied", severity: "success" });
+    expect(toast.success).toHaveBeenLastCalledWith("Document id copied", { id: "clipboard" });
   });
 });

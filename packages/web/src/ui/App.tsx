@@ -46,7 +46,7 @@ import {
 } from "../config.js";
 import type { HubEndpoint, LocalServing } from "../config.js";
 import { acquireRoom } from "../collab/rooms.js";
-import { notifyTransient } from "../notifications.js";
+import { toast } from "sonner";
 import { watchDocumentStub } from "../collab/directory-stub.js";
 import { randomIdentity } from "../collab/identity.js";
 import { createDocLinkContext } from "../editor/doc-links.js";
@@ -751,36 +751,39 @@ export function App(): ReactElement {
     archiveDocument(directory.ydoc, sidebar.ydoc, selected);
     const uuid = selected;
     const title = getMeta(doc.ydoc).title || "Untitled";
-    const key = `archive:${directory.room}:${uuid}`;
     // Keep the original directory alive while Undo is offered, including
     // navigation to a document in another workspace.
     const held = acquireRoom(directory.room, defaultIdentity, { presence: false });
     let closed = false;
     const close = (): void => {
+      if (closed) return;
       closed = true;
       held.release();
       archiveUndoReleases.current.delete(close);
     };
     archiveUndoReleases.current.add(close);
-    notifyTransient({
-      key,
-      message: `Archived “${title}”.`,
-      severity: "success",
-      onClose: close,
+    const id = toast.success(`Archived “${title}”.`, {
+      onDismiss: close,
+      onAutoClose: close,
       action: {
         label: "Undo",
-        onClick: () => {
-          if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
-          if (!held.connection.status.writable) {
-            notifyTransient({
-              key,
-              message: `“${title}” is still archived. Open its link and choose Restore when the connection is ready.`,
-              severity: "error",
-            });
-            return;
+        onClick: (event) => {
+          try {
+            if (closed || !decisionTopicArchived(held.connection.ydoc, uuid)) return;
+            if (!held.connection.status.writable) {
+              // Keep the replacement visible after Sonner finishes this action.
+              event.preventDefault();
+              toast.error(`“${title}” is still archived. Open its link and choose Restore when the connection is ready.`, {
+                id,
+                action: undefined,
+              });
+              return;
+            }
+            restoreFocusRoom.current = null;
+            restoreDirectoryEntry(held.connection.ydoc, uuid);
+          } finally {
+            close();
           }
-          restoreFocusRoom.current = null;
-          restoreDirectoryEntry(held.connection.ydoc, uuid);
         },
       },
     });

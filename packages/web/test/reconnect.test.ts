@@ -68,8 +68,8 @@ vi.mock("../src/collab/local-session.js", async () => {
     }),
   };
 });
-vi.mock("../src/notifications.js", () => ({
-  notifyTransient: ({ message }: { message: string }) => injected.notices.push(message),
+vi.mock("sonner", () => ({
+  toast: { error: (message: string) => injected.notices.push(message) },
 }));
 
 const hubs: Hub[] = [];

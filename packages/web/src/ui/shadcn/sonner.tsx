@@ -5,7 +5,6 @@
 import type { CSSProperties, ReactElement } from "react";
 import { createPortal } from "react-dom";
 import { Toaster } from "sonner";
-import { TRANSIENT_DURATION } from "../../notifications.js";
 import { useAppearance } from "../theme.js";
 
 export function NotificationToaster(): ReactElement {
@@ -15,37 +14,18 @@ export function NotificationToaster(): ReactElement {
   return createPortal(
     <Toaster
       theme={appearance}
-      position="bottom-right"
-      duration={TRANSIENT_DURATION}
-      hotkey={["shiftKey", "F8"]}
-      customAriaLabel="Notifications (Shift+F8)"
-      closeButton
-      // Expose every active notice through native scroll/Tab. Safari needs
-      // in-flow expanded boxes to count upward overflow; relative placement
-      // cancels Sonner translation while its transforms, gestures, focus and
-      // timers remain native.
-      visibleToasts={Infinity}
-      offset={{ bottom: "max(16px, env(safe-area-inset-bottom))", right: "max(16px, env(safe-area-inset-right))" }}
-      className={[
-        "[font-family:var(--font-sans)]! w-(--width)! h-[calc(100dvh-max(16px,env(safe-area-inset-top))-max(16px,env(safe-area-inset-bottom)))]",
-        "flex flex-col-reverse gap-(--gap) overflow-x-hidden overflow-y-auto pointer-events-none [&>[data-sonner-toast]]:pointer-events-auto",
-        "[&>[data-sonner-toast][data-expanded=true][data-removed=false]]:relative! [&>[data-sonner-toast][data-expanded=true][data-removed=false]]:shrink-0",
-        "[&>[data-sonner-toast][data-expanded=true][data-removed=false]]:bottom-[calc(-1*var(--offset))]!",
-      ].join(" ")}
+      className="[font-family:var(--font-sans)]!"
       style={{
-        "--width": "min(356px, calc(100vw - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right))))",
         "--normal-bg": "var(--card)",
         "--normal-text": "var(--card-foreground)",
         "--normal-border": "var(--border)",
         "--border-radius": "var(--radius-sm)",
       } as CSSProperties}
       toastOptions={{
-        closeButtonAriaLabel: "Dismiss notification",
         classNames: {
-          toast: "ub-type-small! shadow-(--shadow-float)! focus-visible:shadow-[inset_0_0_0_2px_var(--card-foreground)]! pr-10! w-full!",
+          toast: "ub-type-small! shadow-(--shadow-float)! focus-visible:shadow-[inset_0_0_0_2px_var(--card-foreground)]!",
           title: "ub-type-small! font-normal! text-card-foreground!",
           actionButton: "ub-type-small! rounded-(--radius-sm)! focus-visible:shadow-none! focus-visible:[outline:revert]! focus-visible:outline-offset-2! [@media(any-pointer:coarse)]:min-h-11! [@media(any-pointer:coarse)]:min-w-11!",
-          closeButton: "left-auto! right-2! top-2! transform-none! size-6! text-card-foreground! bg-card! border-(--border)! hover:bg-secondary! focus-visible:shadow-[0_0_0_2px_var(--card-foreground)]!",
         },
       }}
     />,

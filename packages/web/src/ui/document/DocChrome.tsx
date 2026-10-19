@@ -15,7 +15,7 @@ import {
 } from "@uberblick/schema";
 import type { DocMeta, TagAssignment, TagCatalogEntry } from "@uberblick/schema";
 import { writeToClipboard } from "../../editor/source-chrome.js";
-import { notifyTransient } from "../../notifications.js";
+import { toast } from "sonner";
 import type { RoomConnection } from "../../collab/rooms.js";
 import { useRoomStatus } from "../hooks.js";
 import { LifecycleBadge } from "./LifecycleBadge.js";
@@ -307,11 +307,7 @@ function copyAddress(room: string, segment: string, copyPath?: string): string {
 
 async function copyText(text: string, message: string, failure: string, fallbackReady?: Promise<void>): Promise<void> {
   const ok = await writeToClipboard(text, fallbackReady);
-  notifyTransient({
-    key: "clipboard",
-    message: ok ? message : failure,
-    severity: ok ? "success" : "error",
-  });
+  toast[ok ? "success" : "error"](ok ? message : failure, { id: "clipboard" });
 }
 
 /** The waiting screen has no actions menu, so it keeps an explicit control. */

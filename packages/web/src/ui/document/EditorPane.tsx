@@ -29,7 +29,7 @@ import type { LinkSurvivor } from "../../editor/link-repair.js";
 import type { HubEndpoint } from "../../config.js";
 import type { RoomConnection } from "../../collab/rooms.js";
 import type { NotSharedReason } from "../../shell/document-search.js";
-import { notifySticky, notifyTransient, resolveSticky } from "../../notifications.js";
+import { toast } from "sonner";
 import { writeToClipboard } from "../../editor/source-chrome.js";
 import { rawSyncState, useCalmSyncState } from "../status/calm.js";
 import { statusReading } from "../status/status-reading.js";
@@ -363,20 +363,22 @@ export function StatusLine({
   const hubProblem = facts.hub === "not shared with hub" ? facts.hubDetail : null;
   useEffect(() => {
     const saveKey = `document-status:${connection.room}:save`;
+    if (saveProblem === null) toast.dismiss(saveKey);
+    else toast.error(saveProblem, { id: saveKey });
+  }, [connection, saveProblem]);
+  useEffect(() => {
     const hubKey = `document-status:${connection.room}:hub`;
-    if (saveProblem === null) resolveSticky(saveKey);
-    else notifySticky({ key: saveKey, message: saveProblem, severity: "error" });
-    if (hubProblem === null) resolveSticky(hubKey);
-    else notifySticky({ key: hubKey, message: hubProblem, severity: "warning" });
-  }, [connection, saveProblem, hubProblem]);
+    if (hubProblem === null) toast.dismiss(hubKey);
+    else toast.warning(hubProblem, { id: hubKey });
+  }, [connection, hubProblem]);
   // Cause changes update the same notice; only leaving this source ends its
   // ownership. RoutePane mounts either the waiting or hydrated header.
   useEffect(() => {
     const saveKey = `document-status:${connection.room}:save`;
     const hubKey = `document-status:${connection.room}:hub`;
     return () => {
-      resolveSticky(saveKey);
-      resolveSticky(hubKey);
+      toast.dismiss(saveKey);
+      toast.dismiss(hubKey);
     };
   }, [connection]);
   const activity = useDocumentSyncActivity(connection, hubAcked, rawHubAcked, sampledAt);
@@ -430,7 +432,7 @@ export function StatusLine({
          */}
         {reading.detail === null && peerStrip}
         {revision !== null && <button type="button" className="ub-doc-rev" aria-label={`Copy revision ${revision}`} title={`Copy revision ${revision}`}
-          onClick={() => { void writeToClipboard(revision).then((ok) => notifyTransient({ key: "clipboard", message: ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", severity: ok ? "success" : "error" })); }}>
+          onClick={() => { void writeToClipboard(revision).then((ok) => toast[ok ? "success" : "error"](ok ? "Revision copied" : "Couldn't copy the revision. Try again in a browser with clipboard access.", { id: "clipboard" })); }}>
           rev <span className="ub-doc-id">{revision.slice(0, 8)}</span>
         </button>}
       </div>

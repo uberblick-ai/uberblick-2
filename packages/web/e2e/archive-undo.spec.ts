@@ -37,12 +37,10 @@ for (const input of ["pointer", "keyboard"] as const) {
     await expect(page.locator(".ub-title")).toHaveValue(other);
     const undo = notice.getByRole("button", { name: "Undo", exact: true });
     if (input === "keyboard") {
-      await page.keyboard.press("Shift+F8");
+      await page.keyboard.press("Alt+t");
       await expect(page.locator("[data-sonner-toaster]")).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(notice).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(notice.getByRole("button", { name: "Dismiss notification" })).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(undo).toBeFocused();
       await page.keyboard.press("Enter");
@@ -99,7 +97,7 @@ test("an archive in another tab shows the banner without offering Undo here", as
   await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0);
 });
 
-test("Undo refused by a lost connection leaves the document archived and keeps recovery visible", async ({ browser }) => {
+test("Undo refused by a lost connection auto-closes its notice and keeps banner recovery", async ({ browser }) => {
   const page = await openApp(browser, "/", { upstream: true, readySelector: ".ub-workspace" });
   const title = docTitle("Disconnected Undo");
   await createDoc(page, title);
@@ -115,18 +113,16 @@ test("Undo refused by a lost connection leaves the document archived and keeps r
     });
     await expect(failure).toBeVisible();
     await expect(failure).toHaveAttribute("data-type", "error");
+    await expect(failure.getByRole("button")).toHaveCount(0);
     await page.mouse.move(0, 0);
+    await page.locator(".ub-title").focus();
     await expect(editor(page)).toHaveAttribute("contenteditable", "false");
     await expect(restore).toBeDisabled();
-    await page.waitForTimeout(6500);
-    await expect(failure).toBeVisible();
-    await expect(failure).toHaveAttribute("data-removed", "false");
+    await expect(failure).toHaveCount(0);
     await harness().startHub();
     await expect(restore).toBeEnabled();
     await restore.click();
     await expect(editor(page)).toHaveAttribute("contenteditable", "true");
-    await failure.getByRole("button", { name: "Dismiss notification" }).click();
-    await expect(failure).toHaveCount(0);
   } finally {
     await harness().startHub();
   }

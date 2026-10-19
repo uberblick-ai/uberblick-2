@@ -19,7 +19,7 @@ import {
 } from "@uberblick/schema";
 import type { RoomConnection, RoomStatus } from "../src/collab/rooms.js";
 import type { HubEndpoint } from "../src/config.js";
-import { notifyTransient } from "../src/notifications.js";
+import { toast } from "sonner";
 import { writeToClipboard } from "../src/editor/source-chrome.js";
 import { WorkspaceSettings } from "../src/ui/settings/WorkspaceSettings.js";
 import type { Workspace } from "../src/ui/route.js";
@@ -29,7 +29,7 @@ vi.mock("../src/collab/rooms.js", async (original) => ({
   ...await original<typeof import("../src/collab/rooms.js")>(),
   mintHubAuthMessage: vi.fn(async () => `local-browser-bearer-${crypto.randomUUID()}`),
 }));
-vi.mock("../src/notifications.js", () => ({ notifyTransient: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("../src/editor/source-chrome.js", async (original) => ({
   ...await original<typeof import("../src/editor/source-chrome.js")>(),
   writeToClipboard: vi.fn().mockResolvedValue(true),
@@ -106,7 +106,8 @@ let mounted: RenderResult | null = null;
 afterEach(() => {
   mounted = null;
   vi.unstubAllGlobals();
-  vi.mocked(notifyTransient).mockClear();
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
   vi.mocked(writeToClipboard).mockReset().mockResolvedValue(true);
 });
 
@@ -303,10 +304,10 @@ it.each([true, false])("copies the bare workspace ID and reports clipboard succe
   await act(async () => copy.click());
   expect(writeToClipboard).toHaveBeenCalledTimes(1);
   expect(vi.mocked(writeToClipboard).mock.calls[0]?.[0]).toBe(WORKSPACE.uuid);
-  expect(notifyTransient).toHaveBeenLastCalledWith(expect.objectContaining({
-    message: copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
-    severity: copied ? "success" : "error",
-  }));
+  expect(toast[copied ? "success" : "error"]).toHaveBeenLastCalledWith(
+    copied ? "Workspace ID copied" : "Couldn't copy the workspace ID. Try again in a browser with clipboard access.",
+    { id: "copy-workspace-id" },
+  );
 });
 
 it("counts regular documents and active tags live, and takes the newest stamp from live document and decision entries", async () => {
@@ -523,21 +524,21 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(within(host).getByRole("alert").textContent).toBe(
     "“auth” is already an active tag.",
   );
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
 
   act(() => typeInto(input, "product"));
   expect(within(host).queryByRole("alert")).toBeNull();
   act(() => submit.click());
   const created = listTagCatalog(peer).find((entry) => entry.name === "product");
   expect(created).toMatchObject({ name: "product", state: "active" });
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Created “product”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Created “product”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Created “product”.");
 
   act(() => within(within(host).getByRole("region", { name: "Active" })).getByRole<HTMLButtonElement>("button", { name: /^Retire\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "retired",
   );
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Retired “product”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Retired “product”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Retired “product”.");
 
   act(() => {
@@ -547,14 +548,14 @@ it("validates unique names and converges create, retire, and restore with a peer
   expect(within(host).getByRole("alert").textContent).toBe(
     "“product” is retired. Restore it from the retired list.",
   );
-  expect(notifyTransient).toHaveBeenCalledTimes(2);
+  expect(toast.success).toHaveBeenCalledTimes(2);
 
   act(() => within(within(host).getByRole("region", { name: "Retired" })).getByRole<HTMLButtonElement>("button", { name: /^Restore\s*product$/ }).click());
   expect(listTagCatalog(peer).find((entry) => entry.id === created?.id)?.state).toBe(
     "active",
   );
   expect(within(host).queryByRole("alert")).toBeNull();
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Restored “product”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Restored “product”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Restored “product”.");
 
   act(() => {
@@ -660,13 +661,13 @@ it("renames only shared workspace state and refuses invalid drafts without chang
     expect(input.getAttribute("aria-invalid")).toBe("true");
     expect(getWorkspaceName(settings.connection.ydoc)).toBe("Current name");
   }
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   act(() => typeInto(input, "  Product Research  "));
   expect(input.getAttribute("aria-invalid")).toBe("false");
   act(() => submit.click());
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Product Research");
   expect(input.value).toBe("Product Research");
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Saved “Product Research”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Saved “Product Research”.", { id: "workspace-settings" });
   expect(host.textContent).not.toContain("Saved “Product Research”.");
   expect(within(host).queryByRole("alert")).toBeNull();
   expect(listTagCatalog(settings.connection.ydoc)).toEqual(catalog);
@@ -798,12 +799,12 @@ it("waits for settings state and refuses renaming when its room cannot write", a
   expect(getWorkspaceName(settings.connection.ydoc)).toBe("Existing name");
   expect(host.textContent).toContain("Reconnect before renaming");
   expect(within(host).getByRole("alert").textContent).toBe("Reconnect before renaming the workspace.");
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   settings.update({ writable: true, connected: true, synced: true });
   expect(button.disabled).toBe(false);
   act(() => button.click());
   expect(within(host).queryByRole("alert")).toBeNull();
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Saved “Disconnected overwrite”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Saved “Disconnected overwrite”.", { id: "workspace-settings" });
   settings.connection.ydoc.destroy();
 });
 
@@ -842,11 +843,11 @@ it("keeps tag reconnect refusal inline and clears it when submission later succe
   settings.update({ writable: false, connected: false, synced: false });
   act(() => input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(within(host).getByRole("alert").textContent).toBe("Reconnect before changing the tag catalog.");
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   settings.update({ writable: true, connected: true, synced: true });
   act(() => within(host).getByRole<HTMLButtonElement>("button", { name: "Create" }).click());
   expect(within(host).queryByRole("alert")).toBeNull();
-  expect(notifyTransient).toHaveBeenLastCalledWith({ key: "workspace-settings", message: "Created “product”.", severity: "success" });
+  expect(toast.success).toHaveBeenLastCalledWith("Created “product”.", { id: "workspace-settings" });
   settings.connection.ydoc.destroy();
 });
 
@@ -1044,7 +1045,7 @@ it("shows a hub role-change refusal and keeps the hub's unchanged role", async (
   await selectAccess(host, `Role for ${ADMIN.githubUsername}`, "member");
   expect(host.textContent).toContain("The hub refused this change: the last admin cannot be removed or demoted.");
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${ADMIN.githubUsername}` }).value).toBe("admin");
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
   expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
 });
@@ -1065,12 +1066,12 @@ it("saves a different role on pick, disables management until the reread and ann
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("member");
   expect(within(host).getAllByRole<HTMLSelectElement>("combobox").every((select) => select.disabled)).toBe(true);
   expect(within(host).getAllByRole<HTMLButtonElement>("button").every((button) => button.disabled)).toBe(true);
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   await act(async () => releaseChange(null));
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("member");
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).disabled).toBe(false);
-  expect(notifyTransient).toHaveBeenCalledTimes(1);
-  expect(notifyTransient).toHaveBeenCalledWith(expect.objectContaining({ message: "Role changed", severity: "success" }));
+  expect(toast.success).toHaveBeenCalledTimes(1);
+  expect(toast.success).toHaveBeenCalledWith("Role changed", { id: "workspace-role" });
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
   expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
 });
@@ -1084,7 +1085,7 @@ it("rereads a failed role pick and displays the hub's role without a success toa
   await selectAccess(host, `Role for ${SECOND_ADMIN.githubUsername}`, "member");
   expect(within(host).getByRole("alert").textContent).toBe("The hub cannot be reached. Reconnect to the hub, then retry.");
   expect(within(host).getByRole<HTMLSelectElement>("combobox", { name: `Role for ${SECOND_ADMIN.githubUsername}` }).value).toBe("admin");
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
   expect(hub.calls.filter(({ action }) => action.operation === "list-members")).toHaveLength(2);
 });
@@ -1097,7 +1098,7 @@ it("keeps member management unavailable when the reread after a failed pick also
   expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
   expect(within(host).queryByRole("textbox", { name: "GitHub handle" })).toBeNull();
   expect(within(host).queryByRole("combobox")).toBeNull();
-  expect(notifyTransient).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
 });
 
@@ -1107,7 +1108,7 @@ it("applies self-demotion on pick and removes member management after the new ro
   expect(host.textContent).toContain("You are a member of this workspace.");
   expect(within(host).queryByRole("alertdialog")).toBeNull();
   expect(within(host).queryByRole("table", { name: "Members" })).toBeNull();
-  expect(notifyTransient).toHaveBeenCalledWith(expect.objectContaining({ message: "Role changed", severity: "success" }));
+  expect(toast.success).toHaveBeenCalledWith("Role changed", { id: "workspace-role" });
   expect(hub.calls.filter(({ action }) => action.operation === "own-role")).toHaveLength(2);
 });
 

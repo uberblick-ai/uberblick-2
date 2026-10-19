@@ -1037,12 +1037,7 @@ test("document actions stay reachable, close with the route, and archive into Re
   await expect(restore).toBeFocused();
   await expect(trigger).toBeVisible();
   await expect(copyLink).toBeVisible();
-  const previousLinkCopy = (await copyNotice(page, "Link copied").elementHandles())[0];
   await copyLink.click();
-  if (previousLinkCopy !== undefined) {
-    await expect.poll(() => previousLinkCopy.evaluate((element) => element.isConnected)).toBe(false);
-    await previousLinkCopy.dispose();
-  }
   await expect(copyNotice(page, "Link copied")).toHaveCount(1);
   await expect(copyNotice(page, "Link copied")).toBeVisible();
   await trigger.click();
@@ -2070,15 +2065,10 @@ async function expectCopyNoticeLeavesHeaderUsable(page: Page, message: string): 
   }
 }
 
-/** Wait for native dismissal before inspecting the replacement's content. */
+/** Publish through the control before inspecting its feedback. */
 async function activateCopy(page: Page, control: Locator, key?: "Enter" | "Space"): Promise<void> {
-  const previous = (await page.locator("[data-sonner-toast]").elementHandles())[0];
   if (key !== undefined) await control.press(key);
   else await control.click();
-  if (previous !== undefined) {
-    await expect.poll(() => previous.evaluate((element) => element.isConnected)).toBe(false);
-    await previous.dispose();
-  }
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(1);
 }
 
@@ -2131,7 +2121,7 @@ function editorSelection(page: Page) {
 }
 
 for (const scheme of ["light"] as const) {
-  test(`copy consumers publish fresh shared notices and preserve source selection — ${scheme} @webkit`, async ({ browser }) => {
+  test(`copy consumers publish shared notices and preserve source selection — ${scheme} @webkit`, async ({ browser }) => {
     const page = await openAppearanceApp(browser, scheme, "", false, {
       viewport: { width: 1400, height: 1000 }, isMobile: false,
     });

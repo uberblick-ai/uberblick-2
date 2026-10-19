@@ -250,9 +250,8 @@ test("settings successes use shared notices and preserve native submission focus
   await expectSuccess(page, `Created “${tag}-two”.`);
   await expectSubmissionFocusRetained(page);
 
-  // With the preceding success dismissed, neither validation failure adds
+  // With the preceding success expired, neither validation failure adds
   // a notice. Field edits clear alerts; later lifecycle success does too.
-  await successNotice(page, `Created “${tag}-two”.`).locator("[data-close-button]").click();
   await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
   await field.fill("Invalid Name");
   await field.press("Enter");
