@@ -1015,7 +1015,10 @@ copies remain usable. Issued credentials omit suspended workspaces. A refused
 device renews once, then conditional checks leave its credential and healthy
 rooms alone until restore makes access available again. Restore lets the same
 members discover access through renewal without another sign-in or grant.
-Loopback hubs using the local signing secret do not use this administration.
+A standalone hub bound to a loopback address admits rooms using its local
+signing secret, even with GitHub sign-in configured. This is an accepted limit:
+memberships, suspension and device revocation do not govern those rooms.
+Released Docker hubs bind `0.0.0.0` and are unaffected.
 
 Both hub lists use bounded pages. Omit `cursor` for the first request, then
 sign each returned opaque `nextCursor` in the next request until it is null.

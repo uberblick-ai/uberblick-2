@@ -78,9 +78,9 @@ it("suspension blocks a new reservation and the committed receipt, then restores
   registry.setWorkspaceStatus("backup", workspaceId, "suspended");
   const before = database.connection.prepare("SELECT * FROM hub_workspace_promotions").all();
   registry.remove("backup", "owner");
-  for (const attempt of [attemptId, randomUUID()]) {
-    expect(promotions.reserve(workspaceId, attempt, "owner")).toBe("workspace-suspended");
-  }
+  expect(promotions.reserve(workspaceId, attemptId, "owner")).toBe("workspace-suspended");
+  expect(promotions.reserve(workspaceId, randomUUID(), "owner")).toBe("hub-admin-required");
+  expect(promotions.reserve(workspaceId, randomUUID(), "backup")).toBe("workspace-suspended");
   expect(database.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
   expect(memberships.roleFor(workspaceId, "owner")).toBe("admin");
   database.close();
@@ -94,4 +94,34 @@ it("suspension blocks a new reservation and the committed receipt, then restores
     expect(resumed.reserve(workspaceId, attemptId, "owner")).toBe("resumed");
     expect(reopened.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
   } finally { reopened.close(); }
+});
+
+it("refuses callers without hub administration or their own target receipt before disclosing suspension", () => {
+  const database = new HubDatabase(tempDatabasePath(), error => { throw error; });
+  database.open();
+  try {
+    const memberships = new MembershipRegistry(database);
+    const registry = new HubAdminRegistry(database);
+    registry.grant("owner");
+    registry.grant("backup");
+    const promotions = new WorkspacePromotions(database, memberships, () => false, registry);
+    const workspaceId = randomUUID();
+    const otherWorkspaceId = randomUUID();
+    const attemptId = randomUUID();
+    expect(promotions.reserve(workspaceId, attemptId, "owner")).toBe("created");
+    memberships.grant({ workspaceId: otherWorkspaceId, principalId: "outsider", role: "admin" });
+    registry.remove("backup", "owner");
+    const before = database.connection.prepare("SELECT * FROM hub_workspace_promotions").all();
+    const membersBefore = database.connection.prepare("SELECT * FROM hub_memberships").all();
+    for (const status of ["active", "suspended"] as const) {
+      registry.setWorkspaceStatus("backup", workspaceId, status);
+      registry.setWorkspaceStatus("backup", otherWorkspaceId, status);
+      expect(promotions.reserve(workspaceId, attemptId, "outsider")).toBe("hub-admin-required");
+      expect(promotions.reserve(otherWorkspaceId, attemptId, "outsider")).toBe("hub-admin-required");
+      expect(promotions.reserve(otherWorkspaceId, attemptId, "owner")).toBe("hub-admin-required");
+      expect(promotions.reserve(workspaceId, randomUUID(), "outsider")).toBe("hub-admin-required");
+      expect(database.connection.prepare("SELECT * FROM hub_workspace_promotions").all()).toEqual(before);
+      expect(database.connection.prepare("SELECT * FROM hub_memberships").all()).toEqual(membersBefore);
+    }
+  } finally { database.close(); }
 });
