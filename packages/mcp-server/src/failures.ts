@@ -412,7 +412,7 @@ const RECOVERIES: Record<string, Recovery> = {
   invalid_tag_assignment: {
     recoveryClass: "manual",
     guidance:
-      "Call list_tags for the complete active catalog, then call again with active ids or exact active names. " +
+      "Call list_tags for the complete active catalog, then call again with active ids or active names (case ignored). " +
       "An existing retired or unresolved assignment can be preserved by passing the id returned by the document read.",
   },
   supersedes_not_decision: {

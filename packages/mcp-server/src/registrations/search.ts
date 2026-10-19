@@ -13,7 +13,7 @@ export function registerSearch(server: ToolRegistrar, context: ToolContext): voi
       "English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * " +
       "matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, " +
       "without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or " +
-      "decision records. Optional tag accepts one catalog id or exact current name, or a list: any listed tag " +
+      "decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag " +
       "matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical " +
       "tags; decision hits include current record state, including superseded and conflict. No hits does not " +
       "prove the index is empty or the replica complete." +
