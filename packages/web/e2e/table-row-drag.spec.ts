@@ -11,7 +11,7 @@ import {
   tombstoneDirectoryEntry, upsertDirectoryEntry,
 } from "@uberblick/schema";
 import * as Y from "yjs";
-import { editor, openKeyboardMenu, setupHarness } from "./app-helpers.js";
+import { activateControl, editor, setupHarness } from "./app-helpers.js";
 import { placeCaretIn } from "./harness.js";
 import { proveBrowserArrival } from "./settle.js";
 import { advancePageTimers, installPageTimers, pausePageTimers, resumePageTimers } from "./page-timers.js";
@@ -126,6 +126,9 @@ async function caretIn(cell: Locator, info: TestInfo): Promise<void> {
 }
 
 async function keyboardMove(page: Page, name: "Move row up" | "Move row down"): Promise<void> {
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect.poll(() => menu.evaluate(element => element.contains(element.ownerDocument.activeElement))).toBe(true);
   const item = page.getByRole("menuitem", { name, exact: true });
   await page.keyboard.press("Home");
   for (let step = 0; step < 5; step += 1) {
@@ -236,14 +239,14 @@ test("the header cannot be picked up and drops above it are rejected", async ({ 
   } finally { fixture.close(); }
 });
 
-test("Move entries repeat from the moved caret and keep typing in separate undo steps", { tag: "@webkit" }, async ({ page }, info) => {
+test("Move entries keep the caret in the moved row and typing in separate undo steps", { tag: "@webkit" }, async ({ page }, info) => {
   const fixture = await publishTable();
   try {
     const table = await openTable(page, fixture.uuid);
     await caretIn(table.locator("tr").nth(1).locator("td").first(), info);
     await page.keyboard.press("End");
     await page.keyboard.insertText(" before");
-    await openKeyboardMenu(page, "Control+Alt+r");
+    await activateControl(handle(page, 1), { touch: info.project.use.hasTouch === true });
     await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
     await keyboardMove(page, "Move row down");
     await expect(bodyNames(table)).toHaveText(["beta", "alpha before", "gamma"]);
@@ -251,10 +254,14 @@ test("Move entries repeat from the moved caret and keep typing in separate undo 
       const anchor = document.getSelection()?.anchorNode;
       return anchor !== null && anchor !== undefined && element.contains(anchor);
     })).toBe(true);
-    await openKeyboardMenu(page, "Shift+F10");
+    await activateControl(handle(page, 2), { touch: info.project.use.hasTouch === true });
     await keyboardMove(page, "Move row down");
     await expect(bodyNames(table)).toHaveText(["beta", "gamma", "alpha before"]);
-    await openKeyboardMenu(page, "Control+Alt+r");
+    await expect.poll(() => table.locator("tr").last().evaluate((element) => {
+      const anchor = document.getSelection()?.anchorNode;
+      return anchor !== null && anchor !== undefined && element.contains(anchor);
+    })).toBe(true);
+    await activateControl(handle(page, 3), { touch: info.project.use.hasTouch === true });
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
     await page.keyboard.press("Escape");
     // Escape returns trigger focus; re-enter the moved row before typing.
@@ -270,7 +277,7 @@ test("Move entries repeat from the moved caret and keep typing in separate undo 
     await page.keyboard.press("ControlOrMeta+z");
     await expect(bodyNames(table)).toHaveText(INITIAL);
     await caretIn(table.locator("th").first(), info);
-    await openKeyboardMenu(page, "Control+Alt+r");
+    await activateControl(handle(page, 0), { touch: info.project.use.hasTouch === true });
     await expect(page.getByRole("menuitem", { name: "Move row up", exact: true })).toBeDisabled();
     await expect(page.getByRole("menuitem", { name: "Move row down", exact: true })).toBeDisabled();
   } finally { fixture.close(); }

@@ -213,7 +213,6 @@ test("a column menu closes when concurrent structural edits make its table ragge
     expect(await table.locator("tr").evaluateAll((rows) => rows.map((row) => row.querySelectorAll("th, td").length)))
       .toEqual([3, 3, 2]);
     await table.locator("td").first().click();
-    await page.keyboard.press("Control+Alt+t");
     await expect(page.getByRole("button", { name: /^Column \d+ actions$/ })).toHaveCount(0);
     await expect(table.locator("td").first()).toHaveText("alpha");
   } finally { fixture.close(); }
@@ -290,7 +289,6 @@ test("a ragged shared table offers no structural controls and retains editable c
     const cell = table.locator("tr").last().locator("td").last();
     await cell.click();
     await expect(page.locator(".ub-table-controls")).toHaveCount(0);
-    await page.keyboard.press("Control+Alt+r");
     await expect(page.getByRole("menu")).toHaveCount(0);
     await cell.click({ button: "right" });
     await expect(page.getByRole("menu")).toHaveCount(0);

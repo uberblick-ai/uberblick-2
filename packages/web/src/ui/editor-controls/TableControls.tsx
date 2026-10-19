@@ -115,8 +115,6 @@ function TableControlSurface({ tableId, editor, host }: {
   const hovered = useRef<{ id: string; row: number | null; column?: number | null; x?: number | undefined; y?: number | undefined } | null>(null);
   const touch = useRef(editor.view.dom.ownerDocument.defaultView?.matchMedia?.("(pointer: coarse)").matches ?? false);
   const lastTouch = useRef<{ x: number; y: number } | null>(null);
-  const pendingFocus = useRef(false);
-  const controls = useRef<HTMLDivElement | null>(null);
   const columnStrip = useRef<HTMLDivElement | null>(null);
   const focusDestination = useRef<EventTarget | null>(null);
   const targetKeys = useRef(new WeakMap<TableRowTarget["row"], number>());
@@ -337,40 +335,6 @@ function TableControlSurface({ tableId, editor, host }: {
     const scroll = (event: Event): void => {
       if (drag.current !== null || event.target instanceof HTMLElement && event.target.classList.contains("tableWrapper")) read();
     };
-    const key = (event: KeyboardEvent): void => {
-      if (event.isComposing || !editor.isEditable) return;
-      const rowMenu = event.key === "F10" && event.shiftKey || event.ctrlKey && event.altKey && event.code === "KeyR";
-      const insertion = event.ctrlKey && event.altKey && event.code === "KeyT";
-      const actions: Record<string, TableAction> = {
-        ArrowLeft: "column-before", ArrowRight: "column-after", ArrowUp: "row-before", ArrowDown: "row-after",
-      };
-      const action = event.ctrlKey && event.altKey ? actions[event.key] : undefined;
-      if (!rowMenu && !insertion && action === undefined) return;
-      const caret = caretTable(editor);
-      if (caret?.id !== tableId) return;
-      const target = caret === null ? null : tableRowTarget(editor, caret.id, caret.row);
-      if (target === null) return;
-      // Native button Tab navigation varies on iOS. These caret shortcuts use
-      // the same guarded TableKit action and require no custom focus traversal.
-      if (action !== undefined) {
-        if (actOnTable(editor, target, editor.state.selection.$head.index(2), action)) {
-          event.preventDefault();
-          editor.view.focus();
-        }
-        return;
-      }
-      event.preventDefault();
-      if (rowMenu) {
-        acted.current = false;
-        closing.current = false;
-        columnMenuRef.current = null;
-        setColumnMenu(null);
-        menuRef.current = target;
-        setMenu(target);
-      } else pendingFocus.current = true;
-      read();
-    };
-    dom.addEventListener("keydown", key);
     frame.addEventListener("pointermove", move);
     frame.addEventListener("pointerdown", press, true);
     frame.addEventListener("pointerleave", leave);
@@ -387,7 +351,6 @@ function TableControlSurface({ tableId, editor, host }: {
     refresh.current = read;
     read();
     return () => {
-      dom.removeEventListener("keydown", key);
       frame.removeEventListener("pointermove", move);
       cancelDrag();
       frame.removeEventListener("pointerdown", press, true);
@@ -409,9 +372,6 @@ function TableControlSurface({ tableId, editor, host }: {
 
   useLayoutEffect(() => {
     if (columnStrip.current !== null && geometry !== null) columnStrip.current.scrollLeft = geometry.scrollLeft;
-    if (!pendingFocus.current || geometry === null) return;
-    pendingFocus.current = false;
-    controls.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [geometry]);
 
   useEffect(() => {
@@ -538,7 +498,7 @@ function TableControlSurface({ tableId, editor, host }: {
           win?.requestAnimationFrame(restore);
         }
       }}>
-    {geometry !== null && <div ref={controls} className="ub-table-controls" data-table-id={geometry.tableId} data-touch={geometry.touch}
+    {geometry !== null && <div className="ub-table-controls" data-table-id={geometry.tableId} data-touch={geometry.touch}
       style={{ left: geometry.left, top: geometry.top, width: geometry.width, height: geometry.height }}>
       {gap !== null && <div className="ub-table-row-drop" data-gap={gap}
         style={{ top: geometry.rows[gap - 1]?.bottom, width: geometry.viewportWidth }} />}
@@ -568,8 +528,7 @@ function TableControlSurface({ tableId, editor, host }: {
             ? `clamp(0px, calc(${left - size / 2}px + var(--ub-table-control-overhang)), calc(100% - ${size}px))`
             : left, top: 0, width: size, height: size }}
           aria-label={boundary === 0 ? "Insert column before 1" : `Insert column after ${boundary}`}
-          title="Insert column · Control+Alt+Left/Right from a cell; Control+Alt+T reaches controls"
-          aria-keyshortcuts="Control+Alt+T"
+          title="Insert column"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(0, boundary === 0 ? 0 : boundary - 1, boundary === 0 ? "column-before" : "column-after")}>
           <span aria-hidden="true">+</span>
@@ -585,7 +544,7 @@ function TableControlSurface({ tableId, editor, host }: {
             <button type="button" className={button} data-table-column={index} data-revealed={columnVisible(index)}
               style={{ left: `calc(${((geometry.columns[index] ?? 0) + (geometry.columns[index + 1] ?? 0)) / 2 - size / 2}px + var(--ub-table-control-overhang))`,
                 top: 0, width: size, height: size }}
-              aria-label={`Column ${index + 1} actions`} title="Column actions · Control+Alt+T reaches controls">
+              aria-label={`Column ${index + 1} actions`} title="Column actions">
               <span aria-hidden="true">⋯</span>
             </button>
           </DropdownMenuTrigger>
@@ -613,7 +572,7 @@ function TableControlSurface({ tableId, editor, host }: {
         <button key={`insert-${row.key}`} type="button" className={button}
           data-table-row={index} data-revealed={rowVisible(index)}
           style={{ right: "calc(0px - var(--ub-table-control-overhang))", top: row.bottom - size / 2, width: size, height: size }}
-          aria-label={`Insert row after ${index + 1}`} title="Insert row · Control+Alt+Up/Down from a cell"
+          aria-label={`Insert row after ${index + 1}`} title="Insert row"
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => act(index, 0, "row-after")}>
           <span aria-hidden="true">+</span>
