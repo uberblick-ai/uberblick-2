@@ -2,12 +2,15 @@ import { resolveRemoteHubConfig } from "./team-config.js";
 import { stderrLogger } from "./log.js";
 import { createTeamHub } from "./team.js";
 import { isEphemeralDatabase } from "./persistence.js";
+import { readReleaseIdentity } from "./release-identity.js";
 
 const SIGNALS = ["SIGTERM", "SIGINT"] as const;
 
 async function main(): Promise<void> {
   const config = resolveRemoteHubConfig();
+  const release = readReleaseIdentity();
   const hub = await createTeamHub(config, {
+    ...(release === undefined ? {} : { hubVersion: release.version }),
     initializeDefaultWorkspace: true,
     operatorSetup: process.platform !== "win32" &&
       !isEphemeralDatabase(config.databasePath),

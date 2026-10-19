@@ -29,6 +29,7 @@ export interface TeamHub extends Hub {
 export interface TeamHubOptions {
   operatorSetup?: boolean;
   initializeDefaultWorkspace?: boolean;
+  hubVersion?: string;
   /** Test seam that can only make loopback admission stricter. */
   deviceCredentials?: true;
 }
@@ -79,7 +80,7 @@ function createTeamExtension(
     async handleRequest(request, response) {
       if (handleHubClaimState(claims, signIn !== undefined, request, response)) return true;
       if (await handleCredentialRenewal(credentials, memberships, protocolVersion, log, request, response, workspaceNames)) return true;
-      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins)) return true;
+      if (await handleAccessManagement(credentials, memberships, principals, protocolVersion, log, request, response, promotions, accounts, hubAdmins, options.hubVersion)) return true;
       if (await handleBrowserSignIn(signIn, request, response, config.behindReleaseProxy)) return true;
       return handleGithubSignIn(signIn, request, response, config.behindReleaseProxy);
     },

@@ -24,14 +24,14 @@ afterEach(async () => {
   removeTempDatabases();
 });
 
-async function rig(options: { loopback?: boolean; github?: boolean; githubFetch?: typeof fetch; githubNow?: () => number } = {}) {
+async function rig(options: { loopback?: boolean; github?: boolean; githubFetch?: typeof fetch; githubNow?: () => number; hubVersion?: string } = {}) {
   const logs: HubLogRecord[] = [];
   const github = vi.fn<typeof fetch>(options.githubFetch ?? (async () => { throw new Error("GitHub is unreachable"); }));
   const hub = await createHub({ address: options.loopback ? "127.0.0.1" : "0.0.0.0", port: 0,
     databasePath: tempDatabasePath(), authSecret: TEST_SECRET, log: record => logs.push(record),
     ...(options.github === false ? {} : { github: { clientId: "Iv1.0123456789abcdef", fetch: github,
       ...(options.githubNow === undefined ? {} : { now: options.githubNow }) } }),
-  });
+  }, options.hubVersion === undefined ? {} : { hubVersion: options.hubVersion });
   hubs.push(hub);
   return { hub, logs, github };
 }
@@ -95,6 +95,35 @@ function expireCredential(hub: Hub, credential: IssuedCredential): void {
 }
 
 describe("authenticated hub access management", () => {
+  it.each([undefined, "0.4.7"])("includes the optional release identity in signed-in device lists (%s)", async hubVersion => {
+    const { hub } = await rig(hubVersion === undefined ? {} : { hubVersion });
+    const owner = person(hub, "1234", "owner");
+    expect(await manage(hub, owner.issued, { operation: "list-devices" })).toEqual({ code: 200, result: {
+      status: "ok", ...(hubVersion === undefined ? {} : { hubVersion }), devices: [{
+        deviceId: owner.issued.record.deviceId, signedInAt: owner.issued.record.issuedAt, workspaces: [], current: true,
+      }],
+    } });
+  });
+
+  it("omits release identity from refusals and other successful management replies", async () => {
+    const { hub } = await rig({ hubVersion: "0.4.7" });
+    const owner = person(hub, "1234", "owner", [[WORKSPACE, "member"]]);
+    expect(await manage(hub, owner.issued, { operation: "own-role", workspaceId: WORKSPACE }))
+      .toEqual({ code: 200, result: { status: "ok", role: "member" } });
+    const action = { operation: "list-devices" } as const;
+    expect(await post(hub, {})).toEqual({ code: 400, result: { status: "invalid-request" } });
+    expect(await post(hub, envelope("not-a-device-proof", action)))
+      .toEqual({ code: 401, result: { status: "sign-in-required" } });
+    expect(await post(hub, envelope(await proof(owner.issued, action), action, SYNC_PROTOCOL_VERSION + 1)))
+      .toEqual({ code: 409, result: { status: "protocol-mismatch", reason: `protocol-mismatch:${SYNC_PROTOCOL_VERSION}` } });
+    hub.credentials!.revoke(owner.issued.record.id);
+    expect(await manage(hub, owner.issued, action)).toEqual({ code: 401, result: { status: "sign-in-required" } });
+
+    const unconfigured = await rig({ github: false, hubVersion: "0.4.7" });
+    expect(await post(unconfigured.hub, envelope("not-a-device-proof", action)))
+      .toEqual({ code: 503, result: { status: "not-configured" } });
+  });
+
   it.each(Object.entries(MANAGEMENT_OPERATIONS).filter(([, declaration]) =>
     declaration.target.some(field => field === "workspaceId")))
   ("refuses cross-workspace %s identically while active and suspended without changing the target", async (operation, declaration) => {

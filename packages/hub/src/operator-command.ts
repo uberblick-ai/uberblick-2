@@ -1,10 +1,11 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { runAdminSetup } from "./admin-setup-command.js";
 import { requestOperator } from "./operator-client.js";
 import { restoreDatabase } from "./operator-database.js";
 import { runOperatorDoctor, type OperatorLiveStatus } from "./operator-doctor.js";
+import { readReleaseIdentity } from "./release-identity.js";
 import { requiredHubDatabasePath, SHARED_GITHUB_CLIENT_ID } from "./team-config.js";
 
 const USAGE = `usage: ub-hub <command>
@@ -34,9 +35,8 @@ async function confirmRestore(signal?: AbortSignal): Promise<boolean> {
 }
 
 function releaseIdentity(path: string): void {
-  const release = JSON.parse(readFileSync(path, "utf8"));
-  if (typeof release.version !== "string" || typeof release.sourceCommit !== "string" ||
-      !Number.isInteger(release.syncProtocolVersion)) throw new Error("invalid image release identity");
+  const release = readReleaseIdentity(path);
+  if (release === undefined) throw new Error("image release identity not found");
   console.log(`release    ${release.version}\ncommit     ${release.sourceCommit}\nprotocol   ${release.syncProtocolVersion}`);
 }
 
