@@ -70,6 +70,8 @@ export { isDocId, isExternalHref, readsAsMark } from "./marks.js";
 export { readSyncedDocId } from "./synced-doc-id.js";
 export { githubItemUrl, githubReference, githubRepository } from "./github-reference.js";
 export type { GitHubItem } from "./github-reference.js";
+export { INLINE_ICONS } from "./inline-icons.js";
+export type { InlineIconName } from "./inline-icons.js";
 
 export { blockRev } from "./rev.js";
 export type { RevInput } from "./rev.js";
@@ -234,6 +236,7 @@ export {
   InlineLinkRangeError,
   InvalidDocLinkTargetError,
   InvalidLinkHrefError,
+  InvalidListAttributesError,
   InvalidRoomError,
   InvalidWorkspaceIdError,
   MarksNotAllowedError,

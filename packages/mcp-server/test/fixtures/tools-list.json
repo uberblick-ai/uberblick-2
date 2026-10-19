@@ -297,6 +297,20 @@
                   ],
                   "additionalProperties": false
                 }
+              },
+              "list": {
+                "description": "List style. List items only; omitted means bullet.",
+                "type": "string",
+                "enum": [
+                  "bullet",
+                  "ordered"
+                ]
+              },
+              "indent": {
+                "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
               }
             },
             "required": [
@@ -984,7 +998,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. Active tag ids/exact names; unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. For decision answers, see lifecycle's Decision answers and topics section. Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Create doc/stub; optional blocks/regular-page TL;DR. Require nonblank title/description. List-item seeds accept list bullet/ordered and integer indent 0–3 (defaults bullet and 0). Active tag ids/names (case ignored); unknown/retired refuse. Kind defaults to first status; invalid pairs refuse. Before creating a decision topic, consult get_help({topic: \"lifecycle\"}) for when to create a record. For decision answers, see lifecycle's Decision answers and topics section. Unsupported/excess blocks/TL;DR refuse. Open/decided; deciding needs valid nonblank blocks, no TL;DR/data; decided successors need recorded human answer. related: live, locally readable regular page; successors inherit unless supplied. supersedes: hydrated decision in live topic. Targets validated pre-write. discussion: live, readable non-decision RFC UUID; reuse/create first; ordinary rfc tag in new workspaces. Never inherited; set_metadata corrects/clears while open, then fixed. RFC/page untouched. Separate from curated links/recorded answer {who, when, where}. Sidebar: get_sidebar group id; invalid = group_not_found, no creation; omit = unpinned. Independent rooms: persistence_failed: uuid, completed/failed, rolledBack: false, duplicate-safe recovery. Decisions have no TL;DR; answerPreview: first answer paragraph/list; discussion UUID/null, absent if unknown. Page get_doc: related/linked topics.\n\nHelp: create_doc, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -5490,7 +5504,7 @@
           "maximum": 100
         },
         "tag": {
-          "description": "One catalog tag id or exact name, or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse.",
+          "description": "One catalog tag id or name (case ignored), or a nonempty list. Match any listed tag; carrying more listed tags boosts relevance. Unknown tags refuse.",
           "anyOf": [
             {
               "type": "string",
@@ -5761,7 +5775,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Find live documents containing any query word in titles, descriptions, content or assigned tag names. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or exact current name, or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
+    "description": "Find live documents containing any query word in titles, descriptions, content or assigned tag names. English word forms match; case and accents fold, underscore groups match adjacent words and a trailing * matches prefixes. Punctuation or emoji alone matches nothing. Results use title-weighted bm25 relevance, without a strict title-first or matched-word-count order. Optional kind narrows to regular documents or decision records. Optional tag accepts one catalog id or current name (case ignored), or a list: any listed tag matches and more listed tags boost relevance; unknown tags refuse. Every hit includes kind and canonical tags; decision hits include current record state, including superseded and conflict. No hits does not prove the index is empty or the replica complete.\n\nHelp: search, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -5940,7 +5954,8 @@
           "description": "The block text you read. Asserted before the splice."
         },
         "new_text": {
-          "type": "string"
+          "type": "string",
+          "description": "Replacement text. Repeat old_text for a list style or depth change without a text change."
         },
         "rev": {
           "description": "The block's `rev` from get_doc. Asserted alongside old_text.",
@@ -5989,6 +6004,20 @@
             "columns"
           ],
           "additionalProperties": false
+        },
+        "list": {
+          "description": "New list style on an existing list item; omitted keeps its style. Refused on other block types.",
+          "type": "string",
+          "enum": [
+            "bullet",
+            "ordered"
+          ]
+        },
+        "indent": {
+          "description": "New list depth, an integer from 0 to 3, on an existing list item; omitted keeps its depth. Refused on other block types.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
         }
       },
       "required": [
@@ -6350,7 +6379,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Splice block text, preserving edits elsewhere. Assert old_text and preferably rev from get_doc; stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block and verify export_markdown. Tables require GFM old/new text and table_mapping for structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: [Text](destination) lines after footer in authored order. New buttons need nonempty plain labels linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; output writes style before color and omits defaults. invalid_card refuses bad input; unchanged parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line and marked caption. Accepted Figma view URLs retain only the path and node-id, starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes caption formatting. Card/Figma conversions and table_mapping are refused; new document targets must be known locally.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Splice block text, preserving edits elsewhere; list-item list/indent can change in place. Assert old_text and preferably rev from get_doc; stale_block or old_text_mismatch returns currentText/currentRev. Assertions are replica-local. Edit prose strictly inside unmarked text; replace marked spans with delete_block/insert_block and verify export_markdown. Tables require GFM old/new text and table_mapping for structural/multi-cell edits. Cards take :::card content: inline-Markdown prose, repeated button: [Text](destination) lines after footer in authored order. New buttons need nonempty plain labels linking to https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet default to outline neutral; invalid_card refuses bad input; unchanged parts, buttons and anchors survive. Rev includes each button's text, destination, appearance and order. Figma takes :::figma content: url, optional plain title and height 240–960, blank line and marked caption. Accepted Figma view URLs retain only the path and node-id, starting-point-node-id, version-id on www.figma.com. invalid_figma refuses without writing. Changed headers update their fields; unchanged caption marks/anchors survive. Figma rev includes caption formatting. Card/Figma conversions and table_mapping are refused; new document targets must be known locally.\n\nHelp: edit_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6454,6 +6483,20 @@
             ],
             "additionalProperties": false
           }
+        },
+        "list": {
+          "description": "List style. List items only; omitted means bullet.",
+          "type": "string",
+          "enum": [
+            "bullet",
+            "ordered"
+          ]
+        },
+        "indent": {
+          "description": "List depth, an integer from 0 to 3. List items only; omitted means 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
         }
       },
       "required": [
@@ -6813,7 +6856,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks. Tables take one GFM table or invalid_table refuses. Cards take :::card content without delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines and inline-Markdown prose. Button labels are plain text; destinations are https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with invalid_card. Figma takes :::figma content without delimiters: required url, optional plain one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com design/file/proto/board/slides/community/file links retain the key/id, optional name and node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments disappear. invalid_figma refuses bad headers, paths or height without writing; other sites require a plain link. Document targets must be known locally or doclink_target_not_known_locally refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. Other text is plain or literal source; chart source maps document data.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
+    "description": "Insert one block after after_block_id, or at the top when omitted; lists use adjacent list-item blocks with list/indent (default bullet/0). Tables take one GFM table or invalid_table refuses. Cards take :::card content without delimiters: nonempty title, optional label/footer, repeated button: [Text](destination) lines and inline-Markdown prose. Button labels are plain text; destinations are https or exact claude://code/new, claude-cli://open, codex://new, optionally with ?query. Style outline/filled and color neutral/blue/green/violet may follow in either order; defaults are outline neutral. Output keeps authored order, writes style before color and omits defaults. Bad cards refuse with invalid_card. Figma takes :::figma content without delimiters: required url, optional plain one-line title and height 240–960, blank line and marked caption. HTTPS figma.com/www.figma.com design/file/proto/board/slides/community/file links retain the key/id, optional name and node-id, starting-point-node-id, version-id on www.figma.com; other query fields and fragments disappear. invalid_figma refuses bad headers, paths or height without writing; other sites require a plain link. Document targets must be known locally or doclink_target_not_known_locally refuses. get_doc derives Figma kind/file/fileName/node; this tool contacts no Figma service. Other text is plain or literal source; chart source maps document data.\n\nHelp: insert_block, workspaces, lifecycle, tool-contracts, markdown.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -7362,7 +7405,7 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false
     },
-    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Metadata/durability; no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace sets; [] clears. list_tags active ids/exact names; assigned retired/unresolved ids may stay. New links must be directory-known; archived/unchanged accepted. Regular-only code_check: {repository, commit, result}; replaces that case-insensitive repository's entry, writer stamps UTC checked_at. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; no creation/RFC/page edits/tags or approvalFingerprint/approvalChanged change. Distinct from curated links/recorded answer; fixed on settling. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. Title renames preserve approval. See lifecycle's Decision answers and topics section; answerPreview: first answer paragraph/list; get_doc marks related/linked. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
+    "description": "Set title/description/tldr/tags/links/code_check or decision discussion; require one. Omissions stay; refusals write nothing and field failures name field. Metadata/durability; no TL;DR hint/mark. Title/description cannot be empty/cleared. tldr: null clears, preserving the mark; marked pages refuse with tldr_opted_out unless tldr_opt_in: true accompanies non-null tldr. MCP cannot mark pages. Tags/links replace; [] clears. list_tags active ids/names (case ignored); assigned retired/unresolved ids stay. New links must be directory-known; archived/unchanged accepted. Regular-only code_check: {repository, commit, result}; replaces that case-insensitive repository's entry, writer stamps UTC checked_at. Results: matches (agrees), ahead (intentionally undelivered), drift (unintended disagreement). Content edits preserve checks; decisions refuse. Only open decisions accept discussion: live, readable non-decision RFC UUID/null. Reuse/create RFC first; no creation/RFC/page edits/tags or approvalFingerprint/approvalChanged change. Distinct from curated links/recorded answer; fixed on settling. Decisions have no TL;DR; non-null refuses decision_tldr_unsupported, open null accepted. Decided records refuse tldr/discussion. Title renames preserve approval. See lifecycle's Decision answers and topics section; answerPreview: first answer paragraph/list; get_doc marks related/linked. Archived metadata refuses; lifecycle: set_status.\n\nHelp: set_metadata, workspaces, lifecycle, tool-contracts.",
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,

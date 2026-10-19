@@ -14,6 +14,7 @@ import { openCardButton } from "../../editor/card-button.js";
 import { Button } from "../shadcn/button.js";
 import { Input } from "../shadcn/input.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../shadcn/popover.js";
+import { InlineIconText } from "../InlineIconText.js";
 
 function buttonsFromValue(value: unknown): CardButton[] {
   if (typeof value !== "string") return [];
@@ -136,7 +137,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
       variant={button.style === "filled" ? "default" : "outline"}
       className="ub-card-button" data-card-button-style={button.style ?? "outline"}
       data-card-button-color={button.color ?? "neutral"}
-      onClick={() => openCardButton(button.href)}>{button.text}</Button>)}
+      onClick={() => openCardButton(button.href)}><InlineIconText text={button.text} /></Button>)}
     {writable && <div className="ub-card-edit-controls">
       <Button type="button" variant="outline" size="sm" onClick={remove}>Remove card</Button>
       <Popover open={open} onOpenChange={(next) => {
@@ -149,7 +150,7 @@ function CardActions({ id, editor, buttons, canWrite }: {
         {buttons.length > 0 && <fieldset className="mb-3 grid gap-1" aria-label="Card buttons">
           {keyedButtons.map(({ button, key }, index) => <Button key={key} type="button" variant="selection"
             className="justify-start! whitespace-pre-wrap! text-left! break-words" aria-pressed={selected === index}
-            data-state={selected === index ? "on" : "off"} onClick={() => select(index)}>{index + 1}. {button.text}</Button>)}
+            data-state={selected === index ? "on" : "off"} onClick={() => select(index)}><span>{index + 1}. <InlineIconText text={button.text} /></span></Button>)}
           <Button type="button" variant="outline" size="sm" onClick={() => select(null)}>Add button</Button>
         </fieldset>}
         <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); save(); }}>

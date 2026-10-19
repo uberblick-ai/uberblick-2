@@ -12,6 +12,8 @@ Its observers inspect the existing Yjs document without a product test hook.
 | Seven daily observations, iPad touch | ![Light daily iPad chart](daily-ipad-light.png) | ![Dark daily iPad chart](daily-ipad-dark.png) |
 | Three percentage panels, document width | ![Light desktop panels](panels-desktop-light.png) | ![Dark desktop panels](panels-desktop-dark.png) |
 | Score line in front of grouped response bars, document width | ![Light mixed chart](mixed-desktop-light.png) | ![Dark mixed chart](mixed-desktop-dark.png) |
+| Survey scale and references, overlay | ![Light survey overlay](survey-overlay-light.png) | ![Dark survey overlay](survey-overlay-dark.png) |
+| Survey scale and references, panels | ![Light survey panels](survey-panels-light.png) | ![Dark survey panels](survey-panels-dark.png) |
 
 The browser suite covers source insertion and keyboard/pointer access, canvas
 names/descriptions and appearance changes. The combined chart/table journey in
@@ -40,6 +42,16 @@ canvases remain hidden from accessibility APIs. Independent point geometry
 checks that each compact y label equals its gridline's value across rounded
 positive and negative ranges, keeps tick text inside the canvas and leaves
 headroom for the latest rising percentage marker.
+Survey fixtures keep the score axis at −100 to +100 and the independent
+percentage axis at 50 to 100 in both layouts and appearances. Canvas pixels
+independently verify the neutral reference strokes at 0, 17 and the non-tick
+right-axis value 73. Panels retain their unit group's shared span while drawing
+only their own reference. Hovering the reference retains real observation
+tooltips, including the blank edge of a sparse panel; reference values add no
+legend entries, panel headers or accessible description.
+Live updates also check that plotted and reference values outside a declared
+span widen it exactly, that same-unit panels stay comparable, and that a
+reference without a declared range remains visible on an automatic axis.
 Timing fixtures contain a 2.7 MB area with
 4,400 records and a 365-record/three-series chart, plus 5,001 stored records
 limited to the latest 5,000/eight series in both overlay and panels layouts.
@@ -118,3 +130,11 @@ python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path
 
 The timing test also attaches `chart-timing-bound-panels.json`; its ten live
 redraws measure complete panel redraws rather than an individual canvas.
+
+Regenerate the survey evidence with the chart suite above, or focus its two
+fixtures with `mise run e2e -- chart.spec.ts --project=chromium --grep 'declared ranges'`.
+Copy both appearance pairs before running another browser project:
+
+```sh
+python3 -c 'from pathlib import Path; from shutil import copyfile; source = Path("packages/web/test-results"); target = Path("packages/web/e2e/evidence/chart"); names = ["survey-overlay-light", "survey-overlay-dark", "survey-panels-light", "survey-panels-dark"]; matches = {name: [path for path in source.rglob("chart-" + name + ".png") if path.parent.name.endswith("-chromium")] for name in names}; assert all(len(paths) == 1 for paths in matches.values()), matches; [copyfile(matches[name][0], target / (name + ".png")) for name in names]'
+```

@@ -194,6 +194,73 @@ describe("the workspace tag catalog", () => {
     expect(exported.markdown).not.toContain(MCP.id);
   });
 
+  it("ignores tag name case across writes and filters without trimming selectors", async () => {
+    const rig = await local();
+    const target = await rig.ok("create_doc", {
+      title: "Mobile catalog",
+      description: "A document for case-insensitive catalog selectors.",
+      blocks: [{ type: "paragraph", text: "mobile iguana" }],
+    });
+
+    for (const [name, args] of [
+      ["create_doc", { title: "Unknown mobile", description: "Must not be created.", tags: ["iOS"] }],
+      ["set_metadata", { uuid: target.uuid, tags: ["iOS"] }],
+      ["search", { query: "iguana", tag: "iOS" }],
+      ["list_docs", { tag: "iOS" }],
+    ] as const) {
+      expect((await rig.call(name, args)).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: ["iOS"], retired: [],
+      });
+    }
+
+    const ios = createTagCatalogEntry(rig.instance.replicas.settings().doc, "ios");
+    const assigned = { ...ios };
+    const created = await rig.ok("create_doc", {
+      title: "Tagged mobile",
+      description: "Names in different cases select one catalog identity.",
+      tags: ["iOS", "IOS", ios.id],
+    });
+    expect(created.tags).toEqual([assigned]);
+    expect((await rig.ok("set_metadata", {
+      uuid: target.uuid, tags: ["iOS", "ios"],
+    })).tags).toEqual([assigned]);
+
+    for (const tag of ["iOS", "IOS", ios.id]) {
+      expect((await rig.ok("search", { query: "iguana", tag })).hits)
+        .toEqual([expect.objectContaining({ uuid: target.uuid, tags: [assigned] })]);
+      expect((await rig.ok("list_docs", { tag })).docs.map((doc: { uuid: string }) => doc.uuid).sort())
+        .toEqual([target.uuid, created.uuid].sort());
+    }
+
+    for (const [name, args] of [
+      ["create_doc", { title: "Untrimmed mobile", description: "Must not be created.", tags: [" iOS "] }],
+      ["set_metadata", { uuid: target.uuid, tags: [" iOS "] }],
+      ["search", { query: "iguana", tag: " iOS " }],
+      ["list_docs", { tag: " iOS " }],
+    ] as const) {
+      expect((await rig.call(name, args)).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: [" iOS "], retired: [],
+      });
+    }
+
+    retireTagCatalogEntry(rig.instance.replicas.settings().doc, ios.id);
+    for (const [name, args] of [
+      ["create_doc", { title: "Retired mobile", description: "Must not be created.", tags: ["iOS"] }],
+      ["set_metadata", { uuid: target.uuid, tags: ["iOS"] }],
+    ] as const) {
+      expect((await rig.call(name, args)).payload).toMatchObject({
+        error: "invalid_tag_assignment", unknown: [], retired: ["iOS"], applied: false,
+      });
+    }
+    const retired = { ...assigned, state: "retired" };
+    expect((await rig.ok("set_metadata", { uuid: target.uuid, tags: [ios.id] })).tags)
+      .toEqual([retired]);
+    expect((await rig.ok("search", { query: "iguana", tag: "iOS" })).hits)
+      .toEqual([expect.objectContaining({ uuid: target.uuid, tags: [retired] })]);
+    expect((await rig.ok("list_docs", { tag: "iOS" })).docs)
+      .toContainEqual(expect.objectContaining({ uuid: target.uuid, tags: [retired] }));
+  });
+
   it("preserves or removes assigned retired tags and rejects every invalid value atomically", async () => {
     const rig = await local();
     const keeper = await rig.ok("create_doc", {

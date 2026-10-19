@@ -5,6 +5,10 @@ export const toolHelpDetails = {
   create_doc:
     "Create a document and publish its directory stub, so every client can discover it through list_docs or " +
     "search. Blocks are optional: pass them to seed the document, or add them later with insert_block. " +
+    "List-item seeds accept optional `list` (`bullet` or `ordered`, default `bullet`) and `indent` " +
+    "(integer 0–3, default 0). These fields apply only to list-item blocks; invalid values refuse before " +
+    "creating anything. For example, `{\"type\":\"list-item\",\"text\":\"Review notes\",\"list\":\"ordered\",\"indent\":2}` " +
+    "creates a nested ordered item. " +
     "Figma seeds take the :::figma body without delimiters, as insert_block does; invalid_figma refuses " +
     "before creating anything. See markdown for keys, accepted links and normalization. " +
     "Optional `tldr` supplies a regular document's person-facing summary under set_metadata rules and limit. " +
@@ -17,7 +21,7 @@ export const toolHelpDetails = {
     "decision_tldr_unsupported. Creation as decided requires a non-blank answer and valid shape, without " +
     "TL;DR or data. Answer blocks differ from `answer: {who, when, where}`, the recorded person's attribution. " +
     "Decision writes carry no TL;DR review reminder; an editable regular document seeded with blocks does.\n\n" +
-    "`tags` is a complete assignment set of active catalog ids or exact active names. Names are selectors; " +
+    "`tags` is a complete assignment set of active catalog ids or active names. Name matching ignores case. Names are selectors; " +
     "the document stores canonical ids and the answer resolves each id beside its current name. An unknown or " +
     "retired selection refuses the whole call before a document exists; list_tags is the active vocabulary.\n\n" +
     "A `title` and a `description` are both REQUIRED here and the call fails without either, creating " +
@@ -204,7 +208,7 @@ export const toolHelpDetails = {
     "so treat them as approximate, and expect either to be missing on a stub written before they existed.\n\n" +
     "Lifecycle documents include `kind` and their compatible `status`; ordinary documents omit both. The " +
     "optional `kind` and `status` filters are answered from those directory stubs without opening a document " +
-    "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or exact current name; a value this " +
+    "room, and combine with `tag` and `has_open_threads`. A tag filter accepts a catalog id or current name, ignoring name case; a value this " +
     "catalog does not have is refused rather than answered with an empty listing. Each returned assignment " +
     "carries its canonical id, current name (or null while unresolved), and active, retired or unresolved " +
     "state.",
@@ -226,7 +230,7 @@ export const toolHelpDetails = {
     "without guaranteeing that every title match beats a body-only match or that more matched words come first. " +
     "Pass `kind: regular` for regular documents, including stored requirements, or `kind: decision` for all " +
     "decision records, including superseded, rejected and withdrawn records. Pass `tag` as one catalog id or " +
-    "exact current name, or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
+    "current name (case ignored), or a nonempty list. Any listed tag matches; carrying more listed tags boosts the word " +
     "score. Filters combine and apply before `limit`, which defaults to 20 and accepts up to 100. Unknown tags " +
     "refuse.\n\n" +
     "Every hit carries `kind`, `description` (null when unwritten), a snippet and canonical tag assignments " +
@@ -253,6 +257,14 @@ export const toolHelpDetails = {
   edit_block:
     "Replace one block's text by diff-and-splice: only the characters that actually changed are touched, so a " +
     "concurrent human edit elsewhere in the block survives.\n\n" +
+    "For an existing list item, optional `list` (`bullet` or `ordered`) and `indent` (integer 0–3) change " +
+    "its style and depth in place, together with a text edit or alone. To re-indent without changing text, " +
+    "pass the same read text as `old_text` and `new_text`, the read `rev`, and the new `indent`. " +
+    "Omitted list fields keep their existing values. The same old_text/rev assertions guard both text " +
+    "and attribute changes in one write; failures change neither. The result returns the new list fields " +
+    "and rev. Attribute-only changes keep the block id, text, inline formatting and comment threads, " +
+    "and concurrent text edits from another replica survive the merge. These fields refuse on any " +
+    "other block type; they do not convert blocks or move an item.\n\n" +
     "Marks anchor to positions in the block's text, not to the words they cover, and this tool writes text " +
     "without ever writing a mark. A splice strictly inside unmarked text leaves every mark — inline " +
     "formatting and annotation anchors alike — exactly where it was. A splice that touches a mark's edge " +
@@ -321,7 +333,10 @@ export const toolHelpDetails = {
   insert_block:
     "Insert one block after `after_block_id`, or at the top of the document when it is omitted. Block types " +
     `are the closed set the schema owns — ${BLOCK_TYPES.join(", ")}. ` +
-    "A list is a run of adjacent list-item blocks. " +
+    "A list is a run of adjacent list-item blocks. Optional `list` is `bullet` or `ordered` (default " +
+    "`bullet`), and `indent` is an integer 0–3 (default 0); both apply only to list-item blocks. " +
+    "For example, `list: \"ordered\", indent: 2` creates a nested numbered item. Invalid values refuse " +
+    "before writing. Depth need not follow the preceding item's depth. " +
     "A table's `text` must be exactly one GFM table, or `invalid_table` refuses the write; its rows and cells " +
     "are stored structurally. Alignment markers are accepted but not stored. Inline markdown stores cell " +
     "formatting and escaped punctuation stays literal. Document-link targets must be known to this replica's " +
@@ -364,7 +379,14 @@ export const toolHelpDetails = {
     "missing (gap or connect, default gap) control presentation. Optional layout is overlay or panels, default overlay. " +
     "panels draws one compact line or bar chart per y series in mapping order, in a responsive grid; each panel shows its label " +
     "and latest plotted value. Panels share the x range and share y ranges within each unit group. " +
-    "layout is invalid for table mappings. Optional limit is an integer of 1 or more " +
+    "layout is invalid for table mappings. Each y series optionally accepts range [min, max], exactly two finite numbers " +
+    "with min lower than max, and reference, one finite number. In overlay, both apply to the series' left or right value axis. " +
+    "In panels, range applies to the series' unit group and reference draws only on that series' own panel. " +
+    "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis. " +
+    "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups. " +
+    "Axes and panel unit groups containing bars always include zero. A reference draws a horizontal line across the plot; " +
+    "each distinct reference value appears once per axis or panel. A panel's reference value also widens its unit group's shared range. " +
+    "range and reference are invalid on x and in table mappings. Optional limit is an integer of 1 or more " +
     "and selects the latest N records with a valid x in x-then-record-id order, still at most 5,000. " +
     "A data table also uses a chart block, " +
     "for example `{\"version\":1,\"type\":\"table\",\"collection\":\"observations\",\"columns\":[{\"field\":\"day\",\"format\":\"date\"}," +
@@ -421,7 +443,7 @@ export const toolHelpDetails = {
     "directory answerPreview derives from the first answer paragraph/list. It is distinct from " +
     "recorded `answer: {who, when, where}` attribution. get_doc page decisions are marked related or linked. " +
     "Ordinary document stubs, search and Markdown do not carry TL;DR.\n\n" +
-    "Tags replace the assignment set with catalog ids or exact active names; names resolve to canonical ids " +
+    "Tags replace the assignment set with catalog ids or active names; name matching ignores case and names resolve to canonical ids " +
     "before storage. Already assigned retired or unresolved ids may be preserved or removed, but cannot be " +
     "newly added. Invalid values produce `invalid_tag_assignment` with `field: \"tags\"` before the document, " +
     "directory or index changes.\n\n" +

@@ -38,11 +38,11 @@ const mapping = JSON.stringify({
   x: { field: "day", type: "date" }, y: [{ field: "count", label: "Count" }],
 });
 
-function fixture() {
+function fixture(source = mapping) {
   const ydoc = new Y.Doc();
   initDoc(ydoc, { uuid: UUID, title: "A chart from a newer client" });
   appendBlock(ydoc, { type: "paragraph", text: "Trend explanation" });
-  const id = appendBlock(ydoc, { type: "chart", text: mapping });
+  const id = appendBlock(ydoc, { type: "chart", text: source });
   const fragment = getBlocksFragment(ydoc);
   const chart = fragment.get(1) as Y.XmlElement;
   const status: RoomStatus = {
@@ -66,8 +66,10 @@ function fixture() {
 }
 
 describe("chart content on the previous web vocabulary", () => {
-  it("closes the palette gate without binding, dropping or rewriting the chart", () => {
-    const fix = fixture();
+  it.each([{}, { range: [-100, 100] }, { reference: 0 }, { range: [-100, 100], reference: 0 }])
+    ("closes the palette gate without binding, dropping or rewriting chart settings %j", (settings) => {
+    const sourceMapping = JSON.stringify({ ...JSON.parse(mapping), y: [{ field: "count", label: "Count", ...settings }] });
+    const fix = fixture(sourceMapping);
     const before = Y.encodeStateAsUpdate(fix.ydoc);
     const source = fix.chart.firstChild;
     expect(BLOCK_NODE_NAMES).not.toContain("chart");
@@ -85,7 +87,7 @@ describe("chart content on the previous web vocabulary", () => {
       binding.destroy();
       expect(fix.fragment.get(1)).toBe(fix.chart);
       expect(fix.chart.firstChild).toBe(source);
-      expect((source as Y.XmlText).toString()).toBe(mapping);
+      expect((source as Y.XmlText).toString()).toBe(sourceMapping);
       expect(Y.encodeStateAsUpdate(fix.ydoc)).toEqual(before);
       expect(fix.localUpdates()).toBe(0);
     } finally {

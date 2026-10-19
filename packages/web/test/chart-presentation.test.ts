@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartAxes, chartPanelRanges, chartPointRadius, formatChartTick } from "../src/editor/chart-presentation.js";
+import { chartAxes, chartPanelRanges, chartValueRanges, chartPointRadius, formatChartTick } from "../src/editor/chart-presentation.js";
 import type { ChartSeries } from "../src/editor/chart-data.js";
 
 describe("panel unit ranges", () => {
@@ -34,6 +34,64 @@ describe("panel unit ranges", () => {
       { min: -10, max: 0 }, { min: -10, max: 0 },
       { min: -20, max: 0 }, { min: -20, max: 0 },
       { min: -4, max: 0 }, { min: -4, max: 0 }, { min: -9, max: -9 },
+    ]);
+  });
+
+  it("unions declared spans per unit, replaces zero and widens for data and references in any group member", () => {
+    expect(chartPanelRanges([
+      series([60, 90], "%"), series([2, 5], "ms"), series([null], "%"), series([-5, 110], "%"),
+    ], [
+      { field: "value", range: [50, 100] }, { field: "value", range: [1, 7] },
+      { field: "value", range: [40, 80], reference: 120 }, { field: "value" },
+    ])).toEqual([
+      { min: -5, max: 120, declared: [40, 100] }, { min: 1, max: 7, declared: [1, 7] },
+      { min: -5, max: 120, declared: [40, 100] }, { min: -5, max: 120, declared: [40, 100] },
+    ]);
+  });
+
+  it("preserves exact positive and negative spans, even for an empty series", () => {
+    expect(chartPanelRanges([series([60, 90]), series([null], "ms"), series([-39, 15], "%")], [
+      { field: "value", range: [50, 100] }, { field: "value", range: [-7, -1] }, { field: "value", range: [-100, 100] },
+    ])).toEqual([
+      { min: 50, max: 100, declared: [50, 100] }, { min: -7, max: -1, declared: [-7, -1] }, { min: -100, max: 100, declared: [-100, 100] },
+    ]);
+  });
+
+  it("includes reference-only values in the shared range while retaining automatic zero scaling", () => {
+    expect(chartPanelRanges([series([60, 90]), series([null]), series([-10], "ms")], [
+      { field: "value" }, { field: "value", reference: -20 }, { field: "value", reference: -1 },
+    ])).toEqual([{ min: -20, max: 90 }, { min: -20, max: 90 }, { min: -10, max: -1 }]);
+  });
+
+  it("combines overlay ranges by assigned axis rather than by unit", () => {
+    expect(chartValueRanges([series([3], "%"), series([4], "ms"), series([5], "requests")], [
+      { field: "value", range: [1, 7] }, { field: "value", range: [-20, 20] }, { field: "value", reference: 30 },
+    ], ["y", "y", "y"])).toEqual(Array.from({ length: 3 }, () => ({ min: -20, max: 30, declared: [-20, 20] })));
+  });
+
+  it("widens declared positive and negative spans to zero for every unit group containing bars", () => {
+    expect(chartPanelRanges([
+      series([60], "%"), series([null], "%", "bar"), series([-5], "ms", "bar"), series([3], "s"),
+    ], [
+      { field: "value", range: [50, 100], reference: 120 }, { field: "value", type: "bar" },
+      { field: "value", type: "bar", range: [-10, -1] }, { field: "value", range: [1, 7] },
+    ])).toEqual([
+      { min: 0, max: 120, declared: [50, 100] }, { min: 0, max: 120, declared: [50, 100] },
+      { min: -10, max: 0, declared: [-10, -1] }, { min: 1, max: 7, declared: [1, 7] },
+    ]);
+  });
+
+  it("widens declared bar axes to zero while preserving a mixed chart's independent line range", () => {
+    const mappings = [
+      { field: "responses", type: "bar" as const, unit: "count", range: [-10, -1] as [number, number] },
+      { field: "score", unit: "%", range: [50, 100] as [number, number] },
+      { field: "more", type: "bar" as const, unit: "other", reference: -0.5 },
+    ];
+    expect(chartValueRanges([
+      series([-5], "count", "bar"), series([60], "%"), series([null], "other", "bar"),
+    ], mappings, chartAxes(mappings).seriesAxes)).toEqual([
+      { min: -10, max: 0, declared: [-10, -1] }, { min: 50, max: 100, declared: [50, 100] },
+      { min: -10, max: 0, declared: [-10, -1] },
     ]);
   });
 });

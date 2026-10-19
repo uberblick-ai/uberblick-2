@@ -9,6 +9,14 @@ export class BlockNotFoundError extends Error {
   }
 }
 
+/** List attributes cannot be applied to this block or contain unsupported values. */
+export class InvalidListAttributesError extends Error {
+  constructor(reason: string) {
+    super(`Invalid list attributes: ${reason}`);
+    this.name = "InvalidListAttributesError";
+  }
+}
+
 /** A table write did not contain exactly one supported GFM table. */
 export class InvalidTableError extends Error {
   constructor() {

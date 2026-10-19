@@ -1,6 +1,6 @@
 
 
-import { validateCollectionSchema } from "@uberblick/schema";
+import { INLINE_ICONS, validateCollectionSchema } from "@uberblick/schema";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { GUIDANCE_INSTRUCTIONS } from "../src/briefing.js";
@@ -57,4 +57,15 @@ it("documents the closed version-1 data vocabulary and demonstrates a schema the
   const example = text.match(/```json\n([\s\S]*?)\n```/)?.[1];
   expect(example).toBeDefined();
   expect(() => validateCollectionSchema(JSON.parse(example!))).not.toThrow();
+});
+
+it("documents inline icon names, literal fallback, source preservation and card labels", async () => {
+  const rig = await local();
+  const { text } = await rig.ok("get_help", { topic: "markdown" });
+  for (const name of Object.keys(INLINE_ICONS)) expect(text).toContain(`\`:${name}:\``);
+  for (const rule of [
+    "`:name:`", "lowercase kebab case", "`:rocket:`", "literal, unchanged text",
+    "code, terminal and chart source never render icons", "Markdown import/export keep the literal",
+    "button: [:claude: Discuss with Claude](claude://code/new?prompt=Review)",
+  ]) expect(text, rule).toContain(rule);
 });

@@ -6,6 +6,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { COMMENT_MARK, getWorkspaceMainRepository, githubItemUrl } from "@uberblick/schema";
 import type { GitHubItem } from "@uberblick/schema";
 import type * as Y from "yjs";
+import { inlineIconAnchorLabel } from "../inline-icons.js";
 
 interface LinkRange {
   from: number;
@@ -152,10 +153,12 @@ export const GitHubLinks = Extension.create<{ settings: Y.Doc | null }>({
           anchor.removeAttribute("tabindex");
           anchor.removeAttribute("aria-hidden");
         } else {
-          anchor.removeAttribute("aria-label");
+          const iconLabel = inlineIconAnchorLabel(anchor);
+          if (iconLabel) anchor.setAttribute("aria-label", iconLabel);
+          else anchor.removeAttribute("aria-label");
           anchor.removeAttribute("title");
           // Partial formatting can split the source into additional anchors.
-          const hidden = anchor.querySelector(".ub-github-link-text") !== null;
+          const hidden = anchor.querySelector(".ub-github-link-text") !== null || iconLabel === "";
           if (hidden) {
             anchor.tabIndex = -1;
             anchor.setAttribute("aria-hidden", "true");

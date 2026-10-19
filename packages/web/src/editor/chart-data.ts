@@ -5,7 +5,14 @@ import { bindCollection, incompatible, keys, name, numeric, object, optionalText
 
 export const CHART_RECORD_LIMIT = 5_000;
 
-export interface ChartSeriesMapping { field: string; label?: string; unit?: string; type?: "line" | "bar" }
+export interface ChartSeriesMapping {
+  field: string;
+  label?: string;
+  unit?: string;
+  type?: "line" | "bar";
+  range?: [number, number];
+  reference?: number;
+}
 export interface ChartConfig {
   version: 1;
   type: "line";
@@ -60,9 +67,12 @@ export function parseChartConfig(source: string):
       !object(value.x) || !keys(value.x, ["field", "type", "label"]) ||
       !name(value.x.field) || (value.x.type !== "number" && value.x.type !== "date") ||
       !optionalText(value.x, "label") || !Array.isArray(value.y) || value.y.length < 1 || value.y.length > 8 ||
-      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit", "type"]) &&
+      !value.y.every((series: unknown) => object(series) && keys(series, ["field", "label", "unit", "type", "range", "reference"]) &&
         name(series.field) && optionalText(series, "label") && optionalText(series, "unit") &&
-        (!Object.hasOwn(series, "type") || series.type === "line" || series.type === "bar")) ||
+        (!Object.hasOwn(series, "type") || series.type === "line" || series.type === "bar") &&
+        (!Object.hasOwn(series, "range") || (Array.isArray(series.range) && series.range.length === 2 &&
+          numeric(series.range[0]) && numeric(series.range[1]) && series.range[0] < series.range[1])) &&
+        (!Object.hasOwn(series, "reference") || numeric(series.reference))) ||
       !optionalText(value, "title") ||
       (Object.hasOwn(value, "limit") && (typeof value.limit !== "number" || !Number.isInteger(value.limit) || value.limit < 1)) ||
       (Object.hasOwn(value, "layout") && value.layout !== "overlay" && value.layout !== "panels") ||

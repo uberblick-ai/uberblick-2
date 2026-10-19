@@ -169,6 +169,31 @@ it("keeps tool-specific modes, refusals and recovery in the tool's own expanded 
   }
 });
 
+it("creates and re-indents list items using the published help examples", async () => {
+  const rig = await local();
+  const createHelp = await rig.ok("get_help", { topic: "create_doc" });
+  const created = await rig.ok("create_doc", jsonSection(createHelp.text, "Example"));
+  const seed = (await rig.ok("get_doc", { uuid: created.uuid })).blocks[0];
+  expect(seed).toMatchObject({ type: "list-item", list: "ordered", indent: 0 });
+
+  const insertHelp = await rig.ok("get_help", { topic: "insert_block" });
+  const inserted = await rig.ok("insert_block", {
+    ...jsonSection(insertHelp.text, "Example"), uuid: created.uuid, after_block_id: seed.id,
+  });
+  expect(inserted.block).toMatchObject({ type: "list-item", list: "ordered", indent: 2 });
+
+  const editHelp = await rig.ok("get_help", { topic: "edit_block" });
+  const edited = await rig.ok("edit_block", {
+    ...jsonSection(editHelp.text, "Example"), uuid: created.uuid,
+    block_id: inserted.block.id, rev: inserted.block.rev,
+  });
+  expect(edited.block).toMatchObject({
+    id: inserted.block.id, text: inserted.block.text, list: "ordered", indent: 1,
+  });
+  expect(edited.block.rev).not.toBe(inserted.block.rev);
+  expect((await rig.ok("get_doc", { uuid: created.uuid })).blocks).toEqual([seed, edited.block]);
+});
+
 it("routes decision answer guidance to lifecycle while keeping page context and previews", async () => {
   const rig = await local();
   const { tools } = await rig.client.listTools();
@@ -499,6 +524,28 @@ it("documents opt-in bar series through data and insert_block help", async () =>
       "Bars-only charts keep top-level type line and draw grouped bars from zero",
       "In overlay, a mixed chart draws its bars behind its lines on a separate right-hand value axis",
       "Missing, null or wrong-type bar values draw no bar",
+    ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
+    expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
+      .toMatchObject({ text });
+  }
+});
+
+it("documents per-series ranges and references through data and insert_block help", async () => {
+  const rig = await local();
+  for (const topic of ["data", "insert_block"]) {
+    const { text } = await rig.ok("get_help", { topic });
+    for (const guidance of [
+      "Each y series optionally accepts range [min, max], exactly two finite numbers with min lower than max",
+      "reference, one finite number",
+      "In overlay, both apply to the series' left or right value axis",
+      "In panels, range applies to the series' unit group and reference draws only on that series' own panel",
+      "A range is a minimum span: the axis covers every declared range, and plotted or reference values outside it widen the axis",
+      "A declared range replaces the zero-baseline rule for line-only axes and panel unit groups",
+      "Axes and panel unit groups containing bars always include zero",
+      "A reference draws a horizontal line across the plot",
+      "each distinct reference value appears once per axis or panel",
+      "A panel's reference value also widens its unit group's shared range",
+      "range and reference are invalid on x and in table mappings",
     ]) expect(text, `${topic}: ${guidance}`).toContain(guidance);
     expect((await rig.client.readResource({ uri: `uberblick://help/${topic}` })).contents[0])
       .toMatchObject({ text });

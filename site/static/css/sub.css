@@ -1,7 +1,5 @@
 /* Sub-pages (docs, use cases, not found): the shared shell, one reading column. */
 .col { max-width: 68ch; display: grid; gap: 4px }
 .col > * { min-width: 0 }
-.tools { max-width: 84ch; margin-top: 10px }
-.tools td:first-child { white-space: nowrap; width: 1%; padding-right: 20px }
 .more { margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 14px }
 .more span { color: var(--muted) }
